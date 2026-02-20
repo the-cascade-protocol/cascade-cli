@@ -8,7 +8,7 @@
   "main": "./dist/index.js",
   "type": "module",
   "scripts": {
-    "copy-shapes": "cp -r src/shapes dist/shapes",
+    "copy-shapes": "rm -rf dist/shapes && mkdir -p dist/shapes && cp -r src/shapes/* dist/shapes/",
     "build": "tsc && npm run copy-shapes",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
