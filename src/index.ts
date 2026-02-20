@@ -20,7 +20,7 @@
 import { Command } from 'commander';
 import { registerValidateCommand } from './commands/validate.js';
 import { registerConvertCommand } from './commands/convert.js';
-import { registerPodCommand } from './commands/pod.js';
+import { registerPodCommand } from './commands/pod/index.js';
 import { registerConformanceCommand } from './commands/conformance.js';
 import { registerServeCommand } from './commands/serve.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';

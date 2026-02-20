@@ -20,7 +20,7 @@
 import { Command } from 'commander';
 import { readFileSync } from 'node:fs';
 import { printResult, printError, printVerbose, type OutputOptions } from '../lib/output.js';
-import { convert, detectFormat, type InputFormat, type OutputFormat } from '../lib/fhir-converter.js';
+import { convert, detectFormat, type InputFormat, type OutputFormat } from '../lib/fhir-converter/index.js';
 
 /**
  * Read input from file or stdin.
