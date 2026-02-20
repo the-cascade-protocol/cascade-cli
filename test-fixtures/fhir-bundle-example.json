@@ -1,0 +1,216 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "MedicationStatement",
+        "id": "med-1",
+        "status": "active",
+        "medicationCodeableConcept": {
+          "coding": [
+            {
+              "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+              "code": "860975",
+              "display": "Metformin 500mg"
+            }
+          ],
+          "text": "Metformin HCl 500mg"
+        },
+        "effectivePeriod": { "start": "2024-01-15" },
+        "dosage": [{ "text": "500mg twice daily" }]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-1",
+        "code": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "44054006",
+              "display": "Type 2 Diabetes Mellitus"
+            },
+            {
+              "system": "http://hl7.org/fhir/sid/icd-10-cm",
+              "code": "E11.9",
+              "display": "Type 2 diabetes mellitus without complications"
+            }
+          ],
+          "text": "Type 2 Diabetes Mellitus"
+        },
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "onsetDateTime": "2020-06-15"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "allergy-1",
+        "code": {
+          "coding": [
+            {
+              "system": "http://snomed.info/sct",
+              "code": "91936005",
+              "display": "Penicillin allergy"
+            }
+          ],
+          "text": "Penicillin"
+        },
+        "category": ["medication"],
+        "reaction": [
+          {
+            "manifestation": [
+              { "text": "Hives" },
+              { "text": "Difficulty breathing" }
+            ],
+            "severity": "severe"
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Observation",
+        "id": "lab-1",
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "4548-4",
+              "display": "Hemoglobin A1c"
+            }
+          ],
+          "text": "Hemoglobin A1c"
+        },
+        "category": [
+          {
+            "coding": [
+              { "code": "laboratory" }
+            ]
+          }
+        ],
+        "valueQuantity": {
+          "value": 6.8,
+          "unit": "%"
+        },
+        "effectiveDateTime": "2025-11-15T08:30:00Z",
+        "interpretation": [
+          {
+            "coding": [{ "code": "H" }]
+          }
+        ],
+        "referenceRange": [
+          {
+            "low": { "value": 4.0, "unit": "%" },
+            "high": { "value": 5.6, "unit": "%" }
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Observation",
+        "id": "vital-1",
+        "code": {
+          "coding": [
+            {
+              "system": "http://loinc.org",
+              "code": "8480-6",
+              "display": "Systolic blood pressure"
+            }
+          ]
+        },
+        "category": [
+          {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code": "vital-signs"
+              }
+            ]
+          }
+        ],
+        "valueQuantity": {
+          "value": 138,
+          "unit": "mmHg"
+        },
+        "effectiveDateTime": "2025-12-01T10:30:00Z"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "patient-1",
+        "birthDate": "1985-03-15",
+        "gender": "female",
+        "maritalStatus": {
+          "coding": [{ "code": "M" }],
+          "text": "Married"
+        },
+        "address": [
+          {
+            "use": "home",
+            "line": ["123 Main Street", "Apt 4B"],
+            "city": "Portland",
+            "state": "OR",
+            "postalCode": "97201",
+            "country": "US"
+          }
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "imm-1",
+        "status": "completed",
+        "vaccineCode": {
+          "coding": [
+            {
+              "system": "http://hl7.org/fhir/sid/cvx",
+              "code": "308",
+              "display": "COVID-19 mRNA Vaccine"
+            }
+          ],
+          "text": "COVID-19 mRNA Vaccine"
+        },
+        "occurrenceDateTime": "2024-10-15T10:00:00Z",
+        "manufacturer": { "display": "Pfizer-BioNTech" },
+        "lotNumber": "FN2487"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Coverage",
+        "id": "cov-1",
+        "subscriberId": "BCBS-AR-2020-78452",
+        "payor": [{ "display": "Blue Cross Blue Shield" }],
+        "class": [
+          {
+            "type": { "coding": [{ "code": "group" }] },
+            "value": "GRP-98765",
+            "name": "Blue PPO Select"
+          }
+        ],
+        "period": { "start": "2020-01-01" },
+        "relationship": { "coding": [{ "code": "self" }] }
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "DocumentReference",
+        "id": "doc-1",
+        "status": "current"
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "resourceType": "MedicationStatement",
+  "id": "example-med",
+  "status": "active",
+  "medicationCodeableConcept": {
+    "coding": [
+      {
+        "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+        "code": "860975",
+        "display": "Metformin 500mg"
+      }
+    ],
+    "text": "Metformin HCl 500mg"
+  },
+  "subject": { "reference": "Patient/example" },
+  "effectivePeriod": { "start": "2024-01-15" },
+  "dosage": [{ "text": "500mg twice daily" }]
+}
