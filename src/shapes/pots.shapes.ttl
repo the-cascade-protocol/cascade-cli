@@ -1,0 +1,481 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix pots: <https://ns.cascadeprotocol.org/pots/v1#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix fhir: <http://hl7.org/fhir/> .
+
+# ============================================================================
+# Cascade Protocol -- POTS Screening Vocabulary SHACL Validation Shapes
+# ============================================================================
+#
+# Version: 1.0 (Phase 4, 2026-02-18)
+# Validates: pots:POTSCheckResult, pots:HeartRateMeasurement,
+#            pots:BloodPressureMeasurement, pots:SymptomEvent, pots:PostureStability
+#
+# Layer 2 domain-specific vocabulary for POTS orthostatic testing protocol.
+#
+# Severity levels:
+#   sh:Violation - Required fields; data is invalid without them
+#   sh:Warning   - Important optional fields; data is usable but diminished
+#   sh:Info      - Suggested fields; improve data quality when present
+#
+# ============================================================================
+
+# ============================================================================
+# Shape: POTS Check Result (Top-Level)
+# ============================================================================
+
+pots:POTSCheckResultShape a sh:NodeShape ;
+    sh:targetClass pots:POTSCheckResult ;
+    rdfs:label "POTS Check Result Shape"@en ;
+    rdfs:comment "Validation constraints for a complete POTS orthostatic screening check result bundle"@en ;
+
+    # ------------------------------------------------------------------
+    # REQUIRED (sh:Violation) -- data is invalid without these
+    # ------------------------------------------------------------------
+
+    # Required: date (when the check was performed)
+    sh:property [
+        sh:path pots:date ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Check Date"@en ;
+        sh:message "POTSCheckResult MUST have exactly one date (xsd:dateTime)"@en
+    ] ;
+
+    # Required: protocol (currently only "nasaLean")
+    sh:property [
+        sh:path pots:protocol ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("nasaLean") ;
+        sh:severity sh:Violation ;
+        sh:name "Test Protocol"@en ;
+        sh:message "POTSCheckResult MUST specify protocol as 'nasaLean'"@en
+    ] ;
+
+    # Required: supineHeartRate (baseline HR observation)
+    sh:property [
+        sh:path pots:supineHeartRate ;
+        sh:class pots:HeartRateMeasurement ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Supine Heart Rate"@en ;
+        sh:message "POTSCheckResult MUST have a supine heart rate measurement"@en
+    ] ;
+
+    # Required: potsThresholdMet (primary screening outcome)
+    sh:property [
+        sh:path pots:potsThresholdMet ;
+        sh:datatype xsd:boolean ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "POTS Threshold Met"@en ;
+        sh:message "POTSCheckResult MUST declare whether POTS threshold was met"@en
+    ] ;
+
+    # ------------------------------------------------------------------
+    # WARNING (sh:Warning) -- important optional, data is diminished
+    # ------------------------------------------------------------------
+
+    # Warning: standingHeartRates (needed for meaningful POTS assessment)
+    sh:property [
+        sh:path pots:standingHeartRates ;
+        sh:minCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Standing Heart Rates"@en ;
+        sh:message "Standing heart rate measurements needed for POTS assessment"@en
+    ] ;
+
+    # Warning: supineBloodPressure (important for orthostatic evaluation)
+    sh:property [
+        sh:path pots:supineBloodPressure ;
+        sh:class pots:BloodPressureMeasurement ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Supine Blood Pressure"@en ;
+        sh:message "Supine blood pressure recommended for orthostatic evaluation"@en
+    ] ;
+
+    # Warning: dataProvenance (important for data trustworthiness)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Data Provenance"@en ;
+        sh:message "POTSCheckResult should have data provenance for traceability"@en
+    ] ;
+
+    # ------------------------------------------------------------------
+    # INFO (sh:Info) -- suggested fields for improved data quality
+    # ------------------------------------------------------------------
+
+    # Info: maxHeartRateDelta (pre-computed delta, v1.2+)
+    sh:property [
+        sh:path pots:maxHeartRateDelta ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Info ;
+        sh:name "Maximum Heart Rate Delta"@en ;
+        sh:message "maxHeartRateDelta should be a non-negative number (bpm increase from baseline)"@en
+    ] ;
+
+    # Info: orthostaticHypotensionSuspected
+    sh:property [
+        sh:path pots:orthostaticHypotensionSuspected ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Orthostatic Hypotension Suspected"@en ;
+        sh:message "orthostaticHypotensionSuspected improves clinical context"@en
+    ] ;
+
+    # Info: orthostaticHypertensionSuspected (v1.1+)
+    sh:property [
+        sh:path pots:orthostaticHypertensionSuspected ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Orthostatic Hypertension Suspected"@en ;
+        sh:message "orthostaticHypertensionSuspected improves clinical context"@en
+    ] ;
+
+    # Info: isIncomplete (early termination flag)
+    sh:property [
+        sh:path pots:isIncomplete ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Is Incomplete"@en ;
+        sh:message "isIncomplete flag helps identify partial test results"@en
+    ] ;
+
+    # Info: earlyTerminationReason (v1.1+)
+    sh:property [
+        sh:path pots:earlyTerminationReason ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Early Termination Reason"@en ;
+        sh:message "earlyTerminationReason explains why a check ended early"@en
+    ] ;
+
+    # Info: userAgeAtTest (v1.2+, used for age-adjusted thresholds)
+    sh:property [
+        sh:path pots:userAgeAtTest ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 150 ;
+        sh:severity sh:Info ;
+        sh:name "User Age at Test"@en ;
+        sh:message "userAgeAtTest should be 0-150 years"@en
+    ] ;
+
+    # Info: baselineDurationSeconds
+    sh:property [
+        sh:path pots:baselineDurationSeconds ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Info ;
+        sh:name "Baseline Duration (seconds)"@en ;
+        sh:message "baselineDurationSeconds should be a non-negative integer"@en
+    ] ;
+
+    # Info: uprightDurationSeconds
+    sh:property [
+        sh:path pots:uprightDurationSeconds ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Info ;
+        sh:name "Upright Duration (seconds)"@en ;
+        sh:message "uprightDurationSeconds should be a non-negative integer"@en
+    ] ;
+
+    # Info: postureQualityScore (v1.1+, letter grade)
+    sh:property [
+        sh:path pots:postureQualityScore ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("A" "B" "C" "D") ;
+        sh:severity sh:Info ;
+        sh:name "Posture Quality Score"@en ;
+        sh:message "postureQualityScore must be A, B, C, or D"@en
+    ] ;
+
+    # Info: movementArtifactPercentage (v1.1+)
+    sh:property [
+        sh:path pots:movementArtifactPercentage ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 100 ;
+        sh:severity sh:Info ;
+        sh:name "Movement Artifact Percentage"@en ;
+        sh:message "movementArtifactPercentage should be 0-100"@en
+    ] ;
+
+    # Info: recoveryHeartRate (v1.1+)
+    sh:property [
+        sh:path pots:recoveryHeartRate ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Info ;
+        sh:name "Recovery Heart Rate"@en ;
+        sh:message "recoveryHeartRate should be a non-negative number (bpm)"@en
+    ] ;
+
+    # ------------------------------------------------------------------
+    # Schema version (required for compatibility tracking)
+    # ------------------------------------------------------------------
+
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:severity sh:Violation ;
+        sh:name "Schema Version"@en ;
+        sh:message "Schema version must be in format major.minor (e.g., '1.3')"@en
+    ] .
+
+# ============================================================================
+# Shape: Heart Rate Measurement
+# ============================================================================
+
+pots:HeartRateMeasurementShape a sh:NodeShape ;
+    sh:targetClass pots:HeartRateMeasurement ;
+    rdfs:label "Heart Rate Measurement Shape"@en ;
+    rdfs:comment "Validation constraints for individual heart rate observations captured during a POTS check. Uses FHIR Observation pattern with fhir:valueQuantity."@en ;
+
+    # Required: heart rate value via fhir:valueQuantity
+    sh:property [
+        sh:path fhir:valueQuantity ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Value Quantity"@en ;
+        sh:message "HeartRateMeasurement MUST have a fhir:valueQuantity"@en
+    ] ;
+
+    # Required: the numeric heart rate value (fhir:value within valueQuantity)
+    sh:property [
+        sh:path ( fhir:valueQuantity fhir:value ) ;
+        sh:datatype xsd:double ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 20 ;
+        sh:maxInclusive 300 ;
+        sh:severity sh:Violation ;
+        sh:name "Heart Rate Value"@en ;
+        sh:message "Heart rate value must be 20-300 bpm"@en
+    ] ;
+
+    # Info: secondsSinceStand (temporal position in standing phase)
+    sh:property [
+        sh:path pots:secondsSinceStand ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Info ;
+        sh:name "Seconds Since Stand"@en ;
+        sh:message "secondsSinceStand provides temporal context for the measurement"@en
+    ] ;
+
+    # Info: atSeconds (legacy timing property)
+    sh:property [
+        sh:path pots:atSeconds ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Info ;
+        sh:name "At Seconds"@en ;
+        sh:message "atSeconds provides temporal context for the measurement"@en
+    ] .
+
+# ============================================================================
+# Shape: Blood Pressure Measurement
+# ============================================================================
+
+pots:BloodPressureMeasurementShape a sh:NodeShape ;
+    sh:targetClass pots:BloodPressureMeasurement ;
+    rdfs:label "Blood Pressure Measurement Shape"@en ;
+    rdfs:comment "Validation constraints for blood pressure observations. Uses FHIR Observation pattern with fhir:component for systolic and diastolic values."@en ;
+
+    # Required: at least one component (systolic/diastolic pair)
+    sh:property [
+        sh:path fhir:component ;
+        sh:minCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "BP Components"@en ;
+        sh:message "BloodPressureMeasurement MUST have fhir:component with systolic and diastolic values"@en
+    ] ;
+
+    # Info: secondsSinceStand (temporal position)
+    sh:property [
+        sh:path pots:secondsSinceStand ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Info ;
+        sh:name "Seconds Since Stand"@en ;
+        sh:message "secondsSinceStand provides temporal context for the measurement"@en
+    ] .
+
+# ============================================================================
+# Shape: Blood Pressure Component (Systolic)
+# ============================================================================
+#
+# Validates the systolic component within a blood pressure fhir:component.
+# Targets blank nodes within fhir:component that carry sct:271649006 code.
+# Note: SHACL property paths on blank nodes are validated structurally;
+# this shape serves as reference documentation and for explicit validation.
+
+pots:SystolicComponentShape a sh:NodeShape ;
+    rdfs:label "Systolic BP Component Shape"@en ;
+    rdfs:comment "Validates systolic blood pressure component value within a FHIR Observation"@en ;
+
+    sh:property [
+        sh:path ( fhir:valueQuantity fhir:value ) ;
+        sh:datatype xsd:double ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 40 ;
+        sh:maxInclusive 300 ;
+        sh:severity sh:Violation ;
+        sh:name "Systolic Value"@en ;
+        sh:message "Systolic blood pressure must be 40-300 mmHg"@en
+    ] .
+
+# ============================================================================
+# Shape: Blood Pressure Component (Diastolic)
+# ============================================================================
+
+pots:DiastolicComponentShape a sh:NodeShape ;
+    rdfs:label "Diastolic BP Component Shape"@en ;
+    rdfs:comment "Validates diastolic blood pressure component value within a FHIR Observation"@en ;
+
+    sh:property [
+        sh:path ( fhir:valueQuantity fhir:value ) ;
+        sh:datatype xsd:double ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 20 ;
+        sh:maxInclusive 200 ;
+        sh:severity sh:Violation ;
+        sh:name "Diastolic Value"@en ;
+        sh:message "Diastolic blood pressure must be 20-200 mmHg"@en
+    ] .
+
+# ============================================================================
+# Shape: Symptom Event
+# ============================================================================
+
+pots:SymptomEventShape a sh:NodeShape ;
+    sh:targetClass pots:SymptomEvent ;
+    rdfs:label "Symptom Event Shape"@en ;
+    rdfs:comment "Validation constraints for user-reported symptom events during the standing phase of a POTS check"@en ;
+
+    # Required: symptom type
+    sh:property [
+        sh:path pots:symptom ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Symptom Type"@en ;
+        sh:message "SymptomEvent MUST have a non-empty symptom type"@en
+    ] ;
+
+    # Info: notes (optional description, 100 char limit per ontology)
+    sh:property [
+        sh:path pots:notes ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:maxLength 100 ;
+        sh:severity sh:Info ;
+        sh:name "Symptom Notes"@en ;
+        sh:message "Symptom notes should be 100 characters or fewer"@en
+    ] ;
+
+    # Info: timestampSeconds (precise timing)
+    sh:property [
+        sh:path pots:timestampSeconds ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Info ;
+        sh:name "Timestamp Seconds"@en ;
+        sh:message "timestampSeconds should be a non-negative number"@en
+    ] .
+
+# ============================================================================
+# Shape: Posture Stability
+# ============================================================================
+
+pots:PostureStabilityShape a sh:NodeShape ;
+    sh:targetClass pots:PostureStability ;
+    rdfs:label "Posture Stability Shape"@en ;
+    rdfs:comment "Validation constraints for posture stability readings from Core Motion sensors during the standing phase"@en ;
+
+    # Warning: isStable (primary stability indicator)
+    sh:property [
+        sh:path pots:isStable ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Is Stable"@en ;
+        sh:message "PostureStability should indicate whether posture was stable"@en
+    ] ;
+
+    # Info: stabilityScore (numerical precision)
+    sh:property [
+        sh:path pots:stabilityScore ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 1 ;
+        sh:severity sh:Info ;
+        sh:name "Stability Score"@en ;
+        sh:message "stabilityScore should be 0.0 (unstable) to 1.0 (perfectly stable)"@en
+    ] ;
+
+    # Info: atSeconds (temporal position)
+    sh:property [
+        sh:path pots:atSeconds ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Info ;
+        sh:name "At Seconds"@en ;
+        sh:message "atSeconds provides temporal context for the stability reading"@en
+    ] .
+
+# ============================================================================
+# Changelog
+# ============================================================================
+#
+# Version 1.0 (2026-02-18)
+# - Initial release of POTS SHACL shapes (Phase 4)
+# - POTSCheckResultShape: 4 required (Violation), 3 warning, 12 info properties
+# - HeartRateMeasurementShape: FHIR valueQuantity path, 20-300 bpm range
+# - BloodPressureMeasurementShape: FHIR component pattern validation
+# - SystolicComponentShape: 40-300 mmHg range
+# - DiastolicComponentShape: 20-200 mmHg range
+# - SymptomEventShape: required symptom string, optional notes (100 char)
+# - PostureStabilityShape: isStable (Warning), stabilityScore 0-1 (Info)
+# - Aligned with pots.ttl v1.3 ontology (2026-02-10)
+#

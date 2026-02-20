@@ -1,0 +1,1363 @@
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+@prefix fhir: <http://hl7.org/fhir/> .
+@prefix sct: <http://snomed.info/sct/> .
+@prefix loinc: <http://loinc.org/rdf#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+
+# ============================================================================
+# Ontology Metadata
+# ============================================================================
+
+<https://ns.cascadeprotocol.org/clinical/v1#> a owl:Ontology ;
+    owl:imports <https://ns.cascadeprotocol.org/core/v1#> ;
+    dct:title "Cascade Protocol Clinical Document Ontology"@en ;
+    dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
+    dct:creator "Cascade Agentic Labs" ;
+    dct:created "2025-12-26"^^xsd:date ;
+    dct:modified "2026-02-10"^^xsd:date ;
+    owl:versionInfo "1.5" ;
+    rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
+    rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
+
+# ============================================================================
+# Core Classes
+# ============================================================================
+
+clinical:ClinicalDocument a owl:Class ;
+    rdfs:label "Clinical Document"@en ;
+    rdfs:comment "Clinical documentation imported from EHR systems, including narratives and structured data"@en ;
+    rdfs:subClassOf fhir:DocumentReference ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty clinical:importedAt ;
+        owl:cardinality 1
+    ] ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty clinical:sourceEHR ;
+        owl:cardinality 1
+    ] .
+
+clinical:ClinicalSection a owl:Class ;
+    rdfs:label "Clinical Section"@en ;
+    rdfs:comment "Section within a clinical document (e.g., History of Present Illness, Assessment, Plan)"@en .
+
+clinical:ClinicalNarrative a owl:Class ;
+    rdfs:label "Clinical Narrative"@en ;
+    rdfs:comment "Free-text clinical narrative extracted from FHIR text.div element"@en .
+
+# ============================================================================
+# Document Type Classes (LOINC-aligned)
+# ============================================================================
+
+clinical:ProgressNote a owl:Class ;
+    rdfs:label "Progress Note"@en ;
+    rdfs:comment "Provider progress note documenting a patient encounter"@en ;
+    rdfs:subClassOf clinical:ClinicalDocument .
+
+clinical:DischargeSummary a owl:Class ;
+    rdfs:label "Discharge Summary"@en ;
+    rdfs:comment "Hospital discharge summary document"@en ;
+    rdfs:subClassOf clinical:ClinicalDocument .
+
+clinical:ConsultationNote a owl:Class ;
+    rdfs:label "Consultation Note"@en ;
+    rdfs:comment "Specialist consultation note"@en ;
+    rdfs:subClassOf clinical:ClinicalDocument .
+
+clinical:LaboratoryReport a owl:Class ;
+    rdfs:label "Laboratory Report"@en ;
+    rdfs:comment "Laboratory test results with narrative interpretation"@en ;
+    rdfs:subClassOf clinical:ClinicalDocument ;
+    rdfs:subClassOf fhir:DiagnosticReport .
+
+clinical:ImagingReport a owl:Class ;
+    rdfs:label "Imaging Report"@en ;
+    rdfs:comment "Radiology/imaging report with findings and impressions"@en ;
+    rdfs:subClassOf clinical:ClinicalDocument .
+
+clinical:VisitSummary a owl:Class ;
+    rdfs:label "Visit Summary"@en ;
+    rdfs:comment "After-visit summary provided to patient"@en ;
+    rdfs:subClassOf clinical:ClinicalDocument .
+
+# ============================================================================
+# Structured Clinical Record Classes
+# ============================================================================
+
+clinical:Medication a owl:Class ;
+    rdfs:label "Medication"@en ;
+    rdfs:comment "Medication record from EHR MedicationStatement or MedicationRequest resource"@en ;
+    rdfs:subClassOf fhir:MedicationStatement ;
+    rdfs:subClassOf prov:Entity .
+
+clinical:Allergy a owl:Class ;
+    rdfs:label "Allergy"@en ;
+    rdfs:comment "Allergy or intolerance record from EHR AllergyIntolerance resource"@en ;
+    rdfs:subClassOf fhir:AllergyIntolerance ;
+    rdfs:subClassOf prov:Entity .
+
+clinical:LabResult a owl:Class ;
+    rdfs:label "Lab Result"@en ;
+    rdfs:comment "Laboratory test result from EHR Observation resource"@en ;
+    rdfs:subClassOf fhir:Observation ;
+    rdfs:subClassOf prov:Entity .
+
+clinical:Condition a owl:Class ;
+    rdfs:label "Condition"@en ;
+    rdfs:comment "Medical condition or diagnosis from EHR Condition resource"@en ;
+    rdfs:subClassOf fhir:Condition ;
+    rdfs:subClassOf prov:Entity .
+
+clinical:Immunization a owl:Class ;
+    rdfs:label "Immunization"@en ;
+    rdfs:comment "Vaccination record from EHR Immunization resource"@en ;
+    rdfs:subClassOf fhir:Immunization ;
+    rdfs:subClassOf prov:Entity .
+
+clinical:Procedure a owl:Class ;
+    rdfs:label "Procedure"@en ;
+    rdfs:comment "Medical procedure record from EHR Procedure resource"@en ;
+    rdfs:subClassOf fhir:Procedure ;
+    rdfs:subClassOf prov:Entity .
+
+clinical:VitalSign a owl:Class ;
+    rdfs:label "Vital Sign"@en ;
+    rdfs:comment "Vital sign observation (heart rate, blood pressure, etc.) from EHR"@en ;
+    rdfs:subClassOf fhir:Observation ;
+    rdfs:subClassOf prov:Entity .
+
+# ============================================================================
+# Longitudinal Record Classes (v1.2)
+# ============================================================================
+
+clinical:MedicationUseEpisode a owl:Class ;
+    rdfs:label "Medication Use Episode"@en ;
+    rdfs:comment "Canonical longitudinal record of patient's relationship with a medication over time. Derived from one or more source records via reconciliation. Episodes represent continuous periods of use - a gap beyond threshold creates a new episode."@en ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/episodes/> .
+
+clinical:Supplement a owl:Class ;
+    rdfs:label "Supplement"@en ;
+    rdfs:comment "Dietary supplement, OTC product, or herbal remedy with explicit regulatory status. Separate from Medication class due to different regulatory status and evidence requirements."@en ;
+    rdfs:subClassOf prov:Entity .
+
+# ============================================================================
+# Longitudinal Lab Classes (v1.4)
+# ============================================================================
+
+clinical:LabTestSeries a owl:Class ;
+    rdfs:label "Lab Test Series"@en ;
+    rdfs:comment """Longitudinal record of repeated measurements of the same laboratory
+        test (identified by LOINC code) over time. Derived from one or more
+        clinical:LabResult source records via reconciliation. Carries trending
+        analysis, inferred status, and source linkage. The lab equivalent of
+        MedicationUseEpisode. Unlike medication episodes where a 90-day gap
+        creates a new episode, lab tests have no gap concept — one series per
+        LOINC code per patient."""@en ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/lab-series/> .
+
+# ============================================================================
+# Coverage Record Class (v1.5)
+# ============================================================================
+
+clinical:CoverageRecord a owl:Class ;
+    rdfs:label "Coverage Record"@en ;
+    rdfs:comment "DEPRECATED (v1.5+): Use coverage:InsurancePlan from coverage.ttl for new insurance data. This class remains for backward compatibility with existing EHR import pipeline data. Insurance coverage record imported from EHR. Layer 2 representation of patient insurance data with FHIR Coverage alignment."@en ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:seeAlso fhir:Coverage ;
+    owl:deprecated "true"^^xsd:boolean ;
+    cascade:subConcern "deprecated" .
+
+# ============================================================================
+# Data Properties - LabTestSeries (v1.4)
+# ============================================================================
+
+# --- Identity ---
+
+clinical:canonicalTestName a owl:DatatypeProperty ;
+    rdfs:label "Canonical Test Name"@en ;
+    rdfs:comment "Normalized test name for the lab test series (e.g., 'Hemoglobin A1C')"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:string .
+
+clinical:testLoincCode a owl:DatatypeProperty ;
+    rdfs:label "Test LOINC Code"@en ;
+    rdfs:comment "LOINC code identifying this test series (e.g., '4548-4' for HbA1c). All results in the series share this code."@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:string .
+
+clinical:testConceptUri a owl:ObjectProperty ;
+    rdfs:label "Test Concept URI"@en ;
+    rdfs:comment "Stable LOINC IRI for the test (e.g., loinc:4548-4). Enables linked-data interoperability."@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range rdfs:Resource .
+
+clinical:seriesCategory a owl:DatatypeProperty ;
+    rdfs:label "Series Category"@en ;
+    rdfs:comment "Lab category for the series (e.g., hematology, metabolic, lipid, thyroid). Maps to observation-category vocabulary."@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:string .
+
+# --- Longitudinal Tracking ---
+
+clinical:firstResultDate a owl:DatatypeProperty ;
+    rdfs:label "First Result Date"@en ;
+    rdfs:comment "Earliest clinical date from any source result in this series"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:dateTime .
+
+clinical:lastResultDate a owl:DatatypeProperty ;
+    rdfs:label "Last Result Date"@en ;
+    rdfs:comment "Most recent clinical date from any source result in this series"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:dateTime .
+
+clinical:resultCount a owl:DatatypeProperty ;
+    rdfs:label "Result Count"@en ;
+    rdfs:comment "Number of individual results in this series"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:integer .
+
+# --- Current State (Most Recent Result) ---
+
+clinical:latestValue a owl:DatatypeProperty ;
+    rdfs:label "Latest Value"@en ;
+    rdfs:comment "Value of the most recent result in the series"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:string .
+
+clinical:latestUnit a owl:DatatypeProperty ;
+    rdfs:label "Latest Unit"@en ;
+    rdfs:comment "Unit of the most recent result (UCUM code)"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:string .
+
+clinical:latestInterpretation a owl:DatatypeProperty ;
+    rdfs:label "Latest Interpretation"@en ;
+    rdfs:comment "Interpretation code of the most recent result (FHIR v3-ObservationInterpretation: H, L, N, HH, LL, A, AA)"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:string .
+
+# --- Trend Inference ---
+
+clinical:trendDirection a owl:DatatypeProperty ;
+    rdfs:label "Trend Direction"@en ;
+    rdfs:comment "Inferred trend direction: increasing, decreasing, stable, or insufficient_data"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:string .
+
+clinical:trendConfidence a owl:DatatypeProperty ;
+    rdfs:label "Trend Confidence"@en ;
+    rdfs:comment "Confidence in the trend inference: high, medium, or low"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:string .
+
+clinical:trendReason a owl:DatatypeProperty ;
+    rdfs:label "Trend Reason"@en ;
+    rdfs:comment "Explainable reason for the trend inference (e.g., '3-point upward trend over 18 months')"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:string .
+
+# --- Abnormal History ---
+
+clinical:hasAbnormalHistory a owl:DatatypeProperty ;
+    rdfs:label "Has Abnormal History"@en ;
+    rdfs:comment "Whether any result in the series was interpreted as abnormal or critical"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:boolean .
+
+# --- Current Reference Range ---
+
+clinical:currentReferenceRange a owl:DatatypeProperty ;
+    rdfs:label "Current Reference Range"@en ;
+    rdfs:comment "Most recent reference range text (e.g., '4.0-5.6 %')"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:string .
+
+clinical:currentReferenceRangeLow a owl:DatatypeProperty ;
+    rdfs:label "Current Reference Range Low"@en ;
+    rdfs:comment "Lower bound of the most recent reference range"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:decimal .
+
+clinical:currentReferenceRangeHigh a owl:DatatypeProperty ;
+    rdfs:label "Current Reference Range High"@en ;
+    rdfs:comment "Upper bound of the most recent reference range"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range xsd:decimal .
+
+# --- Panel Membership ---
+
+clinical:seriesPanelMembership a owl:ObjectProperty ;
+    rdfs:label "Series Panel Membership"@en ;
+    rdfs:comment "Reference to a panel (e.g., CMP, CBC) this test series is typically part of"@en ;
+    rdfs:domain clinical:LabTestSeries ;
+    rdfs:range rdfs:Resource .
+
+# Note: derivedFromRecord, sourceExternalId, and hasUnresolvedConflicts are
+# reused from MedicationUseEpisode (domains broadened in v1.4 to apply to
+# all longitudinal record types).
+
+# ============================================================================
+# Data Properties - CoverageRecord (v1.5)
+# ============================================================================
+
+clinical:providerName a owl:DatatypeProperty ;
+    rdfs:label "Provider Name"@en ;
+    rdfs:comment "Insurance company or plan provider name."@en ;
+    rdfs:domain clinical:CoverageRecord ;
+    rdfs:range xsd:string .
+
+clinical:memberId a owl:DatatypeProperty ;
+    rdfs:label "Member ID"@en ;
+    rdfs:comment "Insurance member/subscriber identifier."@en ;
+    rdfs:domain clinical:CoverageRecord ;
+    rdfs:range xsd:string .
+
+clinical:groupNumber a owl:DatatypeProperty ;
+    rdfs:label "Group Number"@en ;
+    rdfs:comment "Employer group number for employer-sponsored plans."@en ;
+    rdfs:domain clinical:CoverageRecord ;
+    rdfs:range xsd:string .
+
+clinical:planName a owl:DatatypeProperty ;
+    rdfs:label "Plan Name"@en ;
+    rdfs:comment "Name of the insurance plan."@en ;
+    rdfs:domain clinical:CoverageRecord ;
+    rdfs:range xsd:string .
+
+clinical:planType a owl:DatatypeProperty ;
+    rdfs:label "Plan Type"@en ;
+    rdfs:comment "Type of insurance plan: hmo, ppo, epo, pos, hdhp, medicare, medicaid, tricare, other."@en ;
+    rdfs:domain clinical:CoverageRecord ;
+    rdfs:range xsd:string .
+
+clinical:coverageType a owl:DatatypeProperty ;
+    rdfs:label "Coverage Type"@en ;
+    rdfs:comment "Classification of coverage: medical, dental, vision, prescription, mental_health."@en ;
+    rdfs:domain clinical:CoverageRecord ;
+    rdfs:range xsd:string .
+
+clinical:relationship a owl:DatatypeProperty ;
+    rdfs:label "Relationship"@en ;
+    rdfs:comment "Beneficiary relationship to subscriber: self, spouse, child, parent, other."@en ;
+    rdfs:domain clinical:CoverageRecord ;
+    rdfs:range xsd:string .
+
+clinical:effectivePeriodStart a owl:DatatypeProperty ;
+    rdfs:label "Effective Period Start"@en ;
+    rdfs:comment "Start date of coverage period."@en ;
+    rdfs:domain clinical:CoverageRecord ;
+    rdfs:range xsd:date .
+
+clinical:effectivePeriodEnd a owl:DatatypeProperty ;
+    rdfs:label "Effective Period End"@en ;
+    rdfs:comment "End date of coverage period."@en ;
+    rdfs:domain clinical:CoverageRecord ;
+    rdfs:range xsd:date .
+
+clinical:payorName a owl:DatatypeProperty ;
+    rdfs:label "Payor Name"@en ;
+    rdfs:comment "Name of the organization paying for coverage."@en ;
+    rdfs:domain clinical:CoverageRecord ;
+    rdfs:range xsd:string .
+
+clinical:subscriberId a owl:DatatypeProperty ;
+    rdfs:label "Subscriber ID"@en ;
+    rdfs:comment "Identifier for the policy holder from the insurer."@en ;
+    rdfs:domain clinical:CoverageRecord ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Document Metadata
+# ============================================================================
+
+clinical:importedAt a owl:DatatypeProperty ;
+    rdfs:label "Imported At"@en ;
+    rdfs:comment "ISO 8601 timestamp when document was imported from Apple Health"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:dateTime .
+
+clinical:sourceEHR a owl:DatatypeProperty ;
+    rdfs:label "Source EHR"@en ;
+    rdfs:comment "Name of the source EHR system (e.g., 'Epic MyChart', 'Cerner'). Applicable to ClinicalDocument, LabResult, and other EHR-sourced records."@en ;
+    rdfs:range xsd:string .
+
+clinical:sourceBundleId a owl:DatatypeProperty ;
+    rdfs:label "Source Bundle ID"@en ;
+    rdfs:comment "iOS app bundle identifier of the source (e.g., 'com.epic.mychart')"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:string .
+
+clinical:fhirResourceId a owl:DatatypeProperty ;
+    rdfs:label "FHIR Resource ID"@en ;
+    rdfs:comment "Original FHIR resource identifier from the source system"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:string .
+
+clinical:fhirResourceType a owl:DatatypeProperty ;
+    rdfs:label "FHIR Resource Type"@en ;
+    rdfs:comment "FHIR resource type (e.g., 'DiagnosticReport', 'Composition')"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:string .
+
+clinical:documentDate a owl:DatatypeProperty ;
+    rdfs:label "Document Date"@en ;
+    rdfs:comment "Date the clinical document was created in the EHR"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:dateTime .
+
+clinical:encounterDate a owl:DatatypeProperty ;
+    rdfs:label "Encounter Date"@en ;
+    rdfs:comment "Date of the clinical encounter this document relates to"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:dateTime .
+
+clinical:displayName a owl:DatatypeProperty ;
+    rdfs:label "Display Name"@en ;
+    rdfs:comment "Human-readable display name from the EHR"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Narrative Content
+# ============================================================================
+
+clinical:narrativeText a owl:DatatypeProperty ;
+    rdfs:label "Narrative Text"@en ;
+    rdfs:comment "Plain text extracted from FHIR text.div element (HTML tags stripped)"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:string .
+
+clinical:narrativeXHTML a owl:DatatypeProperty ;
+    rdfs:label "Narrative XHTML"@en ;
+    rdfs:comment "Original XHTML content from FHIR Narrative element"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:string .
+
+clinical:rawFHIRData a owl:DatatypeProperty ;
+    rdfs:label "Raw FHIR Data"@en ;
+    rdfs:comment "Base64-encoded original FHIR JSON/XML for lossless preservation"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:base64Binary .
+
+# ============================================================================
+# Object Properties - Sections
+# ============================================================================
+
+clinical:hasSection a owl:ObjectProperty ;
+    rdfs:label "Has Section"@en ;
+    rdfs:comment "Links a clinical document to its component sections"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range clinical:ClinicalSection .
+
+clinical:sectionCode a owl:DatatypeProperty ;
+    rdfs:label "Section Code"@en ;
+    rdfs:comment "LOINC code identifying the section type"@en ;
+    rdfs:domain clinical:ClinicalSection ;
+    rdfs:range xsd:string .
+
+clinical:sectionTitle a owl:DatatypeProperty ;
+    rdfs:label "Section Title"@en ;
+    rdfs:comment "Human-readable section title (e.g., 'History of Present Illness')"@en ;
+    rdfs:domain clinical:ClinicalSection ;
+    rdfs:range xsd:string .
+
+clinical:sectionContent a owl:DatatypeProperty ;
+    rdfs:label "Section Content"@en ;
+    rdfs:comment "Plain text content of the section"@en ;
+    rdfs:domain clinical:ClinicalSection ;
+    rdfs:range xsd:string .
+
+clinical:sectionOrder a owl:DatatypeProperty ;
+    rdfs:label "Section Order"@en ;
+    rdfs:comment "Integer indicating section order within the document"@en ;
+    rdfs:domain clinical:ClinicalSection ;
+    rdfs:range xsd:integer .
+
+# ============================================================================
+# Data Properties - Structured Records (Shared)
+# ============================================================================
+
+clinical:recordDate a owl:DatatypeProperty ;
+    rdfs:label "Record Date"@en ;
+    rdfs:comment "Date the clinical record was created or observed"@en ;
+    rdfs:range xsd:dateTime .
+
+clinical:status a owl:DatatypeProperty ;
+    rdfs:label "Status"@en ;
+    rdfs:comment "FHIR status of the record (active, completed, etc.)"@en ;
+    rdfs:range xsd:string .
+
+clinical:loincCode a owl:DatatypeProperty ;
+    rdfs:label "LOINC Code"@en ;
+    rdfs:comment "LOINC code for the clinical concept"@en ;
+    rdfs:range xsd:string .
+
+clinical:snomedCode a owl:DatatypeProperty ;
+    rdfs:label "SNOMED Code"@en ;
+    rdfs:comment "SNOMED CT code for the clinical concept"@en ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Medication
+# ============================================================================
+
+clinical:drugName a owl:DatatypeProperty ;
+    rdfs:label "Drug Name"@en ;
+    rdfs:comment "Name of the medication"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:dosage a owl:DatatypeProperty ;
+    rdfs:label "Dosage"@en ;
+    rdfs:comment "Dosage information for the medication"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:route a owl:DatatypeProperty ;
+    rdfs:label "Route"@en ;
+    rdfs:comment "Route of administration (oral, IV, etc.)"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:frequency a owl:DatatypeProperty ;
+    rdfs:label "Frequency"@en ;
+    rdfs:comment "How often medication is taken"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:rxNormCode a owl:DatatypeProperty ;
+    rdfs:label "RxNorm Code"@en ;
+    rdfs:comment "RxNorm code for the medication"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:ndcCode a owl:DatatypeProperty ;
+    rdfs:label "NDC Code"@en ;
+    rdfs:comment "National Drug Code for the medication"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:prescriber a owl:DatatypeProperty ;
+    rdfs:label "Prescriber"@en ;
+    rdfs:comment "Name of the prescribing physician"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:indication a owl:DatatypeProperty ;
+    rdfs:label "Indication"@en ;
+    rdfs:comment "Clinical reason for the medication (why prescribed)"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:courseOfTherapyType a owl:DatatypeProperty ;
+    rdfs:label "Course of Therapy Type"@en ;
+    rdfs:comment "Prescribing workflow classification: acute (one-time/short), continuous (ongoing), or unknown"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:asNeeded a owl:DatatypeProperty ;
+    rdfs:label "As Needed (PRN)"@en ;
+    rdfs:comment "Whether medication is taken as needed rather than on a fixed schedule"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:boolean .
+
+clinical:medicationForm a owl:DatatypeProperty ;
+    rdfs:label "Medication Form"@en ;
+    rdfs:comment "Physical form of the medication (tablet, capsule, liquid, injection, etc.)"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:activeIngredient a owl:DatatypeProperty ;
+    rdfs:label "Active Ingredient"@en ;
+    rdfs:comment "Primary active ingredient name"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:ingredientStrength a owl:DatatypeProperty ;
+    rdfs:label "Ingredient Strength"@en ;
+    rdfs:comment "Strength of the active ingredient (e.g. '5 mg per tablet')"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:provenanceClass a owl:DatatypeProperty ;
+    rdfs:label "Provenance Class"@en ;
+    rdfs:comment "Source classification for editability: healthKitFHIR, userTracked, pharmacyClaim, or imported. Applicable to Medication, LabResult, and other clinical records."@en ;
+    rdfs:range xsd:string .
+
+clinical:sourceFhirResourceType a owl:DatatypeProperty ;
+    rdfs:label "Source FHIR Resource Type"@en ;
+    rdfs:comment "Which FHIR resource type this record originated from"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:clinicalIntent a owl:DatatypeProperty ;
+    rdfs:label "Clinical Intent"@en ;
+    rdfs:comment "Clinical intent derived from source: reportedUse, prescribed, dispensed, or administered"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:refillsAllowed a owl:DatatypeProperty ;
+    rdfs:label "Refills Allowed"@en ;
+    rdfs:comment "Number of prescription refills authorized"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:integer .
+
+clinical:supplyDurationDays a owl:DatatypeProperty ;
+    rdfs:label "Supply Duration Days"@en ;
+    rdfs:comment "Number of days each fill is intended to supply"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:integer .
+
+clinical:dispensedQuantity a owl:DatatypeProperty ;
+    rdfs:label "Dispensed Quantity"@en ;
+    rdfs:comment "Quantity dispensed per fill (e.g. '90 tablets')"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:prescriptionCategory a owl:DatatypeProperty ;
+    rdfs:label "Prescription Category"@en ;
+    rdfs:comment "Prescribing context: community, inpatient, or discharge"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:administrationRoute a owl:DatatypeProperty ;
+    rdfs:label "Administration Route"@en ;
+    rdfs:comment "Route of administration: oral, intravenous, subcutaneous, intramuscular, topical, inhaled, etc."@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Allergy
+# ============================================================================
+
+clinical:allergen a owl:DatatypeProperty ;
+    rdfs:label "Allergen"@en ;
+    rdfs:comment "Name of the allergen or substance"@en ;
+    rdfs:domain clinical:Allergy ;
+    rdfs:range xsd:string .
+
+clinical:reaction a owl:DatatypeProperty ;
+    rdfs:label "Reaction"@en ;
+    rdfs:comment "Description of the allergic reaction"@en ;
+    rdfs:domain clinical:Allergy ;
+    rdfs:range xsd:string .
+
+clinical:severity a owl:DatatypeProperty ;
+    rdfs:label "Severity"@en ;
+    rdfs:comment "Severity of the allergy (mild, moderate, severe)"@en ;
+    rdfs:domain clinical:Allergy ;
+    rdfs:range xsd:string .
+
+clinical:allergyCategory a owl:DatatypeProperty ;
+    rdfs:label "Allergy Category"@en ;
+    rdfs:comment "Category of allergy (food, medication, environment, biologic)"@en ;
+    rdfs:domain clinical:Allergy ;
+    rdfs:range xsd:string .
+
+clinical:criticality a owl:DatatypeProperty ;
+    rdfs:label "Criticality"@en ;
+    rdfs:comment "Potential clinical harm (low, high, unable-to-assess)"@en ;
+    rdfs:domain clinical:Allergy ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Lab Result
+# ============================================================================
+
+clinical:testName a owl:DatatypeProperty ;
+    rdfs:label "Test Name"@en ;
+    rdfs:comment "Name of the laboratory test"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:string .
+
+clinical:value a owl:DatatypeProperty ;
+    rdfs:label "Value"@en ;
+    rdfs:comment "Numeric or string value of the result"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:string .
+
+clinical:unit a owl:DatatypeProperty ;
+    rdfs:label "Unit"@en ;
+    rdfs:comment "Unit of measurement for the value"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:string .
+
+clinical:referenceRange a owl:DatatypeProperty ;
+    rdfs:label "Reference Range"@en ;
+    rdfs:comment "Normal reference range for the test"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:string .
+
+clinical:interpretation a owl:DatatypeProperty ;
+    rdfs:label "Interpretation"@en ;
+    rdfs:comment "Interpretation flag (normal, high, low, abnormal)"@en ;
+    rdfs:range xsd:string .
+
+clinical:specimenType a owl:DatatypeProperty ;
+    rdfs:label "Specimen Type"@en ;
+    rdfs:comment "Type of specimen collected (blood, urine, etc.)"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Condition
+# ============================================================================
+
+clinical:conditionName a owl:DatatypeProperty ;
+    rdfs:label "Condition Name"@en ;
+    rdfs:comment "Name of the medical condition or diagnosis"@en ;
+    rdfs:domain clinical:Condition ;
+    rdfs:range xsd:string .
+
+clinical:onsetDate a owl:DatatypeProperty ;
+    rdfs:label "Onset Date"@en ;
+    rdfs:comment "Date when the condition began"@en ;
+    rdfs:domain clinical:Condition ;
+    rdfs:range xsd:dateTime .
+
+clinical:abatementDate a owl:DatatypeProperty ;
+    rdfs:label "Abatement Date"@en ;
+    rdfs:comment "Date when the condition resolved"@en ;
+    rdfs:domain clinical:Condition ;
+    rdfs:range xsd:dateTime .
+
+clinical:clinicalStatus a owl:DatatypeProperty ;
+    rdfs:label "Clinical Status"@en ;
+    rdfs:comment "Clinical status (active, recurrence, relapse, inactive, remission, resolved)"@en ;
+    rdfs:domain clinical:Condition ;
+    rdfs:range xsd:string .
+
+clinical:verificationStatus a owl:DatatypeProperty ;
+    rdfs:label "Verification Status"@en ;
+    rdfs:comment "Verification status (unconfirmed, provisional, differential, confirmed, refuted)"@en ;
+    rdfs:domain clinical:Condition ;
+    rdfs:range xsd:string .
+
+clinical:icd10Code a owl:DatatypeProperty ;
+    rdfs:label "ICD-10 Code"@en ;
+    rdfs:comment "ICD-10-CM diagnosis code"@en ;
+    rdfs:domain clinical:Condition ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Immunization
+# ============================================================================
+
+clinical:vaccineName a owl:DatatypeProperty ;
+    rdfs:label "Vaccine Name"@en ;
+    rdfs:comment "Name of the vaccine administered"@en ;
+    rdfs:domain clinical:Immunization ;
+    rdfs:range xsd:string .
+
+clinical:vaccineCode a owl:DatatypeProperty ;
+    rdfs:label "Vaccine Code"@en ;
+    rdfs:comment "CVX code for the vaccine"@en ;
+    rdfs:domain clinical:Immunization ;
+    rdfs:range xsd:string .
+
+clinical:lotNumber a owl:DatatypeProperty ;
+    rdfs:label "Lot Number"@en ;
+    rdfs:comment "Vaccine lot number"@en ;
+    rdfs:domain clinical:Immunization ;
+    rdfs:range xsd:string .
+
+clinical:site a owl:DatatypeProperty ;
+    rdfs:label "Site"@en ;
+    rdfs:comment "Body site where vaccine was administered"@en ;
+    rdfs:domain clinical:Immunization ;
+    rdfs:range xsd:string .
+
+clinical:doseNumber a owl:DatatypeProperty ;
+    rdfs:label "Dose Number"@en ;
+    rdfs:comment "Dose number in a series (e.g., 1, 2, booster)"@en ;
+    rdfs:domain clinical:Immunization ;
+    rdfs:range xsd:string .
+
+clinical:manufacturer a owl:DatatypeProperty ;
+    rdfs:label "Manufacturer"@en ;
+    rdfs:comment "Vaccine manufacturer"@en ;
+    rdfs:domain clinical:Immunization ;
+    rdfs:range xsd:string .
+
+clinical:expirationDate a owl:DatatypeProperty ;
+    rdfs:label "Expiration Date"@en ;
+    rdfs:comment "Vaccine expiration date"@en ;
+    rdfs:domain clinical:Immunization ;
+    rdfs:range xsd:date .
+
+# ============================================================================
+# Data Properties - Procedure
+# ============================================================================
+
+clinical:procedureName a owl:DatatypeProperty ;
+    rdfs:label "Procedure Name"@en ;
+    rdfs:comment "Name of the procedure performed"@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:string .
+
+clinical:procedureDate a owl:DatatypeProperty ;
+    rdfs:label "Procedure Date"@en ;
+    rdfs:comment "Date when the procedure was performed"@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:dateTime .
+
+clinical:bodySite a owl:DatatypeProperty ;
+    rdfs:label "Body Site"@en ;
+    rdfs:comment "Body site where procedure was performed"@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:string .
+
+clinical:performer a owl:DatatypeProperty ;
+    rdfs:label "Performer"@en ;
+    rdfs:comment "Name or identifier of the procedure performer"@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:string .
+
+clinical:cptCode a owl:DatatypeProperty ;
+    rdfs:label "CPT Code"@en ;
+    rdfs:comment "CPT procedure code"@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:string .
+
+clinical:outcome a owl:DatatypeProperty ;
+    rdfs:label "Outcome"@en ;
+    rdfs:comment "Outcome of the procedure"@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:string .
+
+clinical:procedureStatus a owl:DatatypeProperty ;
+    rdfs:label "Procedure Status"@en ;
+    rdfs:comment "FHIR event-status: preparation, in-progress, not-done, on-hold, stopped, completed, entered-in-error, unknown."@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:string .
+
+clinical:procedureCategory a owl:DatatypeProperty ;
+    rdfs:label "Procedure Category"@en ;
+    rdfs:comment "Classification category of the procedure (e.g., surgical, diagnostic, counseling)."@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:string .
+
+clinical:procedureSnomedCode a owl:DatatypeProperty ;
+    rdfs:label "Procedure SNOMED Code"@en ;
+    rdfs:comment "SNOMED CT concept code for the procedure."@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Vital Sign
+# ============================================================================
+
+clinical:vitalType a owl:DatatypeProperty ;
+    rdfs:label "Vital Type"@en ;
+    rdfs:comment "Type of vital sign (heart_rate, blood_pressure, temperature, etc.)"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:string .
+
+clinical:systolicValue a owl:DatatypeProperty ;
+    rdfs:label "Systolic Value"@en ;
+    rdfs:comment "Systolic blood pressure value"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:decimal .
+
+clinical:diastolicValue a owl:DatatypeProperty ;
+    rdfs:label "Diastolic Value"@en ;
+    rdfs:comment "Diastolic blood pressure value"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:decimal .
+
+clinical:deviceName a owl:DatatypeProperty ;
+    rdfs:label "Device Name"@en ;
+    rdfs:comment "Name of the measuring device"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:string .
+
+clinical:measurementMethod a owl:DatatypeProperty ;
+    rdfs:label "Measurement Method"@en ;
+    rdfs:comment "Method used for measurement"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:string .
+
+clinical:valueString a owl:DatatypeProperty ;
+    rdfs:label "Value String"@en ;
+    rdfs:comment "String representation of a value for non-numeric results"@en ;
+    rdfs:range xsd:string .
+
+clinical:effectiveDate a owl:DatatypeProperty ;
+    rdfs:label "Effective Date"@en ;
+    rdfs:comment "Date/time when measurement or observation was taken"@en ;
+    rdfs:range xsd:dateTime .
+
+# ============================================================================
+# Data Properties - Additional Medication
+# ============================================================================
+
+clinical:instructions a owl:DatatypeProperty ;
+    rdfs:label "Instructions"@en ;
+    rdfs:comment "Patient instructions for taking the medication"@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range xsd:string .
+
+clinical:startDate a owl:DatatypeProperty ;
+    rdfs:label "Start Date"@en ;
+    rdfs:comment "Start date for medication or treatment"@en ;
+    rdfs:range xsd:dateTime .
+
+clinical:endDate a owl:DatatypeProperty ;
+    rdfs:label "End Date"@en ;
+    rdfs:comment "End date for medication or treatment"@en ;
+    rdfs:range xsd:dateTime .
+
+# ============================================================================
+# Data Properties - Additional Allergy
+# ============================================================================
+
+clinical:allergyType a owl:DatatypeProperty ;
+    rdfs:label "Allergy Type"@en ;
+    rdfs:comment "Type of allergy (allergy vs intolerance)"@en ;
+    rdfs:domain clinical:Allergy ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Additional Lab Result
+# ============================================================================
+
+clinical:orderingProvider a owl:DatatypeProperty ;
+    rdfs:label "Ordering Provider"@en ;
+    rdfs:comment "Name of the clinician who ordered the laboratory test"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:string .
+
+clinical:performingLab a owl:DatatypeProperty ;
+    rdfs:label "Performing Lab"@en ;
+    rdfs:comment "Name of the laboratory that performed the test"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:string .
+
+clinical:observationStatus a owl:DatatypeProperty ;
+    rdfs:label "Observation Status"@en ;
+    rdfs:comment "FHIR observation-status code: final, preliminary, amended, corrected, cancelled, entered-in-error. See http://hl7.org/fhir/observation-status"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:string .
+
+clinical:sourceRecordId a owl:DatatypeProperty ;
+    rdfs:label "Source Record ID"@en ;
+    rdfs:comment "FHIR resource identifier from the source system for traceability"@en ;
+    rdfs:range xsd:string .
+
+clinical:panelMembership a owl:ObjectProperty ;
+    rdfs:label "Panel Membership"@en ;
+    rdfs:comment "Back-reference from an individual lab result to the panel container (e.g., CMP, CBC) it belongs to. Uses fhir:hasMember on the panel side; this is the inverse link on the member side."@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range rdfs:Resource .
+
+clinical:referenceRangeLow a owl:DatatypeProperty ;
+    rdfs:label "Reference Range Low"@en ;
+    rdfs:comment "Lower bound of normal reference range"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:decimal .
+
+clinical:referenceRangeHigh a owl:DatatypeProperty ;
+    rdfs:label "Reference Range High"@en ;
+    rdfs:comment "Upper bound of normal reference range"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:decimal .
+
+clinical:referenceRangeText a owl:DatatypeProperty ;
+    rdfs:label "Reference Range Text"@en ;
+    rdfs:comment "Reference range as descriptive text"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:string .
+
+clinical:issuedDate a owl:DatatypeProperty ;
+    rdfs:label "Issued Date"@en ;
+    rdfs:comment "Date when the result was issued"@en ;
+    rdfs:domain clinical:LabResult ;
+    rdfs:range xsd:dateTime .
+
+clinical:category a owl:DatatypeProperty ;
+    rdfs:label "Category"@en ;
+    rdfs:comment "Category classification of the record"@en ;
+    rdfs:range xsd:string .
+
+clinical:notes a owl:DatatypeProperty ;
+    rdfs:label "Notes"@en ;
+    rdfs:comment "Additional notes or comments"@en ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Additional Immunization
+# ============================================================================
+
+clinical:occurrenceDate a owl:DatatypeProperty ;
+    rdfs:label "Occurrence Date"@en ;
+    rdfs:comment "Date when the immunization was administered"@en ;
+    rdfs:domain clinical:Immunization ;
+    rdfs:range xsd:dateTime .
+
+clinical:doseQuantity a owl:DatatypeProperty ;
+    rdfs:label "Dose Quantity"@en ;
+    rdfs:comment "Dose amount administered"@en ;
+    rdfs:domain clinical:Immunization ;
+    rdfs:range xsd:string .
+
+clinical:cvxCode a owl:DatatypeProperty ;
+    rdfs:label "CVX Code"@en ;
+    rdfs:comment "CDC CVX vaccine code"@en ;
+    rdfs:domain clinical:Immunization ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Additional Procedure
+# ============================================================================
+
+clinical:performedDate a owl:DatatypeProperty ;
+    rdfs:label "Performed Date"@en ;
+    rdfs:comment "Date when the procedure was performed"@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:dateTime .
+
+clinical:performedEndDate a owl:DatatypeProperty ;
+    rdfs:label "Performed End Date"@en ;
+    rdfs:comment "End date for procedures that span a period"@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:dateTime .
+
+clinical:location a owl:DatatypeProperty ;
+    rdfs:label "Location"@en ;
+    rdfs:comment "Location where procedure was performed"@en ;
+    rdfs:domain clinical:Procedure ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Vital Sign Components
+# ============================================================================
+
+clinical:component1Name a owl:DatatypeProperty ;
+    rdfs:label "Component 1 Name"@en ;
+    rdfs:comment "Name of first vital sign component (e.g., Systolic)"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:string .
+
+clinical:component1Value a owl:DatatypeProperty ;
+    rdfs:label "Component 1 Value"@en ;
+    rdfs:comment "Value of first vital sign component"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:decimal .
+
+clinical:component1Unit a owl:DatatypeProperty ;
+    rdfs:label "Component 1 Unit"@en ;
+    rdfs:comment "Unit for first vital sign component"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:string .
+
+clinical:component1LoincCode a owl:DatatypeProperty ;
+    rdfs:label "Component 1 LOINC Code"@en ;
+    rdfs:comment "LOINC code for first component"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:string .
+
+clinical:component2Name a owl:DatatypeProperty ;
+    rdfs:label "Component 2 Name"@en ;
+    rdfs:comment "Name of second vital sign component (e.g., Diastolic)"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:string .
+
+clinical:component2Value a owl:DatatypeProperty ;
+    rdfs:label "Component 2 Value"@en ;
+    rdfs:comment "Value of second vital sign component"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:decimal .
+
+clinical:component2Unit a owl:DatatypeProperty ;
+    rdfs:label "Component 2 Unit"@en ;
+    rdfs:comment "Unit for second vital sign component"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:string .
+
+clinical:component2LoincCode a owl:DatatypeProperty ;
+    rdfs:label "Component 2 LOINC Code"@en ;
+    rdfs:comment "LOINC code for second component"@en ;
+    rdfs:domain clinical:VitalSign ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - MedicationUseEpisode (v1.2)
+# ============================================================================
+
+clinical:canonicalName a owl:DatatypeProperty ;
+    rdfs:label "Canonical Name"@en ;
+    rdfs:comment "Normalized drug name for the medication episode"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:string .
+
+clinical:episodeFirstSeenDate a owl:DatatypeProperty ;
+    rdfs:label "Episode First Seen Date"@en ;
+    rdfs:comment "Earliest CLINICAL date from source records (not import time)"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:dateTime .
+
+clinical:episodeLastSeenDate a owl:DatatypeProperty ;
+    rdfs:label "Episode Last Seen Date"@en ;
+    rdfs:comment "Most recent CLINICAL date from source records"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:dateTime .
+
+clinical:currentDose a owl:DatatypeProperty ;
+    rdfs:label "Current Dose"@en ;
+    rdfs:comment "Current dosage for the medication (most recent from sources)"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:string .
+
+clinical:currentFrequency a owl:DatatypeProperty ;
+    rdfs:label "Current Frequency"@en ;
+    rdfs:comment "Current frequency of medication use"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:string .
+
+clinical:currentRoute a owl:DatatypeProperty ;
+    rdfs:label "Current Route"@en ;
+    rdfs:comment "Current route of administration"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:string .
+
+clinical:inferredStatus a owl:DatatypeProperty ;
+    rdfs:label "Inferred Status"@en ;
+    rdfs:comment "Inferred active/inactive status (active, inactive)"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:string .
+
+clinical:statusConfidence a owl:DatatypeProperty ;
+    rdfs:label "Status Confidence"@en ;
+    rdfs:comment "Confidence level for inferred status (high, medium, low)"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:string .
+
+clinical:statusReason a owl:DatatypeProperty ;
+    rdfs:label "Status Reason"@en ;
+    rdfs:comment "Reason for status inference (explicitStatus, hasRecentEndDate, noRecentActivity, inferredFromRefills, userOverride)"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:string .
+
+clinical:usePattern a owl:DatatypeProperty ;
+    rdfs:label "Use Pattern"@en ;
+    rdfs:comment "Pattern of medication use (chronic, shortCourse, oneTime, asNeeded, unknown)"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:string .
+
+clinical:therapeuticClass a owl:DatatypeProperty ;
+    rdfs:label "Therapeutic Class"@en ;
+    rdfs:comment "Therapeutic classification from ClinicalClassifier"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:string .
+
+clinical:conceptUri a owl:ObjectProperty ;
+    rdfs:label "Concept URI"@en ;
+    rdfs:comment "Stable URI for the medication concept (RxNorm URI, NDC URI, or minted Cascade URI)"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range rdfs:Resource .
+
+clinical:drugCode a owl:ObjectProperty ;
+    rdfs:label "Drug Code"@en ;
+    rdfs:comment "Drug code URI from any terminology system (RxNorm, NDC, SNOMED, ATC)"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range rdfs:Resource .
+
+clinical:derivedFromRecord a owl:ObjectProperty ;
+    rdfs:label "Derived From Record"@en ;
+    rdfs:comment "Links a longitudinal record (MedicationUseEpisode or LabTestSeries) to the source record(s) it was derived from"@en ;
+    rdfs:range prov:Entity ;
+    rdfs:subPropertyOf prov:wasDerivedFrom .
+
+clinical:sourceExternalId a owl:DatatypeProperty ;
+    rdfs:label "Source External ID"@en ;
+    rdfs:comment "External identifier from source system (FHIR resource ID, claim ID, etc.). Applicable to MedicationUseEpisode, LabTestSeries, and other longitudinal records."@en ;
+    rdfs:range xsd:string .
+
+clinical:hasUnresolvedConflicts a owl:DatatypeProperty ;
+    rdfs:label "Has Unresolved Conflicts"@en ;
+    rdfs:comment "Flag indicating longitudinal record has data conflicts requiring user attention. Applicable to MedicationUseEpisode and LabTestSeries."@en ;
+    rdfs:range xsd:boolean .
+
+clinical:durationDays a owl:DatatypeProperty ;
+    rdfs:label "Duration Days"@en ;
+    rdfs:comment "Duration of the episode in days"@en ;
+    rdfs:domain clinical:MedicationUseEpisode ;
+    rdfs:range xsd:integer .
+
+# ============================================================================
+# Data Properties - Supplement (v1.2)
+# ============================================================================
+
+clinical:supplementName a owl:DatatypeProperty ;
+    rdfs:label "Supplement Name"@en ;
+    rdfs:comment "Name of the supplement or OTC product"@en ;
+    rdfs:domain clinical:Supplement ;
+    rdfs:range xsd:string .
+
+clinical:regulatoryStatus a owl:DatatypeProperty ;
+    rdfs:label "Regulatory Status"@en ;
+    rdfs:comment "Regulatory classification (dietarySupplement, otcDrug, homeopathic, herbalRemedy, unknown)"@en ;
+    rdfs:domain clinical:Supplement ;
+    rdfs:range xsd:string .
+
+clinical:evidenceStrength a owl:DatatypeProperty ;
+    rdfs:label "Evidence Strength"@en ;
+    rdfs:comment "Level of clinical evidence (strongEvidence, moderateEvidence, limitedEvidence, traditionalUse, noEvidence, unknown)"@en ;
+    rdfs:domain clinical:Supplement ;
+    rdfs:range xsd:string .
+
+clinical:brand a owl:DatatypeProperty ;
+    rdfs:label "Brand"@en ;
+    rdfs:comment "Brand name of the supplement"@en ;
+    rdfs:domain clinical:Supplement ;
+    rdfs:range xsd:string .
+
+clinical:form a owl:DatatypeProperty ;
+    rdfs:label "Form"@en ;
+    rdfs:comment "Physical form (capsule, tablet, softgel, liquid, powder, gummy, spray, patch, tea, tincture, other)"@en ;
+    rdfs:domain clinical:Supplement ;
+    rdfs:range xsd:string .
+
+clinical:dsldId a owl:DatatypeProperty ;
+    rdfs:label "DSLD ID"@en ;
+    rdfs:comment "NIH Dietary Supplement Label Database identifier"@en ;
+    rdfs:domain clinical:Supplement ;
+    rdfs:range xsd:string .
+
+clinical:upc a owl:DatatypeProperty ;
+    rdfs:label "UPC"@en ;
+    rdfs:comment "Universal Product Code (barcode)"@en ;
+    rdfs:domain clinical:Supplement ;
+    rdfs:range xsd:string .
+
+clinical:reasonForUse a owl:DatatypeProperty ;
+    rdfs:label "Reason For Use"@en ;
+    rdfs:comment "User-provided reason for taking the supplement"@en ;
+    rdfs:domain clinical:Supplement ;
+    rdfs:range xsd:string .
+
+clinical:cascadeUri a owl:ObjectProperty ;
+    rdfs:label "Cascade URI"@en ;
+    rdfs:comment "Stable Cascade Protocol identifier for the supplement"@en ;
+    rdfs:domain clinical:Supplement ;
+    rdfs:range rdfs:Resource .
+
+clinical:dose a owl:DatatypeProperty ;
+    rdfs:label "Dose"@en ;
+    rdfs:comment "Dosage amount"@en ;
+    rdfs:range xsd:string .
+
+clinical:isActive a owl:DatatypeProperty ;
+    rdfs:label "Is Active"@en ;
+    rdfs:comment "Whether the medication/supplement is currently active"@en ;
+    rdfs:range xsd:boolean .
+
+# ============================================================================
+# Alignment with Healthcare Standards
+# ============================================================================
+
+# LOINC Document Type Mappings (from C-CDA)
+# - Progress note: loinc:11506-3
+# - Discharge summary: loinc:18842-5
+# - Consultation note: loinc:11488-4
+# - History and physical: loinc:34117-2
+# - Procedure note: loinc:28570-0
+
+# LOINC Section Codes (common C-CDA sections)
+# - Chief complaint: loinc:10154-3
+# - History of present illness: loinc:10164-2
+# - Past medical history: loinc:11348-0
+# - Medications: loinc:10160-0
+# - Allergies: loinc:48765-2
+# - Assessment: loinc:51848-0
+# - Plan: loinc:18776-5
+# - Results: loinc:30954-2
+
+# SNOMED CT Mappings
+# - Clinical finding: sct:404684003
+# - Clinical document: sct:734163000
+
+# ============================================================================
+# Changelog
+# ============================================================================
+#
+# Version 1.5 (2026-02-10)
+# - Added CoverageRecord class (11 properties) for insurance coverage data
+#   Maps to fhir:Coverage. Layer 2 complement to checkup:InsuranceInfo (Layer 3).
+#   Properties: providerName, memberId, groupNumber, planName, planType,
+#   coverageType, relationship, effectivePeriodStart, effectivePeriodEnd,
+#   payorName, subscriberId
+# - Added 3 new Procedure properties: procedureStatus, procedureCategory,
+#   procedureSnomedCode
+# - Added administrationRoute property for Medication
+#
+# Version 1.4 (2026-01-28)
+# - Added 5 new lab result properties: orderingProvider, performingLab,
+#   observationStatus, sourceRecordId, panelMembership
+# - Added LabTestSeries class for longitudinal lab result tracking
+#   - 20 properties for identity, trending, reference ranges, source linkage
+#   - Lab equivalent of MedicationUseEpisode
+# - Extended sourceEHR and provenanceClass domains to include LabResult
+# - Extended derivedFromRecord range to include LabResult
+#
+# Version 1.3 (2026-01-26)
+# - Added 14 medication enrichment properties from FHIR pipeline:
+#   - Tier 1: prescriber, indication, courseOfTherapyType, asNeeded,
+#     medicationForm, activeIngredient, ingredientStrength,
+#     provenanceClass, sourceFhirResourceType, clinicalIntent
+#   - Tier 2: refillsAllowed, supplyDurationDays, dispensedQuantity,
+#     prescriptionCategory
+# - Full FHIR extraction pipeline: JSON → MedicationSummary → MedicationRecord → TTL
+# - All new fields serialized to TTL via ClinicalRDFSerializer
+# - SHACL shapes added with enumerated value constraints
+#
+# Version 1.2 (2026-01-15)
+# - Added MedicationUseEpisode class for longitudinal medication tracking
+#   - Represents continuous periods of medication use
+#   - Links to source MedicationRecord(s) via derivedFromRecord
+#   - Includes inferred status with explainable confidence/reason
+#   - Supports multi-system drug coding (RxNorm, NDC, SNOMED, ATC)
+# - Added Supplement class for dietary supplements and OTC products
+#   - Explicit regulatoryStatus (dietarySupplement, otcDrug, homeopathic, herbalRemedy)
+#   - evidenceStrength property for clinical evidence level
+#   - DSLD integration for NIH supplement database
+# - Added ~25 new data properties for episode and supplement serialization
+# - Episode identity rules: gap > 90 days creates new episode
+# - Supplements intentionally do NOT create episodes (different regulatory status)
+#
+# Version 1.1 (2026-01-01)
+# - Added 7 structured clinical record classes: Medication, Allergy, LabResult,
+#   Condition, Immunization, Procedure, VitalSign
+# - Added ~50 data properties for structured records
+# - Added vital sign component properties for multi-value observations (BP)
+# - Added SHACL shapes for all structured record types
+# - Validated with OWL-RL reasoner (no inconsistencies)
+# - Validated with Apache Jena SHACL validator
+#
+# Version 1.0 (2025-12-26)
+# - Initial release with document-centric vocabulary
+# - ClinicalDocument and subtypes (ProgressNote, DischargeSummary, etc.)
+# - ClinicalSection for document structure
+# - Document metadata properties (importedAt, sourceEHR, etc.)
+# - Narrative content properties
+#
+
+# ============================================================================
+# Notes
+# ============================================================================
+
+# Data Classification: Clinical-generated (EHR-verified)
+# All documents imported via clinical: vocabulary use cascade:ClinicalGenerated provenance
+# Source: Apple HealthKit HKClinicalRecord API
+# Privacy: Documents may contain PHI - encrypted storage required

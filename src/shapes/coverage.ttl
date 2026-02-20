@@ -1,0 +1,182 @@
+@prefix coverage: <https://ns.cascadeprotocol.org/coverage/v1#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix fhir: <http://hl7.org/fhir/> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+
+# ============================================================================
+# Ontology Metadata
+# ============================================================================
+
+<https://ns.cascadeprotocol.org/coverage/v1#> a owl:Ontology ;
+    owl:imports <https://ns.cascadeprotocol.org/core/v1#> ;
+    dct:title "Cascade Protocol Coverage Vocabulary"@en ;
+    dct:description "Domain vocabulary for patient-owned insurance, benefits, and financial health data. Layer 2 vocabulary resolving the overlap between checkup:InsuranceInfo (patient-reported) and clinical:CoverageRecord (EHR-imported) with a unified, standardized representation."@en ;
+    dct:creator "Cascade Agentic Labs" ;
+    dct:created "2026-02-18"^^xsd:date ;
+    dct:modified "2026-02-18"^^xsd:date ;
+    owl:versionInfo "1.0" ;
+    rdfs:comment "Insurance and benefits data is cross-cutting: not clinical (it's administrative/financial), not app-specific (any health app benefits from knowing coverage), and contributed by both patient self-report and EHR import. This vocabulary provides a single Layer 2 domain model that both checkup: (Layer 3, patient-reported) and clinical: (Layer 2, EHR-imported) can reference via the mixed namespace pattern. Recommended Pod storage path: /coverage/"@en ;
+    rdfs:seeAlso <https://cascadeprotocol.org/docs/coverage/v1/> .
+
+# ============================================================================
+# Classes
+# ============================================================================
+
+coverage:InsurancePlan a owl:Class ;
+    rdfs:label "Insurance Plan"@en ;
+    rdfs:comment "An insurance plan the patient is enrolled in. Unifies patient-reported data (from checkup:InsuranceInfo) and EHR-imported data (from clinical:CoverageRecord) into a single standardized representation. Recommended Pod storage: /coverage/plans/{plan-id}.ttl"@en ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:seeAlso fhir:Coverage .
+
+coverage:Deductible a owl:Class ;
+    rdfs:label "Deductible"@en ;
+    rdfs:comment "Annual deductible status and progress tracking for an insurance plan. Enables patients to monitor their progress toward meeting annual deductible limits. Properties for this class will be defined in a future version."@en ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:seeAlso fhir:ExplanationOfBenefit .
+
+coverage:CopaySchedule a owl:Class ;
+    rdfs:label "Copay Schedule"@en ;
+    rdfs:comment "Copay amounts by service category for an insurance plan. Helps patients understand their cost-sharing responsibilities for different types of care. Properties for this class will be defined in a future version."@en ;
+    rdfs:subClassOf prov:Entity .
+
+# ============================================================================
+# Data Properties - Core Insurance (from checkup:InsuranceInfo + clinical:CoverageRecord)
+# ============================================================================
+
+coverage:providerName a owl:DatatypeProperty ;
+    rdfs:label "Provider Name"@en ;
+    rdfs:comment "Name of insurance company or plan provider (e.g., Aetna, Blue Cross, Medicare). Unifies checkup:insuranceProvider and clinical:providerName."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+coverage:memberId a owl:DatatypeProperty ;
+    rdfs:label "Member ID"@en ;
+    rdfs:comment "Insurance policy member/subscriber ID number. Present in both patient-reported and EHR-imported data."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+coverage:groupNumber a owl:DatatypeProperty ;
+    rdfs:label "Group Number"@en ;
+    rdfs:comment "Employer group number for employer-sponsored plans. Present in both patient-reported and EHR-imported data."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+coverage:planName a owl:DatatypeProperty ;
+    rdfs:label "Plan Name"@en ;
+    rdfs:comment "Name of the insurance plan (e.g., 'Gold PPO 500'). Originally from clinical:CoverageRecord."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+coverage:planType a owl:DatatypeProperty ;
+    rdfs:label "Plan Type"@en ;
+    rdfs:comment "Type of insurance plan: hmo, ppo, epo, pos, hdhp, medicare, medicaid, tricare, other."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+coverage:coverageType a owl:DatatypeProperty ;
+    rdfs:label "Coverage Type"@en ;
+    rdfs:comment "Classification of coverage: primary, secondary, dental, vision."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+coverage:effectiveStart a owl:DatatypeProperty ;
+    rdfs:label "Effective Start"@en ;
+    rdfs:comment "Start date of coverage period. Maps to clinical:effectivePeriodStart and checkup:effectiveDate."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:date .
+
+coverage:effectiveEnd a owl:DatatypeProperty ;
+    rdfs:label "Effective End"@en ;
+    rdfs:comment "End date of coverage period. Maps to clinical:effectivePeriodEnd and checkup:expirationDate (for insurance usage)."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:date .
+
+coverage:subscriberId a owl:DatatypeProperty ;
+    rdfs:label "Subscriber ID"@en ;
+    rdfs:comment "Identifier for the policy holder from the insurer. From clinical:CoverageRecord."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Subscriber (from Intake Form, 2026-02-16)
+# ============================================================================
+
+coverage:subscriberName a owl:DatatypeProperty ;
+    rdfs:label "Subscriber Name"@en ;
+    rdfs:comment "Name of insurance subscriber (the primary policyholder). From patient-reported intake form data."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+coverage:subscriberRelationship a owl:DatatypeProperty ;
+    rdfs:label "Subscriber Relationship"@en ;
+    rdfs:comment "Relationship of patient to subscriber: self, spouse, child, parent, other. Unifies clinical:relationship and checkup:subscriberRelationship with a typed enum constraint."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Pharmacy Benefits (from InsuranceInfo model)
+# ============================================================================
+
+coverage:rxBin a owl:DatatypeProperty ;
+    rdfs:label "Rx BIN"@en ;
+    rdfs:comment "Pharmacy benefit BIN (Bank Identification Number). Used for prescription drug claims processing."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+coverage:rxPcn a owl:DatatypeProperty ;
+    rdfs:label "Rx PCN"@en ;
+    rdfs:comment "Pharmacy benefit PCN (Processor Control Number). Used for prescription drug claims routing."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+coverage:rxGroup a owl:DatatypeProperty ;
+    rdfs:label "Rx Group"@en ;
+    rdfs:comment "Pharmacy benefit group number. Identifies the patient's pharmacy benefit group for claims processing."@en ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Alignment with Healthcare Standards
+# ============================================================================
+
+# FHIR Coverage Resource Mapping
+# - coverage:InsurancePlan -> fhir:Coverage
+# - coverage:providerName -> fhir:Coverage.payor (display)
+# - coverage:memberId -> fhir:Coverage.identifier
+# - coverage:groupNumber -> fhir:Coverage.class (group)
+# - coverage:planName -> fhir:Coverage.class (plan)
+# - coverage:planType -> fhir:Coverage.type
+# - coverage:coverageType -> fhir:Coverage.class (category)
+# - coverage:effectiveStart -> fhir:Coverage.period.start
+# - coverage:effectiveEnd -> fhir:Coverage.period.end
+# - coverage:subscriberId -> fhir:Coverage.subscriberId
+# - coverage:subscriberRelationship -> fhir:Coverage.relationship
+
+# Future companion vocabulary: billing: (Layer 2)
+# - billing:Claim, billing:Bill, billing:Payment, billing:ExplanationOfBenefits
+# - Enables patient healthcare spending tracking and cost management
+# - Not in scope for this version
+
+# ============================================================================
+# Changelog
+# ============================================================================
+#
+# Version 1.0 (2026-02-18)
+# - Initial release as part of Schema Refactoring Plan Phase 2 (WS4)
+# - Created to resolve overlap between checkup:InsuranceInfo (L3, patient-reported)
+#   and clinical:CoverageRecord (L2, EHR-imported)
+# - InsurancePlan class with 14 properties:
+#   - 8 core properties (providerName, memberId, groupNumber, planName, planType,
+#     coverageType, effectiveStart, effectiveEnd)
+#   - 3 subscriber properties (subscriberId, subscriberName, subscriberRelationship)
+#   - 3 pharmacy benefit properties (rxBin, rxPcn, rxGroup)
+# - Deductible and CopaySchedule classes defined (properties deferred to future version)
+# - FHIR Coverage resource alignment documented
+# - Layer 2 domain vocabulary per three-layer architecture
+# - Recommended Pod storage: /coverage/plans/{plan-id}.ttl
+#

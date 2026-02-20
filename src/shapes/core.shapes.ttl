@@ -1,0 +1,450 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ============================================================================
+# Cascade Protocol -- Core Vocabulary SHACL Validation Shapes
+# ============================================================================
+# Version: 1.0 (Phase 4, 2026-02-18)
+# Validates: cascade:PatientProfile, cascade:Address, cascade:EmergencyContact,
+#            cascade:PharmacyInfo, cascade:AdvanceDirectives
+#
+# Severity levels:
+#   sh:Violation -- Must fix (blocks operations)
+#   sh:Warning   -- Should address (shown prominently)
+#   sh:Info      -- Suggestion (nice to have)
+#
+# These shapes validate core patient demographics and identity structures
+# defined in core.ttl v2.2. They are used by all Cascade Protocol applications
+# that serialize PatientProfile data (e.g., Cascade Checkup intake forms,
+# POTS Check patient context).
+# ============================================================================
+
+# ============================================================================
+# Shape: Patient Profile
+# ============================================================================
+
+cascade:PatientProfileShape a sh:NodeShape ;
+    sh:targetClass cascade:PatientProfile ;
+    rdfs:label "Patient Profile Shape"@en ;
+    rdfs:comment "Validation constraints for patient demographics and identity extensions"@en ;
+
+    # VIOLATION: dateOfBirth required for age calculation and screening eligibility
+    sh:property [
+        sh:path cascade:dateOfBirth ;
+        sh:datatype xsd:date ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Date of Birth"@en ;
+        sh:message "Patient profile must have a date of birth for age calculation and screening eligibility"@en
+    ] ;
+
+    # VIOLATION: biologicalSex required for clinical calculations
+    sh:property [
+        sh:path cascade:biologicalSex ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ( "male" "female" "intersex" ) ;
+        sh:severity sh:Violation ;
+        sh:name "Biological Sex"@en ;
+        sh:message "Patient profile must specify biological sex (male, female, or intersex) for clinical calculations"@en
+    ] ;
+
+    # VIOLATION: dataProvenance required for source tracking
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:minCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Patient profile must have at least one data provenance classification"@en
+    ] ;
+
+    # WARNING: genderIdentity recommended for patient-centered care
+    sh:property [
+        sh:path cascade:genderIdentity ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ( "woman" "man" "non_binary" "other" "prefer_not_to_say" ) ;
+        sh:severity sh:Warning ;
+        sh:name "Gender Identity"@en ;
+        sh:message "Gender identity is recommended for patient-centered care. Values: woman, man, non_binary, other, prefer_not_to_say"@en
+    ] ;
+
+    # WARNING: emergencyContact recommended for safety
+    sh:property [
+        sh:path cascade:emergencyContact ;
+        sh:class cascade:EmergencyContact ;
+        sh:severity sh:Warning ;
+        sh:name "Emergency Contact"@en ;
+        sh:message "An emergency contact is recommended for patient safety"@en
+    ] ;
+
+    # INFO: ageGroup for screening classification
+    sh:property [
+        sh:path cascade:ageGroup ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ( "pediatric" "young_adult" "adult" "senior" ) ;
+        sh:severity sh:Info ;
+        sh:name "Age Group"@en ;
+        sh:message "Age group helps classify patients for screening recommendations (pediatric, young_adult, adult, senior)"@en
+    ] ;
+
+    # INFO: computedAge for convenience
+    sh:property [
+        sh:path cascade:computedAge ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 150 ;
+        sh:severity sh:Info ;
+        sh:name "Computed Age"@en ;
+        sh:message "Computed age should be between 0 and 150 years"@en
+    ] ;
+
+    # INFO: maritalStatus for demographic context
+    sh:property [
+        sh:path cascade:maritalStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ( "single" "married" "domestic_partnership" "divorced" "separated" "widowed" "prefer_not_to_say" ) ;
+        sh:severity sh:Info ;
+        sh:name "Marital Status"@en ;
+        sh:message "Marital status provides demographic context for care planning"@en
+    ] ;
+
+    # INFO: raceEthnicity for health disparity tracking
+    sh:property [
+        sh:path cascade:raceEthnicity ;
+        sh:datatype xsd:string ;
+        sh:in ( "american_indian_alaska_native" "asian" "black_african_american" "hispanic_latino" "native_hawaiian_pacific_islander" "white" "other" "prefer_not_to_say" ) ;
+        sh:severity sh:Info ;
+        sh:name "Race/Ethnicity"@en ;
+        sh:message "Race/ethnicity data supports health equity tracking and risk assessment"@en
+    ] ;
+
+    # INFO: address for contact information
+    sh:property [
+        sh:path cascade:address ;
+        sh:class cascade:Address ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Address"@en ;
+        sh:message "A postal address is helpful for care coordination and correspondence"@en
+    ] ;
+
+    # INFO: preferredPharmacy for prescription routing
+    sh:property [
+        sh:path cascade:preferredPharmacy ;
+        sh:class cascade:PharmacyInfo ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Preferred Pharmacy"@en ;
+        sh:message "A preferred pharmacy helps streamline prescription fulfillment"@en
+    ] ;
+
+    # INFO: advanceDirectives for care planning
+    sh:property [
+        sh:path cascade:advanceDirectives ;
+        sh:class cascade:AdvanceDirectives ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Advance Directives"@en ;
+        sh:message "Advance directives document patient wishes for end-of-life care"@en
+    ] ;
+
+    # INFO: profileId for traceability
+    sh:property [
+        sh:path cascade:profileId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Profile ID"@en ;
+        sh:message "A profile ID (UUID) enables traceability and deduplication"@en
+    ] .
+
+# ============================================================================
+# Shape: Address
+# ============================================================================
+
+cascade:AddressShape a sh:NodeShape ;
+    sh:targetClass cascade:Address ;
+    rdfs:label "Address Shape"@en ;
+    rdfs:comment "Validation constraints for structured postal addresses. Accepts both simplified aliases (city, state) and FHIR-aligned properties (addressCity, addressState)."@en ;
+
+    # WARNING: city or addressCity recommended for location identification
+    sh:property [
+        sh:path cascade:city ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "City"@en ;
+        sh:message "City is recommended for meaningful address identification"@en
+    ] ;
+
+    sh:property [
+        sh:path cascade:addressCity ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Address City (FHIR-aligned)"@en ;
+        sh:message "City (FHIR-aligned) is recommended for meaningful address identification"@en
+    ] ;
+
+    # WARNING: state or addressState recommended for location identification
+    sh:property [
+        sh:path cascade:state ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "State"@en ;
+        sh:message "State is recommended for meaningful address identification"@en
+    ] ;
+
+    sh:property [
+        sh:path cascade:addressState ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Address State (FHIR-aligned)"@en ;
+        sh:message "State (FHIR-aligned) is recommended for meaningful address identification"@en
+    ] ;
+
+    # INFO: streetAddress or addressLine
+    sh:property [
+        sh:path cascade:streetAddress ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Street Address"@en ;
+        sh:message "Street address provides complete location details"@en
+    ] ;
+
+    sh:property [
+        sh:path cascade:addressLine ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:name "Address Line (FHIR-aligned)"@en ;
+        sh:message "Address line (FHIR-aligned) provides complete location details"@en
+    ] ;
+
+    # INFO: postalCode or addressPostalCode
+    sh:property [
+        sh:path cascade:postalCode ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Postal Code"@en ;
+        sh:message "Postal code helps with geographic identification"@en
+    ] ;
+
+    sh:property [
+        sh:path cascade:addressPostalCode ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Address Postal Code (FHIR-aligned)"@en ;
+        sh:message "Postal code (FHIR-aligned) helps with geographic identification"@en
+    ] ;
+
+    # INFO: country or addressCountry
+    sh:property [
+        sh:path cascade:country ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Country"@en ;
+        sh:message "Country is helpful for international patients"@en
+    ] ;
+
+    sh:property [
+        sh:path cascade:addressCountry ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Address Country (FHIR-aligned)"@en ;
+        sh:message "Country (FHIR-aligned) is helpful for international patients"@en
+    ] ;
+
+    # INFO: addressUse for address purpose
+    sh:property [
+        sh:path cascade:addressUse ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ( "home" "work" "temp" "old" ) ;
+        sh:severity sh:Info ;
+        sh:name "Address Use"@en ;
+        sh:message "Address use should be home, work, temp, or old"@en
+    ] ;
+
+    # INFO: addressType for address classification
+    sh:property [
+        sh:path cascade:addressType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ( "postal" "physical" "both" ) ;
+        sh:severity sh:Info ;
+        sh:name "Address Type"@en ;
+        sh:message "Address type should be postal, physical, or both"@en
+    ] .
+
+# ============================================================================
+# Shape: Emergency Contact
+# ============================================================================
+
+cascade:EmergencyContactShape a sh:NodeShape ;
+    sh:targetClass cascade:EmergencyContact ;
+    rdfs:label "Emergency Contact Shape"@en ;
+    rdfs:comment "Validation constraints for patient emergency contact persons"@en ;
+
+    # VIOLATION: contactName required
+    sh:property [
+        sh:path cascade:contactName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Contact Name"@en ;
+        sh:message "Emergency contact must have a name"@en
+    ] ;
+
+    # VIOLATION: contactPhone required
+    sh:property [
+        sh:path cascade:contactPhone ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Contact Phone"@en ;
+        sh:message "Emergency contact must have a phone number"@en
+    ] ;
+
+    # WARNING: contactRelationship recommended
+    sh:property [
+        sh:path cascade:contactRelationship ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ( "spouse" "parent" "child" "sibling" "partner" "friend" "caregiver" "other" ) ;
+        sh:severity sh:Warning ;
+        sh:name "Contact Relationship"@en ;
+        sh:message "Emergency contact relationship is recommended (spouse, parent, child, sibling, partner, friend, caregiver, other)"@en
+    ] .
+
+# ============================================================================
+# Shape: Pharmacy Info
+# ============================================================================
+
+cascade:PharmacyInfoShape a sh:NodeShape ;
+    sh:targetClass cascade:PharmacyInfo ;
+    rdfs:label "Pharmacy Info Shape"@en ;
+    rdfs:comment "Validation constraints for preferred pharmacy information"@en ;
+
+    # VIOLATION: pharmacyName required
+    sh:property [
+        sh:path cascade:pharmacyName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Pharmacy Name"@en ;
+        sh:message "Pharmacy must have a name"@en
+    ] ;
+
+    # INFO: pharmacyAddress for location
+    sh:property [
+        sh:path cascade:pharmacyAddress ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Pharmacy Address"@en ;
+        sh:message "Pharmacy address helps identify the correct location"@en
+    ] ;
+
+    # INFO: pharmacyPhone for contact
+    sh:property [
+        sh:path cascade:pharmacyPhone ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Pharmacy Phone"@en ;
+        sh:message "Pharmacy phone number is helpful for prescription coordination"@en
+    ] .
+
+# ============================================================================
+# Shape: Advance Directives
+# ============================================================================
+
+cascade:AdvanceDirectivesShape a sh:NodeShape ;
+    sh:targetClass cascade:AdvanceDirectives ;
+    rdfs:label "Advance Directives Shape"@en ;
+    rdfs:comment "Validation constraints for patient advance directive declarations. Elevated PHI sensitivity."@en ;
+
+    # VIOLATION: hasLivingWill required
+    sh:property [
+        sh:path cascade:hasLivingWill ;
+        sh:datatype xsd:boolean ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Has Living Will"@en ;
+        sh:message "Advance directives must declare whether a living will is on file"@en
+    ] ;
+
+    # VIOLATION: hasPowerOfAttorney required
+    sh:property [
+        sh:path cascade:hasPowerOfAttorney ;
+        sh:datatype xsd:boolean ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Has Power of Attorney"@en ;
+        sh:message "Advance directives must declare whether a healthcare power of attorney is on file"@en
+    ] ;
+
+    # VIOLATION: hasDNR required
+    sh:property [
+        sh:path cascade:hasDNR ;
+        sh:datatype xsd:boolean ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Has DNR"@en ;
+        sh:message "Advance directives must declare whether a do-not-resuscitate order is on file"@en
+    ] ;
+
+    # INFO: advanceDirectiveNotes for additional context
+    sh:property [
+        sh:path cascade:advanceDirectiveNotes ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Advance Directive Notes"@en ;
+        sh:message "Notes can provide additional context about advance directive wishes"@en
+    ] .
+
+# ============================================================================
+# Changelog
+# ============================================================================
+#
+# Version 1.0 (2026-02-18)
+# - Initial release of core vocabulary SHACL shapes (Phase 4)
+# - PatientProfileShape: VIOLATION for dateOfBirth, biologicalSex,
+#   dataProvenance; WARNING for genderIdentity, emergencyContact;
+#   INFO for ageGroup, computedAge, maritalStatus, raceEthnicity,
+#   address, preferredPharmacy, advanceDirectives, profileId
+# - AddressShape: WARNING for city/addressCity, state/addressState;
+#   INFO for streetAddress/addressLine, postalCode/addressPostalCode,
+#   country/addressCountry, addressUse, addressType
+# - EmergencyContactShape: VIOLATION for contactName, contactPhone;
+#   WARNING for contactRelationship
+# - PharmacyInfoShape: VIOLATION for pharmacyName;
+#   INFO for pharmacyAddress, pharmacyPhone
+# - AdvanceDirectivesShape: VIOLATION for hasLivingWill,
+#   hasPowerOfAttorney, hasDNR; INFO for advanceDirectiveNotes
+#

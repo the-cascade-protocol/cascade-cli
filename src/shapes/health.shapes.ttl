@@ -1,0 +1,697 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix fhir: <http://hl7.org/fhir/> .
+
+# ============================================================================
+# Cascade Protocol — Health & Wellness Vocabulary SHACL Validation Shapes
+# ============================================================================
+# Version: 1.0 (Phase 4, 2026-02-18)
+# Validates: health:SelfReport, health:VO2MaxStatistics, health:HRVStatistics,
+#            health:BPStatistics, health:MetricTrend, health:ActivitySnapshot,
+#            health:SleepSnapshot, health:HealthProfile
+#
+# SEVERITY LEVELS:
+# - sh:Violation = Must fix (data invalid without) - e.g., missing required stats
+# - sh:Warning = Should address (important for completeness) - e.g., missing period
+# - sh:Info = Nice to have (suggested enrichment) - e.g., optional context fields
+#
+# Validates against: health.ttl v2.2 (2026-02-17)
+# ============================================================================
+
+# ============================================================================
+# Shape 1: Self Report
+# ============================================================================
+
+health:SelfReportShape a sh:NodeShape ;
+    sh:targetClass health:SelfReport ;
+    rdfs:label "Self Report Shape"@en ;
+    rdfs:comment "Validation constraints for patient-reported daily check-ins and self-assessments. Ensures required timestamping, type classification, and completion tracking."@en ;
+
+    # REQUIRED: reportDate (when the self-report was recorded)
+    sh:property [
+        sh:path health:reportDate ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Report Date"@en ;
+        sh:message "Self-report must have exactly one reportDate timestamp"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: reportType (category of self-report)
+    sh:property [
+        sh:path health:reportType ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Report Type"@en ;
+        sh:message "Self-report must specify a reportType (e.g., medication_adherence, symptom_tracking, mood, sleep)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: completionStatus (whether report is complete)
+    sh:property [
+        sh:path health:completionStatus ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("complete" "partial" "skipped") ;
+        sh:name "Completion Status"@en ;
+        sh:message "Self-report must have a completionStatus of complete, partial, or skipped"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # INFO: reportContext (what tracking plan this relates to)
+    sh:property [
+        sh:path health:reportContext ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Report Context"@en ;
+        sh:message "Consider adding reportContext to link this report to a tracking plan"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: reportNotes (free-text patient notes)
+    sh:property [
+        sh:path health:reportNotes ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Report Notes"@en ;
+        sh:message "Consider adding reportNotes for additional patient context"@en ;
+        sh:severity sh:Info
+    ] .
+
+# ============================================================================
+# Shape 2: VO2 Max Statistics
+# ============================================================================
+
+health:VO2MaxStatisticsShape a sh:NodeShape ;
+    sh:targetClass health:VO2MaxStatistics ;
+    rdfs:label "VO2 Max Statistics Shape"@en ;
+    rdfs:comment "Validation constraints for VO2 Max statistical summaries. Ensures core statistics, fitness classification, and trend analysis fields are present. Supports the dual-path UI pattern where rich statistics are preferred when available."@en ;
+
+    # REQUIRED: vo2Mean (average VO2 Max over period)
+    sh:property [
+        sh:path health:vo2Mean ;
+        sh:datatype xsd:double ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Mean VO2 Max"@en ;
+        sh:message "VO2 Max statistics must have a mean value (mL/kg/min, >= 0)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: vo2SampleCount (number of measurements)
+    sh:property [
+        sh:path health:vo2SampleCount ;
+        sh:datatype xsd:integer ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 1 ;
+        sh:name "VO2 Sample Count"@en ;
+        sh:message "VO2 Max statistics must have at least 1 sample"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: fitnessClassification (cardiorespiratory fitness level)
+    sh:property [
+        sh:path health:fitnessClassification ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("veryPoor" "poor" "fair" "good" "excellent" "superior") ;
+        sh:name "Fitness Classification"@en ;
+        sh:message "VO2 Max statistics must have a fitnessClassification (veryPoor, poor, fair, good, excellent, or superior)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # WARNING: periodStart (measurement window start)
+    sh:property [
+        sh:path health:periodStart ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Period Start"@en ;
+        sh:message "VO2 Max statistics should specify the measurement period start date"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # WARNING: periodEnd (measurement window end)
+    sh:property [
+        sh:path health:periodEnd ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Period End"@en ;
+        sh:message "VO2 Max statistics should specify the measurement period end date"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # INFO: vo2Min (lowest reading)
+    sh:property [
+        sh:path health:vo2Min ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:name "Minimum VO2 Max"@en ;
+        sh:message "Consider including minimum VO2 Max for range analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: vo2MaxValue (highest reading)
+    sh:property [
+        sh:path health:vo2MaxValue ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:name "Maximum VO2 Max"@en ;
+        sh:message "Consider including maximum VO2 Max for range analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: vo2TrendDirection (trend over period)
+    sh:property [
+        sh:path health:vo2TrendDirection ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("improving" "declining" "stable" "unknown") ;
+        sh:name "VO2 Trend Direction"@en ;
+        sh:message "Consider including vo2TrendDirection for fitness trend analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: isSparseData (data quality indicator)
+    sh:property [
+        sh:path health:isSparseData ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:name "Sparse Data Indicator"@en ;
+        sh:message "Consider setting isSparseData to flag limited measurement periods"@en ;
+        sh:severity sh:Info
+    ] .
+
+# ============================================================================
+# Shape 3: HRV Statistics
+# ============================================================================
+
+health:HRVStatisticsShape a sh:NodeShape ;
+    sh:targetClass health:HRVStatistics ;
+    rdfs:label "HRV Statistics Shape"@en ;
+    rdfs:comment "Validation constraints for Heart Rate Variability (SDNN) statistical summaries. Ensures core statistics and measurement period are present for trend analysis."@en ;
+
+    # REQUIRED: hrvMean (average HRV over period)
+    sh:property [
+        sh:path health:hrvMean ;
+        sh:datatype xsd:double ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Mean HRV"@en ;
+        sh:message "HRV statistics must have a mean value (ms, >= 0)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: hrvSampleCount (number of readings)
+    sh:property [
+        sh:path health:hrvSampleCount ;
+        sh:datatype xsd:integer ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 1 ;
+        sh:name "HRV Sample Count"@en ;
+        sh:message "HRV statistics must have at least 1 sample"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: periodStart (measurement window start)
+    sh:property [
+        sh:path health:periodStart ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Period Start"@en ;
+        sh:message "HRV statistics must specify the measurement period start date"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: periodEnd (measurement window end)
+    sh:property [
+        sh:path health:periodEnd ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Period End"@en ;
+        sh:message "HRV statistics must specify the measurement period end date"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # INFO: hrvMedian (median HRV)
+    sh:property [
+        sh:path health:hrvMedian ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:name "Median HRV"@en ;
+        sh:message "Consider including median HRV for distribution analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: hrvStdDev (standard deviation)
+    sh:property [
+        sh:path health:hrvStdDev ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:name "HRV Standard Deviation"@en ;
+        sh:message "Consider including HRV standard deviation for variability analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: hrvMin (lowest reading)
+    sh:property [
+        sh:path health:hrvMin ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:name "Minimum HRV"@en ;
+        sh:message "Consider including minimum HRV for range analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: hrvMax (highest reading)
+    sh:property [
+        sh:path health:hrvMax ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:name "Maximum HRV"@en ;
+        sh:message "Consider including maximum HRV for range analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: hrvTrendDirection (trend over period)
+    sh:property [
+        sh:path health:hrvTrendDirection ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("improving" "declining" "stable" "unknown") ;
+        sh:name "HRV Trend Direction"@en ;
+        sh:message "Consider including hrvTrendDirection for autonomic nervous system trend analysis"@en ;
+        sh:severity sh:Info
+    ] .
+
+# ============================================================================
+# Shape 4: Blood Pressure Statistics
+# ============================================================================
+
+health:BPStatisticsShape a sh:NodeShape ;
+    sh:targetClass health:BPStatistics ;
+    rdfs:label "Blood Pressure Statistics Shape"@en ;
+    rdfs:comment "Validation constraints for blood pressure statistical summaries. Ensures mean systolic/diastolic values and AHA category classification are present."@en ;
+
+    # REQUIRED: bpMeanSystolic (average systolic BP)
+    sh:property [
+        sh:path health:bpMeanSystolic ;
+        sh:datatype xsd:double ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 40 ;
+        sh:maxInclusive 300 ;
+        sh:name "Mean Systolic BP"@en ;
+        sh:message "BP statistics must have a mean systolic value (mmHg, 40-300)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: bpMeanDiastolic (average diastolic BP)
+    sh:property [
+        sh:path health:bpMeanDiastolic ;
+        sh:datatype xsd:double ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 20 ;
+        sh:maxInclusive 200 ;
+        sh:name "Mean Diastolic BP"@en ;
+        sh:message "BP statistics must have a mean diastolic value (mmHg, 20-200)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: bpCategory (AHA classification)
+    sh:property [
+        sh:path health:bpCategory ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("normal" "elevated" "hypertension_stage1" "hypertension_stage2" "hypertensive_crisis") ;
+        sh:name "BP Category"@en ;
+        sh:message "BP statistics must have an AHA category (normal, elevated, hypertension_stage1, hypertension_stage2, or hypertensive_crisis)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # WARNING: bpSampleCount (number of readings)
+    sh:property [
+        sh:path health:bpSampleCount ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 1 ;
+        sh:name "BP Sample Count"@en ;
+        sh:message "BP statistics should include a sample count for data quality assessment"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # INFO: bpMinSystolic (lowest systolic reading)
+    sh:property [
+        sh:path health:bpMinSystolic ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:name "Minimum Systolic BP"@en ;
+        sh:message "Consider including minimum systolic BP for range analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: bpMaxSystolic (highest systolic reading)
+    sh:property [
+        sh:path health:bpMaxSystolic ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:name "Maximum Systolic BP"@en ;
+        sh:message "Consider including maximum systolic BP for range analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: bpMinDiastolic (lowest diastolic reading)
+    sh:property [
+        sh:path health:bpMinDiastolic ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:name "Minimum Diastolic BP"@en ;
+        sh:message "Consider including minimum diastolic BP for range analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: bpMaxDiastolic (highest diastolic reading)
+    sh:property [
+        sh:path health:bpMaxDiastolic ;
+        sh:datatype xsd:double ;
+        sh:maxCount 1 ;
+        sh:name "Maximum Diastolic BP"@en ;
+        sh:message "Consider including maximum diastolic BP for range analysis"@en ;
+        sh:severity sh:Info
+    ] .
+
+# ============================================================================
+# Shape 5: Metric Trend
+# ============================================================================
+
+health:MetricTrendShape a sh:NodeShape ;
+    sh:targetClass health:MetricTrend ;
+    rdfs:label "Metric Trend Shape"@en ;
+    rdfs:comment "Validation constraints for time-bounded wellness metric trends. Ensures trend direction is present and encourages confidence and period metadata for proper interpretation."@en ;
+
+    # REQUIRED: trendDirection (direction of change)
+    sh:property [
+        sh:path health:trendDirection ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("increasing" "decreasing" "stable" "insufficient_data") ;
+        sh:name "Trend Direction"@en ;
+        sh:message "Metric trend must have a direction (increasing, decreasing, stable, or insufficient_data)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # WARNING: trendConfidence (data quality indicator)
+    sh:property [
+        sh:path health:trendConfidence ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("high" "medium" "low") ;
+        sh:name "Trend Confidence"@en ;
+        sh:message "Metric trend should include confidence level (high >30d, medium 14-30d, low <14d)"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # WARNING: trendPeriodStart (observation window start)
+    sh:property [
+        sh:path health:trendPeriodStart ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Trend Period Start"@en ;
+        sh:message "Metric trend should specify the observation period start date"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # WARNING: trendPeriodEnd (observation window end)
+    sh:property [
+        sh:path health:trendPeriodEnd ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Trend Period End"@en ;
+        sh:message "Metric trend should specify the observation period end date"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # INFO: trendMagnitude (percentage change)
+    sh:property [
+        sh:path health:trendMagnitude ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:name "Trend Magnitude"@en ;
+        sh:message "Consider including trendMagnitude (percentage change) for quantitative trend analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: trendBaselineValue (reference value)
+    sh:property [
+        sh:path health:trendBaselineValue ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:name "Baseline Value"@en ;
+        sh:message "Consider including trendBaselineValue for comparative analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: trendCurrentValue (current period average)
+    sh:property [
+        sh:path health:trendCurrentValue ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:name "Current Value"@en ;
+        sh:message "Consider including trendCurrentValue for comparative analysis"@en ;
+        sh:severity sh:Info
+    ] .
+
+# ============================================================================
+# Shape 6: Activity Snapshot
+# ============================================================================
+
+health:ActivitySnapshotShape a sh:NodeShape ;
+    sh:targetClass health:ActivitySnapshot ;
+    rdfs:label "Activity Snapshot Shape"@en ;
+    rdfs:comment "Validation constraints for aggregated activity metrics over a measurement period (typically 7 days). All fields are optional since activity data availability depends on device capabilities."@en ;
+
+    # WARNING: averageDailySteps (primary activity metric)
+    sh:property [
+        sh:path health:averageDailySteps ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Average Daily Steps"@en ;
+        sh:message "Activity snapshot should include average daily steps as a primary activity metric"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # INFO: exerciseMinutesWeekly (exercise activity)
+    sh:property [
+        sh:path health:exerciseMinutesWeekly ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Exercise Minutes (Weekly)"@en ;
+        sh:message "Consider including weekly exercise minutes for fitness context"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: standHoursDaily (standing activity)
+    sh:property [
+        sh:path health:standHoursDaily ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 24 ;
+        sh:name "Stand Hours (Daily)"@en ;
+        sh:message "Consider including daily stand hours for sedentary behavior tracking"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: activeEnergyBurnedKcal (energy expenditure)
+    sh:property [
+        sh:path health:activeEnergyBurnedKcal ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Active Energy Burned (kcal)"@en ;
+        sh:message "Consider including active energy burned for caloric expenditure tracking"@en ;
+        sh:severity sh:Info
+    ] .
+
+# ============================================================================
+# Shape 7: Sleep Snapshot
+# ============================================================================
+
+health:SleepSnapshotShape a sh:NodeShape ;
+    sh:targetClass health:SleepSnapshot ;
+    rdfs:label "Sleep Snapshot Shape"@en ;
+    rdfs:comment "Validation constraints for aggregated sleep metrics over a measurement period (typically 7 days). Sleep data availability depends on device capabilities and user behavior."@en ;
+
+    # WARNING: averageDurationHours (primary sleep metric)
+    sh:property [
+        sh:path health:averageDurationHours ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 24 ;
+        sh:name "Average Sleep Duration (hours)"@en ;
+        sh:message "Sleep snapshot should include average duration as a primary sleep metric"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # INFO: sleepQuality (qualitative assessment)
+    sh:property [
+        sh:path health:sleepQuality ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Sleep Quality"@en ;
+        sh:message "Consider including sleep quality assessment for comprehensive sleep analysis"@en ;
+        sh:severity sh:Info
+    ] .
+
+# ============================================================================
+# Shape 8: Health Profile (Top-level Container)
+# ============================================================================
+
+health:HealthProfileShape a sh:NodeShape ;
+    sh:targetClass health:HealthProfile ;
+    rdfs:label "Health Profile Shape"@en ;
+    rdfs:comment "Validation constraints for the top-level wellness profile aggregating vital signs, body measurements, activity, and sleep data from consumer devices. Stored at /wellness/ in the Cascade Pod."@en ;
+
+    # WARNING: bloodType (ABO blood group characteristic)
+    sh:property [
+        sh:path health:bloodType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("aPositive" "aNegative" "bPositive" "bNegative" "abPositive" "abNegative" "oPositive" "oNegative") ;
+        sh:name "Blood Type"@en ;
+        sh:message "Blood type should be a valid ABO/Rh value if provided"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # INFO: restingHeartRateHistory (90-day vital trend)
+    sh:property [
+        sh:path health:restingHeartRateHistory ;
+        sh:class health:DailyVitalReading ;
+        sh:name "Resting Heart Rate History"@en ;
+        sh:message "Consider populating resting heart rate history for cardiac trend analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: walkingHeartRateHistory (90-day vital trend)
+    sh:property [
+        sh:path health:walkingHeartRateHistory ;
+        sh:class health:DailyVitalReading ;
+        sh:name "Walking Heart Rate History"@en ;
+        sh:message "Consider populating walking heart rate history for activity-related cardiac trends"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: hrvHistory (7-day HRV readings)
+    sh:property [
+        sh:path health:hrvHistory ;
+        sh:class health:HRVReading ;
+        sh:name "HRV History"@en ;
+        sh:message "Consider populating HRV history for autonomic nervous system analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: bloodPressureHistory (30-day BP readings)
+    sh:property [
+        sh:path health:bloodPressureHistory ;
+        sh:class health:BloodPressureReading ;
+        sh:name "Blood Pressure History"@en ;
+        sh:message "Consider populating blood pressure history for cardiovascular trend analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: vo2MaxHistory (180-day VO2 Max readings)
+    sh:property [
+        sh:path health:vo2MaxHistory ;
+        sh:class health:VitalSignReading ;
+        sh:name "VO2 Max History"@en ;
+        sh:message "Consider populating VO2 Max history for fitness trend analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: bodyMassHistory (30-day weight readings)
+    sh:property [
+        sh:path health:bodyMassHistory ;
+        sh:class health:DailyVitalReading ;
+        sh:name "Body Mass History"@en ;
+        sh:message "Consider populating body mass history for weight trend analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: dailyActivityHistory (90-day activity snapshots)
+    sh:property [
+        sh:path health:dailyActivityHistory ;
+        sh:class health:DailyActivitySnapshot ;
+        sh:name "Daily Activity History"@en ;
+        sh:message "Consider populating daily activity history for activity trend analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: dailySleepHistory (90-day sleep snapshots)
+    sh:property [
+        sh:path health:dailySleepHistory ;
+        sh:class health:DailySleepSnapshot ;
+        sh:name "Daily Sleep History"@en ;
+        sh:message "Consider populating daily sleep history for sleep pattern analysis"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: hasHRVStatistics (link to HRV statistical summary)
+    sh:property [
+        sh:path health:hasHRVStatistics ;
+        sh:class health:HRVStatistics ;
+        sh:maxCount 1 ;
+        sh:node health:HRVStatisticsShape ;
+        sh:name "HRV Statistics"@en ;
+        sh:message "Consider linking HRV statistics for heart rate variability summary"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # INFO: hasBPStatistics (link to BP statistical summary)
+    sh:property [
+        sh:path health:hasBPStatistics ;
+        sh:class health:BPStatistics ;
+        sh:maxCount 1 ;
+        sh:node health:BPStatisticsShape ;
+        sh:name "BP Statistics"@en ;
+        sh:message "Consider linking BP statistics for blood pressure summary"@en ;
+        sh:severity sh:Info
+    ] .
+
+# ============================================================================
+# Changelog
+# ============================================================================
+#
+# Version 1.0 (2026-02-18)
+# - Initial release of Health & Wellness SHACL shapes (Phase 4)
+# - 8 shapes covering all major health.ttl v2.2 classes:
+#   - SelfReportShape: Patient-reported check-in validation (3 required, 2 info)
+#   - VO2MaxStatisticsShape: Fitness statistics validation (3 required, 2 warning, 4 info)
+#   - HRVStatisticsShape: HRV statistics validation (4 required, 5 info)
+#   - BPStatisticsShape: Blood pressure statistics validation (3 required, 1 warning, 4 info)
+#   - MetricTrendShape: Wellness trend validation (1 required, 3 warning, 3 info)
+#   - ActivitySnapshotShape: Activity metrics validation (1 warning, 3 info)
+#   - SleepSnapshotShape: Sleep metrics validation (1 warning, 1 info)
+#   - HealthProfileShape: Top-level container validation (1 warning, 10 info)
+# - Severity levels follow established pattern: Violation/Warning/Info
+# - sh:in constraints match enumerated values from health.ttl ontology
+# - Range constraints (minInclusive/maxInclusive) reflect physiological bounds
+#

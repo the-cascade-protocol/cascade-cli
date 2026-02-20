@@ -1,0 +1,1459 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix checkup: <https://ns.cascadeprotocol.org/checkup/v1#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ============================================================================
+# CASCADE CHECKUP SHACL SHAPES - ADULT (Ages 18-64)
+# ============================================================================
+# Version: 2.0
+# Created: 2026-01-03
+# Modified: 2026-02-18 (v2.0: Shapes for v1.5-v2.0 ontology classes)
+#
+# SEVERITY LEVELS:
+# - sh:Violation = Must fix (blocks export) - e.g., missing patient name
+# - sh:Warning = Should address (shown prominently) - e.g., no allergies listed
+# - sh:Info = Nice to have (suggestions) - e.g., incomplete family history
+#
+# PHASE 7 ADDITIONS:
+# - Extended MedicationSummaryShape with episode linkage and patient meaning fields
+# - Added SupplementSummaryShape with regulatory classification requirements
+# - Added hasSupplement validation to IntakeFormData
+#
+# v1.6 ADDITIONS:
+# - Added IntakeQuestionnaireResponseShape with LOINC panel code validation
+# - Added ResponseItemShape with question text validation
+# - Added hasQuestionnaireResponse validation to IntakeFormData
+#
+# v2.0 ADDITIONS (WS8 - Shapes for v1.5-v2.0 ontology classes):
+# - Added DailyCheckInShape with SelfReport inheritance via sh:node
+# - Added ImmunizationSummaryShape with vaccine validation
+# - Added LabResultSummaryShape with mixed namespace (clinical:/checkup:)
+# - Added ProcedureSummaryShape with mixed namespace (clinical:/checkup:)
+# - Added DiscussionTopicShape with category and relevance validation
+# - Added hasDailyCheckIn, hasDiscussionTopic, hasImmunization,
+#   hasLabResult, hasProcedure aggregate links to IntakeFormDataShape
+# - Added health: and clinical: prefix declarations
+# ============================================================================
+
+# ============================================================================
+# INTAKE FORM DATA SHAPE (Top-level validation)
+# ============================================================================
+
+checkup:IntakeFormDataShape a sh:NodeShape ;
+    sh:targetClass checkup:IntakeFormData ;
+    rdfs:label "Intake Form Data Validation" ;
+    rdfs:comment "Validates completeness of intake form data for adult patients (18-64)" ;
+
+    # Required: Patient Profile
+    sh:property [
+        sh:path checkup:hasPatientProfile ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:node checkup:PatientProfileShape ;
+        sh:severity sh:Violation ;
+        sh:message "Patient profile is required for intake forms"
+    ] ;
+
+    # Required: Schema version
+    sh:property [
+        sh:path checkup:schemaVersion ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Violation ;
+        sh:message "Schema version is required"
+    ] ;
+
+    # Required: Generation timestamp
+    sh:property [
+        sh:path checkup:generatedAt ;
+        sh:minCount 1 ;
+        sh:datatype xsd:dateTime ;
+        sh:severity sh:Violation ;
+        sh:message "Generation timestamp is required"
+    ] ;
+
+    # Warning: Medications
+    sh:property [
+        sh:path checkup:hasMedication ;
+        sh:minCount 0 ;
+        sh:node checkup:MedicationSummaryShape ;
+        sh:severity sh:Warning ;
+        sh:message "Medication list helps providers avoid drug interactions. Add your current medications or confirm 'None'."
+    ] ;
+
+    # Info: Supplements (Phase 3 - separate from medications)
+    sh:property [
+        sh:path checkup:hasSupplement ;
+        sh:minCount 0 ;
+        sh:node checkup:SupplementSummaryShape ;
+        sh:severity sh:Info ;
+        sh:message "Supplements and OTC products can interact with medications. Consider listing supplements separately from prescription medications."
+    ] ;
+
+    # Warning: Allergies
+    sh:property [
+        sh:path checkup:hasAllergy ;
+        sh:minCount 0 ;
+        sh:node checkup:AllergySummaryShape ;
+        sh:severity sh:Warning ;
+        sh:message "Allergy information helps prevent adverse reactions. Add allergies or confirm 'No Known Drug Allergies (NKDA)'."
+    ] ;
+
+    # Warning: Insurance
+    sh:property [
+        sh:path checkup:hasInsurance ;
+        sh:minCount 0 ;
+        sh:maxCount 1 ;
+        sh:node checkup:InsuranceInfoShape ;
+        sh:severity sh:Warning ;
+        sh:message "Insurance information is usually required for office visits. Add insurance or select 'Self-Pay'."
+    ] ;
+
+    # Warning: Conditions
+    sh:property [
+        sh:path checkup:hasCondition ;
+        sh:minCount 0 ;
+        sh:node checkup:ConditionSummaryShape ;
+        sh:severity sh:Warning ;
+        sh:message "Active conditions help providers understand your health history. Add conditions or confirm 'None'."
+    ] ;
+
+    # Info: Family History
+    sh:property [
+        sh:path checkup:hasFamilyHistory ;
+        sh:minCount 0 ;
+        sh:node checkup:FamilyHistoryEntryShape ;
+        sh:severity sh:Info ;
+        sh:message "Family history helps assess risk for certain conditions. Consider adding health history for parents and siblings."
+    ] ;
+
+    # Info: Vital Signs Trends
+    sh:property [
+        sh:path checkup:hasVitalsTrend ;
+        sh:minCount 0 ;
+        sh:node checkup:VitalSignsTrendShape ;
+        sh:severity sh:Info ;
+        sh:message "Recent vital signs provide context for your current health status."
+    ] ;
+
+    # Info: Screening Status
+    sh:property [
+        sh:path checkup:hasScreening ;
+        sh:minCount 0 ;
+        sh:node checkup:ScreeningStatusShape ;
+        sh:severity sh:Info ;
+        sh:message "Tracking preventive screenings helps you stay current with recommended care."
+    ] ;
+
+    # Info: Visit Issues
+    sh:property [
+        sh:path checkup:hasVisitIssue ;
+        sh:minCount 0 ;
+        sh:node checkup:VisitIssueShape ;
+        sh:severity sh:Info ;
+        sh:message "Adding issues you want to discuss helps you make the most of your appointment."
+    ] ;
+
+    # Info: Diagnostic Results
+    sh:property [
+        sh:path checkup:hasDiagnosticResult ;
+        sh:minCount 0 ;
+        sh:node checkup:DiagnosticTestResultShape ;
+        sh:severity sh:Info ;
+        sh:message "Including recent diagnostic tests gives your provider valuable context."
+    ] ;
+
+    # Info: Intake Questionnaires (v1.6)
+    sh:property [
+        sh:path checkup:hasQuestionnaireResponse ;
+        sh:minCount 0 ;
+        sh:node checkup:IntakeQuestionnaireResponseShape ;
+        sh:severity sh:Info ;
+        sh:message "Consider completing intake questionnaires for a more complete health profile."
+    ] ;
+
+    # Info: Daily Check-ins (v2.0)
+    sh:property [
+        sh:path checkup:hasDailyCheckIn ;
+        sh:minCount 0 ;
+        sh:node checkup:DailyCheckInShape ;
+        sh:severity sh:Info ;
+        sh:message "Daily medication check-ins help track adherence patterns for your provider."
+    ] ;
+
+    # Info: Discussion Topics (v2.0)
+    sh:property [
+        sh:path checkup:hasDiscussionTopic ;
+        sh:minCount 0 ;
+        sh:node checkup:DiscussionTopicShape ;
+        sh:severity sh:Info ;
+        sh:message "Discussion topics help prioritize what to cover during your appointment."
+    ] ;
+
+    # Info: Immunizations (v2.0)
+    sh:property [
+        sh:path checkup:hasImmunization ;
+        sh:minCount 0 ;
+        sh:node checkup:ImmunizationSummaryShape ;
+        sh:severity sh:Info ;
+        sh:message "Including immunization records helps your provider review your vaccination status."
+    ] ;
+
+    # Info: Lab Results (v2.0)
+    sh:property [
+        sh:path checkup:hasLabResult ;
+        sh:minCount 0 ;
+        sh:node checkup:LabResultSummaryShape ;
+        sh:severity sh:Info ;
+        sh:message "Recent lab results give your provider context about your current health status."
+    ] ;
+
+    # Info: Procedures (v2.0)
+    sh:property [
+        sh:path checkup:hasProcedure ;
+        sh:minCount 0 ;
+        sh:node checkup:ProcedureSummaryShape ;
+        sh:severity sh:Info ;
+        sh:message "Procedure history helps your provider understand your surgical and diagnostic background."
+    ] .
+
+# ============================================================================
+# PATIENT PROFILE SHAPE (Critical - blocks export if invalid)
+# ============================================================================
+
+checkup:PatientProfileShape a sh:NodeShape ;
+    sh:targetClass checkup:PatientProfile ;
+    rdfs:label "Patient Profile Validation" ;
+    rdfs:comment "Validates required patient demographics" ;
+
+    # VIOLATION: Patient name required
+    sh:property [
+        sh:path checkup:patientName ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 2 ;
+        sh:severity sh:Violation ;
+        sh:message "Patient name is required for intake forms"
+    ] ;
+
+    # VIOLATION: Date of birth required
+    sh:property [
+        sh:path checkup:dateOfBirth ;
+        sh:minCount 1 ;
+        sh:datatype xsd:date ;
+        sh:severity sh:Violation ;
+        sh:message "Date of birth is required for intake forms"
+    ] ;
+
+    # VIOLATION: Biological sex required (for screening recommendations)
+    sh:property [
+        sh:path checkup:biologicalSex ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:in ( "male" "female" "intersex" ) ;
+        sh:severity sh:Violation ;
+        sh:message "Biological sex is required for medical screening recommendations"
+    ] ;
+
+    # WARNING: Contact phone recommended
+    sh:property [
+        sh:path checkup:contactPhone ;
+        sh:minCount 0 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Warning ;
+        sh:message "Contact phone number is typically required by healthcare providers"
+    ] ;
+
+    # INFO: Emergency contact suggested
+    sh:property [
+        sh:path checkup:emergencyContact ;
+        sh:minCount 0 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Consider adding an emergency contact"
+    ] ;
+
+    # Computed age must be valid integer
+    sh:property [
+        sh:path checkup:computedAge ;
+        sh:datatype xsd:integer ;
+        sh:minInclusive 18 ;
+        sh:maxInclusive 64 ;
+        sh:severity sh:Warning ;
+        sh:message "Age should be between 18-64 for adult shapes (use senior shapes for 65+)"
+    ] ;
+
+    # Age group must be valid
+    sh:property [
+        sh:path checkup:ageGroup ;
+        sh:in ( "young_adult" "adult" ) ;
+        sh:severity sh:Info ;
+        sh:message "Age group should be young_adult (18-39) or adult (40-64)"
+    ] ;
+
+    # Gender identity is optional but validated if present
+    sh:property [
+        sh:path checkup:genderIdentity ;
+        sh:in ( "woman" "man" "non_binary" "other" "prefer_not_to_say" ) ;
+        sh:severity sh:Info ;
+        sh:message "Gender identity must be a valid option if provided"
+    ] .
+
+# ============================================================================
+# INSURANCE INFO SHAPE
+# ============================================================================
+
+checkup:InsuranceInfoShape a sh:NodeShape ;
+    sh:targetClass checkup:InsuranceInfo ;
+    rdfs:label "Insurance Information Validation" ;
+    rdfs:comment "Validates insurance details for intake forms" ;
+
+    # WARNING: Provider name required if insurance section exists
+    sh:property [
+        sh:path checkup:insuranceProvider ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Warning ;
+        sh:message "Insurance provider name is required"
+    ] ;
+
+    # WARNING: Member ID required
+    sh:property [
+        sh:path checkup:memberId ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Warning ;
+        sh:message "Member ID / Policy number is required for insurance verification"
+    ] ;
+
+    # Coverage type must be valid
+    sh:property [
+        sh:path checkup:coverageType ;
+        sh:in ( "hmo" "ppo" "epo" "pos" "medicare" "medicaid" "tricare" "self_pay" "other" ) ;
+        sh:severity sh:Info ;
+        sh:message "Coverage type should be a recognized plan type"
+    ] ;
+
+    # INFO: PCP recommended
+    sh:property [
+        sh:path checkup:primaryCareProvider ;
+        sh:minCount 0 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Primary care provider name is helpful for care coordination"
+    ] .
+
+# ============================================================================
+# MEDICATION SUMMARY SHAPE (Extended v1.2 - Phase 3 Medication Ontology)
+# ============================================================================
+
+checkup:MedicationSummaryShape a sh:NodeShape ;
+    sh:targetClass checkup:MedicationSummary ;
+    rdfs:label "Medication Summary Validation" ;
+    rdfs:comment "Validates medication entries with adherence data and episode linkage (Phase 3 extended)" ;
+
+    # WARNING: Medication name required
+    sh:property [
+        sh:path checkup:medicationName ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 2 ;
+        sh:severity sh:Warning ;
+        sh:message "Medication name is required"
+    ] ;
+
+    # INFO: Dose recommended
+    sh:property [
+        sh:path checkup:dose ;
+        sh:minCount 0 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Including the dose helps prevent medication errors"
+    ] ;
+
+    # INFO: Frequency recommended
+    sh:property [
+        sh:path checkup:frequency ;
+        sh:in ( "once_daily" "twice_daily" "three_times_daily" "four_times_daily" "as_needed" "weekly" "monthly" "other" ) ;
+        sh:severity sh:Info ;
+        sh:message "Frequency should be a recognized dosing schedule"
+    ] ;
+
+    # Adherence status must be valid if present
+    sh:property [
+        sh:path checkup:adherenceStatus ;
+        sh:in ( "taking_as_prescribed" "usually_take" "sometimes_miss" "often_miss" "stopped" ) ;
+        sh:severity sh:Info ;
+        sh:message "Adherence status must be a recognized value"
+    ] ;
+
+    # Adherence barrier must be valid if present
+    sh:property [
+        sh:path checkup:adherenceBarrier ;
+        sh:in ( "cost" "side_effects" "forgetfulness" "access" "complexity" "other" "none" ) ;
+        sh:severity sh:Info ;
+        sh:message "Adherence barrier must be a recognized value"
+    ] ;
+
+    # Effectiveness must be valid if present
+    sh:property [
+        sh:path checkup:perceivedEffectiveness ;
+        sh:in ( "very_effective" "somewhat_effective" "not_sure" "not_effective" ) ;
+        sh:severity sh:Info ;
+        sh:message "Perceived effectiveness must be a recognized value"
+    ] ;
+
+    # Phase 3: Episode linkage (recommended for traceability)
+    sh:property [
+        sh:path checkup:episodeId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Episode ID" ;
+        sh:message "Linking to MedicationUseEpisode enables longitudinal tracking"
+    ] ;
+
+    # Phase 3: Start date
+    sh:property [
+        sh:path checkup:startDate ;
+        sh:datatype xsd:date ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Start Date" ;
+        sh:message "Start date helps track medication duration"
+    ] ;
+
+    # Phase 3: Indication (why patient takes it)
+    sh:property [
+        sh:path checkup:indication ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Indication" ;
+        sh:message "Understanding why patient takes medication improves clinical context"
+    ] ;
+
+    # Phase 3: Patient cost
+    sh:property [
+        sh:path checkup:patientCost ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Info ;
+        sh:name "Patient Cost" ;
+        sh:message "Cost tracking helps identify financial barriers"
+    ] ;
+
+    # Phase 3: Cost frequency
+    sh:property [
+        sh:path checkup:costFrequency ;
+        sh:in ( "per_month" "per_refill" "per_dose" "per_bottle" "annual" ) ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Cost Frequency" ;
+        sh:message "Cost frequency should be a recognized value"
+    ] ;
+
+    # Phase 3: Functional impact
+    sh:property [
+        sh:path checkup:functionalImpact ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Functional Impact" ;
+        sh:message "How medication helps patient functionally (e.g., 'helps me sleep')"
+    ] ;
+
+    # Phase 3: Concerns for doctor
+    sh:property [
+        sh:path checkup:concernsForDoctor ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Concerns For Doctor" ;
+        sh:message "Concerns patient wants to discuss with provider"
+    ] .
+
+# ============================================================================
+# SUPPLEMENT SUMMARY SHAPE (v1.1 - Phase 3 Medication Ontology)
+# ============================================================================
+
+checkup:SupplementSummaryShape a sh:NodeShape ;
+    sh:targetClass checkup:SupplementSummary ;
+    rdfs:label "Supplement Summary Validation" ;
+    rdfs:comment "Validates supplement entries with regulatory classification. Explicitly separate from medications per Cascade Protocol." ;
+
+    # WARNING: Supplement name required
+    sh:property [
+        sh:path checkup:supplementName ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 2 ;
+        sh:severity sh:Warning ;
+        sh:message "Supplement name is required"
+    ] ;
+
+    # REQUIRED: Regulatory status (distinguishes from FDA-approved medications)
+    sh:property [
+        sh:path checkup:regulatoryStatus ;
+        sh:minCount 1 ;
+        sh:in ( "dietarySupplement" "otcDrug" "homeopathic" "herbalRemedy" "unknown" ) ;
+        sh:severity sh:Warning ;
+        sh:name "Regulatory Status" ;
+        sh:message "Regulatory status is required to distinguish supplements from FDA-approved medications"
+    ] ;
+
+    # INFO: Dose recommended
+    sh:property [
+        sh:path checkup:supplementDose ;
+        sh:minCount 0 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Including the dose helps track supplement intake"
+    ] ;
+
+    # INFO: Frequency recommended
+    sh:property [
+        sh:path checkup:supplementFrequency ;
+        sh:in ( "once_daily" "twice_daily" "three_times_daily" "four_times_daily" "as_needed" "weekly" "monthly" "other" ) ;
+        sh:severity sh:Info ;
+        sh:message "Frequency should be a recognized dosing schedule"
+    ] ;
+
+    # Optional: Brand
+    sh:property [
+        sh:path checkup:supplementBrand ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:message "Brand helps identify specific products"
+    ] ;
+
+    # Optional: Form
+    sh:property [
+        sh:path checkup:supplementForm ;
+        sh:in ( "capsule" "tablet" "softgel" "liquid" "powder" "gummy" "spray" "patch" "tea" "tincture" "other" ) ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:message "Physical form should be a recognized value"
+    ] ;
+
+    # Optional: Evidence strength
+    sh:property [
+        sh:path checkup:evidenceStrength ;
+        sh:in ( "strongEvidence" "moderateEvidence" "limitedEvidence" "traditionalUse" "noEvidence" "unknown" ) ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Evidence Strength" ;
+        sh:message "Evidence strength helps set expectations about supplement efficacy"
+    ] ;
+
+    # Optional: Reason for use
+    sh:property [
+        sh:path checkup:reasonForUse ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:message "Reason for use helps providers understand patient goals"
+    ] ;
+
+    # Optional: Start date
+    sh:property [
+        sh:path checkup:supplementStartDate ;
+        sh:datatype xsd:date ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:message "Start date helps track supplement duration"
+    ] ;
+
+    # Optional: Is active
+    sh:property [
+        sh:path checkup:supplementIsActive ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:message "Active status indicates if currently taking"
+    ] ;
+
+    # Optional: DSLD ID (NIH identifier)
+    sh:property [
+        sh:path checkup:dsldId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "DSLD ID" ;
+        sh:message "NIH Dietary Supplement Label Database identifier for product lookup"
+    ] ;
+
+    # Optional: Doctor aware
+    sh:property [
+        sh:path checkup:doctorAware ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Doctor Aware" ;
+        sh:message "Indicates if healthcare provider knows about this supplement"
+    ] ;
+
+    # Optional: Patient cost
+    sh:property [
+        sh:path checkup:patientCost ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Info ;
+        sh:message "Cost tracking helps identify financial barriers"
+    ] ;
+
+    # Optional: Cost frequency
+    sh:property [
+        sh:path checkup:costFrequency ;
+        sh:in ( "per_month" "per_refill" "per_dose" "per_bottle" "annual" ) ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:message "Cost frequency should be a recognized value"
+    ] .
+
+# ============================================================================
+# ALLERGY SUMMARY SHAPE
+# ============================================================================
+
+checkup:AllergySummaryShape a sh:NodeShape ;
+    sh:targetClass checkup:AllergySummary ;
+    rdfs:label "Allergy Summary Validation" ;
+    rdfs:comment "Validates allergy entries with reaction details" ;
+
+    # WARNING: Allergen name required
+    sh:property [
+        sh:path checkup:allergen ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 2 ;
+        sh:severity sh:Warning ;
+        sh:message "Allergen name is required"
+    ] ;
+
+    # INFO: Reaction type recommended
+    sh:property [
+        sh:path checkup:reaction ;
+        sh:in ( "hives" "rash" "swelling" "difficulty_breathing" "anaphylaxis" "nausea" "diarrhea" "headache" "other" "unknown" ) ;
+        sh:severity sh:Info ;
+        sh:message "Reaction type should be a recognized value"
+    ] ;
+
+    # INFO: Severity recommended
+    sh:property [
+        sh:path checkup:allergySeverity ;
+        sh:in ( "mild" "moderate" "severe" "life_threatening" ) ;
+        sh:severity sh:Info ;
+        sh:message "Knowing allergy severity helps providers assess risk"
+    ] ;
+
+    # Category must be valid if present
+    sh:property [
+        sh:path checkup:allergyCategory ;
+        sh:in ( "medication" "food" "environmental" "latex" "contrast" "insect" "other" ) ;
+        sh:severity sh:Info ;
+        sh:message "Allergy category should be a recognized value"
+    ] .
+
+# ============================================================================
+# CONDITION SUMMARY SHAPE
+# ============================================================================
+
+checkup:ConditionSummaryShape a sh:NodeShape ;
+    sh:targetClass checkup:ConditionSummary ;
+    rdfs:label "Condition Summary Validation" ;
+    rdfs:comment "Validates health condition entries" ;
+
+    # WARNING: Condition name required
+    sh:property [
+        sh:path checkup:conditionName ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 2 ;
+        sh:severity sh:Warning ;
+        sh:message "Condition name is required"
+    ] ;
+
+    # Status must be valid
+    sh:property [
+        sh:path checkup:conditionStatus ;
+        sh:in ( "active" "resolved" "remission" "recurrence" "inactive" ) ;
+        sh:severity sh:Info ;
+        sh:message "Condition status should be a recognized value"
+    ] ;
+
+    # ICD-10 code pattern if present
+    sh:property [
+        sh:path checkup:icd10Code ;
+        sh:datatype xsd:string ;
+        sh:pattern "^[A-Z][0-9]{2}(\\.[0-9A-Z]{1,4})?$" ;
+        sh:severity sh:Info ;
+        sh:message "ICD-10 code should follow standard format (e.g., I10, E11.9)"
+    ] .
+
+# ============================================================================
+# FAMILY HISTORY ENTRY SHAPE
+# ============================================================================
+
+checkup:FamilyHistoryEntryShape a sh:NodeShape ;
+    sh:targetClass checkup:FamilyHistoryEntry ;
+    rdfs:label "Family History Entry Validation" ;
+    rdfs:comment "Validates family health history entries" ;
+
+    # INFO: Relative type required
+    sh:property [
+        sh:path checkup:relativeType ;
+        sh:minCount 1 ;
+        sh:in ( "mother" "father" "sibling" "maternal_grandmother" "maternal_grandfather" "paternal_grandmother" "paternal_grandfather" "aunt" "uncle" "child" ) ;
+        sh:severity sh:Info ;
+        sh:message "Relative type is required for family history entries"
+    ] ;
+
+    # INFO: Condition required
+    sh:property [
+        sh:path checkup:familyCondition ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Health condition is required for family history entries"
+    ] ;
+
+    # Age at diagnosis should be reasonable
+    sh:property [
+        sh:path checkup:ageAtDiagnosis ;
+        sh:datatype xsd:integer ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 120 ;
+        sh:severity sh:Info ;
+        sh:message "Age at diagnosis should be between 0 and 120"
+    ] ;
+
+    # Age at death should be reasonable
+    sh:property [
+        sh:path checkup:ageAtDeath ;
+        sh:datatype xsd:integer ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 120 ;
+        sh:severity sh:Info ;
+        sh:message "Age at death should be between 0 and 120"
+    ] .
+
+# ============================================================================
+# VITAL SIGNS TREND SHAPE
+# ============================================================================
+
+checkup:VitalSignsTrendShape a sh:NodeShape ;
+    sh:targetClass checkup:VitalSignsTrend ;
+    rdfs:label "Vital Signs Trend Validation" ;
+    rdfs:comment "Validates vital signs with trend analysis" ;
+
+    # Vital type must be valid
+    sh:property [
+        sh:path checkup:vitalType ;
+        sh:minCount 1 ;
+        sh:in ( "blood_pressure" "systolic_bp" "diastolic_bp" "heart_rate" "weight" "height" "bmi" "temperature" "respiratory_rate" "oxygen_saturation" ) ;
+        sh:severity sh:Info ;
+        sh:message "Vital type must be a recognized measurement type"
+    ] ;
+
+    # Current value required
+    sh:property [
+        sh:path checkup:currentValue ;
+        sh:minCount 1 ;
+        sh:severity sh:Info ;
+        sh:message "Current value is required for vital signs"
+    ] ;
+
+    # Trend direction must be valid
+    sh:property [
+        sh:path checkup:trendDirection ;
+        sh:in ( "increasing" "decreasing" "stable" ) ;
+        sh:severity sh:Info ;
+        sh:message "Trend direction should be increasing, decreasing, or stable"
+    ] ;
+
+    # Data source must be valid
+    sh:property [
+        sh:path checkup:dataSource ;
+        sh:in ( "apple_health" "ehr" "manual" "device" "imported" ) ;
+        sh:severity sh:Info ;
+        sh:message "Data source should be a recognized value"
+    ] .
+
+# ============================================================================
+# SCREENING STATUS SHAPE
+# ============================================================================
+
+checkup:ScreeningStatusShape a sh:NodeShape ;
+    sh:targetClass checkup:ScreeningStatus ;
+    rdfs:label "Screening Status Validation" ;
+    rdfs:comment "Validates preventive screening status" ;
+
+    # Screening type must be valid
+    sh:property [
+        sh:path checkup:screeningType ;
+        sh:minCount 1 ;
+        sh:in ( "mammogram" "colonoscopy" "colorectal" "pap_smear" "psa" "bone_density" "aaa_ultrasound" "lung_ct" "diabetes_a1c" "lipid_panel" "hepatitis_c" "hiv" "std" "skin_cancer" ) ;
+        sh:severity sh:Info ;
+        sh:message "Screening type must be a recognized preventive screening"
+    ] ;
+
+    # Status must be valid
+    sh:property [
+        sh:path checkup:screeningStatus ;
+        sh:in ( "not_due" "due" "overdue" "completed" "declined" "not_applicable" ) ;
+        sh:severity sh:Info ;
+        sh:message "Screening status must be a recognized value"
+    ] ;
+
+    # Guideline source should be recognized
+    sh:property [
+        sh:path checkup:guidelineSource ;
+        sh:in ( "USPSTF" "ACS" "AAP" "ACOG" "ADA" "ACC_AHA" "other" ) ;
+        sh:severity sh:Info ;
+        sh:message "Guideline source should be a recognized organization"
+    ] ;
+
+    # Grade level for USPSTF
+    sh:property [
+        sh:path checkup:gradeLevel ;
+        sh:in ( "A" "B" "C" "D" "I" ) ;
+        sh:severity sh:Info ;
+        sh:message "USPSTF grade should be A, B, C, D, or I"
+    ] .
+
+# ============================================================================
+# VISIT ISSUE SHAPE
+# ============================================================================
+
+checkup:VisitIssueShape a sh:NodeShape ;
+    sh:targetClass checkup:VisitIssue ;
+    rdfs:label "Visit Issue Validation" ;
+    rdfs:comment "Validates chief complaints / issues to discuss" ;
+
+    # Category must be valid
+    sh:property [
+        sh:path checkup:issueCategory ;
+        sh:minCount 1 ;
+        sh:in ( "pain" "skin" "digestive" "respiratory" "cardiovascular" "mental_health" "neurological" "musculoskeletal" "urinary" "reproductive" "endocrine" "medication" "screening" "general" "other" ) ;
+        sh:severity sh:Info ;
+        sh:message "Issue category must be a recognized value"
+    ] ;
+
+    # Description required
+    sh:property [
+        sh:path checkup:issueDescription ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 5 ;
+        sh:severity sh:Info ;
+        sh:message "Issue description is required and should be at least 5 characters"
+    ] ;
+
+    # Duration must be valid
+    sh:property [
+        sh:path checkup:issueDuration ;
+        sh:in ( "hours" "days" "weeks" "months" "years" ) ;
+        sh:severity sh:Info ;
+        sh:message "Duration should be hours, days, weeks, months, or years"
+    ] ;
+
+    # Severity must be valid
+    sh:property [
+        sh:path checkup:issueSeverity ;
+        sh:in ( "mild" "moderate" "severe" ) ;
+        sh:severity sh:Info ;
+        sh:message "Severity should be mild, moderate, or severe"
+    ] ;
+
+    # Frequency must be valid
+    sh:property [
+        sh:path checkup:issueFrequency ;
+        sh:in ( "constant" "intermittent" "occasional" "rare" ) ;
+        sh:severity sh:Info ;
+        sh:message "Frequency should be constant, intermittent, occasional, or rare"
+    ] ;
+
+    # Priority must be 1-10
+    sh:property [
+        sh:path checkup:issuePriority ;
+        sh:datatype xsd:integer ;
+        sh:minInclusive 1 ;
+        sh:maxInclusive 10 ;
+        sh:severity sh:Info ;
+        sh:message "Priority should be between 1 (highest) and 10 (lowest)"
+    ] .
+
+# ============================================================================
+# DIAGNOSTIC TEST RESULT SHAPE
+# ============================================================================
+
+checkup:DiagnosticTestResultShape a sh:NodeShape ;
+    sh:targetClass checkup:DiagnosticTestResult ;
+    rdfs:label "Diagnostic Test Result Validation" ;
+    rdfs:comment "Validates external diagnostic test results" ;
+
+    # Test type must be valid
+    sh:property [
+        sh:path checkup:testType ;
+        sh:minCount 1 ;
+        sh:in ( "pots_check" "blood_pressure_series" "glucose_series" "ecg" "sleep_analysis" "hearing_test" "vision_test" "other" ) ;
+        sh:severity sh:Info ;
+        sh:message "Test type must be a recognized diagnostic test"
+    ] ;
+
+    # Test date required
+    sh:property [
+        sh:path checkup:testDate ;
+        sh:minCount 1 ;
+        sh:datatype xsd:dateTime ;
+        sh:severity sh:Info ;
+        sh:message "Test date is required for diagnostic results"
+    ] ;
+
+    # Source app required
+    sh:property [
+        sh:path checkup:sourceApp ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Source app name is required for provenance"
+    ] ;
+
+    # Result summary required
+    sh:property [
+        sh:path checkup:resultSummary ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 10 ;
+        sh:severity sh:Info ;
+        sh:message "Result summary is required and should be descriptive"
+    ] .
+
+# ============================================================================
+# SUGGESTED QUESTION SHAPE
+# ============================================================================
+
+checkup:SuggestedQuestionShape a sh:NodeShape ;
+    sh:targetClass checkup:SuggestedQuestion ;
+    rdfs:label "Suggested Question Validation" ;
+    rdfs:comment "Validates AI-generated or template questions" ;
+
+    # Question text required
+    sh:property [
+        sh:path checkup:questionText ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 10 ;
+        sh:severity sh:Info ;
+        sh:message "Question text is required and should be meaningful"
+    ] ;
+
+    # Category must be valid
+    sh:property [
+        sh:path checkup:questionCategory ;
+        sh:in ( "treatment_options" "side_effects" "prevention" "lifestyle" "referral" "diagnosis" "prognosis" "medication" "screening" "general" ) ;
+        sh:severity sh:Info ;
+        sh:message "Question category must be a recognized value"
+    ] .
+
+# ============================================================================
+# INTAKE QUESTIONNAIRE RESPONSE SHAPE (v1.6)
+# ============================================================================
+
+checkup:IntakeQuestionnaireResponseShape a sh:NodeShape ;
+    sh:targetClass checkup:IntakeQuestionnaireResponse ;
+    rdfs:label "Intake Questionnaire Response Validation" ;
+    rdfs:comment "Validates intake questionnaire responses using LOINC panel codes" ;
+
+    # VIOLATION: Questionnaire ID (LOINC panel code) required
+    sh:property [
+        sh:path checkup:questionnaireId ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:message "Questionnaire ID (LOINC panel code) is required"
+    ] ;
+
+    # VIOLATION: Questionnaire title required
+    sh:property [
+        sh:path checkup:questionnaireTitle ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Violation ;
+        sh:message "Questionnaire title is required"
+    ] ;
+
+    # WARNING: At least one response item
+    sh:property [
+        sh:path checkup:responseItem ;
+        sh:minCount 1 ;
+        sh:node checkup:ResponseItemShape ;
+        sh:severity sh:Warning ;
+        sh:message "Questionnaire should have at least one response item"
+    ] ;
+
+    # INFO: Completion timestamp
+    sh:property [
+        sh:path checkup:completedAt ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:message "Consider adding completion timestamp"
+    ] .
+
+# ============================================================================
+# RESPONSE ITEM SHAPE (v1.6)
+# ============================================================================
+
+checkup:ResponseItemShape a sh:NodeShape ;
+    sh:targetClass checkup:ResponseItem ;
+    rdfs:label "Response Item Validation" ;
+    rdfs:comment "Validates individual question-answer pairs within a questionnaire response" ;
+
+    # VIOLATION: Question text required
+    sh:property [
+        sh:path checkup:itemText ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:message "Question text is required for each response item"
+    ] ;
+
+    # INFO: Item link ID (LOINC code)
+    sh:property [
+        sh:path checkup:itemLinkId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:message "LOINC item code helps standardize questionnaire items"
+    ] ;
+
+    # INFO: Answer text
+    sh:property [
+        sh:path checkup:itemAnswer ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Consider providing an answer for this item"
+    ] ;
+
+    # INFO: Answer code (SNOMED CT or LOINC answer)
+    sh:property [
+        sh:path checkup:itemAnswerCode ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Coded answer enables interoperability with clinical systems"
+    ] ;
+
+    # INFO: Answer code system URI
+    sh:property [
+        sh:path checkup:itemAnswerCodeSystem ;
+        sh:datatype xsd:anyURI ;
+        sh:severity sh:Info ;
+        sh:message "Code system URI identifies the terminology (e.g., SNOMED CT, LOINC)"
+    ] ;
+
+    # Nested child items (recursive structure)
+    sh:property [
+        sh:path checkup:childItem ;
+        sh:node checkup:ResponseItemShape ;
+        sh:severity sh:Info ;
+        sh:message "Child items support hierarchical questionnaire structures"
+    ] .
+
+# ============================================================================
+# DAILY CHECK-IN SHAPE (v2.0 - SelfReport subclass)
+# ============================================================================
+
+checkup:DailyCheckInShape a sh:NodeShape ;
+    sh:targetClass checkup:DailyCheckIn ;
+    rdfs:label "Daily Check-in Validation" ;
+    rdfs:comment "Validates daily medication adherence check-ins. Inherits base SelfReport validation via sh:node." ;
+
+    # Inherit SelfReport base validation (reportDate, reportType, completionStatus)
+    sh:node health:SelfReportShape ;
+
+    # VIOLATION: Check-in date required
+    sh:property [
+        sh:path checkup:checkInDate ;
+        sh:minCount 1 ;
+        sh:datatype xsd:dateTime ;
+        sh:severity sh:Violation ;
+        sh:message "Check-in date is required"
+    ] ;
+
+    # VIOLATION: Adherence response required
+    sh:property [
+        sh:path checkup:checkInResponse ;
+        sh:minCount 1 ;
+        sh:in ( "allTaken" "missedSome" "skippedToday" ) ;
+        sh:severity sh:Violation ;
+        sh:message "Check-in response is required and must be allTaken, missedSome, or skippedToday"
+    ] ;
+
+    # INFO: Missed medication IDs (relevant when response is missedSome)
+    sh:property [
+        sh:path checkup:missedMedicationIds ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Consider identifying which medications were missed for better adherence tracking"
+    ] ;
+
+    # INFO: Notes
+    sh:property [
+        sh:path checkup:checkInNotes ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Notes can help explain adherence barriers or side effects"
+    ] ;
+
+    # INFO: Submission timestamp
+    sh:property [
+        sh:path checkup:submittedAt ;
+        sh:datatype xsd:dateTime ;
+        sh:severity sh:Info ;
+        sh:message "Submission timestamp helps track check-in timing patterns"
+    ] .
+
+# ============================================================================
+# IMMUNIZATION SUMMARY SHAPE (v2.0)
+# ============================================================================
+
+checkup:ImmunizationSummaryShape a sh:NodeShape ;
+    sh:targetClass checkup:ImmunizationSummary ;
+    rdfs:label "Immunization Summary Validation" ;
+    rdfs:comment "Validates immunization records for intake forms" ;
+
+    # VIOLATION: Vaccine name required
+    sh:property [
+        sh:path checkup:vaccineName ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:message "Vaccine name is required"
+    ] ;
+
+    # VIOLATION: Administration date required
+    sh:property [
+        sh:path checkup:administrationDate ;
+        sh:minCount 1 ;
+        sh:datatype xsd:dateTime ;
+        sh:severity sh:Violation ;
+        sh:message "Vaccine administration date is required"
+    ] ;
+
+    # WARNING: Immunization status
+    sh:property [
+        sh:path checkup:immunizationStatus ;
+        sh:in ( "completed" "entered-in-error" "not-done" ) ;
+        sh:severity sh:Warning ;
+        sh:message "Immunization status should be completed, entered-in-error, or not-done"
+    ] ;
+
+    # WARNING: Vaccine code (CVX)
+    sh:property [
+        sh:path checkup:vaccineCode ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Warning ;
+        sh:message "CVX vaccine code helps standardize immunization records"
+    ] ;
+
+    # WARNING: Vaccine category
+    sh:property [
+        sh:path checkup:vaccineCategory ;
+        sh:in ( "routine" "travel" "occupational" "other" ) ;
+        sh:severity sh:Warning ;
+        sh:message "Vaccine category should be routine, travel, occupational, or other"
+    ] ;
+
+    # INFO: Manufacturer
+    sh:property [
+        sh:path checkup:manufacturer ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Vaccine manufacturer helps identify specific products"
+    ] ;
+
+    # INFO: Lot number
+    sh:property [
+        sh:path checkup:lotNumber ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Lot number supports vaccine recall tracking"
+    ] ;
+
+    # INFO: Dose number in series
+    sh:property [
+        sh:path checkup:doseNumber ;
+        sh:datatype xsd:integer ;
+        sh:minInclusive 1 ;
+        sh:severity sh:Info ;
+        sh:message "Dose number tracks progress in multi-dose vaccine series"
+    ] ;
+
+    # INFO: Notes
+    sh:property [
+        sh:path checkup:immunizationNotes ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Additional notes about the immunization"
+    ] .
+
+# ============================================================================
+# LAB RESULT SUMMARY SHAPE (v2.0 - mixed namespace: clinical:/checkup:)
+# ============================================================================
+
+checkup:LabResultSummaryShape a sh:NodeShape ;
+    sh:targetClass checkup:LabResultSummary ;
+    rdfs:label "Lab Result Summary Validation" ;
+    rdfs:comment "Validates lab result records using mixed namespace pattern: clinical: for standardized data, checkup: for app-layer categorization" ;
+
+    # VIOLATION: Test name required (clinical: namespace)
+    sh:property [
+        sh:path clinical:testName ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:message "Lab test name is required"
+    ] ;
+
+    # WARNING: Result value
+    sh:property [
+        sh:path clinical:resultValue ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Warning ;
+        sh:message "Lab result value helps providers interpret results"
+    ] ;
+
+    # WARNING: Lab category for intake display
+    sh:property [
+        sh:path checkup:labCategory ;
+        sh:in ( "metabolic" "hematology" "lipid" "thyroid" "vitamin" "other" ) ;
+        sh:severity sh:Warning ;
+        sh:message "Lab category should be metabolic, hematology, lipid, thyroid, vitamin, or other"
+    ] ;
+
+    # INFO: Result unit
+    sh:property [
+        sh:path clinical:resultUnit ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Result unit helps interpret the lab value"
+    ] ;
+
+    # INFO: Reference range
+    sh:property [
+        sh:path clinical:referenceRange ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Reference range provides context for the result"
+    ] ;
+
+    # INFO: Result date
+    sh:property [
+        sh:path clinical:resultDate ;
+        sh:datatype xsd:dateTime ;
+        sh:severity sh:Info ;
+        sh:message "Result date helps establish the timeline of lab work"
+    ] ;
+
+    # INFO: Interpretation
+    sh:property [
+        sh:path clinical:interpretation ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Interpretation (normal, abnormal, critical) helps providers triage results"
+    ] ;
+
+    # INFO: Notes
+    sh:property [
+        sh:path clinical:notes ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Additional clinical notes about the lab result"
+    ] .
+
+# ============================================================================
+# PROCEDURE SUMMARY SHAPE (v2.0 - mixed namespace: clinical:/checkup:)
+# ============================================================================
+
+checkup:ProcedureSummaryShape a sh:NodeShape ;
+    sh:targetClass checkup:ProcedureSummary ;
+    rdfs:label "Procedure Summary Validation" ;
+    rdfs:comment "Validates procedure records using mixed namespace pattern: checkup: for app-layer fields, clinical: for standardized clinical data" ;
+
+    # VIOLATION: Procedure name required
+    sh:property [
+        sh:path checkup:procedureName ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:message "Procedure name is required"
+    ] ;
+
+    # WARNING: Procedure status (clinical: namespace)
+    sh:property [
+        sh:path clinical:procedureStatus ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Warning ;
+        sh:message "Procedure status helps providers know if the procedure was completed"
+    ] ;
+
+    # WARNING: Performed date (clinical: namespace)
+    sh:property [
+        sh:path clinical:performedDate ;
+        sh:datatype xsd:dateTime ;
+        sh:severity sh:Warning ;
+        sh:message "Performed date helps establish the timeline of procedures"
+    ] ;
+
+    # INFO: Procedure category
+    sh:property [
+        sh:path checkup:procedureCategory ;
+        sh:in ( "surgical" "diagnostic" "therapeutic" "other" ) ;
+        sh:severity sh:Info ;
+        sh:message "Procedure category should be surgical, diagnostic, therapeutic, or other"
+    ] ;
+
+    # INFO: Procedure location
+    sh:property [
+        sh:path checkup:procedureLocation ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Facility or location where the procedure was performed"
+    ] ;
+
+    # INFO: Body site
+    sh:property [
+        sh:path clinical:bodySite ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Body site provides specificity about where the procedure was performed"
+    ] ;
+
+    # INFO: Performer
+    sh:property [
+        sh:path clinical:performer ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Performer name supports care coordination"
+    ] ;
+
+    # INFO: Outcome
+    sh:property [
+        sh:path clinical:outcome ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Outcome description provides context about the procedure result"
+    ] .
+
+# ============================================================================
+# DISCUSSION TOPIC SHAPE (v2.0)
+# ============================================================================
+
+checkup:DiscussionTopicShape a sh:NodeShape ;
+    sh:targetClass checkup:DiscussionTopic ;
+    rdfs:label "Discussion Topic Validation" ;
+    rdfs:comment "Validates AI-generated or user-created visit discussion topics" ;
+
+    # VIOLATION: Topic text required
+    sh:property [
+        sh:path checkup:topicText ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:message "Discussion topic text is required"
+    ] ;
+
+    # WARNING: Topic category
+    sh:property [
+        sh:path checkup:topicCategory ;
+        sh:in ( "durationBased" "recentChange" "adherenceConcern" "sideEffectReport" "multipleForSame" "supplementDoctor" "interactionRisk" "refillDue" "effectivenessConcern" "costConcern" "custom" ) ;
+        sh:severity sh:Warning ;
+        sh:message "Topic category must be a recognized value"
+    ] ;
+
+    # INFO: Topic source
+    sh:property [
+        sh:path checkup:topicSource ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Info ;
+        sh:message "Topic source indicates how the topic was generated (medication, supplement, adherencePattern, custom)"
+    ] ;
+
+    # INFO: Relevance score
+    sh:property [
+        sh:path checkup:relevanceScore ;
+        sh:datatype xsd:double ;
+        sh:minInclusive 0.0 ;
+        sh:maxInclusive 1.0 ;
+        sh:severity sh:Info ;
+        sh:message "Relevance score should be between 0.0 and 1.0"
+    ] ;
+
+    # INFO: Is selected for next visit
+    sh:property [
+        sh:path checkup:isSelected ;
+        sh:datatype xsd:boolean ;
+        sh:severity sh:Info ;
+        sh:message "Selection status indicates if topic is active for the next visit"
+    ] .
+
+# ============================================================================
+# CHANGELOG
+# ============================================================================
+#
+# v2.0 (2026-02-18): WS8 - Shapes for v1.5-v2.0 ontology classes
+# - Added health: and clinical: prefix declarations for cross-namespace shapes
+# - Added 5 new NodeShapes:
+#   - DailyCheckInShape: SelfReport subclass with sh:node health:SelfReportShape
+#     inheritance, checkInDate/checkInResponse required (Violation), missedMedicationIds/
+#     checkInNotes/submittedAt optional (Info)
+#   - ImmunizationSummaryShape: vaccineName/administrationDate required (Violation),
+#     immunizationStatus/vaccineCode/vaccineCategory warnings, manufacturer/lotNumber/
+#     doseNumber/immunizationNotes info
+#   - LabResultSummaryShape: mixed namespace — clinical:testName required (Violation),
+#     clinical:resultValue warning, checkup:labCategory warning, clinical info properties
+#   - ProcedureSummaryShape: mixed namespace — checkup:procedureName required (Violation),
+#     clinical:procedureStatus/performedDate warnings, checkup:procedureCategory/
+#     procedureLocation and clinical:bodySite/performer/outcome info
+#   - DiscussionTopicShape: topicText required (Violation), topicCategory warning,
+#     topicSource/relevanceScore/isSelected info
+# - Added 5 new aggregate link properties to IntakeFormDataShape:
+#   hasDailyCheckIn, hasDiscussionTopic, hasImmunization, hasLabResult, hasProcedure
+# - Total shapes: 20 (was 15)
+#
+# v1.6 (2026-02-09): Intake Questionnaire SHACL Shapes
+# - Added IntakeQuestionnaireResponseShape with LOINC panel code validation
+# - Added ResponseItemShape with question text validation and nested child items
+# - Added hasQuestionnaireResponse validation to IntakeFormDataShape
+# - Total shapes: 15 (was 13)
+#
+# v1.3 (2026-01-17): Phase 7 Medication Ontology Extensions
+# - Extended MedicationSummaryShape with episode linkage (episodeId, startDate,
+#   indication) and patient meaning fields (patientCost, costFrequency,
+#   functionalImpact, concernsForDoctor)
+# - Added SupplementSummaryShape with regulatoryStatus requirement
+# - Added hasSupplement validation to IntakeFormDataShape
+#
+# v1.0 (2026-01-03): Initial release
+# - 10 core shapes: IntakeFormData, PatientProfile, InsuranceInfo,
+#   MedicationSummary, AllergySummary, ConditionSummary, FamilyHistoryEntry,
+#   VitalSignsTrend, ScreeningStatus, VisitIssue, DiagnosticTestResult,
+#   SuggestedQuestion
+#
+# ============================================================================
+# END OF ADULT SHAPES
+# ============================================================================

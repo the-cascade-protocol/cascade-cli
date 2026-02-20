@@ -1,0 +1,859 @@
+@prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+@prefix fhir: <http://hl7.org/fhir/> .
+@prefix sct: <http://snomed.info/sct/> .
+@prefix loinc: <http://loinc.org/rdf#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix ucum: <http://unitsofmeasure.org/> .
+
+# ============================================================================
+# Ontology Metadata
+# ============================================================================
+
+<https://ns.cascadeprotocol.org/health/v1#> a owl:Ontology ;
+    owl:imports <https://ns.cascadeprotocol.org/core/v1#> ;
+    dct:title "Cascade Protocol Health & Wellness Ontology"@en ;
+    dct:description "Vocabulary for consumer-generated wellness observations from wearable devices and HealthKit. Maps Cascade wellness properties to established SNOMED CT and LOINC codes following the three-layer ontology architecture."@en ;
+    dct:creator "Cascade Agentic Labs" ;
+    dct:created "2026-01-29"^^xsd:date ;
+    dct:modified "2026-02-17"^^xsd:date ;
+    owl:versionInfo "2.2" ;
+    rdfs:comment """Three-layer ontology for wellness data:
+        Layer 1 (Established standards): SNOMED CT concept IDs + LOINC observation codes
+        Layer 2 (Cascade health vocabulary): health: namespace properties linking to Layer 1
+        Layer 3 (Checkup summary): checkup: namespace patient-facing aggregations"""@en ;
+    rdfs:seeAlso <https://cascadeprotocol.org/docs/health/v1/> .
+
+# Changelog:
+# v2.2 (2026-02-17): Added 2 container linking ObjectProperties:
+#     health:hasHRVStatistics, health:hasBPStatistics. These link a wellness
+#     profile or intake form to its statistical summary nodes. Previously dark
+#     vocabulary emitted by CheckupSerializer. Part of Schema Refactoring
+#     Plan Phase 3 (PF1-R).
+#
+# v2.1 (2026-02-17): Added health:SelfReport base class and 5 base properties
+#     (reportDate, reportType, completionStatus, reportContext, reportNotes)
+#     for patient-reported daily check-ins. (Phase 3, WS7)
+#
+# v2.0 (2026-02-18): Schema Refactoring WS3b — Migrated HealthProfileSerializer
+#     from cascade: to health: namespace. Added 8 history container properties
+#     (restingHeartRateHistory, walkingHeartRateHistory, hrvHistory,
+#     bloodPressureHistory, vo2MaxHistory, bodyMassHistory, dailyActivityHistory,
+#     dailySleepHistory) and 7 supporting classes (HealthProfile, DailyVitalReading,
+#     HRVReading, BloodPressureReading, VitalSignReading, DailyActivitySnapshot,
+#     DailySleepSnapshot). These properties capture time-series data emitted by
+#     HealthProfileSerializer for 90-day, 30-day, and 7-day lookback windows.
+#
+# v1.9 (2026-02-17): Added health:bloodType property for ABO blood group and
+#     Rh factor. Values: aPositive, aNegative, bPositive, bNegative, abPositive,
+#     abNegative, oPositive, oNegative. Sourced from HealthKit
+#     (HKCharacteristicType.bloodType) or manual entry. Previously dark vocabulary
+#     emitted in QR payload. Part of Schema Refactoring Plan Phase 2.5 (PF4).
+#
+# v1.8 (2026-02-10): Added 6 body measurement properties with SNOMED/LOINC
+#     annotations (bodyMass, bodyHeight, bodyMassIndex, bodyTemperature,
+#     oxygenSaturation, bloodGlucose). Added health:BPStatistics class with
+#     10 properties for blood pressure statistical summaries. Added shared
+#     temporal properties (periodStart, periodEnd). Completed HRVStatistics
+#     property definitions (hrvSampleCount, hrvDaysCovered, hrvMean, hrvMedian,
+#     hrvStdDev, hrvMin, hrvMax, hrvPercentile25, hrvPercentile75,
+#     hrvTrendDirection).
+#
+# v1.7 (2026-02-03): Added health:VO2MaxStatistics and health:HRVStatistics
+#   composite classes for statistical trend analysis. Added 9 new properties
+#   for VO2 Max statistics: vo2Mean, vo2Min, vo2MaxValue, vo2SampleCount,
+#   vo2DaysCovered, vo2TrendDirection, vo2PercentageChange, fitnessClassification,
+#   and isSparseData. These support the dual-path UI pattern where rich statistics
+#   are preferred when available, with fallback to single values. Part of the
+#   VO2 Max Statistics Implementation Plan Phase 5 (Documentation).
+#
+# v1.6 (2026-02-02): Added health:trendPolarity annotation property to all
+#   measurable wellness metrics. Defines whether an increase is generally
+#   favorable (higher_is_better), unfavorable (lower_is_better), or
+#   context-dependent (neutral). Used by presentation layers for trend arrow
+#   color semantics. Part of Visit Prep Feature Plan Phase 1.5.
+#
+# v1.5 (2026-02-01): Added health:MetricTrend class for time-bounded wellness
+#   trends with direction, magnitude, confidence, and baseline/current values.
+#   Follows the pattern established by clinical:LabTestSeries but designed for
+#   continuous daily observations from consumer devices (vs discrete clinical samples).
+#   Shares trendDirection/trendConfidence vocabulary with clinical: for cross-domain
+#   consistency. Added as part of Ontology Improvement Plan (Work Stream 2, Task 2.1).
+#
+# v1.4 (2026-01-29): Initial release. Wellness vital signs, activity, and sleep
+#   properties with SNOMED CT and LOINC standard code mappings for all metrics.
+#   Created as part of the Wellness Data Pipeline implementation (Tasks 1-7).
+
+# ============================================================================
+# Layer 2: Wellness Observation Properties
+# ============================================================================
+# Each property maps a cascade: wellness term to its SNOMED CT and LOINC equivalents.
+# These properties are used by HealthProfileSerializer to produce interoperable TTL.
+
+# ----------------------------------------------------------------------------
+# Vital Signs — Cardiac
+# ----------------------------------------------------------------------------
+
+health:restingHeartRate a owl:DatatypeProperty ;
+    rdfs:label "Resting Heart Rate"@en ;
+    rdfs:comment "Average resting heart rate from wearable device"@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:364075005 ;  # Heart rate
+    health:loincCode loinc:40443-4 ;   # Heart rate --resting
+    health:unit "beats/min" ;
+    health:ucumCode "/min" ;
+    health:trendPolarity "lower_is_better" .
+
+health:walkingHeartRate a owl:DatatypeProperty ;
+    rdfs:label "Walking Heart Rate"@en ;
+    rdfs:comment "Average heart rate during walking from wearable device"@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:364075005 ;  # Heart rate
+    health:loincCode loinc:89270-3 ;   # Heart rate --W exercise
+    health:unit "beats/min" ;
+    health:ucumCode "/min" ;
+    health:trendPolarity "lower_is_better" .
+
+health:heartRateVariability a owl:DatatypeProperty ;
+    rdfs:label "Heart Rate Variability (SDNN)"@en ;
+    rdfs:comment "Standard deviation of normal-to-normal R-R intervals (SDNN) from wearable device"@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:80404004 ;   # Heart rate variability
+    health:loincCode loinc:80404-7 ;   # R-R interval.standard deviation
+    health:unit "ms" ;
+    health:ucumCode "ms" ;
+    health:trendPolarity "higher_is_better" .
+
+# ----------------------------------------------------------------------------
+# Vital Signs — Cardiovascular
+# ----------------------------------------------------------------------------
+
+health:bloodPressure a owl:ObjectProperty ;
+    rdfs:label "Blood Pressure"@en ;
+    rdfs:comment "Blood pressure panel observation with systolic and diastolic components"@en ;
+    rdfs:domain fhir:Observation ;
+    health:snomedCode sct:75367002 ;   # Blood pressure
+    health:loincCode loinc:85354-9 .   # Blood pressure panel
+
+health:systolicBP a owl:DatatypeProperty ;
+    rdfs:label "Systolic Blood Pressure"@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:271649006 ;  # Systolic blood pressure
+    health:loincCode loinc:8480-6 ;    # Systolic blood pressure
+    health:unit "mmHg" ;
+    health:ucumCode "mm[Hg]" ;
+    health:trendPolarity "lower_is_better" .
+
+health:diastolicBP a owl:DatatypeProperty ;
+    rdfs:label "Diastolic Blood Pressure"@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:271650006 ;  # Diastolic blood pressure
+    health:loincCode loinc:8462-4 ;    # Diastolic blood pressure
+    health:unit "mmHg" ;
+    health:ucumCode "mm[Hg]" ;
+    health:trendPolarity "lower_is_better" .
+
+# ----------------------------------------------------------------------------
+# Vital Signs — Respiratory & Fitness
+# ----------------------------------------------------------------------------
+
+health:respiratoryRate a owl:DatatypeProperty ;
+    rdfs:label "Respiratory Rate"@en ;
+    rdfs:comment "Average respiratory rate from wearable device"@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:86290005 ;   # Respiratory rate
+    health:loincCode loinc:9279-1 ;    # Respiratory rate
+    health:unit "breaths/min" ;
+    health:ucumCode "/min" ;
+    health:trendPolarity "neutral" .
+
+health:vo2Max a owl:DatatypeProperty ;
+    rdfs:label "VO2 Max"@en ;
+    rdfs:comment "Estimated maximal oxygen consumption (cardiorespiratory fitness)"@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:251880009 ;  # Aerobic capacity
+    health:loincCode loinc:60842-2 ;   # VO2 max
+    health:unit "mL/kg/min" ;
+    health:ucumCode "mL/kg/min" ;
+    health:trendPolarity "higher_is_better" .
+
+# ----------------------------------------------------------------------------
+# Walking Steadiness
+# ----------------------------------------------------------------------------
+
+health:walkingSteadiness a owl:DatatypeProperty ;
+    rdfs:label "Walking Steadiness"@en ;
+    rdfs:comment "Apple Health walking steadiness classification (OK / Low / Very Low). Maps to nearest SNOMED balance concept. No LOINC equivalent exists for this consumer-device metric."@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:string ;
+    health:snomedCode sct:364832000 ;  # Balance finding
+    rdfs:comment "SNOMED mapping note: 364832000 (Balance finding) is the closest available concept. Alternatives considered: 250043000 (Gait finding), 282097004 (Ability to walk). Apple's OK/Low/Very Low classification is proprietary."@en .
+
+# Valid values for walkingSteadiness
+health:WalkingSteadinessOK a health:WalkingSteadinessLevel ;
+    rdfs:label "OK" .
+health:WalkingSteadinessLow a health:WalkingSteadinessLevel ;
+    rdfs:label "Low" .
+health:WalkingSteadinessVeryLow a health:WalkingSteadinessLevel ;
+    rdfs:label "Very Low" .
+
+# ----------------------------------------------------------------------------
+# Body Measurements (v1.8)
+# ----------------------------------------------------------------------------
+
+health:bodyMass a owl:DatatypeProperty ;
+    rdfs:label "Body Mass"@en ;
+    rdfs:comment "Body weight measurement."@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:27113001 ;
+    health:loincCode loinc:29463-7 ;
+    health:unit "kg" ;
+    health:ucumCode "kg" ;
+    health:trendPolarity "neutral" .
+
+health:bodyHeight a owl:DatatypeProperty ;
+    rdfs:label "Body Height"@en ;
+    rdfs:comment "Body height measurement."@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:50373000 ;
+    health:loincCode loinc:8302-2 ;
+    health:unit "cm" ;
+    health:ucumCode "cm" ;
+    health:trendPolarity "neutral" .
+
+health:bodyMassIndex a owl:DatatypeProperty ;
+    rdfs:label "Body Mass Index"@en ;
+    rdfs:comment "Computed body mass index (weight/height squared)."@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:60621009 ;
+    health:loincCode loinc:39156-5 ;
+    health:unit "kg/m2" ;
+    health:ucumCode "kg/m2" ;
+    health:trendPolarity "neutral" .
+
+health:bodyTemperature a owl:DatatypeProperty ;
+    rdfs:label "Body Temperature"@en ;
+    rdfs:comment "Body temperature measurement."@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:386725007 ;
+    health:loincCode loinc:8310-5 ;
+    health:unit "degC" ;
+    health:ucumCode "Cel" ;
+    health:trendPolarity "neutral" .
+
+health:oxygenSaturation a owl:DatatypeProperty ;
+    rdfs:label "Oxygen Saturation"@en ;
+    rdfs:comment "Blood oxygen saturation (SpO2) from pulse oximeter."@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:431314004 ;
+    health:loincCode loinc:2708-6 ;
+    health:unit "%" ;
+    health:ucumCode "%" ;
+    health:trendPolarity "higher_is_better" .
+
+health:bloodGlucose a owl:DatatypeProperty ;
+    rdfs:label "Blood Glucose"@en ;
+    rdfs:comment "Blood glucose measurement."@en ;
+    rdfs:domain fhir:Observation ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:33747003 ;
+    health:loincCode loinc:2339-0 ;
+    health:unit "mg/dL" ;
+    health:ucumCode "mg/dL" ;
+    health:trendPolarity "neutral" .
+
+# ----------------------------------------------------------------------------
+# Blood Type (v1.9)
+# ----------------------------------------------------------------------------
+
+health:bloodType a owl:DatatypeProperty ;
+    rdfs:label "Blood Type"@en ;
+    rdfs:comment "ABO blood group and Rh factor. Values: aPositive, aNegative, bPositive, bNegative, abPositive, abNegative, oPositive, oNegative. Sourced from HealthKit (HKCharacteristicType.bloodType) or manual entry."@en ;
+    rdfs:domain health:HealthProfile ;
+    rdfs:range xsd:string ;
+    health:snomedCode sct:365637002 ;
+    health:loincCode loinc:882-1 .
+
+# Note: health:HealthProfile is not formally defined in this ontology file
+# but refers to the SDK's HealthProfile model stored at /wellness/. The
+# bloodType property is a characteristic (not a time-series observation)
+# so it does not use fhir:Observation as its domain.
+
+# ----------------------------------------------------------------------------
+# Activity Metrics
+# ----------------------------------------------------------------------------
+
+health:averageDailySteps a owl:DatatypeProperty ;
+    rdfs:label "Average Daily Steps"@en ;
+    rdfs:comment "Average number of steps per day over measurement period"@en ;
+    rdfs:domain health:ActivitySnapshot ;
+    rdfs:range xsd:integer ;
+    health:snomedCode sct:68130003 ;   # Physical activity
+    health:loincCode loinc:41950-7 ;   # Number of steps in 24 hour Measured
+    health:unit "steps" ;
+    health:trendPolarity "higher_is_better" .
+
+health:activeEnergyBurnedKcal a owl:DatatypeProperty ;
+    rdfs:label "Active Energy Burned"@en ;
+    rdfs:comment "Active energy expenditure in kilocalories (excludes basal metabolic rate)"@en ;
+    rdfs:domain health:ActivitySnapshot ;
+    rdfs:range xsd:decimal ;
+    health:snomedCode sct:251833007 ;  # Energy expenditure
+    health:loincCode loinc:41981-2 ;   # Calories burned
+    health:unit "kcal" ;
+    health:ucumCode "kcal" .
+
+health:exerciseMinutesWeekly a owl:DatatypeProperty ;
+    rdfs:label "Exercise Minutes (Weekly)"@en ;
+    rdfs:comment "Total minutes of exercise activity per week"@en ;
+    rdfs:domain health:ActivitySnapshot ;
+    rdfs:range xsd:integer ;
+    health:snomedCode sct:68130003 ;   # Physical activity
+    health:loincCode loinc:73985-4 ;   # Exercise activity
+    health:unit "min" ;
+    health:ucumCode "min" ;
+    health:trendPolarity "higher_is_better" .
+
+health:standHoursDaily a owl:DatatypeProperty ;
+    rdfs:label "Stand Hours (Daily)"@en ;
+    rdfs:comment "Number of hours per day with at least one minute of standing. Cascade-proprietary metric — no SNOMED CT or LOINC equivalent exists. Apple Health-specific activity ring metric."@en ;
+    rdfs:domain health:ActivitySnapshot ;
+    rdfs:range xsd:integer ;
+    health:unit "hours" .
+
+# ----------------------------------------------------------------------------
+# Sleep Metrics
+# ----------------------------------------------------------------------------
+
+health:averageDurationHours a owl:DatatypeProperty ;
+    rdfs:label "Average Sleep Duration"@en ;
+    rdfs:comment "Average sleep duration in hours over measurement period"@en ;
+    rdfs:domain health:SleepSnapshot ;
+    rdfs:range xsd:decimal ;
+    health:snomedCode sct:248263006 ;  # Duration of sleep
+    health:loincCode loinc:93832-4 ;   # Sleep duration
+    health:unit "hours" ;
+    health:ucumCode "h" ;
+    health:trendPolarity "neutral" .
+
+health:sleepQuality a owl:DatatypeProperty ;
+    rdfs:label "Sleep Quality"@en ;
+    rdfs:comment "Qualitative sleep quality assessment derived from wearable sleep analysis"@en ;
+    rdfs:domain health:SleepSnapshot ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Composite Classes
+# ============================================================================
+
+health:ActivitySnapshot a owl:Class ;
+    rdfs:label "Activity Snapshot"@en ;
+    rdfs:comment "Aggregated activity metrics over a measurement period (typically 7 days)"@en ;
+    rdfs:subClassOf prov:Entity .
+
+health:SleepSnapshot a owl:Class ;
+    rdfs:label "Sleep Snapshot"@en ;
+    rdfs:comment "Aggregated sleep metrics over a measurement period (typically 7 days)"@en ;
+    rdfs:subClassOf prov:Entity .
+
+health:VO2MaxStatistics a owl:Class ;
+    rdfs:label "VO2 Max Statistics"@en ;
+    rdfs:comment "Statistical summary of VO2 Max readings over a measurement period (typically 180 days). Provides trend analysis, fitness classification, and min/max/mean calculations. Designed for dual-path UI display: rich statistics view when available, fallback to single VO2 Max value otherwise."@en ;
+    rdfs:subClassOf prov:Entity .
+
+health:HRVStatistics a owl:Class ;
+    rdfs:label "HRV Statistics"@en ;
+    rdfs:comment "Statistical summary of Heart Rate Variability (SDNN) readings over a measurement period. Provides trend analysis and min/max/mean calculations."@en ;
+    rdfs:subClassOf prov:Entity .
+
+health:BPStatistics a owl:Class ;
+    rdfs:label "Blood Pressure Statistics"@en ;
+    rdfs:comment "Statistical summary of blood pressure readings over a measurement period. Provides mean, min, max for systolic and diastolic values, plus AHA category classification."@en ;
+    rdfs:subClassOf prov:Entity .
+
+health:HealthProfile a owl:Class ;
+    rdfs:label "Health Profile"@en ;
+    rdfs:comment "Top-level wellness profile aggregating vital signs, body measurements, activity, and sleep data from consumer devices. Stored at /wellness/ in the Cascade Pod."@en ;
+    rdfs:subClassOf prov:Entity .
+
+health:DailyVitalReading a owl:Class ;
+    rdfs:label "Daily Vital Reading"@en ;
+    rdfs:comment "A single day's aggregated vital sign reading with value, unit, date, and sample count. Used in 90-day and 30-day history containers."@en ;
+    rdfs:subClassOf fhir:Observation .
+
+health:HRVReading a owl:Class ;
+    rdfs:label "HRV Reading"@en ;
+    rdfs:comment "A single heart rate variability (SDNN) observation with timestamp and optional source."@en ;
+    rdfs:subClassOf fhir:Observation .
+
+health:BloodPressureReading a owl:Class ;
+    rdfs:label "Blood Pressure Reading"@en ;
+    rdfs:comment "A single blood pressure observation with systolic and diastolic components, timestamp, and optional source."@en ;
+    rdfs:subClassOf fhir:Observation .
+
+health:VitalSignReading a owl:Class ;
+    rdfs:label "Vital Sign Reading"@en ;
+    rdfs:comment "A single vital sign observation with value, unit, measurement period, timestamp, and source. Used for baseline readings and VO2 Max history entries."@en ;
+    rdfs:subClassOf fhir:Observation .
+
+health:DailyActivitySnapshot a owl:Class ;
+    rdfs:label "Daily Activity Snapshot"@en ;
+    rdfs:comment "A single day's activity data: steps, active energy, exercise minutes, and stand hours."@en ;
+    rdfs:subClassOf prov:Entity .
+
+health:DailySleepSnapshot a owl:Class ;
+    rdfs:label "Daily Sleep Snapshot"@en ;
+    rdfs:comment "A single night's sleep data: duration in hours and quality classification."@en ;
+    rdfs:subClassOf prov:Entity .
+
+# ============================================================================
+# History Container Properties (v2.0)
+# ============================================================================
+# Time-series containers emitted by HealthProfileSerializer for trend analysis.
+# Each property links a HealthProfile to an ordered list of readings.
+
+health:restingHeartRateHistory a owl:ObjectProperty ;
+    rdfs:label "Resting Heart Rate History"@en ;
+    rdfs:comment "Time series of daily resting heart rate readings (90-day lookback). Each entry is a DailyVitalReading with date and value."@en ;
+    rdfs:domain health:HealthProfile ;
+    rdfs:range health:DailyVitalReading .
+
+health:walkingHeartRateHistory a owl:ObjectProperty ;
+    rdfs:label "Walking Heart Rate History"@en ;
+    rdfs:comment "Time series of daily walking heart rate readings (90-day lookback)."@en ;
+    rdfs:domain health:HealthProfile ;
+    rdfs:range health:DailyVitalReading .
+
+health:hrvHistory a owl:ObjectProperty ;
+    rdfs:label "HRV History"@en ;
+    rdfs:comment "Time series of heart rate variability (SDNN) readings (7-day lookback)."@en ;
+    rdfs:domain health:HealthProfile ;
+    rdfs:range health:HRVReading .
+
+health:bloodPressureHistory a owl:ObjectProperty ;
+    rdfs:label "Blood Pressure History"@en ;
+    rdfs:comment "Time series of blood pressure readings (30-day lookback). Each entry has systolic and diastolic values."@en ;
+    rdfs:domain health:HealthProfile ;
+    rdfs:range health:BloodPressureReading .
+
+health:vo2MaxHistory a owl:ObjectProperty ;
+    rdfs:label "VO2 Max History"@en ;
+    rdfs:comment "Time series of VO2 Max readings (180-day lookback)."@en ;
+    rdfs:domain health:HealthProfile ;
+    rdfs:range health:VitalSignReading .
+
+health:bodyMassHistory a owl:ObjectProperty ;
+    rdfs:label "Body Mass History"@en ;
+    rdfs:comment "Time series of daily body mass readings (30-day lookback)."@en ;
+    rdfs:domain health:HealthProfile ;
+    rdfs:range health:DailyVitalReading .
+
+health:dailyActivityHistory a owl:ObjectProperty ;
+    rdfs:label "Daily Activity History"@en ;
+    rdfs:comment "Time series of daily activity snapshots (90-day lookback). Steps, exercise, calories, stand hours per day."@en ;
+    rdfs:domain health:HealthProfile ;
+    rdfs:range health:DailyActivitySnapshot .
+
+health:dailySleepHistory a owl:ObjectProperty ;
+    rdfs:label "Daily Sleep History"@en ;
+    rdfs:comment "Time series of daily sleep snapshots (90-day lookback). Duration and quality per night."@en ;
+    rdfs:domain health:HealthProfile ;
+    rdfs:range health:DailySleepSnapshot .
+
+# ============================================================================
+# Self-Report Base Class (v2.1)
+# ============================================================================
+#
+# Base class for patient-reported daily check-ins and self-assessments.
+# Apps extend this with domain-specific response data.
+
+health:SelfReport a owl:Class ;
+    rdfs:label "Self Report"@en ;
+    rdfs:comment "Base class for patient-reported daily check-ins and self-assessments. Provides common structure for timestamped self-reports across health domains. Apps extend this with domain-specific response data. Examples: medication adherence, symptom tracking, mood logging, sleep records."@en ;
+    rdfs:subClassOf prov:Entity .
+
+health:reportDate a owl:DatatypeProperty ;
+    rdfs:label "Report Date"@en ;
+    rdfs:comment "When the self-report was recorded."@en ;
+    rdfs:domain health:SelfReport ;
+    rdfs:range xsd:dateTime .
+
+health:reportType a owl:DatatypeProperty ;
+    rdfs:label "Report Type"@en ;
+    rdfs:comment "Category of self-report (e.g., medication_adherence, symptom_tracking, mood, sleep)."@en ;
+    rdfs:domain health:SelfReport ;
+    rdfs:range xsd:string .
+
+health:completionStatus a owl:DatatypeProperty ;
+    rdfs:label "Completion Status"@en ;
+    rdfs:comment "Whether the report is complete, partial, or skipped."@en ;
+    rdfs:domain health:SelfReport ;
+    rdfs:range xsd:string .
+
+health:reportContext a owl:DatatypeProperty ;
+    rdfs:label "Report Context"@en ;
+    rdfs:comment "What tracking plan or list this report relates to (free-form reference)."@en ;
+    rdfs:domain health:SelfReport ;
+    rdfs:range xsd:string .
+
+health:reportNotes a owl:DatatypeProperty ;
+    rdfs:label "Report Notes"@en ;
+    rdfs:comment "Optional free-text notes from the patient."@en ;
+    rdfs:domain health:SelfReport ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Annotation Properties
+# ============================================================================
+
+health:snomedCode a owl:AnnotationProperty ;
+    rdfs:label "SNOMED CT Code"@en ;
+    rdfs:comment "Links a wellness property to its SNOMED CT concept"@en .
+
+health:loincCode a owl:AnnotationProperty ;
+    rdfs:label "LOINC Code"@en ;
+    rdfs:comment "Links a wellness property to its LOINC observation code"@en .
+
+health:unit a owl:AnnotationProperty ;
+    rdfs:label "Display Unit"@en ;
+    rdfs:comment "Human-readable unit of measurement"@en .
+
+health:ucumCode a owl:AnnotationProperty ;
+    rdfs:label "UCUM Code"@en ;
+    rdfs:comment "Unified Code for Units of Measure code"@en .
+
+health:trendPolarity a owl:AnnotationProperty ;
+    rdfs:label "Trend Polarity"@en ;
+    rdfs:comment "Whether an increase in this metric is generally favorable ('higher_is_better'), unfavorable ('lower_is_better'), or context-dependent ('neutral'). Used by presentation layers to determine trend arrow color semantics. This is a general heuristic — individual clinical context may differ."@en .
+
+# ============================================================================
+# VO2 Max Statistics Properties (v1.7)
+# ============================================================================
+# Statistical analysis of VO2 Max readings with trend detection and fitness
+# classification. Part of the dual-path wellness data pattern where rich
+# statistics are preferred when available, with fallback to single values.
+
+health:vo2Mean a owl:DatatypeProperty ;
+    rdfs:label "Mean VO2 Max"@en ;
+    rdfs:comment "Average VO2 Max over measurement period (mL/kg/min)"@en ;
+    rdfs:domain health:VO2MaxStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "mL/kg/min" ;
+    health:ucumCode "mL/kg/min" .
+
+health:vo2Min a owl:DatatypeProperty ;
+    rdfs:label "Minimum VO2 Max"@en ;
+    rdfs:comment "Lowest VO2 Max reading in measurement period"@en ;
+    rdfs:domain health:VO2MaxStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "mL/kg/min" .
+
+health:vo2MaxValue a owl:DatatypeProperty ;
+    rdfs:label "Maximum VO2 Max"@en ;
+    rdfs:comment "Highest VO2 Max reading in measurement period"@en ;
+    rdfs:domain health:VO2MaxStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "mL/kg/min" .
+
+health:vo2SampleCount a owl:DatatypeProperty ;
+    rdfs:label "Sample Count"@en ;
+    rdfs:comment "Number of VO2 Max measurements in the period"@en ;
+    rdfs:domain health:VO2MaxStatistics ;
+    rdfs:range xsd:integer .
+
+health:vo2DaysCovered a owl:DatatypeProperty ;
+    rdfs:label "Days Covered"@en ;
+    rdfs:comment "Number of unique days with VO2 Max measurements"@en ;
+    rdfs:domain health:VO2MaxStatistics ;
+    rdfs:range xsd:integer .
+
+health:vo2TrendDirection a owl:DatatypeProperty ;
+    rdfs:label "VO2 Trend Direction"@en ;
+    rdfs:comment "Trend direction based on comparison of first half vs second half of readings: 'improving', 'declining', 'stable', or 'unknown'. Uses 3% threshold (1 MET ≈ 3.5 mL/kg/min is clinically meaningful)."@en ;
+    rdfs:domain health:VO2MaxStatistics ;
+    rdfs:range xsd:string .
+
+health:vo2PercentageChange a owl:DatatypeProperty ;
+    rdfs:label "Percentage Change"@en ;
+    rdfs:comment "Percentage change from oldest to newest reading period"@en ;
+    rdfs:domain health:VO2MaxStatistics ;
+    rdfs:range xsd:double .
+
+health:fitnessClassification a owl:DatatypeProperty ;
+    rdfs:label "Fitness Classification"@en ;
+    rdfs:comment "Cardiorespiratory fitness level based on mean VO2 Max: 'veryPoor' (<20), 'poor' (20-29), 'fair' (30-34), 'good' (35-44), 'excellent' (45-54), 'superior' (≥55). Currently age/sex agnostic; future versions may use demographics for personalized classification."@en ;
+    rdfs:domain health:VO2MaxStatistics ;
+    rdfs:range xsd:string .
+
+health:isSparseData a owl:DatatypeProperty ;
+    rdfs:label "Sparse Data Indicator"@en ;
+    rdfs:comment "True when measurements are limited (< 3 samples or < 30 days covered). Used to trigger messaging about VO2 Max measurement requirements."@en ;
+    rdfs:domain health:VO2MaxStatistics ;
+    rdfs:range xsd:boolean .
+
+# ============================================================================
+# Shared Statistics Temporal Properties (v1.8)
+# ============================================================================
+
+health:periodStart a owl:DatatypeProperty ;
+    rdfs:label "Period Start"@en ;
+    rdfs:comment "Start date of the statistical measurement period."@en ;
+    rdfs:range xsd:dateTime .
+
+health:periodEnd a owl:DatatypeProperty ;
+    rdfs:label "Period End"@en ;
+    rdfs:comment "End date of the statistical measurement period."@en ;
+    rdfs:range xsd:dateTime .
+
+# ============================================================================
+# HRV Statistics Properties (v1.8)
+# ============================================================================
+
+health:hrvSampleCount a owl:DatatypeProperty ;
+    rdfs:label "HRV Sample Count"@en ;
+    rdfs:comment "Number of HRV readings in the period."@en ;
+    rdfs:domain health:HRVStatistics ;
+    rdfs:range xsd:integer .
+
+health:hrvDaysCovered a owl:DatatypeProperty ;
+    rdfs:label "HRV Days Covered"@en ;
+    rdfs:comment "Number of unique days with HRV measurements."@en ;
+    rdfs:domain health:HRVStatistics ;
+    rdfs:range xsd:integer .
+
+health:hrvMean a owl:DatatypeProperty ;
+    rdfs:label "Mean HRV"@en ;
+    rdfs:comment "Average HRV (SDNN) over the measurement period (ms)."@en ;
+    rdfs:domain health:HRVStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "ms" .
+
+health:hrvMedian a owl:DatatypeProperty ;
+    rdfs:label "Median HRV"@en ;
+    rdfs:comment "Median HRV (SDNN) over the measurement period (ms)."@en ;
+    rdfs:domain health:HRVStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "ms" .
+
+health:hrvStdDev a owl:DatatypeProperty ;
+    rdfs:label "HRV Standard Deviation"@en ;
+    rdfs:comment "Standard deviation of HRV readings over the measurement period (ms)."@en ;
+    rdfs:domain health:HRVStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "ms" .
+
+health:hrvMin a owl:DatatypeProperty ;
+    rdfs:label "Minimum HRV"@en ;
+    rdfs:comment "Lowest HRV reading in the period (ms)."@en ;
+    rdfs:domain health:HRVStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "ms" .
+
+health:hrvMax a owl:DatatypeProperty ;
+    rdfs:label "Maximum HRV"@en ;
+    rdfs:comment "Highest HRV reading in the period (ms)."@en ;
+    rdfs:domain health:HRVStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "ms" .
+
+health:hrvPercentile25 a owl:DatatypeProperty ;
+    rdfs:label "HRV 25th Percentile"@en ;
+    rdfs:comment "25th percentile of HRV readings over the measurement period (ms)."@en ;
+    rdfs:domain health:HRVStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "ms" .
+
+health:hrvPercentile75 a owl:DatatypeProperty ;
+    rdfs:label "HRV 75th Percentile"@en ;
+    rdfs:comment "75th percentile of HRV readings over the measurement period (ms)."@en ;
+    rdfs:domain health:HRVStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "ms" .
+
+health:hrvTrendDirection a owl:DatatypeProperty ;
+    rdfs:label "HRV Trend Direction"@en ;
+    rdfs:comment "Trend direction for HRV: improving, declining, stable, or unknown."@en ;
+    rdfs:domain health:HRVStatistics ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Blood Pressure Statistics Properties (v1.8)
+# ============================================================================
+
+health:bpSampleCount a owl:DatatypeProperty ;
+    rdfs:label "BP Sample Count"@en ;
+    rdfs:comment "Number of blood pressure readings in the period."@en ;
+    rdfs:domain health:BPStatistics ;
+    rdfs:range xsd:integer .
+
+health:bpMeanSystolic a owl:DatatypeProperty ;
+    rdfs:label "Mean Systolic BP"@en ;
+    rdfs:comment "Average systolic blood pressure over the measurement period (mmHg)."@en ;
+    rdfs:domain health:BPStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "mmHg" .
+
+health:bpMeanDiastolic a owl:DatatypeProperty ;
+    rdfs:label "Mean Diastolic BP"@en ;
+    rdfs:comment "Average diastolic blood pressure over the measurement period (mmHg)."@en ;
+    rdfs:domain health:BPStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "mmHg" .
+
+health:bpMinSystolic a owl:DatatypeProperty ;
+    rdfs:label "Minimum Systolic BP"@en ;
+    rdfs:comment "Lowest systolic blood pressure reading in the period (mmHg)."@en ;
+    rdfs:domain health:BPStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "mmHg" .
+
+health:bpMaxSystolic a owl:DatatypeProperty ;
+    rdfs:label "Maximum Systolic BP"@en ;
+    rdfs:comment "Highest systolic blood pressure reading in the period (mmHg)."@en ;
+    rdfs:domain health:BPStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "mmHg" .
+
+health:bpMinDiastolic a owl:DatatypeProperty ;
+    rdfs:label "Minimum Diastolic BP"@en ;
+    rdfs:comment "Lowest diastolic blood pressure reading in the period (mmHg)."@en ;
+    rdfs:domain health:BPStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "mmHg" .
+
+health:bpMaxDiastolic a owl:DatatypeProperty ;
+    rdfs:label "Maximum Diastolic BP"@en ;
+    rdfs:comment "Highest diastolic blood pressure reading in the period (mmHg)."@en ;
+    rdfs:domain health:BPStatistics ;
+    rdfs:range xsd:double ;
+    health:unit "mmHg" .
+
+health:bpCategory a owl:DatatypeProperty ;
+    rdfs:label "BP Category"@en ;
+    rdfs:comment "AHA blood pressure category based on mean values: normal, elevated, hypertension_stage1, hypertension_stage2, hypertensive_crisis."@en ;
+    rdfs:domain health:BPStatistics ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Temporal Trend Classes (v1.5)
+# ============================================================================
+# Design rationale: clinical:LabTestSeries captures discrete lab samples over
+# clinical visits as a long-lived container. health:MetricTrend is a computed
+# observation over a bounded time window from continuous daily device data —
+# more like a derived fact than a container. They share trendDirection and
+# trendConfidence vocabulary intentionally for cross-domain consistency.
+# Values use objective direction (increasing/decreasing) rather than
+# value-laden terms (improving/declining) — the ontology describes *what*
+# happened; the presentation layer interprets whether it's good or bad.
+
+health:MetricTrend a owl:Class ;
+    rdfs:label "Metric Trend" ;
+    rdfs:comment "A time-bounded trend for a single wellness metric, computed from a series of observations. Captures direction, magnitude, and comparison period." ;
+    rdfs:subClassOf prov:Entity .
+
+# --- MetricTrend Properties ---
+
+health:trendMetric a owl:ObjectProperty ;
+    rdfs:label "Trend Metric" ;
+    rdfs:comment "The wellness property this trend describes (e.g., health:restingHeartRate)" ;
+    rdfs:domain health:MetricTrend .
+
+health:trendDirection a owl:DatatypeProperty ;
+    rdfs:label "Trend Direction" ;
+    rdfs:comment "Direction of change: increasing, decreasing, stable, or insufficient_data. Matches clinical:trendDirection values for cross-domain consistency. Semantic interpretation (whether 'increasing' is good or bad) is metric-specific and handled at the presentation layer, not the ontology layer." ;
+    rdfs:domain health:MetricTrend ;
+    rdfs:range xsd:string .
+
+health:trendMagnitude a owl:DatatypeProperty ;
+    rdfs:label "Trend Magnitude" ;
+    rdfs:comment "Percentage change between comparison periods (e.g., -5.6 means a 5.6% decrease)" ;
+    rdfs:domain health:MetricTrend ;
+    rdfs:range xsd:decimal .
+
+health:trendPeriodStart a owl:DatatypeProperty ;
+    rdfs:label "Trend Period Start" ;
+    rdfs:domain health:MetricTrend ;
+    rdfs:range xsd:dateTime .
+
+health:trendPeriodEnd a owl:DatatypeProperty ;
+    rdfs:label "Trend Period End" ;
+    rdfs:domain health:MetricTrend ;
+    rdfs:range xsd:dateTime .
+
+health:trendBaselineValue a owl:DatatypeProperty ;
+    rdfs:label "Baseline Value" ;
+    rdfs:comment "The reference value (e.g., 90-day average) this trend is compared against" ;
+    rdfs:domain health:MetricTrend ;
+    rdfs:range xsd:decimal .
+
+health:trendCurrentValue a owl:DatatypeProperty ;
+    rdfs:label "Current Value" ;
+    rdfs:comment "The current period average (e.g., 7-day average)" ;
+    rdfs:domain health:MetricTrend ;
+    rdfs:range xsd:decimal .
+
+health:trendConfidence a owl:DatatypeProperty ;
+    rdfs:label "Trend Confidence" ;
+    rdfs:comment "Confidence in the trend: high (>30 days data), medium (14-30 days), low (<14 days)" ;
+    rdfs:domain health:MetricTrend ;
+    rdfs:range xsd:string .
+
+health:trendSource a owl:ObjectProperty ;
+    rdfs:label "Trend Data Source" ;
+    rdfs:comment "The data source (device, app, or system) that produced the underlying observations. Links to cascade:DataSource when available; for inline use, a blank node with cascade:sourceName is acceptable." ;
+    rdfs:domain health:MetricTrend ;
+    rdfs:range cascade:DataSource .
+
+# ============================================================================
+# Statistics Container Linking Properties (v2.2)
+# ============================================================================
+# ObjectProperties used by CheckupSerializer to link an intake form or
+# wellness profile to its statistical summary nodes.
+
+health:hasHRVStatistics a owl:ObjectProperty ;
+    rdfs:label "has HRV statistics"@en ;
+    rdfs:comment "Links a wellness profile to its HRV statistical summary."@en ;
+    rdfs:range health:HRVStatistics .
+
+health:hasBPStatistics a owl:ObjectProperty ;
+    rdfs:label "has BP statistics"@en ;
+    rdfs:comment "Links a wellness profile to its blood pressure statistical summary."@en ;
+    rdfs:range health:BPStatistics .
+
+# ============================================================================
+# Standard Code Reference Table (for documentation)
+# ============================================================================
+#
+# | Metric                | Health Property              | SNOMED CT   | LOINC    |
+# |-----------------------|------------------------------|-------------|----------|
+# | Resting Heart Rate    | health:restingHeartRate      | 364075005   | 40443-4  |
+# | Walking Heart Rate    | health:walkingHeartRate      | 364075005   | 89270-3  |
+# | HRV (SDNN)            | health:heartRateVariability  | 80404004    | 80404-7  |
+# | Blood Pressure        | health:bloodPressure         | 75367002    | 85354-9  |
+# | Systolic BP           | (component)                  | 271649006   | 8480-6   |
+# | Diastolic BP          | (component)                  | 271650006   | 8462-4   |
+# | Respiratory Rate      | health:respiratoryRate       | 86290005    | 9279-1   |
+# | VO2 Max               | health:vo2Max                | 251880009   | 60842-2  |
+# | Walking Steadiness    | health:walkingSteadiness     | 364832000   | ---      |
+# | Average Daily Steps   | health:averageDailySteps     | 68130003    | 41950-7  |
+# | Active Energy Burned  | health:activeEnergyBurnedKcal| 251833007   | 41981-2  |
+# | Exercise Minutes      | health:exerciseMinutesWeekly | 68130003    | 73985-4  |
+# | Stand Hours           | health:standHoursDaily       | ---         | ---      |
+# | Sleep Duration        | health:averageDurationHours  | 248263006   | 93832-4  |

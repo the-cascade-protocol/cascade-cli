@@ -1,0 +1,1350 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ============================================================================
+# SHACL Shapes for Cascade Protocol Clinical Documents
+# ============================================================================
+#
+# These shapes validate clinical documents imported from EHR systems via
+# Apple HealthKit. Shapes accept multiple provenance values to support
+# different data sources (EHR, device, patient-reported).
+#
+# ============================================================================
+
+# ============================================================================
+# Shape: Clinical Document (Base)
+# ============================================================================
+
+clinical:ClinicalDocumentShape a sh:NodeShape ;
+    sh:targetClass clinical:ClinicalDocument ;
+    rdfs:label "Clinical Document Shape"@en ;
+    rdfs:comment "Validation constraints for clinical documents imported from EHR"@en ;
+
+    # Required: importedAt timestamp
+    sh:property [
+        sh:path clinical:importedAt ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Imported At"@en ;
+        sh:message "Clinical document must have exactly one importedAt timestamp"@en
+    ] ;
+
+    # Required: sourceEHR name
+    sh:property [
+        sh:path clinical:sourceEHR ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:maxLength 100 ;
+        sh:name "Source EHR"@en ;
+        sh:message "Clinical document must specify the source EHR system"@en
+    ] ;
+
+    # Optional: sourceBundleId (iOS bundle identifier pattern)
+    sh:property [
+        sh:path clinical:sourceBundleId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[a-zA-Z][a-zA-Z0-9.-]*$" ;
+        sh:name "Source Bundle ID"@en ;
+        sh:message "Bundle ID must be a valid iOS bundle identifier"@en
+    ] ;
+
+    # Required: fhirResourceId
+    sh:property [
+        sh:path clinical:fhirResourceId ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "FHIR Resource ID"@en ;
+        sh:message "Clinical document must have a FHIR resource ID"@en
+    ] ;
+
+    # Required: fhirResourceType
+    sh:property [
+        sh:path clinical:fhirResourceType ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "FHIR Resource Type"@en ;
+        sh:message "Clinical document must specify FHIR resource type"@en
+    ] ;
+
+    # Optional: displayName
+    sh:property [
+        sh:path clinical:displayName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:maxLength 500 ;
+        sh:name "Display Name"@en
+    ] ;
+
+    # Optional: narrativeText (unbounded length for clinical notes)
+    sh:property [
+        sh:path clinical:narrativeText ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Narrative Text"@en ;
+        sh:description "Plain text content extracted from FHIR narrative"@en
+    ] ;
+
+    # Optional: narrativeXHTML
+    sh:property [
+        sh:path clinical:narrativeXHTML ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Narrative XHTML"@en
+    ] ;
+
+    # Optional: rawFHIRData (base64 encoded)
+    sh:property [
+        sh:path clinical:rawFHIRData ;
+        sh:datatype xsd:base64Binary ;
+        sh:maxCount 1 ;
+        sh:name "Raw FHIR Data"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Clinical documents must have valid provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:message "Schema version must be in format major.minor"@en
+    ] ;
+
+    # Optional: sections
+    sh:property [
+        sh:path clinical:hasSection ;
+        sh:class clinical:ClinicalSection ;
+        sh:name "Sections"@en
+    ] .
+
+# ============================================================================
+# Shape: Clinical Section
+# ============================================================================
+
+clinical:ClinicalSectionShape a sh:NodeShape ;
+    sh:targetClass clinical:ClinicalSection ;
+    rdfs:label "Clinical Section Shape"@en ;
+    rdfs:comment "Validation constraints for clinical document sections"@en ;
+
+    # Required: sectionTitle
+    sh:property [
+        sh:path clinical:sectionTitle ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:maxLength 200 ;
+        sh:name "Section Title"@en ;
+        sh:message "Section must have a title"@en
+    ] ;
+
+    # Required: sectionContent
+    sh:property [
+        sh:path clinical:sectionContent ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:name "Section Content"@en ;
+        sh:message "Section must have content"@en
+    ] ;
+
+    # Optional: sectionCode (LOINC format: 5 digits, dash, 1 digit)
+    sh:property [
+        sh:path clinical:sectionCode ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]{4,5}-[0-9]$" ;
+        sh:name "Section Code"@en ;
+        sh:message "Section code must be a valid LOINC code (e.g., 10154-3)"@en
+    ] ;
+
+    # Optional: sectionOrder
+    sh:property [
+        sh:path clinical:sectionOrder ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Section Order"@en
+    ] .
+
+# ============================================================================
+# Shape: Progress Note (extends ClinicalDocument)
+# ============================================================================
+
+clinical:ProgressNoteShape a sh:NodeShape ;
+    sh:targetClass clinical:ProgressNote ;
+    rdfs:label "Progress Note Shape"@en ;
+    rdfs:comment "Additional constraints for progress notes"@en ;
+
+    # Inherits all ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Progress notes should have encounterDate
+    sh:property [
+        sh:path clinical:encounterDate ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Date"@en ;
+        sh:message "Progress notes must specify the encounter date"@en
+    ] .
+
+# ============================================================================
+# Shape: Discharge Summary
+# ============================================================================
+
+clinical:DischargeSummaryShape a sh:NodeShape ;
+    sh:targetClass clinical:DischargeSummary ;
+    rdfs:label "Discharge Summary Shape"@en ;
+    rdfs:comment "Additional constraints for discharge summaries"@en ;
+
+    # Inherits ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Discharge summaries should have document date
+    sh:property [
+        sh:path clinical:documentDate ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Document Date"@en ;
+        sh:message "Discharge summary must have a document date"@en
+    ] .
+
+# ============================================================================
+# Shape: Laboratory Report
+# ============================================================================
+
+clinical:LaboratoryReportShape a sh:NodeShape ;
+    sh:targetClass clinical:LaboratoryReport ;
+    rdfs:label "Laboratory Report Shape"@en ;
+    rdfs:comment "Additional constraints for laboratory reports"@en ;
+
+    # Inherits ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Lab reports should have documentDate (when results were finalized)
+    sh:property [
+        sh:path clinical:documentDate ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:name "Document Date"@en ;
+        sh:message "Lab reports must have a document date"@en
+    ] .
+
+# ============================================================================
+# Shape: Imaging Report
+# ============================================================================
+
+clinical:ImagingReportShape a sh:NodeShape ;
+    sh:targetClass clinical:ImagingReport ;
+    rdfs:label "Imaging Report Shape"@en ;
+    rdfs:comment "Additional constraints for imaging/radiology reports"@en ;
+
+    # Inherits ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Imaging reports should have document date
+    sh:property [
+        sh:path clinical:documentDate ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:name "Document Date"@en ;
+        sh:message "Imaging reports must have a document date"@en
+    ] .
+
+# ============================================================================
+# Shape: Visit Summary
+# ============================================================================
+
+clinical:VisitSummaryShape a sh:NodeShape ;
+    sh:targetClass clinical:VisitSummary ;
+    rdfs:label "Visit Summary Shape"@en ;
+    rdfs:comment "Additional constraints for after-visit summaries"@en ;
+
+    # Inherits ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Visit summaries should have encounter date
+    sh:property [
+        sh:path clinical:encounterDate ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Date"@en ;
+        sh:message "Visit summary must specify the encounter date"@en
+    ] .
+
+# ============================================================================
+# Structured Record Shapes
+# ============================================================================
+
+# ============================================================================
+# Shape: Medication
+# ============================================================================
+
+clinical:MedicationShape a sh:NodeShape ;
+    sh:targetClass clinical:Medication ;
+    rdfs:label "Medication Shape"@en ;
+    rdfs:comment "Validation constraints for medication records"@en ;
+
+    # Required: drugName
+    sh:property [
+        sh:path clinical:drugName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Drug Name"@en ;
+        sh:message "Medication must have a drug name"@en
+    ] ;
+
+    # Optional: dosage
+    sh:property [
+        sh:path clinical:dosage ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Dosage"@en
+    ] ;
+
+    # Optional: route
+    sh:property [
+        sh:path clinical:route ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Route"@en
+    ] ;
+
+    # Optional: frequency
+    sh:property [
+        sh:path clinical:frequency ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Frequency"@en
+    ] ;
+
+    # Optional: status
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Status"@en
+    ] ;
+
+    # Optional: rxNormCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:rxNormCode ;
+        sh:maxCount 1 ;
+        sh:name "RxNorm Code"@en
+    ] ;
+
+    # Optional: snomedCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:snomedCode ;
+        sh:maxCount 1 ;
+        sh:name "SNOMED Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Medication records must have valid provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] ;
+
+    # Optional: prescriber
+    sh:property [
+        sh:path clinical:prescriber ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Prescriber"@en
+    ] ;
+
+    # Optional: indication
+    sh:property [
+        sh:path clinical:indication ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Indication"@en
+    ] ;
+
+    # Optional: courseOfTherapyType
+    sh:property [
+        sh:path clinical:courseOfTherapyType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("acute" "continuous" "unknown") ;
+        sh:severity sh:Warning ;
+        sh:name "Course of Therapy Type"@en ;
+        sh:message "courseOfTherapyType should be acute, continuous, or unknown"@en
+    ] ;
+
+    # Optional: asNeeded (PRN)
+    sh:property [
+        sh:path clinical:asNeeded ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:name "As Needed (PRN)"@en
+    ] ;
+
+    # Optional: medicationForm
+    sh:property [
+        sh:path clinical:medicationForm ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Medication Form"@en
+    ] ;
+
+    # Optional: activeIngredient
+    sh:property [
+        sh:path clinical:activeIngredient ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Active Ingredient"@en
+    ] ;
+
+    # Optional: ingredientStrength
+    sh:property [
+        sh:path clinical:ingredientStrength ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Ingredient Strength"@en
+    ] ;
+
+    # Optional: provenanceClass
+    sh:property [
+        sh:path clinical:provenanceClass ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("healthKitFHIR" "userTracked" "pharmacyClaim" "imported") ;
+        sh:name "Provenance Class"@en
+    ] ;
+
+    # Optional: sourceFhirResourceType
+    sh:property [
+        sh:path clinical:sourceFhirResourceType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("MedicationRequest" "MedicationStatement" "MedicationDispense" "MedicationAdministration") ;
+        sh:name "Source FHIR Resource Type"@en
+    ] ;
+
+    # Optional: clinicalIntent
+    sh:property [
+        sh:path clinical:clinicalIntent ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("reportedUse" "prescribed" "dispensed" "administered") ;
+        sh:name "Clinical Intent"@en
+    ] ;
+
+    # Optional: refillsAllowed
+    sh:property [
+        sh:path clinical:refillsAllowed ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Refills Allowed"@en
+    ] ;
+
+    # Optional: supplyDurationDays
+    sh:property [
+        sh:path clinical:supplyDurationDays ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Supply Duration Days"@en
+    ] ;
+
+    # Optional: dispensedQuantity
+    sh:property [
+        sh:path clinical:dispensedQuantity ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Dispensed Quantity"@en
+    ] ;
+
+    # Optional: prescriptionCategory
+    sh:property [
+        sh:path clinical:prescriptionCategory ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("community" "inpatient" "discharge") ;
+        sh:name "Prescription Category"@en
+    ] .
+
+# ============================================================================
+# Shape: Allergy
+# ============================================================================
+
+clinical:AllergyShape a sh:NodeShape ;
+    sh:targetClass clinical:Allergy ;
+    rdfs:label "Allergy Shape"@en ;
+    rdfs:comment "Validation constraints for allergy/intolerance records"@en ;
+
+    # Required: allergen
+    sh:property [
+        sh:path clinical:allergen ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Allergen"@en ;
+        sh:message "Allergy must specify the allergen"@en
+    ] ;
+
+    # Optional: reaction
+    sh:property [
+        sh:path clinical:reaction ;
+        sh:datatype xsd:string ;
+        sh:name "Reaction"@en
+    ] ;
+
+    # Optional: severity (constrained values)
+    sh:property [
+        sh:path clinical:severity ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("mild" "moderate" "severe") ;
+        sh:name "Severity"@en ;
+        sh:message "Severity must be mild, moderate, or severe"@en
+    ] ;
+
+    # Optional: criticality
+    sh:property [
+        sh:path clinical:criticality ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("low" "high" "unable-to-assess") ;
+        sh:name "Criticality"@en
+    ] ;
+
+    # Optional: category (allergy category)
+    sh:property [
+        sh:path clinical:category ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("food" "medication" "environment" "biologic") ;
+        sh:name "Allergy Category"@en
+    ] ;
+
+    # Optional: snomedCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:snomedCode ;
+        sh:maxCount 1 ;
+        sh:name "SNOMED Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Lab Result
+# ============================================================================
+
+clinical:LabResultShape a sh:NodeShape ;
+    sh:targetClass clinical:LabResult ;
+    rdfs:label "Lab Result Shape"@en ;
+    rdfs:comment "Validation constraints for laboratory result records"@en ;
+
+    # Required: testName
+    sh:property [
+        sh:path clinical:testName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Test Name"@en ;
+        sh:message "Lab result must have a test name"@en
+    ] ;
+
+    # Optional: value (can be string or numeric)
+    sh:property [
+        sh:path clinical:value ;
+        sh:maxCount 1 ;
+        sh:name "Value"@en
+    ] ;
+
+    # Optional: unit
+    sh:property [
+        sh:path clinical:unit ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Unit"@en
+    ] ;
+
+    # Optional: referenceRange
+    sh:property [
+        sh:path clinical:referenceRange ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Reference Range"@en
+    ] ;
+
+    # Optional: interpretation (accepts both cases)
+    sh:property [
+        sh:path clinical:interpretation ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("normal" "high" "low" "abnormal" "critical" "Normal" "High" "Low" "Abnormal" "Critical") ;
+        sh:name "Interpretation"@en
+    ] ;
+
+    # Optional: loincCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:loincCode ;
+        sh:maxCount 1 ;
+        sh:name "LOINC Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Condition
+# ============================================================================
+
+clinical:ConditionShape a sh:NodeShape ;
+    sh:targetClass clinical:Condition ;
+    rdfs:label "Condition Shape"@en ;
+    rdfs:comment "Validation constraints for condition/diagnosis records"@en ;
+
+    # Required: conditionName
+    sh:property [
+        sh:path clinical:conditionName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Condition Name"@en ;
+        sh:message "Condition must have a name"@en
+    ] ;
+
+    # Optional: clinicalStatus
+    sh:property [
+        sh:path clinical:clinicalStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("active" "recurrence" "relapse" "inactive" "remission" "resolved") ;
+        sh:name "Clinical Status"@en
+    ] ;
+
+    # Optional: verificationStatus
+    sh:property [
+        sh:path clinical:verificationStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("unconfirmed" "provisional" "differential" "confirmed" "refuted" "entered-in-error") ;
+        sh:name "Verification Status"@en
+    ] ;
+
+    # Optional: onsetDate
+    sh:property [
+        sh:path clinical:onsetDate ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Onset Date"@en
+    ] ;
+
+    # Optional: snomedCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:snomedCode ;
+        sh:maxCount 1 ;
+        sh:name "SNOMED Code"@en
+    ] ;
+
+    # Optional: icd10Code (can be string or URI reference)
+    sh:property [
+        sh:path clinical:icd10Code ;
+        sh:maxCount 1 ;
+        sh:name "ICD-10 Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Immunization
+# ============================================================================
+
+clinical:ImmunizationShape a sh:NodeShape ;
+    sh:targetClass clinical:Immunization ;
+    rdfs:label "Immunization Shape"@en ;
+    rdfs:comment "Validation constraints for immunization records"@en ;
+
+    # Required: vaccineName
+    sh:property [
+        sh:path clinical:vaccineName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Vaccine Name"@en ;
+        sh:message "Immunization must have a vaccine name"@en
+    ] ;
+
+    # Optional: cvxCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:cvxCode ;
+        sh:maxCount 1 ;
+        sh:name "CVX Code"@en
+    ] ;
+
+    # Optional: lotNumber
+    sh:property [
+        sh:path clinical:lotNumber ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Lot Number"@en
+    ] ;
+
+    # Optional: site
+    sh:property [
+        sh:path clinical:site ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Site"@en
+    ] ;
+
+    # Optional: doseQuantity
+    sh:property [
+        sh:path clinical:doseQuantity ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Dose Quantity"@en
+    ] ;
+
+    # Optional: manufacturer
+    sh:property [
+        sh:path clinical:manufacturer ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Manufacturer"@en
+    ] ;
+
+    # Optional: status
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("completed" "entered-in-error" "not-done") ;
+        sh:name "Status"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Procedure
+# ============================================================================
+
+clinical:ProcedureShape a sh:NodeShape ;
+    sh:targetClass clinical:Procedure ;
+    rdfs:label "Procedure Shape"@en ;
+    rdfs:comment "Validation constraints for procedure records"@en ;
+
+    # Required: procedureName
+    sh:property [
+        sh:path clinical:procedureName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Procedure Name"@en ;
+        sh:message "Procedure must have a name"@en
+    ] ;
+
+    # Optional: procedureDate
+    sh:property [
+        sh:path clinical:procedureDate ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Procedure Date"@en
+    ] ;
+
+    # Optional: bodySite
+    sh:property [
+        sh:path clinical:bodySite ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Body Site"@en
+    ] ;
+
+    # Optional: performer
+    sh:property [
+        sh:path clinical:performer ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Performer"@en
+    ] ;
+
+    # Optional: status
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("preparation" "in-progress" "not-done" "on-hold" "stopped" "completed" "entered-in-error" "unknown") ;
+        sh:name "Status"@en
+    ] ;
+
+    # Optional: cptCode
+    sh:property [
+        sh:path clinical:cptCode ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]{5}$" ;
+        sh:name "CPT Code"@en ;
+        sh:message "CPT code must be 5 digits"@en
+    ] ;
+
+    # Optional: snomedCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:snomedCode ;
+        sh:maxCount 1 ;
+        sh:name "SNOMED Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Vital Sign
+# ============================================================================
+
+clinical:VitalSignShape a sh:NodeShape ;
+    sh:targetClass clinical:VitalSign ;
+    rdfs:label "Vital Sign Shape"@en ;
+    rdfs:comment "Validation constraints for vital sign observations"@en ;
+
+    # Required: vitalType (accepts display names, snake_case, and camelCase)
+    sh:property [
+        sh:path clinical:vitalType ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("Heart Rate" "Blood Pressure" "Respiratory Rate" "Body Temperature" "Oxygen Saturation" "Body Weight" "Body Height" "BMI" "heart_rate" "blood_pressure" "respiratory_rate" "body_temperature" "oxygen_saturation" "body_weight" "body_height" "bmi" "heartRate" "bloodPressure" "bloodPressureSystolic" "bloodPressureDiastolic" "respiratoryRate" "temperature" "oxygenSaturation" "bodyWeight" "bodyHeight" "bodyMassIndex") ;
+        sh:name "Vital Type"@en ;
+        sh:message "Vital sign must have a valid type"@en
+    ] ;
+
+    # Optional: value (can be string or numeric)
+    sh:property [
+        sh:path clinical:value ;
+        sh:maxCount 1 ;
+        sh:name "Value"@en
+    ] ;
+
+    # Optional: unit
+    sh:property [
+        sh:path clinical:unit ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Unit"@en
+    ] ;
+
+    # Optional: component values (for blood pressure, etc.)
+    sh:property [
+        sh:path clinical:component1Value ;
+        sh:maxCount 1 ;
+        sh:name "Component 1 Value"@en
+    ] ;
+
+    sh:property [
+        sh:path clinical:component2Value ;
+        sh:maxCount 1 ;
+        sh:name "Component 2 Value"@en
+    ] ;
+
+    # Optional: interpretation
+    sh:property [
+        sh:path clinical:interpretation ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Interpretation"@en
+    ] ;
+
+    # Optional: deviceName
+    sh:property [
+        sh:path clinical:deviceName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Device Name"@en
+    ] ;
+
+    # Optional: loincCode (can be string or URI reference)
+    sh:property [
+        sh:path clinical:loincCode ;
+        sh:maxCount 1 ;
+        sh:name "LOINC Code"@en
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Longitudinal Record Shapes (v1.2)
+# ============================================================================
+
+# ============================================================================
+# Shape: Medication Use Episode
+# ============================================================================
+
+clinical:MedicationUseEpisodeShape a sh:NodeShape ;
+    sh:targetClass clinical:MedicationUseEpisode ;
+    rdfs:label "Medication Use Episode Shape"@en ;
+    rdfs:comment "Validation constraints for longitudinal medication episodes. Ensures source linkage and explainable status inference per Cascade Protocol requirements."@en ;
+
+    # REQUIRED: canonicalName (normalized drug name)
+    sh:property [
+        sh:path clinical:canonicalName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Canonical Name"@en ;
+        sh:message "Episode must have a canonical drug name"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: episodeFirstSeenDate (earliest CLINICAL date from sources)
+    sh:property [
+        sh:path clinical:episodeFirstSeenDate ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "First Seen Date"@en ;
+        sh:message "Episode must have a first seen date (earliest clinical date from source records)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: episodeLastSeenDate (most recent CLINICAL date from sources)
+    sh:property [
+        sh:path clinical:episodeLastSeenDate ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Last Seen Date"@en ;
+        sh:message "Episode must have a last seen date (most recent clinical date from source records)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: sourceRecordIds (Task 7.3 - must link to all contributing records)
+    sh:property [
+        sh:path clinical:derivedFromRecord ;
+        sh:minCount 1 ;
+        sh:name "Derived From Record"@en ;
+        sh:message "Episode MUST link to at least one source MedicationRecord (sourceRecordIds required per Cascade Protocol)"@en ;
+        sh:description "Every episode must trace back to its source records for explainability"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: inferredStatus (Task 7.4 - must have explainable status)
+    sh:property [
+        sh:path clinical:inferredStatus ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("active" "inactive") ;
+        sh:name "Inferred Status"@en ;
+        sh:message "Episode MUST have an inferred status (active or inactive)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: statusReason (Task 7.4 - must explain why we think this status)
+    sh:property [
+        sh:path clinical:statusReason ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("explicitStatus" "hasRecentEndDate" "noRecentActivity" "inferredFromRefills" "userOverride") ;
+        sh:name "Status Reason"@en ;
+        sh:message "Episode MUST have a status reason explaining WHY system thinks this status (per No Silent Inference policy)"@en ;
+        sh:description "Enables answering: 'Why does system think this medication is active?'"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: statusConfidence
+    sh:property [
+        sh:path clinical:statusConfidence ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("high" "medium" "low") ;
+        sh:name "Status Confidence"@en ;
+        sh:message "Episode must declare confidence level for status inference"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: conceptUri (stable URI for the medication concept)
+    sh:property [
+        sh:path clinical:conceptUri ;
+        sh:maxCount 1 ;
+        sh:name "Concept URI"@en ;
+        sh:description "Stable URI for the medication concept (RxNorm URI or minted Cascade URI)"@en
+    ] ;
+
+    # Optional: currentDose
+    sh:property [
+        sh:path clinical:currentDose ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Current Dose"@en
+    ] ;
+
+    # Optional: currentFrequency
+    sh:property [
+        sh:path clinical:currentFrequency ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Current Frequency"@en
+    ] ;
+
+    # Optional: currentRoute
+    sh:property [
+        sh:path clinical:currentRoute ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Current Route"@en
+    ] ;
+
+    # Optional: usePattern
+    sh:property [
+        sh:path clinical:usePattern ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("chronic" "shortCourse" "oneTime" "asNeeded" "unknown") ;
+        sh:name "Use Pattern"@en
+    ] ;
+
+    # Optional: therapeuticClass
+    sh:property [
+        sh:path clinical:therapeuticClass ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Therapeutic Class"@en
+    ] ;
+
+    # Optional: hasUnresolvedConflicts flag
+    sh:property [
+        sh:path clinical:hasUnresolvedConflicts ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:name "Has Unresolved Conflicts"@en ;
+        sh:description "Flag indicating episode has data conflicts requiring user attention"@en
+    ] ;
+
+    # Optional: durationDays
+    sh:property [
+        sh:path clinical:durationDays ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Duration Days"@en
+    ] ;
+
+    # Required: provenance
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:Reconciled) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Episode must have valid provenance (typically Reconciled for derived episodes)"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Shape: Supplement (SDK-level)
+# ============================================================================
+
+clinical:SupplementShape a sh:NodeShape ;
+    sh:targetClass clinical:Supplement ;
+    rdfs:label "Supplement Shape"@en ;
+    rdfs:comment "Validation constraints for supplement records. Ensures regulatory status is always explicit per Cascade Protocol requirements."@en ;
+
+    # REQUIRED: supplementName
+    sh:property [
+        sh:path clinical:supplementName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Supplement Name"@en ;
+        sh:message "Supplement must have a name"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: regulatoryStatus (Task 7.5 - explicit regulatory distinction)
+    sh:property [
+        sh:path clinical:regulatoryStatus ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("dietarySupplement" "otcDrug" "homeopathic" "herbalRemedy" "unknown") ;
+        sh:name "Regulatory Status"@en ;
+        sh:message "Supplement MUST have explicit regulatory status to distinguish from FDA-approved medications"@en ;
+        sh:description "Required per Cascade Protocol to avoid implying clinical equivalence with prescription medications"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: dose
+    sh:property [
+        sh:path clinical:dose ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Dose"@en
+    ] ;
+
+    # Optional: frequency
+    sh:property [
+        sh:path clinical:frequency ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Frequency"@en
+    ] ;
+
+    # Optional: brand
+    sh:property [
+        sh:path clinical:brand ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Brand"@en
+    ] ;
+
+    # Optional: form
+    sh:property [
+        sh:path clinical:form ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("capsule" "tablet" "softgel" "liquid" "powder" "gummy" "spray" "patch" "tea" "tincture" "other") ;
+        sh:name "Form"@en
+    ] ;
+
+    # Optional: evidenceStrength
+    sh:property [
+        sh:path clinical:evidenceStrength ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("strongEvidence" "moderateEvidence" "limitedEvidence" "traditionalUse" "noEvidence" "unknown") ;
+        sh:name "Evidence Strength"@en ;
+        sh:description "Level of clinical evidence supporting supplement use"@en
+    ] ;
+
+    # Optional: isActive
+    sh:property [
+        sh:path clinical:isActive ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:name "Is Active"@en
+    ] ;
+
+    # Optional: dsldId (NIH Dietary Supplement Label Database)
+    sh:property [
+        sh:path clinical:dsldId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "DSLD ID"@en ;
+        sh:description "NIH Dietary Supplement Label Database identifier"@en
+    ] ;
+
+    # Optional: upc (barcode)
+    sh:property [
+        sh:path clinical:upc ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "UPC"@en
+    ] ;
+
+    # Optional: cascadeUri (stable identifier)
+    sh:property [
+        sh:path clinical:cascadeUri ;
+        sh:maxCount 1 ;
+        sh:name "Cascade URI"@en ;
+        sh:description "Stable Cascade Protocol identifier (minted when no external ID exists)"@en
+    ] ;
+
+    # Optional: reasonForUse
+    sh:property [
+        sh:path clinical:reasonForUse ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Reason For Use"@en
+    ] ;
+
+    # Required: provenance
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en
+    ] .
+
+# ============================================================================
+# Changelog
+# ============================================================================
+#
+# Version 1.2 (2026-01-15)
+# - Added MedicationUseEpisodeShape for longitudinal medication tracking
+#   - REQUIRED: canonicalName, episodeFirstSeenDate, episodeLastSeenDate
+#   - REQUIRED: derivedFromRecord (sourceRecordIds) for source linkage (Task 7.3)
+#   - REQUIRED: inferredStatus, statusReason, statusConfidence (Task 7.4)
+#   - Ensures every episode answers "why does system think this?"
+# - Added SupplementShape for dietary supplements and OTC products
+#   - REQUIRED: supplementName, regulatoryStatus (Task 7.5)
+#   - Explicit regulatory distinction from medications
+# - Added cascade:Reconciled to valid provenance values for derived episodes
+#
+# Version 1.1 (2026-01-01)
+# - Added shapes for all structured clinical record types
+#
+# Version 1.0 (2025-12-26)
+# - Initial release with document shapes
+#

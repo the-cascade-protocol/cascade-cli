@@ -1,0 +1,214 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix coverage: <https://ns.cascadeprotocol.org/coverage/v1#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ============================================================================
+# Cascade Protocol — Coverage Vocabulary SHACL Validation Shapes
+# Version: 1.0 (Phase 4, 2026-02-18)
+# Validates: coverage:InsurancePlan
+#
+# Layer 2 domain-specific vocabulary for patient-owned insurance and benefits data.
+# Aligns with FHIR Coverage resource (fhir:Coverage).
+# ============================================================================
+
+# ============================================================================
+# Shape: Insurance Plan
+# ============================================================================
+
+coverage:InsurancePlanShape a sh:NodeShape ;
+    sh:targetClass coverage:InsurancePlan ;
+    rdfs:label "Insurance Plan Shape"@en ;
+    rdfs:comment "Validation constraints for patient insurance plan records. Covers core identification, plan classification, coverage period, subscriber info, and pharmacy benefits."@en ;
+
+    # ------------------------------------------------------------------
+    # REQUIRED (sh:Violation) — Must be present for valid plan record
+    # ------------------------------------------------------------------
+
+    # Required: providerName
+    sh:property [
+        sh:path coverage:providerName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Provider Name"@en ;
+        sh:message "Insurance provider name is required"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Required: memberId
+    sh:property [
+        sh:path coverage:memberId ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Member ID"@en ;
+        sh:message "Member ID is required for claims processing"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Required: coverageType
+    sh:property [
+        sh:path coverage:coverageType ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("primary" "secondary" "dental" "vision") ;
+        sh:name "Coverage Type"@en ;
+        sh:message "Coverage type must be primary, secondary, dental, or vision"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # ------------------------------------------------------------------
+    # WARNING (sh:Warning) — Important for coverage verification
+    # ------------------------------------------------------------------
+
+    # Warning: groupNumber
+    sh:property [
+        sh:path coverage:groupNumber ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Group Number"@en ;
+        sh:message "Group number helps verify coverage"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # Warning: planType
+    sh:property [
+        sh:path coverage:planType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("hmo" "ppo" "epo" "pos" "hdhp" "medicare" "medicaid" "tricare" "other") ;
+        sh:name "Plan Type"@en ;
+        sh:message "Plan type should be hmo, ppo, epo, pos, hdhp, medicare, medicaid, tricare, or other"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # Warning: effectiveStart
+    sh:property [
+        sh:path coverage:effectiveStart ;
+        sh:datatype xsd:date ;
+        sh:maxCount 1 ;
+        sh:name "Effective Start"@en ;
+        sh:message "Plan effective date helps verify active coverage"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # Warning: subscriberRelationship
+    sh:property [
+        sh:path coverage:subscriberRelationship ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("self" "spouse" "child" "parent" "other") ;
+        sh:name "Subscriber Relationship"@en ;
+        sh:message "Subscriber relationship needed for dependent verification"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # ------------------------------------------------------------------
+    # INFO (sh:Info) — Suggested for completeness
+    # ------------------------------------------------------------------
+
+    # Info: planName
+    sh:property [
+        sh:path coverage:planName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Plan Name"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # Info: effectiveEnd
+    sh:property [
+        sh:path coverage:effectiveEnd ;
+        sh:datatype xsd:date ;
+        sh:maxCount 1 ;
+        sh:name "Effective End"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # Info: subscriberId
+    sh:property [
+        sh:path coverage:subscriberId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Subscriber ID"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # Info: subscriberName
+    sh:property [
+        sh:path coverage:subscriberName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Subscriber Name"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # Info: rxBin
+    sh:property [
+        sh:path coverage:rxBin ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Rx BIN"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # Info: rxPcn
+    sh:property [
+        sh:path coverage:rxPcn ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Rx PCN"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # Info: rxGroup
+    sh:property [
+        sh:path coverage:rxGroup ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Rx Group"@en ;
+        sh:severity sh:Info
+    ] ;
+
+    # ------------------------------------------------------------------
+    # Standard Cascade metadata
+    # ------------------------------------------------------------------
+
+    # Required: provenance
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Insurance plan must have valid provenance"@en
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:message "Schema version must be in format major.minor"@en
+    ] .
+
+# ============================================================================
+# Changelog
+# ============================================================================
+#
+# Version 1.0 (2026-02-18)
+# - Initial release with InsurancePlanShape
+#   - 3 REQUIRED (sh:Violation): providerName, memberId, coverageType
+#   - 4 WARNING (sh:Warning): groupNumber, planType, effectiveStart, subscriberRelationship
+#   - 6 INFO (sh:Info): planName, effectiveEnd, subscriberId, subscriberName, rxBin, rxPcn, rxGroup
+#   - Standard Cascade metadata: dataProvenance, schemaVersion
+# - Aligns with coverage.ttl v1.0 InsurancePlan class (14 properties)
+#
