@@ -7,8 +7,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-
-let auditCounter = 0;
+import { randomUUID } from 'crypto';
 
 export interface AuditEntry {
   operation: string;
@@ -20,11 +19,12 @@ export interface AuditEntry {
 }
 
 /**
- * Generate the next audit entry ID.
+ * Generate a globally unique audit entry ID using crypto.randomUUID().
+ * Unlike sequential counters, UUID-based IDs survive server restarts
+ * and concurrent sessions without collisions.
  */
 function nextAuditId(): string {
-  auditCounter++;
-  return `audit-${String(auditCounter).padStart(4, '0')}`;
+  return `audit-${randomUUID()}`;
 }
 
 /**

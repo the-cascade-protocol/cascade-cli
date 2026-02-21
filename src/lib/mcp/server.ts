@@ -105,8 +105,25 @@ async function startSSEServer(server: McpServer, port: number, podPath?: string)
   const httpServer = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://localhost:${port}`);
 
-    // CORS headers for web agents
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // CORS headers — restricted to localhost origins only.
+    // Requests without an Origin header (same-origin, CLI tools, curl) are allowed.
+    const origin = req.headers['origin'];
+    if (origin) {
+      try {
+        const originUrl = new URL(origin);
+        const isLocalhost = originUrl.hostname === 'localhost' || originUrl.hostname === '127.0.0.1';
+        if (!isLocalhost) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Forbidden: only localhost origins are allowed' }));
+          return;
+        }
+        res.setHeader('Access-Control-Allow-Origin', origin);
+      } catch {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Forbidden: invalid Origin header' }));
+        return;
+      }
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 

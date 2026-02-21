@@ -12,6 +12,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
@@ -55,6 +56,48 @@ function resolvePod(pathArg?: string): string {
   return resolvePodDir(raw);
 }
 
+/**
+ * Validate that a resolved path stays within an allowed boundary directory.
+ * Prevents path traversal attacks (e.g., "../../etc/passwd").
+ */
+export function validatePathBoundary(resolvedPath: string, boundary: string): boolean {
+  const normalizedPath = path.resolve(resolvedPath);
+  const normalizedBoundary = path.resolve(boundary);
+  return normalizedPath.startsWith(normalizedBoundary + path.sep) || normalizedPath === normalizedBoundary;
+}
+
+/** Format a successful tool response with JSON content. */
+function toolResponse(data: unknown): { content: Array<{ type: 'text'; text: string }> } {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+/** Format an error tool response. */
+function toolError(message: string): { content: Array<{ type: 'text'; text: string }> } {
+  return { content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }] };
+}
+
+/**
+ * Wrapper for tool handlers that need Pod directory resolution.
+ * Handles: pod path resolution, directory check, error catching, response formatting.
+ */
+function withPodHandler(
+  handler: (absDir: string, args: Record<string, unknown>) => Promise<unknown>,
+): (args: Record<string, unknown>) => Promise<{ content: Array<{ type: 'text'; text: string }> }> {
+  return async (args) => {
+    try {
+      const absDir = resolvePod(args.path as string | undefined);
+      if (!(await isDirectory(absDir))) {
+        return toolError('Pod directory not found. Check the path argument or CASCADE_POD_PATH variable.');
+      }
+      const result = await handler(absDir, args);
+      return toolResponse(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return toolError(message);
+    }
+  };
+}
+
 // ─── Tool Registration ──────────────────────────────────────────────────────
 
 /**
@@ -78,72 +121,55 @@ function registerPodRead(server: McpServer): void {
     {
       path: z.string().optional().describe('Path to the Pod directory. Uses CASCADE_POD_PATH if omitted.'),
     },
-    async ({ path: podPath }) => {
-      const absDir = resolvePod(podPath);
+    withPodHandler(async (absDir) => {
+      const profile = await readPatientProfile(absDir);
 
-      if (!(await isDirectory(absDir))) {
-        return { content: [{ type: 'text', text: JSON.stringify({ error: `Pod directory not found: ${absDir}` }) }] };
-      }
+      const recordCounts: Record<string, number> = {};
+      const provenanceSources = new Set<string>();
+      let totalRecords = 0;
 
-      try {
-        // Read patient profile
-        const profile = await readPatientProfile(absDir);
+      for (const [typeName, typeInfo] of Object.entries(DATA_TYPES)) {
+        const filePath = path.join(absDir, typeInfo.directory, typeInfo.filename);
+        if (!(await fileExists(filePath))) continue;
 
-        // Discover and count records per type
-        const recordCounts: Record<string, number> = {};
-        const provenanceSources = new Set<string>();
-        let totalRecords = 0;
+        const { records } = await parseDataFile(filePath);
+        if (records.length > 0) {
+          recordCounts[typeName] = records.length;
+          totalRecords += records.length;
 
-        for (const [typeName, typeInfo] of Object.entries(DATA_TYPES)) {
-          const filePath = path.join(absDir, typeInfo.directory, typeInfo.filename);
-          if (!(await fileExists(filePath))) continue;
-
-          const { records } = await parseDataFile(filePath);
-          if (records.length > 0) {
-            recordCounts[typeName] = records.length;
-            totalRecords += records.length;
-
-            // Extract provenance sources
-            for (const rec of records) {
-              const prov = rec.properties['cascade:dataProvenance'];
-              if (prov) provenanceSources.add(prov);
-            }
+          for (const rec of records) {
+            const prov = rec.properties['cascade:dataProvenance'];
+            if (prov) provenanceSources.add(prov);
           }
         }
-
-        const summary = {
-          pod: absDir,
-          patient: {
-            name: profile.name ?? 'Unknown',
-            dateOfBirth: profile.dateOfBirth,
-            age: profile.age,
-            schemaVersion: profile.schemaVersion,
-          },
-          totalRecords,
-          recordCounts,
-          provenanceSources: Array.from(provenanceSources),
-          directories: {
-            clinical: Object.entries(recordCounts)
-              .filter(([k]) => DATA_TYPES[k]?.directory === 'clinical')
-              .map(([k, v]) => ({ type: k, count: v })),
-            wellness: Object.entries(recordCounts)
-              .filter(([k]) => DATA_TYPES[k]?.directory === 'wellness')
-              .map(([k, v]) => ({ type: k, count: v })),
-          },
-        };
-
-        // Write audit entry
-        await writeAuditEntry(
-          absDir,
-          createAuditEntry('pod_read', ['all'], totalRecords),
-        );
-
-        return { content: [{ type: 'text', text: JSON.stringify(summary, null, 2) }] };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: 'text', text: JSON.stringify({ error: `Failed to read pod: ${message}` }) }] };
       }
-    },
+
+      await writeAuditEntry(
+        absDir,
+        createAuditEntry('pod_read', ['all'], totalRecords),
+      );
+
+      return {
+        pod: absDir,
+        patient: {
+          name: profile.name ?? 'Unknown',
+          dateOfBirth: profile.dateOfBirth,
+          age: profile.age,
+          schemaVersion: profile.schemaVersion,
+        },
+        totalRecords,
+        recordCounts,
+        provenanceSources: Array.from(provenanceSources),
+        directories: {
+          clinical: Object.entries(recordCounts)
+            .filter(([k]) => DATA_TYPES[k]?.directory === 'clinical')
+            .map(([k, v]) => ({ type: k, count: v })),
+          wellness: Object.entries(recordCounts)
+            .filter(([k]) => DATA_TYPES[k]?.directory === 'wellness')
+            .map(([k, v]) => ({ type: k, count: v })),
+        },
+      };
+    }),
   );
 }
 
@@ -164,58 +190,42 @@ function registerPodQuery(server: McpServer): void {
         ])
         .describe('Data type to query, or "all" for everything.'),
     },
-    async ({ path: podPath, dataType }) => {
-      const absDir = resolvePod(podPath);
+    withPodHandler(async (absDir, args) => {
+      const dataType = args.dataType as string;
+      const typesToQuery = dataType === 'all' ? Object.keys(DATA_TYPES) : [dataType];
+      const results: Record<string, { count: number; file: string; records: Array<{ id: string; type: string; label?: string; properties: Record<string, string> }> }> = {};
+      let totalRecords = 0;
 
-      if (!(await isDirectory(absDir))) {
-        return { content: [{ type: 'text', text: JSON.stringify({ error: `Pod directory not found: ${absDir}` }) }] };
-      }
+      for (const typeName of typesToQuery) {
+        const typeInfo = DATA_TYPES[typeName];
+        if (!typeInfo) continue;
 
-      try {
-        const typesToQuery = dataType === 'all' ? Object.keys(DATA_TYPES) : [dataType];
-        const results: Record<string, { count: number; file: string; records: Array<{ id: string; type: string; label?: string; properties: Record<string, string> }> }> = {};
-        let totalRecords = 0;
+        const filePath = path.join(absDir, typeInfo.directory, typeInfo.filename);
+        if (!(await fileExists(filePath))) continue;
 
-        for (const typeName of typesToQuery) {
-          const typeInfo = DATA_TYPES[typeName];
-          if (!typeInfo) continue;
-
-          const filePath = path.join(absDir, typeInfo.directory, typeInfo.filename);
-          if (!(await fileExists(filePath))) continue;
-
-          const { records } = await parseDataFile(filePath);
-          if (records.length > 0) {
-            results[typeName] = {
-              count: records.length,
-              file: `${typeInfo.directory}/${typeInfo.filename}`,
-              records: records.map((r) => ({
-                id: r.id,
-                type: r.type,
-                label: r.label,
-                properties: r.properties,
-              })),
-            };
-            totalRecords += records.length;
-          }
+        const { records } = await parseDataFile(filePath);
+        if (records.length > 0) {
+          results[typeName] = {
+            count: records.length,
+            file: `${typeInfo.directory}/${typeInfo.filename}`,
+            records: records.map((r) => ({
+              id: r.id,
+              type: r.type,
+              label: r.label,
+              properties: r.properties,
+            })),
+          };
+          totalRecords += records.length;
         }
-
-        // Write audit entry
-        await writeAuditEntry(
-          absDir,
-          createAuditEntry('pod_query', typesToQuery, totalRecords),
-        );
-
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({ pod: absDir, dataType, dataTypes: results, totalRecords }, null, 2),
-          }],
-        };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: 'text', text: JSON.stringify({ error: `Failed to query pod: ${message}` }) }] };
       }
-    },
+
+      await writeAuditEntry(
+        absDir,
+        createAuditEntry('pod_query', typesToQuery, totalRecords),
+      );
+
+      return { pod: absDir, dataType, dataTypes: results, totalRecords };
+    }),
   );
 }
 
@@ -231,38 +241,31 @@ function registerValidate(server: McpServer): void {
     },
     async ({ path: filePath, content }) => {
       if (!filePath && !content) {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({ error: 'Either "path" or "content" argument is required.' }),
-          }],
-        };
+        return toolError('Either "path" or "content" argument is required.');
       }
 
       try {
         const { store: shapesStore, shapeFiles } = getShapes();
 
         if (content) {
-          // Validate inline content
           const result = validateTurtle(content, shapesStore, shapeFiles, '<inline>');
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          };
+          return toolResponse(result);
         }
 
-        // Validate file or directory
+        // Validate file or directory — with path containment check
         const absPath = path.resolve(process.cwd(), filePath!);
-        const stat = await fs.stat(absPath).catch(() => null);
+        if (!validatePathBoundary(absPath, process.cwd())) {
+          return toolError('Path is outside the allowed boundary. Paths must resolve within the current working directory.');
+        }
 
+        const stat = await fs.stat(absPath).catch(() => null);
         if (!stat) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ error: `Path not found: ${absPath}` }) }],
-          };
+          return toolError('Path not found. Check that the file or directory exists.');
         }
 
         if (stat.isFile()) {
           const result = validateFile(absPath, shapesStore, shapeFiles);
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          return toolResponse(result);
         }
 
         // Directory validation
@@ -270,24 +273,19 @@ function registerValidate(server: McpServer): void {
         const results = ttlFiles.map((f) => validateFile(f, shapesStore, shapeFiles));
         const allValid = results.every((r) => r.valid);
 
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              valid: allValid,
-              filesValidated: ttlFiles.length,
-              results: results.map((r) => ({
-                file: r.file,
-                valid: r.valid,
-                issues: r.results.length,
-                details: r.results,
-              })),
-            }, null, 2),
-          }],
-        };
+        return toolResponse({
+          valid: allValid,
+          filesValidated: ttlFiles.length,
+          results: results.map((r) => ({
+            file: r.file,
+            valid: r.valid,
+            issues: r.results.length,
+            details: r.results,
+          })),
+        });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: 'text', text: JSON.stringify({ error: `Validation failed: ${message}` }) }] };
+        return toolError(`Validation failed: ${message}`);
       }
     },
   );
@@ -307,33 +305,19 @@ function registerConvert(server: McpServer): void {
     },
     async ({ content: inputContent, from, to, format }) => {
       try {
-        // Map "cascade" target to the output serialization format
         const outputTarget = to === 'cascade' ? (format ?? 'turtle') : to;
         const outputSerialization = (format ?? 'turtle') as 'turtle' | 'jsonld';
 
         const result = await convert(inputContent, from, outputTarget, outputSerialization);
 
         if (!result.success) {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                error: result.errors.join('; '),
-                warnings: result.warnings,
-              }),
-            }],
-          };
+          return toolError(result.errors.join('; '));
         }
 
-        return {
-          content: [{
-            type: 'text',
-            text: result.output,
-          }],
-        };
+        return { content: [{ type: 'text' as const, text: result.output }] };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: 'text', text: JSON.stringify({ error: `Conversion failed: ${message}` }) }] };
+        return toolError(`Conversion failed: ${message}`);
       }
     },
   );
@@ -361,82 +345,65 @@ function registerWrite(server: McpServer): void {
         sourceRecords: z.array(z.string()).optional().describe('URIs of source records used to derive this data.'),
       }).optional().describe('Provenance metadata for the written record.'),
     },
-    async ({ path: podPath, dataType, record, provenance }) => {
-      const absDir = resolvePod(podPath);
+    withPodHandler(async (absDir, args) => {
+      const dataType = args.dataType as string;
+      const record = args.record as Record<string, unknown>;
+      const provenance = args.provenance as { agentId?: string; reason?: string; confidence?: number; sourceRecords?: string[] } | undefined;
 
-      if (!(await isDirectory(absDir))) {
-        return { content: [{ type: 'text', text: JSON.stringify({ error: `Pod directory not found: ${absDir}` }) }] };
+      const typeInfo = DATA_TYPES[dataType];
+      if (!typeInfo) {
+        throw new Error(`Unknown data type: ${dataType}`);
       }
 
+      const uuid = randomUUID();
+      const recordUri = `urn:uuid:${uuid}`;
+      const timestamp = new Date().toISOString();
+
+      const turtle = buildRecordTurtle(recordUri, dataType, typeInfo, record, provenance, timestamp);
+
+      const targetDir = path.join(absDir, typeInfo.directory);
+      const targetFile = path.join(targetDir, typeInfo.filename);
+
+      // Path containment: verify target stays within the Pod
+      if (!validatePathBoundary(targetFile, absDir)) {
+        throw new Error('Target file path is outside the Pod directory.');
+      }
+
+      await fs.mkdir(targetDir, { recursive: true });
+
+      let fileExistsFlag = false;
       try {
-        const typeInfo = DATA_TYPES[dataType];
-        if (!typeInfo) {
-          return { content: [{ type: 'text', text: JSON.stringify({ error: `Unknown data type: ${dataType}` }) }] };
-        }
-
-        // Generate a UUID for the record
-        const uuid = generateUUID();
-        const recordUri = `urn:uuid:${uuid}`;
-        const timestamp = new Date().toISOString();
-
-        // Build the Turtle for this record
-        const turtle = buildRecordTurtle(recordUri, dataType, typeInfo, record, provenance, timestamp);
-
-        // Determine target file
-        const targetDir = path.join(absDir, typeInfo.directory);
-        const targetFile = path.join(targetDir, typeInfo.filename);
-
-        // Ensure directory exists
-        await fs.mkdir(targetDir, { recursive: true });
-
-        // Check if file exists
-        let fileExistsFlag = false;
-        try {
-          await fs.access(targetFile);
-          fileExistsFlag = true;
-        } catch {
-          // File doesn't exist
-        }
-
-        if (fileExistsFlag) {
-          // Append record to existing file
-          await fs.appendFile(targetFile, '\n' + turtle, 'utf-8');
-        } else {
-          // Create new file with prefixes
-          const prefixes = generatePrefixes();
-          await fs.writeFile(targetFile, prefixes + '\n' + turtle, 'utf-8');
-        }
-
-        // Write audit entry
-        await writeAuditEntry(
-          absDir,
-          createAuditEntry(
-            'write',
-            [dataType],
-            1,
-            provenance?.agentId,
-          ),
-        );
-
-        const result = {
-          success: true,
-          recordUri,
-          file: `${typeInfo.directory}/${typeInfo.filename}`,
-          provenance: {
-            type: 'AIGenerated',
-            agentId: provenance?.agentId ?? 'unknown-agent',
-            timestamp,
-            reason: provenance?.reason,
-            confidence: provenance?.confidence,
-          },
-        };
-
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: 'text', text: JSON.stringify({ error: `Failed to write record: ${message}` }) }] };
+        await fs.access(targetFile);
+        fileExistsFlag = true;
+      } catch {
+        // File doesn't exist
       }
-    },
+
+      if (fileExistsFlag) {
+        await fs.appendFile(targetFile, '\n' + turtle, 'utf-8');
+      } else {
+        const prefixes = generatePrefixes();
+        await fs.writeFile(targetFile, prefixes + '\n' + turtle, 'utf-8');
+      }
+
+      await writeAuditEntry(
+        absDir,
+        createAuditEntry('write', [dataType], 1, provenance?.agentId),
+      );
+
+      return {
+        success: true,
+        recordUri,
+        file: `${typeInfo.directory}/${typeInfo.filename}`,
+        provenance: {
+          type: 'AIGenerated',
+          agentId: provenance?.agentId ?? 'unknown-agent',
+          timestamp,
+          reason: provenance?.reason,
+          confidence: provenance?.confidence,
+        },
+      };
+    }),
   );
 }
 
@@ -544,7 +511,7 @@ function registerCapabilities(server: McpServer): void {
 // ─── Turtle Generation Helpers ───────────────────────────────────────────────
 
 /** Generate namespace prefixes for a new Turtle file. */
-function generatePrefixes(): string {
+export function generatePrefixes(): string {
   return `@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
 @prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
 @prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
@@ -556,7 +523,7 @@ function generatePrefixes(): string {
 }
 
 /** Map from data type key to rdf:type and name predicate. */
-const TYPE_MAPPING: Record<string, { rdfType: string; nameKey: string; namePred: string }> = {
+export const TYPE_MAPPING: Record<string, { rdfType: string; nameKey: string; namePred: string }> = {
   medications: { rdfType: 'health:MedicationRecord', nameKey: 'name', namePred: 'health:medicationName' },
   conditions: { rdfType: 'health:ConditionRecord', nameKey: 'name', namePred: 'health:conditionName' },
   allergies: { rdfType: 'health:AllergyRecord', nameKey: 'name', namePred: 'health:allergen' },
@@ -567,7 +534,7 @@ const TYPE_MAPPING: Record<string, { rdfType: string; nameKey: string; namePred:
 };
 
 /** Property name mapping from JSON keys to Turtle predicates. */
-const PROPERTY_PREDICATES: Record<string, string> = {
+export const PROPERTY_PREDICATES: Record<string, string> = {
   dose: 'health:dose',
   frequency: 'health:frequency',
   route: 'health:route',
@@ -586,7 +553,8 @@ const PROPERTY_PREDICATES: Record<string, string> = {
   interpretation: 'health:interpretation',
   performedDate: 'health:performedDate',
   testCode: 'health:testCode',
-  vaccineDate: 'health:vaccineDate',
+  vaccineDate: 'health:administrationDate',
+  administrationDate: 'health:administrationDate',
   lotNumber: 'health:lotNumber',
   site: 'health:site',
   manufacturer: 'health:manufacturer',
@@ -605,7 +573,7 @@ const PROPERTY_PREDICATES: Record<string, string> = {
 /**
  * Build a Turtle serialization for a record.
  */
-function buildRecordTurtle(
+export function buildRecordTurtle(
   recordUri: string,
   dataType: string,
   _typeInfo: typeof DATA_TYPES[string],
@@ -664,14 +632,26 @@ function buildRecordTurtle(
   return lines.join('\n');
 }
 
-/** Escape a string for Turtle literal. */
-function escapeTurtleString(value: string): string {
-  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+/** Escape a string for Turtle literal. Handles all standard escape sequences. */
+export function escapeTurtleString(value: string): string {
+  const escaped = value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+  // Use triple-quoted long literal for very long strings or strings with embedded newlines
+  if (value.length > 200 || value.includes('\n')) {
+    const longEscaped = value
+      .replace(/\\/g, '\\\\')
+      .replace(/"""/g, '\\"\\"\\"');
+    return `"""${longEscaped}"""`;
+  }
   return `"${escaped}"`;
 }
 
 /** Format a value for Turtle based on key name / value type. */
-function formatTurtleValue(key: string, value: unknown): string {
+export function formatTurtleValue(key: string, value: unknown): string {
   if (typeof value === 'boolean') {
     return `${value}`;
   }
@@ -685,22 +665,4 @@ function formatTurtleValue(key: string, value: unknown): string {
   return escapeTurtleString(String(value));
 }
 
-/**
- * Generate a v4-like UUID without external dependencies.
- */
-function generateUUID(): string {
-  const hex = '0123456789abcdef';
-  let uuid = '';
-  for (let i = 0; i < 36; i++) {
-    if (i === 8 || i === 13 || i === 18 || i === 23) {
-      uuid += '-';
-    } else if (i === 14) {
-      uuid += '4';
-    } else if (i === 19) {
-      uuid += hex[Math.floor(Math.random() * 4) + 8];
-    } else {
-      uuid += hex[Math.floor(Math.random() * 16)];
-    }
-  }
-  return uuid;
-}
+// UUID generation uses crypto.randomUUID() — cryptographically secure, built into Node.js 14.17+.
