@@ -30,7 +30,7 @@ const program = new Command();
 program
   .name('cascade')
   .description('Cascade Protocol CLI')
-  .version('0.1.0')
+  .version('0.2.0')
   .option('--verbose', 'Verbose output', false)
   .option('--json', 'Output results as JSON (machine-readable)', false);
 

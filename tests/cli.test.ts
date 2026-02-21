@@ -21,7 +21,7 @@ describe('cascade CLI', () => {
   describe('--version', () => {
     it('should print the version number', () => {
       const output = runCli('--version');
-      expect(output).toBe('0.1.0');
+      expect(output).toBe('0.2.0');
     });
   });
 
@@ -50,7 +50,7 @@ describe('cascade CLI', () => {
       const parsed = JSON.parse(output);
       expect(parsed).toBeDefined();
       expect(parsed.name).toBe('@cascade-protocol/cli');
-      expect(parsed.version).toBe('0.1.0');
+      expect(parsed.version).toBe('0.2.0');
     });
 
     it('should list all tools', () => {
