@@ -416,7 +416,7 @@ function registerCapabilities(server: McpServer): void {
     {},
     async () => {
       const capabilities = {
-        name: '@cascade-protocol/cli',
+        name: '@the-cascade-protocol/cli',
         version: '0.2.0',
         description: 'Cascade Protocol MCP Server — Local-first AI agent access to structured health data.',
         protocol: 'https://cascadeprotocol.org',

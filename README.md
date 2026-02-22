@@ -1,17 +1,17 @@
-# @cascade-protocol/cli
+# @the-cascade-protocol/cli
 
 Cascade Protocol CLI - Validate, convert, and manage health data.
 
 ## Installation
 
 ```bash
-npm install -g @cascade-protocol/cli
+npm install -g @the-cascade-protocol/cli
 ```
 
 Or use directly with npx:
 
 ```bash
-npx @cascade-protocol/cli validate record.ttl
+npx @the-cascade-protocol/cli validate record.ttl
 ```
 
 ## Docker

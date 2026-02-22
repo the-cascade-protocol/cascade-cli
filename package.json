@@ -1,5 +1,5 @@
 {
-  "name": "@cascade-protocol/cli",
+  "name": "@the-cascade-protocol/cli",
   "version": "0.2.0",
   "description": "Cascade Protocol CLI - Validate, convert, and manage health data",
   "bin": {

@@ -49,7 +49,7 @@ describe('cascade CLI', () => {
       const output = runCli('capabilities');
       const parsed = JSON.parse(output);
       expect(parsed).toBeDefined();
-      expect(parsed.name).toBe('@cascade-protocol/cli');
+      expect(parsed.name).toBe('@the-cascade-protocol/cli');
       expect(parsed.version).toBe('0.2.0');
     });
 
@@ -114,7 +114,7 @@ describe('cascade CLI', () => {
     it('should accept --json flag', () => {
       const output = runCli('--json capabilities');
       const parsed = JSON.parse(output);
-      expect(parsed.name).toBe('@cascade-protocol/cli');
+      expect(parsed.name).toBe('@the-cascade-protocol/cli');
     });
 
     it('should accept --verbose flag', () => {

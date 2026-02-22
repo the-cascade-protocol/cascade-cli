@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * @cascade-protocol/cli
+ * @the-cascade-protocol/cli
  *
  * Cascade Protocol CLI - Validate, convert, and manage health data.
  *

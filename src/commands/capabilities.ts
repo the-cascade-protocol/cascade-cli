@@ -48,7 +48,7 @@ interface CapabilitiesOutput {
 
 function getCapabilities(version: string): CapabilitiesOutput {
   return {
-    name: '@cascade-protocol/cli',
+    name: '@the-cascade-protocol/cli',
     version,
     description: 'Cascade Protocol CLI - Validate, convert, and manage health data with zero network calls',
     protocol: 'https://cascadeprotocol.org',
