@@ -14,6 +14,18 @@ Or use directly with npx:
 npx @cascade-protocol/cli validate record.ttl
 ```
 
+## Docker
+
+Run the CLI without installing Node.js. See [DOCKER.md](DOCKER.md) for full details.
+
+```bash
+# Build the image
+docker build -t cascade-protocol/tools .
+
+# Validate a Turtle file
+docker run --rm -v $(pwd):/data cascade-protocol/tools cascade validate /data/record.ttl
+```
+
 ## Usage
 
 ```
