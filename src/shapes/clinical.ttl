@@ -20,8 +20,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-02-10"^^xsd:date ;
-    owl:versionInfo "1.5" ;
+    dct:modified "2026-02-22"^^xsd:date ;
+    owl:versionInfo "1.6" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -747,6 +747,12 @@ clinical:verificationStatus a owl:DatatypeProperty ;
 clinical:icd10Code a owl:DatatypeProperty ;
     rdfs:label "ICD-10 Code"@en ;
     rdfs:comment "ICD-10-CM diagnosis code"@en ;
+    rdfs:domain clinical:Condition ;
+    rdfs:range xsd:string .
+
+clinical:linkedConditionIds a owl:DatatypeProperty ;
+    rdfs:label "Linked Condition IDs"@en ;
+    rdfs:comment "Space-separated UUIDs of related ConditionSummary records. Enables graph traversal between related diagnoses (e.g., complication to root condition)."@en ;
     rdfs:domain clinical:Condition ;
     rdfs:range xsd:string .
 

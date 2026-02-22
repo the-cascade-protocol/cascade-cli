@@ -17,8 +17,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-02-18"^^xsd:date ;
-    owl:versionInfo "2.2" ;
+    dct:modified "2026-02-22"^^xsd:date ;
+    owl:versionInfo "2.3" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -154,6 +154,20 @@ cascade:sourceMetricCoverage a owl:ObjectProperty ;
     rdfs:domain cascade:DataSource .
 
 # ============================================================================
+# ============================================================================
+# Provenance Detail Properties (v2.3)
+# ============================================================================
+
+cascade:sourceOrganization a owl:DatatypeProperty ;
+    rdfs:label "Source Organization"@en ;
+    rdfs:comment "Organization that provided this record (e.g., 'Kaiser Permanente', 'Mayo Clinic'). Populated from FHIR meta.source or contained Organization reference during clinical record import."@en ;
+    rdfs:range xsd:string .
+
+cascade:sourceDeviceName a owl:DatatypeProperty ;
+    rdfs:label "Source Device Name"@en ;
+    rdfs:comment "Device or app that recorded this measurement (e.g., 'Apple Watch Series 9', 'Omron BP Monitor'). Populated from HealthKit HKSource contributing app/device name."@en ;
+    rdfs:range xsd:string .
+
 # Vocabulary Organization (v1.3)
 # ============================================================================
 
