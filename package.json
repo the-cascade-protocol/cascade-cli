@@ -31,6 +31,20 @@
     "cli"
   ],
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/the-cascade-protocol/cli.git"
+  },
+  "homepage": "https://cascadeprotocol.org",
+  "bugs": {
+    "url": "https://github.com/the-cascade-protocol/cli/issues"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "DOCKER.md"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@types/archiver": "^7.0.0",
