@@ -419,31 +419,11 @@ export async function copyDirectory(src: string, dest: string): Promise<void> {
 }
 
 /**
- * Create a ZIP archive of the pod directory using the archiver package.
+ * Create a ZIP archive of the pod directory using adm-zip.
  */
 export async function createZipArchive(sourceDir: string, outputPath: string): Promise<void> {
-  // Dynamic import of archiver
-  let archiverModule: { default: (format: string, options?: Record<string, unknown>) => import('archiver').Archiver };
-  try {
-    archiverModule = await import('archiver') as typeof archiverModule;
-  } catch {
-    throw new Error(
-      'The "archiver" package is required for ZIP export. ' +
-        'Install it with: npm install archiver',
-    );
-  }
-
-  const { createWriteStream } = await import('fs');
-
-  return new Promise((resolve, reject) => {
-    const output = createWriteStream(outputPath);
-    const archive = archiverModule.default('zip', { zlib: { level: 9 } });
-
-    output.on('close', () => resolve());
-    archive.on('error', (err: Error) => reject(err));
-
-    archive.pipe(output);
-    archive.directory(sourceDir, path.basename(sourceDir));
-    void archive.finalize();
-  });
+  const AdmZip = (await import('adm-zip')).default;
+  const zip = new AdmZip();
+  zip.addLocalFolder(sourceDir, path.basename(sourceDir));
+  zip.writeZip(outputPath);
 }
