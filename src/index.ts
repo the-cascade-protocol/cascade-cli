@@ -24,13 +24,16 @@ import { registerPodCommand } from './commands/pod/index.js';
 import { registerConformanceCommand } from './commands/conformance.js';
 import { registerServeCommand } from './commands/serve.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json') as { version: string };
 
 const program = new Command();
 
 program
   .name('cascade')
   .description('Cascade Protocol CLI')
-  .version('0.2.0')
+  .version(pkg.version)
   .option('--verbose', 'Verbose output', false)
   .option('--json', 'Output results as JSON (machine-readable)', false);
 

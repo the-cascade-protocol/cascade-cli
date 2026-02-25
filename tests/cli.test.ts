@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { execSync } from 'child_process';
 import { resolve } from 'path';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json') as { version: string };
 
 const CLI_PATH = resolve(__dirname, '../dist/index.js');
 
@@ -21,7 +24,7 @@ describe('cascade CLI', () => {
   describe('--version', () => {
     it('should print the version number', () => {
       const output = runCli('--version');
-      expect(output).toBe('0.2.0');
+      expect(output).toBe(pkg.version);
     });
   });
 
@@ -50,7 +53,7 @@ describe('cascade CLI', () => {
       const parsed = JSON.parse(output);
       expect(parsed).toBeDefined();
       expect(parsed.name).toBe('@the-cascade-protocol/cli');
-      expect(parsed.version).toBe('0.2.0');
+      expect(parsed.version).toBe(pkg.version);
     });
 
     it('should list all tools', () => {
