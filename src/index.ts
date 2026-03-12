@@ -20,13 +20,12 @@
 import { Command } from 'commander';
 import { registerValidateCommand } from './commands/validate.js';
 import { registerConvertCommand } from './commands/convert.js';
+import { registerReconcileCommand } from './commands/reconcile.js';
 import { registerPodCommand } from './commands/pod/index.js';
 import { registerConformanceCommand } from './commands/conformance.js';
 import { registerServeCommand } from './commands/serve.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const pkg = require('../package.json') as { version: string };
+import pkg from '../package.json' with { type: 'json' };
 
 const program = new Command();
 
@@ -40,6 +39,7 @@ program
 // Register all commands
 registerValidateCommand(program);
 registerConvertCommand(program);
+registerReconcileCommand(program);
 registerPodCommand(program);
 registerConformanceCommand(program);
 registerServeCommand(program);
@@ -52,6 +52,8 @@ program.addHelpText(
 Examples:
   cascade validate record.ttl
   cascade convert --from fhir --to cascade patient.json
+  cascade convert --from fhir --to cascade --source-system primary-care patient.json
+  cascade reconcile system-a.ttl system-b.ttl system-c.ttl --output merged.ttl --report report.json
   cascade pod init ./my-pod
   cascade capabilities
   cascade capabilities --json

@@ -24,15 +24,20 @@
 
 import type { Quad } from 'n3';
 
+import { DataFactory } from 'n3';
+
 import {
   type InputFormat,
   type OutputFormat,
   type ConversionResult,
   type BatchConversionResult,
+  NS,
   SUPPORTED_TYPES,
   quadsToTurtle,
   quadsToJsonLd,
 } from './types.js';
+
+const { namedNode, literal, quad: makeQuad } = DataFactory;
 
 import { convertFhirResourceToQuads } from './fhir-to-cascade.js';
 import { convertCascadeToFhir } from './cascade-to-fhir.js';
@@ -56,6 +61,7 @@ export async function convert(
   from: InputFormat,
   to: OutputFormat,
   outputSerialization: 'turtle' | 'jsonld' = 'turtle',
+  sourceSystem?: string,
 ): Promise<BatchConversionResult> {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -113,6 +119,26 @@ export async function convert(
         success: false, output: '', format: to, resourceCount: 0,
         warnings, errors: ['No convertible FHIR resources found'], results: [],
       };
+    }
+
+    // Inject cascade:sourceSystem into every record if --source-system was given.
+    // We add one triple per unique subject that has an rdf:type (i.e. a real record).
+    if (sourceSystem) {
+      const recordSubjects = new Set<string>();
+      for (const q of allQuads) {
+        if (q.predicate.value === NS.rdf + 'type') {
+          recordSubjects.add(q.subject.value);
+        }
+      }
+      for (const subjectUri of recordSubjects) {
+        allQuads.push(
+          makeQuad(
+            namedNode(subjectUri),
+            namedNode(NS.cascade + 'sourceSystem'),
+            literal(sourceSystem),
+          ),
+        );
+      }
     }
 
     // Determine output format

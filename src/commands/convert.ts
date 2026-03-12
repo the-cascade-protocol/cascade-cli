@@ -43,10 +43,11 @@ export function registerConvertCommand(program: Command): void {
     .requiredOption('--from <format>', 'Source format (fhir|cascade|c-cda)')
     .requiredOption('--to <format>', 'Target format (turtle|jsonld|fhir|cascade)')
     .option('--format <output>', 'Output serialization format (turtle|jsonld)', 'turtle')
+    .option('--source-system <name>', 'Tag all records with a source system name (adds cascade:sourceSystem for reconciliation)')
     .action(
       async (
         file: string | undefined,
-        options: { from: string; to: string; format: string },
+        options: { from: string; to: string; format: string; sourceSystem?: string },
       ) => {
         const globalOpts = program.opts() as OutputOptions;
 
@@ -57,6 +58,9 @@ export function registerConvertCommand(program: Command): void {
           printVerbose('Reading from stdin', globalOpts);
         }
         printVerbose(`Output format: ${options.format}`, globalOpts);
+        if (options.sourceSystem) {
+          printVerbose(`Source system: ${options.sourceSystem}`, globalOpts);
+        }
 
         // 1. Read input
         let input: string;
@@ -106,6 +110,7 @@ export function registerConvertCommand(program: Command): void {
           options.from as InputFormat,
           options.to as OutputFormat,
           outputSerialization,
+          options.sourceSystem,
         );
 
         // 5. Output
