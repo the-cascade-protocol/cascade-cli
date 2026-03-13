@@ -41,6 +41,7 @@ const { namedNode, literal, quad: makeQuad } = DataFactory;
 
 import { convertFhirResourceToQuads } from './fhir-to-cascade.js';
 import { convertCascadeToFhir } from './cascade-to-fhir.js';
+import { EXCLUDED_TYPES, EXCLUDED_REASONS } from './converters-passthrough.js';
 
 // Re-export public types
 export type { InputFormat, OutputFormat, ConversionResult, BatchConversionResult };
@@ -96,8 +97,8 @@ export async function convert(
 
     const allQuads: Quad[] = [];
     for (const res of fhirResources) {
-      if (!SUPPORTED_TYPES.has(res.resourceType)) {
-        warnings.push(`Skipping unsupported FHIR resource type: ${res.resourceType}`);
+      if (EXCLUDED_TYPES.has(res.resourceType)) {
+        warnings.push(`Skipping excluded FHIR resource type: ${res.resourceType} — ${EXCLUDED_REASONS[res.resourceType] ?? 'intentionally excluded'}`);
         continue;
       }
       const result = convertFhirResourceToQuads(res);

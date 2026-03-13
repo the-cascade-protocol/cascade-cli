@@ -39,7 +39,7 @@ export async function convertCascadeToFhir(turtle: string): Promise<{
     subjects.get(subj)!.push(q);
   }
 
-  for (const [_subjectUri, subjectQuads] of subjects) {
+  for (const [subjectUri, subjectQuads] of subjects) {
     // Find rdf:type
     const typeQuad = subjectQuads.find(q => q.predicate.value === NS.rdf + 'type');
     if (!typeQuad) continue;
@@ -360,6 +360,239 @@ export async function convertCascadeToFhir(turtle: string): Promise<{
       if (srcId) fhirResource.id = srcId;
 
       resources.push(fhirResource);
+    } else if (rdfType === NS.clinical + 'Procedure') {
+      const fhirResource: any = {
+        resourceType: 'Procedure',
+        code: { text: getFirst(NS.clinical + 'procedureName') ?? '' },
+      };
+
+      const status = getFirst(NS.clinical + 'procedureStatus');
+      if (status) fhirResource.status = status;
+
+      const performedDate = getFirst(NS.clinical + 'performedDate');
+      if (performedDate) fhirResource.performedDateTime = performedDate;
+
+      const srcId = getFirst(NS.clinical + 'sourceRecordId');
+      if (srcId) fhirResource.id = srcId;
+
+      const snomedUri = pv.get(NS.clinical + 'procedureSnomedCode')?.[0];
+      if (snomedUri) {
+        const code = snomedUri.startsWith(NS.sct) ? snomedUri.slice(NS.sct.length) : snomedUri;
+        fhirResource.code.coding = [{ system: 'http://snomed.info/sct', code }];
+      }
+
+      resources.push(fhirResource);
+    } else if (rdfType === NS.clinical + 'ClinicalDocument') {
+      const fhirResource: any = {
+        resourceType: 'DocumentReference',
+        status: 'current',
+        type: { text: getFirst(NS.clinical + 'documentType') ?? '' },
+      };
+
+      const docDate = getFirst(NS.clinical + 'documentDate');
+      if (docDate) fhirResource.date = docDate;
+
+      const contentType = getFirst(NS.clinical + 'contentType');
+      const docUrl = getFirst(NS.clinical + 'documentUrl');
+      const docTitle = getFirst(NS.clinical + 'documentTitle');
+      if (contentType || docUrl || docTitle) {
+        const attachment: any = {};
+        if (contentType) attachment.contentType = contentType;
+        if (docUrl) attachment.url = docUrl;
+        if (docTitle) attachment.title = docTitle;
+        fhirResource.content = [{ attachment }];
+      }
+
+      const srcId = getFirst(NS.clinical + 'sourceRecordId');
+      if (srcId) fhirResource.id = srcId;
+
+      resources.push(fhirResource);
+    } else if (rdfType === NS.clinical + 'Encounter') {
+      const fhirResource: any = {
+        resourceType: 'Encounter',
+        status: getFirst(NS.clinical + 'encounterStatus') ?? 'finished',
+      };
+
+      const encClass = getFirst(NS.clinical + 'encounterClass');
+      if (encClass) fhirResource.class = { code: encClass };
+
+      const encType = getFirst(NS.clinical + 'encounterType');
+      if (encType) fhirResource.type = [{ text: encType }];
+
+      const start = getFirst(NS.clinical + 'encounterStart');
+      const end = getFirst(NS.clinical + 'encounterEnd');
+      if (start || end) {
+        fhirResource.period = {};
+        if (start) fhirResource.period.start = start;
+        if (end) fhirResource.period.end = end;
+      }
+
+      const provName = getFirst(NS.clinical + 'providerName');
+      if (provName) fhirResource.participant = [{ individual: { display: provName } }];
+
+      const facility = getFirst(NS.clinical + 'facilityName');
+      if (facility) fhirResource.serviceProvider = { display: facility };
+
+      const srcId = getFirst(NS.clinical + 'sourceRecordId');
+      if (srcId) fhirResource.id = srcId;
+
+      resources.push(fhirResource);
+    } else if (rdfType === NS.clinical + 'LaboratoryReport') {
+      const fhirResource: any = {
+        resourceType: 'DiagnosticReport',
+        status: 'final',
+        code: { text: getFirst(NS.clinical + 'panelName') ?? '' },
+      };
+
+      const loincUri = getFirst(NS.clinical + 'loincCode');
+      if (loincUri) {
+        const code = loincUri.startsWith(NS.loinc) ? loincUri.slice(NS.loinc.length) : loincUri;
+        fhirResource.code.coding = [{ system: 'http://loinc.org', code }];
+      }
+
+      const category = getFirst(NS.clinical + 'reportCategory');
+      if (category) fhirResource.category = [{ coding: [{ code: category }] }];
+
+      const effDate = getFirst(NS.clinical + 'performedDate');
+      if (effDate) fhirResource.effectiveDateTime = effDate;
+
+      const srcId = getFirst(NS.clinical + 'sourceRecordId');
+      if (srcId) fhirResource.id = srcId;
+
+      resources.push(fhirResource);
+    } else if (rdfType === NS.clinical + 'MedicationAdministration') {
+      const fhirResource: any = {
+        resourceType: 'MedicationAdministration',
+        status: getFirst(NS.clinical + 'administrationStatus') ?? 'completed',
+        medicationCodeableConcept: { text: getFirst(NS.health + 'medicationName') ?? '' },
+      };
+
+      const adminDate = getFirst(NS.clinical + 'administeredDate');
+      if (adminDate) fhirResource.effectiveDateTime = adminDate;
+
+      const dose = getFirst(NS.clinical + 'administeredDose');
+      const route = getFirst(NS.clinical + 'administeredRoute');
+      if (dose || route) {
+        fhirResource.dosage = {};
+        if (dose) fhirResource.dosage.dose = { value: dose };
+        if (route) fhirResource.dosage.route = { text: route };
+      }
+
+      const srcId = getFirst(NS.clinical + 'sourceRecordId');
+      if (srcId) fhirResource.id = srcId;
+
+      resources.push(fhirResource);
+    } else if (rdfType === NS.clinical + 'ImplantedDevice') {
+      const fhirResource: any = {
+        resourceType: 'Device',
+        status: getFirst(NS.clinical + 'deviceStatus') ?? 'active',
+      };
+
+      const deviceType = getFirst(NS.clinical + 'deviceType');
+      if (deviceType) fhirResource.type = { text: deviceType };
+
+      const manufacturer = getFirst(NS.clinical + 'deviceManufacturer');
+      if (manufacturer) fhirResource.manufacturer = manufacturer;
+
+      const udi = getFirst(NS.clinical + 'udiCarrier');
+      if (udi) fhirResource.udiCarrier = [{ deviceIdentifier: udi }];
+
+      const implantDate = getFirst(NS.clinical + 'implantDate');
+      if (implantDate) fhirResource.manufactureDate = implantDate;
+
+      const srcId = getFirst(NS.clinical + 'sourceRecordId');
+      if (srcId) fhirResource.id = srcId;
+
+      resources.push(fhirResource);
+    } else if (rdfType === NS.clinical + 'ImagingStudy') {
+      const fhirResource: any = {
+        resourceType: 'ImagingStudy',
+        status: 'available',
+      };
+
+      const modality = getFirst(NS.clinical + 'imagingModality');
+      const description = getFirst(NS.clinical + 'studyDescription');
+      if (description) fhirResource.description = description;
+
+      const studyDate = getFirst(NS.clinical + 'studyDate');
+      if (studyDate) fhirResource.started = studyDate;
+
+      const dicomUid = getFirst(NS.clinical + 'dicomStudyUid');
+      if (dicomUid) fhirResource.identifier = [{ value: dicomUid }];
+
+      if (modality) fhirResource.series = [{ modality: { code: modality } }];
+
+      const srcId = getFirst(NS.clinical + 'sourceRecordId');
+      if (srcId) fhirResource.id = srcId;
+
+      resources.push(fhirResource);
+    } else if (rdfType === NS.coverage + 'ClaimRecord') {
+      const fhirResource: any = {
+        resourceType: 'Claim',
+        status: getFirst(NS.coverage + 'claimStatus') ?? 'active',
+        use: 'claim',
+      };
+
+      const claimDate = getFirst(NS.coverage + 'claimDate');
+      if (claimDate) fhirResource.created = claimDate;
+
+      const claimType = getFirst(NS.coverage + 'claimType');
+      if (claimType) fhirResource.type = { coding: [{ code: claimType }] };
+
+      const provider = getFirst(NS.coverage + 'billingProvider');
+      if (provider) fhirResource.provider = { display: provider };
+
+      const total = getFirst(NS.coverage + 'claimTotal');
+      if (total) fhirResource.total = { value: parseFloat(total) };
+
+      const srcId = getFirst(NS.coverage + 'sourceRecordId');
+      if (srcId) fhirResource.id = srcId;
+
+      resources.push(fhirResource);
+    } else if (rdfType === NS.coverage + 'BenefitStatement') {
+      const fhirResource: any = {
+        resourceType: 'ExplanationOfBenefit',
+        status: getFirst(NS.coverage + 'adjudicationStatus') ?? 'active',
+        use: 'claim',
+        outcome: getFirst(NS.coverage + 'outcomeCode') ?? 'complete',
+      };
+
+      const adjDate = getFirst(NS.coverage + 'adjudicationDate');
+      if (adjDate) fhirResource.created = adjDate;
+
+      const denialReason = getFirst(NS.coverage + 'denialReason');
+      if (denialReason) {
+        fhirResource.adjudication = [{ reason: { text: denialReason } }];
+      }
+
+      const totalBilled = getFirst(NS.coverage + 'totalBilled');
+      const totalPaid = getFirst(NS.coverage + 'totalPaid');
+      const totalArr: any[] = [];
+      if (totalBilled) totalArr.push({ category: { coding: [{ code: 'submitted' }] }, amount: { value: parseFloat(totalBilled) } });
+      if (totalPaid) totalArr.push({ category: { coding: [{ code: 'benefit' }] }, amount: { value: parseFloat(totalPaid) } });
+      if (totalArr.length > 0) fhirResource.total = totalArr;
+
+      const claimRef = getFirst(NS.coverage + 'relatedClaim');
+      if (claimRef) fhirResource.claim = { reference: claimRef };
+
+      const srcId = getFirst(NS.coverage + 'sourceRecordId');
+      if (srcId) fhirResource.id = srcId;
+
+      resources.push(fhirResource);
+    } else if (getFirst(NS.cascade + 'layerPromotionStatus') === NS.cascade + 'PendingLayerTwoPromotion') {
+      // Layer 1 passthrough — restore original FHIR JSON verbatim
+      const fhirJson = getFirst(NS.cascade + 'fhirJson');
+      if (fhirJson) {
+        try {
+          const originalResource = JSON.parse(fhirJson);
+          resources.push(originalResource);
+        } catch {
+          warnings.push(`Failed to parse passthrough FHIR JSON for subject: ${subjectUri}`);
+        }
+      } else {
+        const resourceType = getFirst(NS.cascade + 'fhirResourceType') ?? 'Unknown';
+        warnings.push(`Passthrough record for ${resourceType} has no cascade:fhirJson — cannot restore (minimal mode?)`);
+      }
     } else {
       warnings.push(`Unknown Cascade RDF type: ${rdfType}`);
     }

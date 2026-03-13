@@ -5,8 +5,12 @@
  * provides the main public conversion functions.
  *
  * Individual converters are in:
- *   - converters-clinical.ts     Medications, conditions, allergies, observations
- *   - converters-demographics.ts Patient, immunization, coverage
+ *   - converters-clinical.ts      Medications, conditions, allergies, observations,
+ *                                  procedures, encounters, clinical documents, lab reports,
+ *                                  medication admin, devices, imaging studies
+ *   - converters-demographics.ts  Patient, immunization, coverage
+ *   - converters-clinical-admin.ts Claim, ExplanationOfBenefit
+ *   - converters-passthrough.ts   Layer 1 FHIR passthrough for unknown types
  */
 
 import type { Quad } from 'n3';
@@ -20,6 +24,13 @@ import {
   isVitalSignObservation,
   convertObservationLab,
   convertObservationVital,
+  convertProcedure,
+  convertClinicalDocument,
+  convertEncounter,
+  convertLaboratoryReport,
+  convertMedicationAdministration,
+  convertDevice,
+  convertImagingStudy,
 } from './converters-clinical.js';
 
 import {
@@ -27,6 +38,16 @@ import {
   convertImmunization,
   convertCoverage,
 } from './converters-demographics.js';
+
+import {
+  convertClaim,
+  convertExplanationOfBenefit,
+} from './converters-clinical-admin.js';
+
+import {
+  convertFhirPassthrough,
+  EXCLUDED_TYPES,
+} from './converters-passthrough.js';
 
 // ---------------------------------------------------------------------------
 // Main dispatcher: single FHIR resource -> Cascade
@@ -55,18 +76,43 @@ export function convertFhirResourceToQuads(fhirResource: any): (ConversionResult
       return convertImmunization(fhirResource);
     case 'Coverage':
       return convertCoverage(fhirResource);
-    default:
-      return null;
+    case 'Procedure':
+      return convertProcedure(fhirResource);
+    case 'DocumentReference':
+      return convertClinicalDocument(fhirResource);
+    case 'Encounter':
+      return convertEncounter(fhirResource);
+    case 'DiagnosticReport':
+      return convertLaboratoryReport(fhirResource);
+    case 'MedicationAdministration':
+      return convertMedicationAdministration(fhirResource);
+    case 'Device':
+      return convertDevice(fhirResource);
+    case 'ImagingStudy':
+      return convertImagingStudy(fhirResource);
+    case 'Claim':
+      return convertClaim(fhirResource);
+    case 'ExplanationOfBenefit':
+      return convertExplanationOfBenefit(fhirResource);
+    default: {
+      if (EXCLUDED_TYPES.has(resourceType)) {
+        // Intentionally excluded — log to manifest as excluded, return null
+        return null;
+      }
+      // Layer 1 passthrough for everything else
+      return convertFhirPassthrough(fhirResource);
+    }
   }
 }
 
 export async function convertFhirToCascade(fhirResource: any): Promise<ConversionResult> {
   const result = convertFhirResourceToQuads(fhirResource);
   if (!result) {
+    const resourceType = fhirResource?.resourceType ?? 'unknown';
     return {
       turtle: '',
-      warnings: [`Unsupported FHIR resource type: ${fhirResource?.resourceType ?? 'unknown'}`],
-      resourceType: fhirResource?.resourceType ?? 'unknown',
+      warnings: [`Unsupported FHIR resource type: ${resourceType}`],
+      resourceType,
       cascadeType: 'unknown',
     };
   }
