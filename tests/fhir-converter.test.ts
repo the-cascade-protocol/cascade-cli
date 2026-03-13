@@ -20,6 +20,13 @@ import {
   convertObservationLab,
   convertObservationVital,
   isVitalSignObservation,
+  convertProcedure,
+  convertClinicalDocument,
+  convertEncounter,
+  convertLaboratoryReport,
+  convertMedicationAdministration,
+  convertDevice,
+  convertImagingStudy,
 } from '../src/lib/fhir-converter/converters-clinical.js';
 import {
   convertPatient,
@@ -27,10 +34,23 @@ import {
   convertCoverage,
 } from '../src/lib/fhir-converter/converters-demographics.js';
 import {
+  convertClaim,
+  convertExplanationOfBenefit,
+} from '../src/lib/fhir-converter/converters-clinical-admin.js';
+import {
+  convertFhirPassthrough,
+  EXCLUDED_TYPES,
+  EXCLUDED_REASONS,
+} from '../src/lib/fhir-converter/converters-passthrough.js';
+import {
+  buildImportManifest,
+} from '../src/lib/fhir-converter/import-manifest.js';
+import {
   NS,
   ensureDateTimeWithTz,
   extractCodings,
   codeableConceptText,
+  mintSubjectUri,
 } from '../src/lib/fhir-converter/types.js';
 
 // =============================================================================
@@ -758,7 +778,9 @@ describe('Batch conversion', () => {
 
     const result = await convert(JSON.stringify(bundle), 'fhir', 'turtle');
     expect(result.success).toBe(true);
-    expect(result.resourceCount).toBe(1);
+    // Practitioner is now preserved as a Layer 1 passthrough, so resourceCount is 2
+    expect(result.resourceCount).toBe(2);
+    // Passthrough warning is emitted for Practitioner
     expect(result.warnings.some(w => w.includes('Practitioner'))).toBe(true);
   });
 
@@ -797,9 +819,12 @@ describe('Batch conversion', () => {
 // =============================================================================
 
 describe('Edge cases', () => {
-  it('should return null for unknown resource types', () => {
+  it('should return passthrough result for unknown resource types', () => {
     const result = convertFhirResourceToQuads({ resourceType: 'Practitioner' });
-    expect(result).toBeNull();
+    // Unknown types are now preserved as Layer 1 passthrough, not null
+    expect(result).not.toBeNull();
+    expect(result?.cascadeType).toBe('fhir:Practitioner');
+    expect(result?.warnings.some(w => w.includes('Layer 1 passthrough'))).toBe(true);
   });
 
   it('should return null for resources without resourceType', () => {
@@ -808,7 +833,8 @@ describe('Edge cases', () => {
   });
 
   it('should handle empty/null input gracefully via convertFhirToCascade', async () => {
-    const result = await convertFhirToCascade({ resourceType: 'Encounter' });
+    // Encounter is now a fully mapped type — use a truly unsupported resourceType
+    const result = await convertFhirToCascade({ resourceType: undefined });
     expect(result.turtle).toBe('');
     expect(result.warnings.some(w => w.includes('Unsupported'))).toBe(true);
     expect(result.cascadeType).toBe('unknown');
@@ -870,5 +896,675 @@ describe('Edge cases', () => {
     const quads = result._quads;
     expect(findQuadValue(quads, NS.cascade + 'dataProvenance')).toBe(NS.cascade + 'ClinicalGenerated');
     expect(findQuadValue(quads, NS.cascade + 'schemaVersion')).toBe('1.3');
+  });
+});
+
+// =============================================================================
+// Tests: mintSubjectUri (Phase A)
+// =============================================================================
+
+describe('mintSubjectUri', () => {
+  it('should return urn:uuid: prefixed URI', () => {
+    const result = mintSubjectUri({ resourceType: 'Patient', id: 'test-id' });
+    expect(result).toMatch(/^urn:uuid:/);
+  });
+
+  it('should return deterministic URI for valid UUID v4 id', () => {
+    const resource = { resourceType: 'Patient', id: '550e8400-e29b-41d4-a716-446655440000' };
+    const result1 = mintSubjectUri(resource);
+    const result2 = mintSubjectUri(resource);
+    expect(result1).toBe(result2);
+    expect(result1).toBe('urn:uuid:550e8400-e29b-41d4-a716-446655440000');
+  });
+
+  it('should return deterministic URI for non-UUID id (hash-based)', () => {
+    const resource = { resourceType: 'Condition', id: 'cond-abc-123' };
+    const result1 = mintSubjectUri(resource);
+    const result2 = mintSubjectUri(resource);
+    expect(result1).toBe(result2);
+    expect(result1).toMatch(/^urn:uuid:[0-9a-f-]{36}$/);
+  });
+
+  it('should return different URIs for different resourceType+id combinations', () => {
+    const r1 = mintSubjectUri({ resourceType: 'Patient', id: 'abc' });
+    const r2 = mintSubjectUri({ resourceType: 'Condition', id: 'abc' });
+    expect(r1).not.toBe(r2);
+  });
+
+  it('should return random UUID when no id present', () => {
+    const r1 = mintSubjectUri({ resourceType: 'Patient' });
+    const r2 = mintSubjectUri({ resourceType: 'Patient' });
+    expect(r1).toMatch(/^urn:uuid:/);
+    // Two calls with no id should produce different URIs
+    expect(r1).not.toBe(r2);
+  });
+});
+
+// =============================================================================
+// Tests: New FHIR -> Cascade converters (Phase B)
+// =============================================================================
+
+const sampleProcedure = {
+  resourceType: 'Procedure',
+  id: 'proc-1',
+  status: 'completed',
+  code: {
+    coding: [
+      { system: 'http://snomed.info/sct', code: '80146002', display: 'Appendectomy' },
+    ],
+    text: 'Appendectomy',
+  },
+  performedDateTime: '2023-06-15T10:00:00Z',
+};
+
+const sampleDocumentReference = {
+  resourceType: 'DocumentReference',
+  id: 'doc-1',
+  status: 'current',
+  type: {
+    coding: [{ display: 'Discharge Summary' }],
+    text: 'Discharge Summary',
+  },
+  date: '2023-06-16T14:00:00Z',
+  content: [
+    {
+      attachment: {
+        contentType: 'application/pdf',
+        url: 'https://example.org/docs/discharge-1.pdf',
+        title: 'Discharge Summary June 2023',
+      },
+    },
+  ],
+};
+
+const sampleEncounter = {
+  resourceType: 'Encounter',
+  id: 'enc-1',
+  status: 'finished',
+  class: { code: 'AMB', system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode' },
+  type: [
+    {
+      coding: [{ system: 'http://snomed.info/sct', code: '11429006', display: 'Consultation' }],
+      text: 'Consultation',
+    },
+  ],
+  period: {
+    start: '2023-06-15T09:00:00Z',
+    end: '2023-06-15T10:30:00Z',
+  },
+  participant: [
+    { individual: { display: 'Dr. Jane Smith' } },
+  ],
+  serviceProvider: { display: 'General Hospital' },
+};
+
+const sampleDiagnosticReport = {
+  resourceType: 'DiagnosticReport',
+  id: 'dr-1',
+  status: 'final',
+  category: [{ coding: [{ code: 'LAB' }] }],
+  code: {
+    coding: [{ system: 'http://loinc.org', code: '58410-2', display: 'Complete Blood Count' }],
+    text: 'Complete Blood Count',
+  },
+  effectiveDateTime: '2023-06-15T08:00:00Z',
+  performer: [{ display: 'Quest Diagnostics' }],
+  result: [
+    { reference: 'Observation/obs-wbc-1' },
+    { reference: 'Observation/obs-rbc-1' },
+  ],
+};
+
+const sampleMedicationAdmin = {
+  resourceType: 'MedicationAdministration',
+  id: 'medadmin-1',
+  status: 'completed',
+  medicationCodeableConcept: {
+    coding: [{ display: 'Cefazolin 1g IV' }],
+    text: 'Cefazolin 1g IV',
+  },
+  effectiveDateTime: '2023-06-15T07:30:00Z',
+  dosage: {
+    dose: { value: 1, unit: 'g' },
+    route: { coding: [{ display: 'Intravenous' }], text: 'Intravenous' },
+  },
+};
+
+const sampleDevice = {
+  resourceType: 'Device',
+  id: 'dev-1',
+  status: 'active',
+  type: {
+    coding: [{ display: 'Cardiac Pacemaker' }],
+    text: 'Cardiac Pacemaker',
+  },
+  manufacturer: 'Medtronic',
+  udiCarrier: [{ deviceIdentifier: '00844588003288' }],
+  manufactureDate: '2022-01-15T00:00:00Z',
+};
+
+const sampleImagingStudy = {
+  resourceType: 'ImagingStudy',
+  id: 'img-1',
+  status: 'available',
+  started: '2023-06-14T11:00:00Z',
+  description: 'CT Abdomen with contrast',
+  numberOfSeries: 3,
+  series: [
+    { modality: { code: 'CT' } },
+  ],
+  identifier: [{ value: '2.16.840.1.113883.19.5.99999.1' }],
+};
+
+const sampleClaim = {
+  resourceType: 'Claim',
+  id: 'claim-1',
+  status: 'active',
+  type: { coding: [{ code: 'professional' }] },
+  created: '2023-06-20T00:00:00Z',
+  provider: { display: 'General Hospital' },
+  total: { value: 1250.00 },
+  diagnosis: [
+    {
+      sequence: 1,
+      diagnosisCodeableConcept: {
+        coding: [{ system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'K37', display: 'Appendicitis' }],
+      },
+    },
+  ],
+};
+
+const sampleEOB = {
+  resourceType: 'ExplanationOfBenefit',
+  id: 'eob-1',
+  status: 'active',
+  outcome: 'complete',
+  created: '2023-06-25T00:00:00Z',
+  claim: { reference: 'Claim/claim-1' },
+  total: [
+    { category: { coding: [{ code: 'submitted' }] }, amount: { value: 1250.00 } },
+    { category: { coding: [{ code: 'benefit' }] }, amount: { value: 800.00 } },
+    { category: { coding: [{ code: 'patientpay' }] }, amount: { value: 450.00 } },
+  ],
+};
+
+describe('Procedure -> clinical:Procedure', () => {
+  it('should convert Procedure to clinical:Procedure', () => {
+    const result = convertProcedure(sampleProcedure);
+    expect(result.cascadeType).toBe('clinical:Procedure');
+    expect(result.resourceType).toBe('Procedure');
+
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.rdf + 'type')).toBe(NS.clinical + 'Procedure');
+    expect(findQuadValue(quads, NS.clinical + 'procedureName')).toBe('Appendectomy');
+    expect(findQuadValue(quads, NS.clinical + 'procedureStatus')).toBe('completed');
+    expect(findQuadValue(quads, NS.clinical + 'sourceRecordId')).toBe('proc-1');
+  });
+
+  it('should extract SNOMED code', () => {
+    const result = convertProcedure(sampleProcedure);
+    const snomedCodes = findAllQuadValues(result._quads, NS.clinical + 'procedureSnomedCode');
+    expect(snomedCodes).toContain(NS.sct + '80146002');
+  });
+
+  it('should extract performedDate', () => {
+    const result = convertProcedure(sampleProcedure);
+    expect(findQuadValue(result._quads, NS.clinical + 'performedDate')).toBeTruthy();
+  });
+
+  it('should be annotated FullyMapped', () => {
+    const result = convertProcedure(sampleProcedure);
+    expect(findQuadValue(result._quads, NS.cascade + 'layerPromotionStatus')).toBe(NS.cascade + 'FullyMapped');
+  });
+
+  it('should round-trip Procedure', async () => {
+    const fhirResult = await convertFhirToCascade(sampleProcedure);
+    expect(fhirResult.turtle).toBeTruthy();
+
+    const reverseResult = await convertCascadeToFhir(fhirResult.turtle);
+    expect(reverseResult.resources).toHaveLength(1);
+    const fhir = reverseResult.resources[0];
+    expect(fhir.resourceType).toBe('Procedure');
+    expect(fhir.code.text).toBe('Appendectomy');
+    expect(fhir.id).toBe('proc-1');
+  });
+});
+
+describe('DocumentReference -> clinical:ClinicalDocument', () => {
+  it('should convert DocumentReference to clinical:ClinicalDocument', () => {
+    const result = convertClinicalDocument(sampleDocumentReference);
+    expect(result.cascadeType).toBe('clinical:ClinicalDocument');
+
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.clinical + 'documentType')).toBe('Discharge Summary');
+    expect(findQuadValue(quads, NS.clinical + 'contentType')).toBe('application/pdf');
+    expect(findQuadValue(quads, NS.clinical + 'sourceRecordId')).toBe('doc-1');
+  });
+
+  it('should be annotated FullyMapped', () => {
+    const result = convertClinicalDocument(sampleDocumentReference);
+    expect(findQuadValue(result._quads, NS.cascade + 'layerPromotionStatus')).toBe(NS.cascade + 'FullyMapped');
+  });
+});
+
+describe('Encounter -> clinical:Encounter', () => {
+  it('should convert Encounter to clinical:Encounter', () => {
+    const result = convertEncounter(sampleEncounter);
+    expect(result.cascadeType).toBe('clinical:Encounter');
+
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.rdf + 'type')).toBe(NS.clinical + 'Encounter');
+    expect(findQuadValue(quads, NS.clinical + 'encounterClass')).toBe('AMB');
+    expect(findQuadValue(quads, NS.clinical + 'encounterStatus')).toBe('finished');
+    expect(findQuadValue(quads, NS.clinical + 'encounterType')).toBe('Consultation');
+    expect(findQuadValue(quads, NS.clinical + 'providerName')).toBe('Dr. Jane Smith');
+    expect(findQuadValue(quads, NS.clinical + 'facilityName')).toBe('General Hospital');
+    expect(findQuadValue(quads, NS.clinical + 'sourceRecordId')).toBe('enc-1');
+  });
+
+  it('should extract period start and end', () => {
+    const result = convertEncounter(sampleEncounter);
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.clinical + 'encounterStart')).toBeTruthy();
+    expect(findQuadValue(quads, NS.clinical + 'encounterEnd')).toBeTruthy();
+  });
+
+  it('should extract SNOMED encounter code', () => {
+    const result = convertEncounter(sampleEncounter);
+    const snomedCodes = findAllQuadValues(result._quads, NS.clinical + 'snomedCode');
+    expect(snomedCodes).toContain(NS.sct + '11429006');
+  });
+
+  it('should be annotated FullyMapped', () => {
+    const result = convertEncounter(sampleEncounter);
+    expect(findQuadValue(result._quads, NS.cascade + 'layerPromotionStatus')).toBe(NS.cascade + 'FullyMapped');
+  });
+
+  it('should round-trip Encounter', async () => {
+    const fhirResult = await convertFhirToCascade(sampleEncounter);
+    const reverseResult = await convertCascadeToFhir(fhirResult.turtle);
+
+    expect(reverseResult.resources).toHaveLength(1);
+    const fhir = reverseResult.resources[0];
+    expect(fhir.resourceType).toBe('Encounter');
+    expect(fhir.status).toBe('finished');
+    expect(fhir.id).toBe('enc-1');
+  });
+});
+
+describe('DiagnosticReport -> clinical:LaboratoryReport', () => {
+  it('should convert DiagnosticReport to clinical:LaboratoryReport', () => {
+    const result = convertLaboratoryReport(sampleDiagnosticReport);
+    expect(result.cascadeType).toBe('clinical:LaboratoryReport');
+
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.rdf + 'type')).toBe(NS.clinical + 'LaboratoryReport');
+    expect(findQuadValue(quads, NS.clinical + 'panelName')).toBe('Complete Blood Count');
+    expect(findQuadValue(quads, NS.clinical + 'reportCategory')).toBe('LAB');
+    expect(findQuadValue(quads, NS.clinical + 'providerName')).toBe('Quest Diagnostics');
+    expect(findQuadValue(quads, NS.clinical + 'sourceRecordId')).toBe('dr-1');
+  });
+
+  it('should link hasLabResult to constituent observations', () => {
+    const result = convertLaboratoryReport(sampleDiagnosticReport);
+    const labResults = findAllQuadValues(result._quads, NS.clinical + 'hasLabResult');
+    expect(labResults).toHaveLength(2);
+    expect(labResults).toContain('urn:uuid:obs-wbc-1');
+    expect(labResults).toContain('urn:uuid:obs-rbc-1');
+  });
+
+  it('should extract LOINC code', () => {
+    const result = convertLaboratoryReport(sampleDiagnosticReport);
+    const loincCodes = findAllQuadValues(result._quads, NS.clinical + 'loincCode');
+    expect(loincCodes).toContain(NS.loinc + '58410-2');
+  });
+
+  it('should be annotated FullyMapped', () => {
+    const result = convertLaboratoryReport(sampleDiagnosticReport);
+    expect(findQuadValue(result._quads, NS.cascade + 'layerPromotionStatus')).toBe(NS.cascade + 'FullyMapped');
+  });
+});
+
+describe('MedicationAdministration -> clinical:MedicationAdministration', () => {
+  it('should convert MedicationAdministration', () => {
+    const result = convertMedicationAdministration(sampleMedicationAdmin);
+    expect(result.cascadeType).toBe('clinical:MedicationAdministration');
+
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.health + 'medicationName')).toBe('Cefazolin 1g IV');
+    expect(findQuadValue(quads, NS.clinical + 'administrationStatus')).toBe('completed');
+    expect(findQuadValue(quads, NS.clinical + 'administeredRoute')).toBe('Intravenous');
+    expect(findQuadValue(quads, NS.clinical + 'sourceRecordId')).toBe('medadmin-1');
+  });
+
+  it('should be annotated FullyMapped', () => {
+    const result = convertMedicationAdministration(sampleMedicationAdmin);
+    expect(findQuadValue(result._quads, NS.cascade + 'layerPromotionStatus')).toBe(NS.cascade + 'FullyMapped');
+  });
+
+  it('should round-trip MedicationAdministration', async () => {
+    const fhirResult = await convertFhirToCascade(sampleMedicationAdmin);
+    const reverseResult = await convertCascadeToFhir(fhirResult.turtle);
+
+    expect(reverseResult.resources).toHaveLength(1);
+    const fhir = reverseResult.resources[0];
+    expect(fhir.resourceType).toBe('MedicationAdministration');
+    expect(fhir.status).toBe('completed');
+    expect(fhir.id).toBe('medadmin-1');
+  });
+});
+
+describe('Device -> clinical:ImplantedDevice', () => {
+  it('should convert Device to clinical:ImplantedDevice', () => {
+    const result = convertDevice(sampleDevice);
+    expect(result.cascadeType).toBe('clinical:ImplantedDevice');
+
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.rdf + 'type')).toBe(NS.clinical + 'ImplantedDevice');
+    expect(findQuadValue(quads, NS.clinical + 'deviceType')).toBe('Cardiac Pacemaker');
+    expect(findQuadValue(quads, NS.clinical + 'deviceManufacturer')).toBe('Medtronic');
+    expect(findQuadValue(quads, NS.clinical + 'udiCarrier')).toBe('00844588003288');
+    expect(findQuadValue(quads, NS.clinical + 'deviceStatus')).toBe('active');
+    expect(findQuadValue(quads, NS.clinical + 'sourceRecordId')).toBe('dev-1');
+  });
+
+  it('should be annotated FullyMapped', () => {
+    const result = convertDevice(sampleDevice);
+    expect(findQuadValue(result._quads, NS.cascade + 'layerPromotionStatus')).toBe(NS.cascade + 'FullyMapped');
+  });
+
+  it('should round-trip Device', async () => {
+    const fhirResult = await convertFhirToCascade(sampleDevice);
+    const reverseResult = await convertCascadeToFhir(fhirResult.turtle);
+
+    expect(reverseResult.resources).toHaveLength(1);
+    const fhir = reverseResult.resources[0];
+    expect(fhir.resourceType).toBe('Device');
+    expect(fhir.type.text).toBe('Cardiac Pacemaker');
+    expect(fhir.id).toBe('dev-1');
+  });
+});
+
+describe('ImagingStudy -> clinical:ImagingStudy', () => {
+  it('should convert ImagingStudy', () => {
+    const result = convertImagingStudy(sampleImagingStudy);
+    expect(result.cascadeType).toBe('clinical:ImagingStudy');
+
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.rdf + 'type')).toBe(NS.clinical + 'ImagingStudy');
+    expect(findQuadValue(quads, NS.clinical + 'imagingModality')).toBe('CT');
+    expect(findQuadValue(quads, NS.clinical + 'studyDescription')).toBe('CT Abdomen with contrast');
+    expect(findQuadValue(quads, NS.clinical + 'dicomStudyUid')).toBe('2.16.840.1.113883.19.5.99999.1');
+    expect(findQuadValue(quads, NS.clinical + 'sourceRecordId')).toBe('img-1');
+  });
+
+  it('should be annotated FullyMapped', () => {
+    const result = convertImagingStudy(sampleImagingStudy);
+    expect(findQuadValue(result._quads, NS.cascade + 'layerPromotionStatus')).toBe(NS.cascade + 'FullyMapped');
+  });
+});
+
+describe('Claim -> coverage:ClaimRecord', () => {
+  it('should convert Claim to coverage:ClaimRecord', () => {
+    const result = convertClaim(sampleClaim);
+    expect(result.cascadeType).toBe('coverage:ClaimRecord');
+
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.rdf + 'type')).toBe(NS.coverage + 'ClaimRecord');
+    expect(findQuadValue(quads, NS.coverage + 'claimStatus')).toBe('active');
+    expect(findQuadValue(quads, NS.coverage + 'claimType')).toBe('professional');
+    expect(findQuadValue(quads, NS.coverage + 'billingProvider')).toBe('General Hospital');
+    expect(findQuadValue(quads, NS.coverage + 'sourceRecordId')).toBe('claim-1');
+  });
+
+  it('should extract diagnosis codes', () => {
+    const result = convertClaim(sampleClaim);
+    const diagnoses = findAllQuadValues(result._quads, NS.coverage + 'hasDiagnosis');
+    expect(diagnoses).toContain('K37');
+  });
+
+  it('should be annotated FullyMapped', () => {
+    const result = convertClaim(sampleClaim);
+    expect(findQuadValue(result._quads, NS.cascade + 'layerPromotionStatus')).toBe(NS.cascade + 'FullyMapped');
+  });
+
+  it('should round-trip Claim', async () => {
+    const fhirResult = await convertFhirToCascade(sampleClaim);
+    const reverseResult = await convertCascadeToFhir(fhirResult.turtle);
+
+    expect(reverseResult.resources).toHaveLength(1);
+    const fhir = reverseResult.resources[0];
+    expect(fhir.resourceType).toBe('Claim');
+    expect(fhir.status).toBe('active');
+    expect(fhir.id).toBe('claim-1');
+  });
+});
+
+describe('ExplanationOfBenefit -> coverage:BenefitStatement', () => {
+  it('should convert ExplanationOfBenefit to coverage:BenefitStatement', () => {
+    const result = convertExplanationOfBenefit(sampleEOB);
+    expect(result.cascadeType).toBe('coverage:BenefitStatement');
+
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.rdf + 'type')).toBe(NS.coverage + 'BenefitStatement');
+    expect(findQuadValue(quads, NS.coverage + 'adjudicationStatus')).toBe('active');
+    expect(findQuadValue(quads, NS.coverage + 'outcomeCode')).toBe('complete');
+    expect(findQuadValue(quads, NS.coverage + 'sourceRecordId')).toBe('eob-1');
+  });
+
+  it('should extract totals', () => {
+    const result = convertExplanationOfBenefit(sampleEOB);
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.coverage + 'totalBilled')).toBe('1250');
+    expect(findQuadValue(quads, NS.coverage + 'totalPaid')).toBe('800');
+    expect(findQuadValue(quads, NS.coverage + 'patientResponsibility')).toBe('450');
+  });
+
+  it('should link relatedClaim', () => {
+    const result = convertExplanationOfBenefit(sampleEOB);
+    const relatedClaim = findQuadValue(result._quads, NS.coverage + 'relatedClaim');
+    expect(relatedClaim).toBeTruthy();
+    expect(relatedClaim).toContain('claim-1');
+  });
+
+  it('should be annotated FullyMapped', () => {
+    const result = convertExplanationOfBenefit(sampleEOB);
+    expect(findQuadValue(result._quads, NS.cascade + 'layerPromotionStatus')).toBe(NS.cascade + 'FullyMapped');
+  });
+
+  it('should round-trip ExplanationOfBenefit', async () => {
+    const fhirResult = await convertFhirToCascade(sampleEOB);
+    const reverseResult = await convertCascadeToFhir(fhirResult.turtle);
+
+    expect(reverseResult.resources).toHaveLength(1);
+    const fhir = reverseResult.resources[0];
+    expect(fhir.resourceType).toBe('ExplanationOfBenefit');
+    expect(fhir.id).toBe('eob-1');
+  });
+});
+
+// =============================================================================
+// Tests: Layer 1 passthrough (Phase B4)
+// =============================================================================
+
+describe('Layer 1 FHIR passthrough', () => {
+  const sampleUnknownResource = {
+    resourceType: 'Practitioner',
+    id: 'prac-1',
+    name: [{ text: 'Dr. Unknown' }],
+    date: '2023-01-01',
+  };
+
+  it('should preserve unknown resource types as passthrough', () => {
+    const result = convertFhirPassthrough(sampleUnknownResource);
+    expect(result.cascadeType).toBe('fhir:Practitioner');
+    expect(result.resourceType).toBe('Practitioner');
+
+    const quads = result._quads;
+    expect(findQuadValue(quads, NS.cascade + 'layerPromotionStatus')).toBe(NS.cascade + 'PendingLayerTwoPromotion');
+    expect(findQuadValue(quads, NS.cascade + 'fhirResourceType')).toBe('Practitioner');
+  });
+
+  it('should embed original FHIR JSON in cascade:fhirJson', () => {
+    const result = convertFhirPassthrough(sampleUnknownResource);
+    const fhirJson = findQuadValue(result._quads, NS.cascade + 'fhirJson');
+    expect(fhirJson).toBeTruthy();
+    const parsed = JSON.parse(fhirJson!);
+    expect(parsed.resourceType).toBe('Practitioner');
+    expect(parsed.id).toBe('prac-1');
+  });
+
+  it('should emit a passthrough warning', () => {
+    const result = convertFhirPassthrough(sampleUnknownResource);
+    expect(result.warnings.some(w => w.includes('Layer 1 passthrough'))).toBe(true);
+  });
+
+  it('should produce a round-trip-identical FHIR resource via cascade-to-fhir', async () => {
+    const fhirResult = await convertFhirToCascade(sampleUnknownResource);
+    expect(fhirResult.turtle).toBeTruthy();
+    expect(fhirResult.cascadeType).toBe('fhir:Practitioner');
+
+    const reverseResult = await convertCascadeToFhir(fhirResult.turtle);
+    expect(reverseResult.resources).toHaveLength(1);
+    const restored = reverseResult.resources[0];
+    expect(restored.resourceType).toBe('Practitioner');
+    expect(restored.id).toBe('prac-1');
+  });
+
+  it('should have EXCLUDED_TYPES for intentionally excluded resources', () => {
+    expect(EXCLUDED_TYPES.has('SupplyDelivery')).toBe(true);
+    expect(EXCLUDED_TYPES.has('CareTeam')).toBe(true);
+    expect(EXCLUDED_TYPES.has('CarePlan')).toBe(true);
+    expect(EXCLUDED_TYPES.has('Provenance')).toBe(true);
+    expect(EXCLUDED_TYPES.has('Medication')).toBe(true);
+  });
+
+  it('should have documented reasons for all excluded types', () => {
+    for (const type of EXCLUDED_TYPES) {
+      expect(EXCLUDED_REASONS[type]).toBeTruthy();
+    }
+  });
+
+  it('should skip excluded types in batch conversion with a warning', async () => {
+    const bundle = {
+      resourceType: 'Bundle',
+      type: 'collection',
+      entry: [
+        { resource: sampleClaim },
+        { resource: { resourceType: 'SupplyDelivery', id: 'sd-1' } },
+      ],
+    };
+    const result = await convert(JSON.stringify(bundle), 'fhir', 'turtle');
+    expect(result.success).toBe(true);
+    expect(result.resourceCount).toBe(1); // Only Claim converted
+    expect(result.warnings.some(w => w.includes('SupplyDelivery'))).toBe(true);
+  });
+});
+
+// =============================================================================
+// Tests: Import manifest (Phase C)
+// =============================================================================
+
+describe('buildImportManifest', () => {
+  it('should build a manifest from BatchConversionResult', () => {
+    const batchResult = {
+      success: true,
+      output: '',
+      format: 'turtle' as const,
+      resourceCount: 3,
+      warnings: ['Claim preserved as Layer 1 passthrough — no Layer 2 mapping yet'],
+      errors: [],
+      results: [
+        { turtle: '', warnings: [], resourceType: 'Condition', cascadeType: 'health:ConditionRecord' },
+        { turtle: '', warnings: [], resourceType: 'Procedure', cascadeType: 'clinical:Procedure' },
+        { turtle: '', warnings: ['Practitioner preserved as Layer 1 passthrough — no Layer 2 mapping yet'], resourceType: 'Practitioner', cascadeType: 'fhir:Practitioner' },
+      ],
+    };
+    const manifest = buildImportManifest(batchResult, '/path/to/patient.json', 'primary-care', {});
+
+    expect(manifest.sourceFile).toBe('/path/to/patient.json');
+    expect(manifest.sourceSystem).toBe('primary-care');
+    expect(manifest.summary.total).toBe(3);
+    expect(manifest.summary.fullyMapped).toBe(2);
+    expect(manifest.summary.passthrough).toBe(1);
+    expect(manifest.summary.excluded).toBe(0);
+    expect(manifest.byType['Condition'].strategy).toBe('mapped');
+    expect(manifest.byType['Procedure'].strategy).toBe('mapped');
+    expect(manifest.byType['Practitioner'].strategy).toBe('passthrough');
+  });
+
+  it('should include excluded types in manifest', () => {
+    const batchResult = {
+      success: true, output: '', format: 'turtle' as const, resourceCount: 1,
+      warnings: [], errors: [],
+      results: [{ turtle: '', warnings: [], resourceType: 'Condition', cascadeType: 'health:ConditionRecord' }],
+    };
+    const manifest = buildImportManifest(batchResult, 'test.json', 'test', { SupplyDelivery: 5 });
+
+    expect(manifest.summary.excluded).toBe(5);
+    expect(manifest.summary.total).toBe(6);
+    expect(manifest.byType['SupplyDelivery'].strategy).toBe('excluded');
+    expect(manifest.byType['SupplyDelivery'].reason).toBeTruthy();
+  });
+
+  it('should produce a manifest with convertedAt timestamp', () => {
+    const batchResult = {
+      success: true, output: '', format: 'turtle' as const, resourceCount: 0,
+      warnings: [], errors: [], results: [],
+    };
+    const manifest = buildImportManifest(batchResult, 'test.json', 'test', {});
+    expect(manifest.convertedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+// =============================================================================
+// Tests: Batch conversion with new types
+// =============================================================================
+
+describe('Batch conversion with all new types', () => {
+  it('should convert a FHIR bundle with all new Layer 2 types', async () => {
+    const bundle = {
+      resourceType: 'Bundle',
+      type: 'collection',
+      entry: [
+        { resource: sampleProcedure },
+        { resource: sampleEncounter },
+        { resource: sampleDiagnosticReport },
+        { resource: sampleMedicationAdmin },
+        { resource: sampleDevice },
+        { resource: sampleClaim },
+        { resource: sampleEOB },
+      ],
+    };
+
+    const result = await convert(JSON.stringify(bundle), 'fhir', 'turtle');
+    expect(result.success).toBe(true);
+    expect(result.resourceCount).toBe(7);
+    expect(result.output).toContain('clinical:Procedure');
+    expect(result.output).toContain('clinical:Encounter');
+    expect(result.output).toContain('clinical:LaboratoryReport');
+    expect(result.output).toContain('clinical:MedicationAdministration');
+    expect(result.output).toContain('clinical:ImplantedDevice');
+    expect(result.output).toContain('coverage:ClaimRecord');
+    expect(result.output).toContain('coverage:BenefitStatement');
+  });
+
+  it('should passthrough unknown types with zero silent drops', async () => {
+    const bundle = {
+      resourceType: 'Bundle',
+      type: 'collection',
+      entry: [
+        { resource: sampleCondition },
+        { resource: { resourceType: 'Practitioner', id: 'prac-2', name: [{ text: 'Test' }] } },
+        { resource: { resourceType: 'Organization', id: 'org-1', name: 'Test Hospital' } },
+      ],
+    };
+
+    const result = await convert(JSON.stringify(bundle), 'fhir', 'turtle');
+    expect(result.success).toBe(true);
+    // All 3 resources should be in results (1 Layer 2, 2 passthrough)
+    expect(result.resourceCount).toBe(3);
+    // Passthrough resources should be in the output TTL
+    expect(result.output).toContain('PendingLayerTwoPromotion');
   });
 });
