@@ -18,9 +18,12 @@
  */
 
 import { Command } from 'commander';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, basename, join } from 'node:path';
 import { printResult, printError, printVerbose, type OutputOptions } from '../lib/output.js';
 import { convert, detectFormat, type InputFormat, type OutputFormat } from '../lib/fhir-converter/index.js';
+import { buildImportManifest } from '../lib/fhir-converter/import-manifest.js';
+import { EXCLUDED_TYPES } from '../lib/fhir-converter/converters-passthrough.js';
 
 /**
  * Read input from file or stdin.
@@ -44,10 +47,11 @@ export function registerConvertCommand(program: Command): void {
     .requiredOption('--to <format>', 'Target format (turtle|jsonld|fhir|cascade)')
     .option('--format <output>', 'Output serialization format (turtle|jsonld)', 'turtle')
     .option('--source-system <name>', 'Tag all records with a source system name (adds cascade:sourceSystem for reconciliation)')
+    .option('--manifest [file]', 'Write import manifest JSON alongside output (default: {input}-manifest.json). Only applies when --from fhir.')
     .action(
       async (
         file: string | undefined,
-        options: { from: string; to: string; format: string; sourceSystem?: string },
+        options: { from: string; to: string; format: string; sourceSystem?: string; manifest?: string | boolean },
       ) => {
         const globalOpts = program.opts() as OutputOptions;
 
@@ -163,6 +167,45 @@ export function registerConvertCommand(program: Command): void {
           if (result.warnings.length > 0) {
             console.error(`${result.warnings.length} warning${result.warnings.length > 1 ? 's' : ''}`);
           }
+        }
+
+        // Write import manifest if requested (FHIR -> Cascade only)
+        if (options.manifest !== undefined && options.from === 'fhir' && result.success) {
+          // Count excluded types from the source bundle
+          const excludedCounts: Record<string, number> = {};
+          try {
+            const parsed = JSON.parse(input);
+            const resources: any[] =
+              parsed.resourceType === 'Bundle'
+                ? (parsed.entry ?? []).map((e: any) => e.resource).filter(Boolean)
+                : [parsed];
+            for (const res of resources) {
+              if (res?.resourceType && EXCLUDED_TYPES.has(res.resourceType)) {
+                excludedCounts[res.resourceType] = (excludedCounts[res.resourceType] ?? 0) + 1;
+              }
+            }
+          } catch {
+            // Input already validated as parseable JSON above; this should not fail
+          }
+
+          const manifest = buildImportManifest(
+            result,
+            file ?? '<stdin>',
+            options.sourceSystem ?? '',
+            excludedCounts,
+          );
+
+          let manifestPath: string;
+          if (typeof options.manifest === 'string') {
+            manifestPath = options.manifest;
+          } else if (file) {
+            manifestPath = join(dirname(file), `${basename(file, '.json')}-manifest.json`);
+          } else {
+            manifestPath = 'fhir-import-manifest.json';
+          }
+
+          writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+          console.error(`Import manifest written to: ${manifestPath}`);
         }
       },
     );

@@ -32,7 +32,6 @@ import {
   type ConversionResult,
   type BatchConversionResult,
   NS,
-  SUPPORTED_TYPES,
   quadsToTurtle,
   quadsToJsonLd,
 } from './types.js';
