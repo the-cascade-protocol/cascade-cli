@@ -4,6 +4,8 @@
  * Supports both human-readable text and machine-readable JSON output modes.
  */
 
+import { writeSync } from 'node:fs';
+
 export interface OutputOptions {
   json: boolean;
   verbose: boolean;
@@ -46,9 +48,21 @@ function formatSingleItem(item: unknown): string {
 
 /**
  * Print result data to stdout.
+ *
+ * Uses synchronous fs.writeSync() instead of console.log() to bypass Bun's
+ * internal userspace stdout buffer. For large outputs (multi-MB Turtle docs
+ * embedded in JSON), console.log() in a Bun-compiled binary may not flush
+ * the full buffer before the process exits, causing truncated JSON that fails
+ * to parse in the Tauri sidecar host. writeSync() issues a direct OS write(2)
+ * syscall and loops until all bytes are written to fd 1.
  */
 export function printResult(data: unknown, opts: OutputOptions): void {
-  console.log(formatOutput(data, opts));
+  const str = formatOutput(data, opts) + '\n';
+  const buf = Buffer.from(str, 'utf8');
+  let offset = 0;
+  while (offset < buf.length) {
+    offset += writeSync(1, buf, offset, buf.length - offset);
+  }
 }
 
 /**
