@@ -7,7 +7,6 @@
  *   - Coverage -> coverage:InsurancePlan
  */
 
-import { randomUUID } from 'node:crypto';
 import type { Quad } from 'n3';
 
 import {
@@ -22,6 +21,7 @@ import {
   tripleDate,
   commonTriples,
   quadsToJsonLd,
+  mintSubjectUri,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ import {
 
 export function convertPatient(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = `urn:uuid:${randomUUID()}`;
+  const subjectUri = mintSubjectUri(resource);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.cascade + 'PatientProfile'));
@@ -112,7 +112,7 @@ export function convertPatient(resource: any): ConversionResult & { _quads: Quad
 
 export function convertImmunization(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = `urn:uuid:${randomUUID()}`;
+  const subjectUri = mintSubjectUri(resource);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'ImmunizationRecord'));
@@ -194,7 +194,7 @@ export function convertImmunization(resource: any): ConversionResult & { _quads:
 
 export function convertCoverage(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = `urn:uuid:${randomUUID()}`;
+  const subjectUri = mintSubjectUri(resource);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.coverage + 'InsurancePlan'));

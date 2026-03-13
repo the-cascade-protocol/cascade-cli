@@ -5,6 +5,7 @@
  */
 
 import { DataFactory, Writer, type Quad } from 'n3';
+import { randomUUID, createHash } from 'node:crypto';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -98,7 +99,7 @@ export const VITAL_LOINC_CODES: Record<string, { type: string; name: string; uni
 /** FHIR observation categories that indicate vital signs */
 export const VITAL_CATEGORIES = ['vital-signs', 'vital-sign'];
 
-/** Set of FHIR resource types supported for conversion */
+/** Set of FHIR resource types that receive full Layer 2 conversion */
 export const SUPPORTED_TYPES = new Set([
   'MedicationStatement', 'MedicationRequest',
   'Condition',
@@ -107,6 +108,15 @@ export const SUPPORTED_TYPES = new Set([
   'Patient',
   'Immunization',
   'Coverage',
+  'Procedure',
+  'DocumentReference',
+  'Encounter',
+  'DiagnosticReport',
+  'MedicationAdministration',
+  'Device',
+  'ImagingStudy',
+  'Claim',
+  'ExplanationOfBenefit',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -225,6 +235,33 @@ export function tripleDateTime(subject: string, predicate: string, dateStr: stri
 
 export function tripleDate(subject: string, predicate: string, dateStr: string): Quad {
   return tripleTyped(subject, predicate, dateStr, NS.xsd + 'date');
+}
+
+// ---------------------------------------------------------------------------
+// Subject URI minting (deterministic from resource.id)
+// ---------------------------------------------------------------------------
+
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function deterministicUuid(input: string): string {
+  const hash = createHash('sha1').update(input).digest('hex');
+  // Format as a deterministic UUID-shaped string (SHA-1 based, not strict v5)
+  const v = ((parseInt(hash.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, '0');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${v}${hash.slice(18, 20)}-${hash.slice(20, 32)}`;
+}
+
+/**
+ * Mint a deterministic subject URI from a FHIR resource.
+ * - If resource.id is a valid UUID v4: returns urn:uuid:{resource.id}
+ * - If resource.id exists but is not a UUID: returns urn:uuid:{deterministicUuid(resourceType:id)}
+ * - If no resource.id: falls back to a random UUID (last resort)
+ */
+export function mintSubjectUri(resource: any): string {
+  const id = resource?.id as string | undefined;
+  if (!id) return `urn:uuid:${randomUUID()}`;
+  if (UUID_V4_REGEX.test(id)) return `urn:uuid:${id}`;
+  const resourceType = (resource?.resourceType as string) ?? 'Unknown';
+  return `urn:uuid:${deterministicUuid(`${resourceType}:${id}`)}`;
 }
 
 /** Common triples every Cascade resource gets */
