@@ -437,6 +437,46 @@ describe('FHIR -> Cascade converters', () => {
       expect(result.warnings).toContain('No result value found in Observation resource');
     });
 
+    it('should serialize component answers for panel observations (e.g., PRAPARE survey)', () => {
+      const obs = {
+        resourceType: 'Observation',
+        id: 'prapare-1',
+        code: { text: 'PRAPARE' },
+        category: [{ coding: [{ code: 'survey' }] }],
+        effectiveDateTime: '2024-06-01T10:00:00Z',
+        component: [
+          {
+            code: { coding: [{ code: '76501-6', display: 'Afraid of partner', system: 'http://loinc.org' }] },
+            valueCodeableConcept: { coding: [{ code: 'LA32-8', display: 'No' }], text: 'No' },
+          },
+          {
+            code: { text: 'Are you a refugee' },
+            valueCodeableConcept: { text: 'No' },
+          },
+          {
+            code: { text: 'Stress level' },
+            valueQuantity: { value: 3, unit: '/10' },
+          },
+        ],
+      };
+      const result = convertObservationLab(obs);
+      expect(result.warnings).not.toContain('No result value found in Observation resource');
+      const val = findQuadValue(result._quads, NS.health + 'resultValue');
+      expect(val).toContain('Afraid of partner: No');
+      expect(val).toContain('Are you a refugee: No');
+      expect(val).toContain('Stress level: 3 /10');
+    });
+
+    it('should still warn when component array has no extractable answers', () => {
+      const obs = {
+        resourceType: 'Observation',
+        code: { text: 'Empty panel' },
+        component: [{ code: { text: 'Q1' } }], // no value fields on component
+      };
+      const result = convertObservationLab(obs);
+      expect(result.warnings).toContain('No result value found in Observation resource');
+    });
+
     it('should map LOINC test codes', () => {
       const result = convertObservationLab(sampleLabObservation);
       const testCodes = findAllQuadValues(result._quads, NS.health + 'testCode');
@@ -480,6 +520,99 @@ describe('FHIR -> Cascade converters', () => {
       const result = convertObservationVital(sampleVitalObservation);
       expect(findQuadValue(result._quads, NS.clinical + 'interpretation')).toBe('high');
     });
+
+    it('should extract systolic and diastolic from BP panel component observation', () => {
+      const bpPanel = {
+        resourceType: 'Observation',
+        id: 'bp-panel-1',
+        code: {
+          coding: [{ system: 'http://loinc.org', code: '55284-4', display: 'Blood pressure panel' }],
+          text: 'Blood pressure panel with all children optional',
+        },
+        category: [{ coding: [{ code: 'vital-signs' }] }],
+        effectiveDateTime: '2024-01-15T10:30:00Z',
+        component: [
+          {
+            code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Systolic Blood Pressure' }] },
+            valueQuantity: { value: 131, unit: 'mm[Hg]' },
+          },
+          {
+            code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastolic Blood Pressure' }] },
+            valueQuantity: { value: 70, unit: 'mm[Hg]' },
+          },
+        ],
+      };
+      const result = convertObservationVital(bpPanel);
+      expect(result.warnings).not.toContain('No valueQuantity found in vital sign Observation');
+      const quads = result._quads;
+      expect(findQuadValue(quads, NS.clinical + 'bloodPressureSystolicValue')).toBe('131');
+      expect(findQuadValue(quads, NS.clinical + 'bloodPressureSystolicUnit')).toBe('mm[Hg]');
+      expect(findQuadValue(quads, NS.clinical + 'bloodPressureDiastolicValue')).toBe('70');
+      expect(findQuadValue(quads, NS.clinical + 'bloodPressureDiastolicUnit')).toBe('mm[Hg]');
+    });
+
+    it('should still warn when component children have no known LOINC codes', () => {
+      const obs = {
+        resourceType: 'Observation',
+        id: 'panel-unknown-1',
+        code: { coding: [{ system: 'http://loinc.org', code: '99999-9', display: 'Unknown panel' }] },
+        category: [{ coding: [{ code: 'vital-signs' }] }],
+        component: [
+          {
+            code: { coding: [{ system: 'http://loinc.org', code: '99998-8' }] },
+            valueQuantity: { value: 5, unit: 'unit' },
+          },
+        ],
+      };
+      const result = convertObservationVital(obs);
+      expect(result.warnings).toContain('No valueQuantity found in vital sign Observation');
+    });
+
+    it('should fall back to display name slug silently for unmapped vital LOINC codes', () => {
+      const obs = {
+        resourceType: 'Observation',
+        id: 'novel-vital-1',
+        code: {
+          coding: [{ system: 'http://loinc.org', code: '99997-7', display: 'Novel Vital Sign' }],
+          text: 'Novel Vital Sign',
+        },
+        category: [{ coding: [{ code: 'vital-signs' }] }],
+        valueQuantity: { value: 42, unit: 'units' },
+        effectiveDateTime: '2024-01-15T10:30:00Z',
+      };
+      const result = convertObservationVital(obs);
+      // Data preserved, no warning emitted
+      expect(result.warnings).toHaveLength(0);
+      expect(findQuadValue(result._quads, NS.clinical + 'vitalType')).toBe('novel_vital_sign');
+      expect(findQuadValue(result._quads, NS.clinical + 'vitalTypeName')).toBe('Novel Vital Sign');
+      expect(findQuadValue(result._quads, NS.clinical + 'value')).toBe('42');
+    });
+
+    it('should map newly added vital LOINC codes (pain, IOP, pediatric)', () => {
+      const painObs = {
+        resourceType: 'Observation',
+        id: 'pain-1',
+        code: { coding: [{ system: 'http://loinc.org', code: '72514-3' }] },
+        category: [{ coding: [{ code: 'vital-signs' }] }],
+        valueQuantity: { value: 4, unit: '{score}' },
+        effectiveDateTime: '2024-01-15T10:30:00Z',
+      };
+      const painResult = convertObservationVital(painObs);
+      expect(painResult.warnings).toHaveLength(0);
+      expect(findQuadValue(painResult._quads, NS.clinical + 'vitalType')).toBe('painSeverity');
+
+      const iopObs = {
+        resourceType: 'Observation',
+        id: 'iop-1',
+        code: { coding: [{ system: 'http://loinc.org', code: '79893-4' }] },
+        category: [{ coding: [{ code: 'vital-signs' }] }],
+        valueQuantity: { value: 16, unit: 'mm[Hg]' },
+        effectiveDateTime: '2024-01-15T10:30:00Z',
+      };
+      const iopResult = convertObservationVital(iopObs);
+      expect(iopResult.warnings).toHaveLength(0);
+      expect(findQuadValue(iopResult._quads, NS.clinical + 'vitalType')).toBe('intraocularPressureRightEye');
+    });
   });
 
   describe('isVitalSignObservation', () => {
@@ -497,6 +630,46 @@ describe('FHIR -> Cascade converters', () => {
 
     it('should return false for lab observation', () => {
       expect(isVitalSignObservation(sampleLabObservation)).toBe(false);
+    });
+
+    it('should detect vital sign by category text fallback', () => {
+      const obs = {
+        resourceType: 'Observation',
+        category: [{ text: 'Vital Signs' }], // text only, no structured coding
+        code: { coding: [{ system: 'http://loinc.org', code: '8867-4' }] },
+        valueQuantity: { value: 72, unit: 'bpm' },
+      };
+      expect(isVitalSignObservation(obs)).toBe(true);
+    });
+
+    it('should detect vital sign via https LOINC system URL variant', () => {
+      const obs = {
+        resourceType: 'Observation',
+        code: { coding: [{ system: 'https://loinc.org', code: '8867-4' }] },
+        valueQuantity: { value: 72, unit: 'bpm' },
+      };
+      expect(isVitalSignObservation(obs)).toBe(true);
+    });
+
+    it('should detect vital sign via LOINC OID system URL (C-CDA origin)', () => {
+      const obs = {
+        resourceType: 'Observation',
+        code: { coding: [{ system: 'urn:oid:2.16.840.1.113883.6.1', code: '8867-4' }] },
+        valueQuantity: { value: 72, unit: 'bpm' },
+      };
+      expect(isVitalSignObservation(obs)).toBe(true);
+    });
+
+    it('should emit correct vitalType when LOINC system is https variant', () => {
+      const obs = {
+        resourceType: 'Observation',
+        status: 'final',
+        code: { coding: [{ system: 'https://loinc.org', code: '8867-4', display: 'Heart rate' }] },
+        valueQuantity: { value: 72, unit: 'bpm' },
+      };
+      const result = convertObservationVital(obs);
+      expect(result.warnings).toHaveLength(0);
+      expect(findQuadValue(result._quads, NS.clinical + 'vitalType')).toBe('heartRate');
     });
   });
 

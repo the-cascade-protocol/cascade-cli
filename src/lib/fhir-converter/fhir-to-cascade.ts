@@ -53,7 +53,7 @@ import {
 // Main dispatcher: single FHIR resource -> Cascade
 // ---------------------------------------------------------------------------
 
-export function convertFhirResourceToQuads(fhirResource: any): (ConversionResult & { _quads: Quad[] }) | null {
+export function convertFhirResourceToQuads(fhirResource: any, passthroughMinimal = false): (ConversionResult & { _quads: Quad[] }) | null {
   const resourceType = fhirResource?.resourceType as string | undefined;
   if (!resourceType) return null;
 
@@ -100,13 +100,13 @@ export function convertFhirResourceToQuads(fhirResource: any): (ConversionResult
         return null;
       }
       // Layer 1 passthrough for everything else
-      return convertFhirPassthrough(fhirResource);
+      return convertFhirPassthrough(fhirResource, passthroughMinimal);
     }
   }
 }
 
-export async function convertFhirToCascade(fhirResource: any): Promise<ConversionResult> {
-  const result = convertFhirResourceToQuads(fhirResource);
+export async function convertFhirToCascade(fhirResource: any, passthroughMinimal = false): Promise<ConversionResult> {
+  const result = convertFhirResourceToQuads(fhirResource, passthroughMinimal);
   if (!result) {
     const resourceType = fhirResource?.resourceType ?? 'unknown';
     return {

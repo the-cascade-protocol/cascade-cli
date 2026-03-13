@@ -5,11 +5,14 @@
  * Supports FHIR R4, Cascade Protocol Turtle, and JSON-LD.
  *
  * Options:
- *   --from <format>     Source format (fhir|cascade|c-cda)
- *   --to <format>       Target format (turtle|jsonld|fhir|cascade)
- *   --format <output>   Output serialization format (turtle|jsonld) [default: turtle]
- *   --json              Output results as JSON envelope (machine-readable)
- *   --verbose           Show detailed conversion information
+ *   --from <format>        Source format (fhir|cascade|c-cda)
+ *   --to <format>          Target format (turtle|jsonld|fhir|cascade)
+ *   --format <output>      Output serialization format (turtle|jsonld) [default: turtle]
+ *   --passthrough <mode>   Passthrough mode for unmapped FHIR types (full|minimal) [default: full]
+ *                          full: stores original FHIR JSON for lossless round-trip
+ *                          minimal: omits fhirJson; smaller output, no round-trip support
+ *   --json                 Output results as JSON envelope (machine-readable)
+ *   --verbose              Show detailed conversion information
  *
  * Supports stdin piping:
  *   cat patient.json | cascade convert --from fhir --to cascade
@@ -47,11 +50,12 @@ export function registerConvertCommand(program: Command): void {
     .requiredOption('--to <format>', 'Target format (turtle|jsonld|fhir|cascade)')
     .option('--format <output>', 'Output serialization format (turtle|jsonld)', 'turtle')
     .option('--source-system <name>', 'Tag all records with a source system name (adds cascade:sourceSystem for reconciliation)')
+    .option('--passthrough <mode>', 'Passthrough mode for unmapped FHIR types: full (store fhirJson, round-trip supported) or minimal (omit fhirJson, smaller output)', 'full')
     .option('--manifest [file]', 'Write import manifest JSON alongside output (default: {input}-manifest.json). Only applies when --from fhir.')
     .action(
       async (
         file: string | undefined,
-        options: { from: string; to: string; format: string; sourceSystem?: string; manifest?: string | boolean },
+        options: { from: string; to: string; format: string; sourceSystem?: string; passthrough: string; manifest?: string | boolean },
       ) => {
         const globalOpts = program.opts() as OutputOptions;
 
@@ -109,12 +113,17 @@ export function registerConvertCommand(program: Command): void {
 
         // 4. Run conversion
         const outputSerialization = (options.format === 'jsonld' ? 'jsonld' : 'turtle') as 'turtle' | 'jsonld';
+        const passthroughMinimal = options.passthrough === 'minimal';
+        if (passthroughMinimal) {
+          printVerbose('Passthrough mode: minimal (cascade:fhirJson omitted, round-trip export disabled)', globalOpts);
+        }
         const result = await convert(
           input,
           options.from as InputFormat,
           options.to as OutputFormat,
           outputSerialization,
           options.sourceSystem,
+          passthroughMinimal,
         );
 
         // 5. Output

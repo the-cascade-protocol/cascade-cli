@@ -11,7 +11,7 @@ import { EXCLUDED_REASONS } from './converters-passthrough.js';
 
 export interface ManifestEntry {
   count: number;
-  strategy: 'mapped' | 'passthrough' | 'excluded';
+  strategy: 'mapped' | 'passthrough' | 'passthrough-minimal' | 'excluded';
   reason?: string;
 }
 
@@ -31,10 +31,15 @@ export interface ImportManifest {
 /**
  * Build an ImportManifest from a BatchConversionResult.
  *
+ * Passthrough detection uses cascadeType prefix only:
+ *   - 'fhir:*'          -> full passthrough (fhirJson stored, round-trip supported)
+ *   - 'fhir-minimal:*'  -> minimal passthrough (no fhirJson, round-trip not supported)
+ * All other cascadeType values are Layer 2 mapped records.
+ *
  * @param result        The conversion result from the converter library
  * @param sourceFile    The source FHIR file path
  * @param sourceSystem  The --source-system CLI argument
- * @param excludedTypes Map of resource types that were excluded (from EXCLUDED_TYPES Set) with their counts
+ * @param excludedTypes Map of resource types that were excluded with their counts
  */
 export function buildImportManifest(
   result: BatchConversionResult,
@@ -47,15 +52,20 @@ export function buildImportManifest(
   let passthrough = 0;
 
   for (const r of result.results) {
-    const isPassthrough = r.cascadeType.startsWith('fhir:') || r.warnings.some(w => w.includes('Layer 1 passthrough'));
-    const strategy: 'mapped' | 'passthrough' = isPassthrough ? 'passthrough' : 'mapped';
+    const isFullPassthrough = r.cascadeType.startsWith('fhir:');
+    const isMinimalPassthrough = r.cascadeType.startsWith('fhir-minimal:');
+    const strategy: ManifestEntry['strategy'] = isMinimalPassthrough
+      ? 'passthrough-minimal'
+      : isFullPassthrough
+        ? 'passthrough'
+        : 'mapped';
 
     if (!byType[r.resourceType]) {
       byType[r.resourceType] = { count: 0, strategy };
     }
     byType[r.resourceType].count++;
 
-    if (strategy === 'passthrough') passthrough++;
+    if (isFullPassthrough || isMinimalPassthrough) passthrough++;
     else fullyMapped++;
   }
 

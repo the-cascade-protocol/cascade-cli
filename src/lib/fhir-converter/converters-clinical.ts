@@ -24,6 +24,7 @@ import {
   CODING_SYSTEM_MAP,
   VITAL_LOINC_CODES,
   VITAL_CATEGORIES,
+  isLoincSystem,
   extractCodings,
   codeableConceptText,
   tripleStr,
@@ -263,16 +264,21 @@ export function convertAllergyIntolerance(resource: any): ConversionResult & { _
 export function isVitalSignObservation(resource: any): boolean {
   if (Array.isArray(resource.category)) {
     for (const cat of resource.category) {
+      // Structured coding check
       if (Array.isArray(cat.coding)) {
         for (const c of cat.coding) {
           if (VITAL_CATEGORIES.includes(c.code)) return true;
         }
       }
+      // Text fallback — some systems only populate category.text
+      if (typeof cat.text === 'string' && /vital/i.test(cat.text)) return true;
     }
   }
+  // LOINC code fallback — catches observations with no/wrong category
+  // Accepts all known LOINC system URL variants (http, https, OID, trailing slash)
   const codings = extractCodings(resource.code);
   for (const c of codings) {
-    if (c.system === 'http://loinc.org' && VITAL_LOINC_CODES[c.code]) return true;
+    if (isLoincSystem(c.system) && VITAL_LOINC_CODES[c.code]) return true;
   }
   return false;
 }
@@ -302,6 +308,27 @@ export function convertObservationLab(resource: any): ConversionResult & { _quad
   } else if (resource.valueCodeableConcept) {
     const valText = codeableConceptText(resource.valueCodeableConcept) ?? '';
     quads.push(tripleStr(subjectUri, NS.health + 'resultValue', valText));
+  } else if (Array.isArray(resource.component) && resource.component.length > 0) {
+    // Panel-style observation (e.g., PRAPARE survey, multi-question assessments):
+    // serialize component question/answer pairs into a single resultValue string.
+    const parts: string[] = [];
+    for (const comp of resource.component) {
+      const question = codeableConceptText(comp.code);
+      if (!question) continue;
+      const answer =
+        (comp.valueCodeableConcept ? codeableConceptText(comp.valueCodeableConcept) : undefined) ??
+        comp.valueString ??
+        (comp.valueQuantity !== undefined ? `${comp.valueQuantity.value} ${comp.valueQuantity.unit ?? ''}`.trim() : undefined);
+      if (answer !== undefined) {
+        parts.push(`${question}: ${answer}`);
+      }
+    }
+    if (parts.length > 0) {
+      quads.push(tripleStr(subjectUri, NS.health + 'resultValue', parts.join('; ')));
+    } else {
+      quads.push(tripleStr(subjectUri, NS.health + 'resultValue', ''));
+      warnings.push('No result value found in Observation resource');
+    }
   } else {
     quads.push(tripleStr(subjectUri, NS.health + 'resultValue', ''));
     warnings.push('No result value found in Observation resource');
@@ -390,7 +417,7 @@ export function convertObservationVital(resource: any): ConversionResult & { _qu
   const codings = extractCodings(resource.code);
   let vitalInfo: { type: string; name: string; unit: string; snomedCode: string } | undefined;
   for (const c of codings) {
-    if (c.system === 'http://loinc.org' && VITAL_LOINC_CODES[c.code]) {
+    if (isLoincSystem(c.system) && VITAL_LOINC_CODES[c.code]) {
       vitalInfo = VITAL_LOINC_CODES[c.code];
       quads.push(tripleRef(subjectUri, NS.clinical + 'loincCode', NS.loinc + c.code));
       break;
@@ -402,15 +429,40 @@ export function convertObservationVital(resource: any): ConversionResult & { _qu
     quads.push(tripleStr(subjectUri, NS.clinical + 'vitalTypeName', vitalInfo.name));
     quads.push(tripleRef(subjectUri, NS.clinical + 'snomedCode', NS.sct + vitalInfo.snomedCode));
   } else {
+    // No LOINC match in the map — fall back to a slug derived from the display name.
+    // Data is fully preserved (value + unit + name); we just lack a canonical vitalType enum.
     const name = codeableConceptText(resource.code) ?? 'Unknown Vital';
-    quads.push(tripleStr(subjectUri, NS.clinical + 'vitalType', name.toLowerCase().replace(/\s+/g, '_')));
+    quads.push(tripleStr(subjectUri, NS.clinical + 'vitalType', name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')));
     quads.push(tripleStr(subjectUri, NS.clinical + 'vitalTypeName', name));
-    warnings.push(`Unknown vital sign LOINC code -- using display name: ${name}`);
   }
 
   if (resource.valueQuantity) {
     quads.push(tripleDouble(subjectUri, NS.clinical + 'value', resource.valueQuantity.value));
     quads.push(tripleStr(subjectUri, NS.clinical + 'unit', resource.valueQuantity.unit ?? vitalInfo?.unit ?? ''));
+  } else if (Array.isArray(resource.component) && resource.component.length > 0) {
+    // Panel-style vital (e.g., blood pressure panel LOINC 55284-4): component children
+    // hold the individual readings. Emit each known component as a typed value predicate,
+    // e.g., clinical:bloodPressureSystolicValue / clinical:bloodPressureDiastolicValue.
+    let emittedCount = 0;
+    for (const comp of resource.component) {
+      if (!comp.valueQuantity) continue;
+      const compCodings = extractCodings(comp.code);
+      let compInfo: { type: string; name: string; unit: string; snomedCode: string } | undefined;
+      for (const c of compCodings) {
+        if (isLoincSystem(c.system) && VITAL_LOINC_CODES[c.code]) {
+          compInfo = VITAL_LOINC_CODES[c.code];
+          break;
+        }
+      }
+      if (compInfo) {
+        quads.push(tripleDouble(subjectUri, NS.clinical + compInfo.type + 'Value', comp.valueQuantity.value));
+        quads.push(tripleStr(subjectUri, NS.clinical + compInfo.type + 'Unit', comp.valueQuantity.unit ?? compInfo.unit ?? ''));
+        emittedCount++;
+      }
+    }
+    if (emittedCount === 0) {
+      warnings.push('No valueQuantity found in vital sign Observation');
+    }
   } else {
     warnings.push('No valueQuantity found in vital sign Observation');
   }

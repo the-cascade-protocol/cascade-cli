@@ -3,23 +3,39 @@
  *
  * Converts between FHIR R4 JSON and Cascade Protocol RDF (Turtle/JSON-LD).
  *
- * Supported FHIR R4 resource types:
+ * Supported FHIR R4 resource types (Layer 2 — full vocabulary mapping):
  *   - MedicationStatement / MedicationRequest -> health:MedicationRecord
- *   - Condition -> health:ConditionRecord
- *   - AllergyIntolerance -> health:AllergyRecord
- *   - Observation (lab) -> health:LabResultRecord
- *   - Observation (vital) -> clinical:VitalSign
- *   - Patient -> cascade:PatientProfile
- *   - Immunization -> health:ImmunizationRecord
- *   - Coverage -> coverage:InsurancePlan
+ *   - Condition                               -> health:ConditionRecord
+ *   - AllergyIntolerance                      -> health:AllergyRecord
+ *   - Observation (lab)                       -> health:LabResultRecord
+ *   - Observation (vital signs)               -> clinical:VitalSign
+ *   - Patient                                 -> cascade:PatientProfile
+ *   - Immunization                            -> health:ImmunizationRecord
+ *   - Coverage                                -> coverage:InsurancePlan
+ *   - Procedure                               -> clinical:Procedure
+ *   - DocumentReference                       -> clinical:ClinicalDocument
+ *   - Encounter                               -> clinical:Encounter
+ *   - DiagnosticReport                        -> clinical:LaboratoryReport
+ *   - MedicationAdministration                -> clinical:MedicationAdministration
+ *   - Device                                  -> clinical:ImplantedDevice
+ *   - ImagingStudy                            -> clinical:ImagingStudy
+ *   - Claim                                   -> coverage:ClaimRecord
+ *   - ExplanationOfBenefit                    -> coverage:BenefitStatement
+ *
+ * All other resource types receive Layer 1 passthrough (stored as fhir:{Type}).
+ * Explicitly excluded types: SupplyDelivery, CareTeam, CarePlan, Provenance, Medication.
  *
  * Zero network calls. All conversion is local.
  *
- * This module re-exports all public API for backward compatibility.
+ * This module re-exports all public API.
  * Internal implementation is split across:
- *   - types.ts         Shared types, namespaces, and quad helpers
- *   - fhir-to-cascade.ts  FHIR -> Cascade converters
- *   - cascade-to-fhir.ts  Cascade -> FHIR converters
+ *   - types.ts                  Shared types, namespaces, and quad helpers
+ *   - fhir-to-cascade.ts        FHIR -> Cascade dispatcher
+ *   - converters-clinical.ts    Clinical resource converters
+ *   - converters-demographics.ts Patient, immunization, coverage converters
+ *   - converters-clinical-admin.ts Claim, EOB converters
+ *   - converters-passthrough.ts  Layer 1 passthrough for unknown types
+ *   - cascade-to-fhir.ts        Cascade -> FHIR reverse converters
  */
 
 import type { Quad } from 'n3';
@@ -55,6 +71,10 @@ export { convertCascadeToFhir } from './cascade-to-fhir.js';
 
 /**
  * Convert an entire FHIR input (single resource or Bundle) to Cascade format.
+ *
+ * @param passthroughMinimal  If true, omits cascade:fhirJson from passthrough records.
+ *                            Round-trip export is not supported in minimal mode.
+ *                            Produces smaller output for display-only scenarios.
  */
 export async function convert(
   input: string,
@@ -62,6 +82,7 @@ export async function convert(
   to: OutputFormat,
   outputSerialization: 'turtle' | 'jsonld' = 'turtle',
   sourceSystem?: string,
+  passthroughMinimal = false,
 ): Promise<BatchConversionResult> {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -100,7 +121,7 @@ export async function convert(
         warnings.push(`Skipping excluded FHIR resource type: ${res.resourceType} — ${EXCLUDED_REASONS[res.resourceType] ?? 'intentionally excluded'}`);
         continue;
       }
-      const result = convertFhirResourceToQuads(res);
+      const result = convertFhirResourceToQuads(res, passthroughMinimal);
       if (result) {
         allQuads.push(...result._quads);
         results.push({

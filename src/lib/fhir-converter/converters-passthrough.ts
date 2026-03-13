@@ -3,6 +3,10 @@
  *
  * For any FHIR resource type that doesn't have a full Layer 2 mapping,
  * preserves the original FHIR JSON inline for lossless round-trip export.
+ *
+ * Modes:
+ *   full (default) — stores complete FHIR JSON in cascade:fhirJson; round-trip export supported
+ *   minimal        — omits cascade:fhirJson; round-trip export not supported; smaller output
  */
 
 import type { Quad } from 'n3';
@@ -42,9 +46,11 @@ export const EXCLUDED_REASONS: Record<string, string> = {
 
 /**
  * Convert any unmapped FHIR resource to a Layer 1 passthrough record.
- * Stores the original FHIR JSON in cascade:fhirJson for lossless round-trip.
+ *
+ * @param resource  The FHIR resource object
+ * @param minimal   If true, omits cascade:fhirJson (smaller output, no round-trip)
  */
-export function convertFhirPassthrough(resource: any): ConversionResult & { _quads: Quad[] } {
+export function convertFhirPassthrough(resource: any, minimal = false): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const resourceType = resource.resourceType as string ?? 'Unknown';
   const subjectUri = mintSubjectUri(resource);
@@ -80,18 +86,22 @@ export function convertFhirPassthrough(resource: any): ConversionResult & { _qua
     }
   }
 
-  // Store complete FHIR JSON for lossless round-trip
-  const fhirJson = JSON.stringify(resource);
-  quads.push(tripleStr(subjectUri, NS.cascade + 'fhirJson', fhirJson));
+  if (minimal) {
+    warnings.push(`${resourceType} preserved as Layer 1 passthrough (minimal mode) — round-trip export not supported`);
+  } else {
+    // Store complete FHIR JSON for lossless round-trip
+    quads.push(tripleStr(subjectUri, NS.cascade + 'fhirJson', JSON.stringify(resource)));
+    warnings.push(`${resourceType} preserved as Layer 1 passthrough — no Layer 2 mapping yet`);
+  }
 
-  warnings.push(`${resourceType} preserved as Layer 1 passthrough — no Layer 2 mapping yet`);
+  const cascadeType = minimal ? `fhir-minimal:${resourceType}` : `fhir:${resourceType}`;
 
   return {
     turtle: '',
-    jsonld: quadsToJsonLd(quads, `fhir:${resourceType}`),
+    jsonld: quadsToJsonLd(quads, cascadeType),
     warnings,
     resourceType,
-    cascadeType: `fhir:${resourceType}`,
+    cascadeType,
     _quads: quads,
   };
 }

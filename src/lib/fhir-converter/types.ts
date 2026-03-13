@@ -35,6 +35,13 @@ export interface BatchConversionResult {
 }
 
 // ---------------------------------------------------------------------------
+// Schema version
+// ---------------------------------------------------------------------------
+
+/** Current Cascade Protocol schema version emitted on all converted records. */
+export const SCHEMA_VERSION = '1.3';
+
+// ---------------------------------------------------------------------------
 // Namespace constants
 // ---------------------------------------------------------------------------
 
@@ -76,24 +83,49 @@ export const CODING_SYSTEM_MAP: Record<string, string> = {
   'urn:oid:2.16.840.1.113883.6.88': NS.rxnorm,
   'http://snomed.info/sct': NS.sct,
   'http://loinc.org': NS.loinc,
+  'https://loinc.org': NS.loinc,
+  'http://loinc.org/': NS.loinc,
+  'urn:oid:2.16.840.1.113883.6.1': NS.loinc,   // LOINC OID (C-CDA / older HL7)
   'http://hl7.org/fhir/sid/icd-10-cm': NS.icd10,
   'http://hl7.org/fhir/sid/icd-10': NS.icd10,
 };
+
+/** Returns true for any known LOINC coding system URL variant. */
+export function isLoincSystem(system: string | undefined): boolean {
+  if (!system) return false;
+  return CODING_SYSTEM_MAP[system] === NS.loinc;
+}
 
 // ---------------------------------------------------------------------------
 // FHIR vital-sign LOINC code mapping
 // ---------------------------------------------------------------------------
 
 export const VITAL_LOINC_CODES: Record<string, { type: string; name: string; unit: string; snomedCode: string }> = {
+  // Core vital signs (US Core Vital Signs profile)
   '8480-6': { type: 'bloodPressureSystolic', name: 'Systolic Blood Pressure', unit: 'mmHg', snomedCode: '271649006' },
   '8462-4': { type: 'bloodPressureDiastolic', name: 'Diastolic Blood Pressure', unit: 'mmHg', snomedCode: '271650006' },
+  '55284-4': { type: 'bloodPressurePanel', name: 'Blood Pressure Panel', unit: 'mmHg', snomedCode: '75367002' },
+  '85354-9': { type: 'bloodPressurePanel', name: 'Blood Pressure Panel', unit: 'mmHg', snomedCode: '75367002' },
+  '8478-0': { type: 'meanBloodPressure', name: 'Mean Blood Pressure', unit: 'mmHg', snomedCode: '6797001' },
   '8867-4': { type: 'heartRate', name: 'Heart Rate', unit: 'bpm', snomedCode: '364075005' },
   '9279-1': { type: 'respiratoryRate', name: 'Respiratory Rate', unit: 'breaths/min', snomedCode: '86290005' },
   '8310-5': { type: 'bodyTemperature', name: 'Body Temperature', unit: 'degC', snomedCode: '386725007' },
+  '8331-1': { type: 'bodyTemperatureOral', name: 'Body Temperature (Oral)', unit: 'degC', snomedCode: '386725007' },
   '2708-6': { type: 'oxygenSaturation', name: 'Oxygen Saturation', unit: '%', snomedCode: '431314004' },
+  '59408-5': { type: 'oxygenSaturation', name: 'Oxygen Saturation (Pulse Ox)', unit: '%', snomedCode: '431314004' },
   '29463-7': { type: 'bodyWeight', name: 'Body Weight', unit: 'kg', snomedCode: '27113001' },
   '8302-2': { type: 'bodyHeight', name: 'Body Height', unit: 'cm', snomedCode: '50373000' },
   '39156-5': { type: 'bmi', name: 'Body Mass Index', unit: 'kg/m2', snomedCode: '60621009' },
+  // Pain
+  '72514-3': { type: 'painSeverity', name: 'Pain Severity (0-10 NRS)', unit: '{score}', snomedCode: '225908003' },
+  // Pediatric growth measurements
+  '9843-4': { type: 'headCircumference', name: 'Head Occipital-Frontal Circumference', unit: 'cm', snomedCode: '363812007' },
+  '8289-1': { type: 'headCircumferencePercentile', name: 'Head Circumference Percentile', unit: '%', snomedCode: '363812007' },
+  '77606-2': { type: 'weightForLengthPercentile', name: 'Weight-for-Length Percentile', unit: '%', snomedCode: '248334005' },
+  '59576-9': { type: 'bmiPercentile', name: 'BMI Percentile', unit: '%', snomedCode: '60621009' },
+  // Ophthalmology
+  '79893-4': { type: 'intraocularPressureRightEye', name: 'Intraocular Pressure (Right Eye)', unit: 'mm[Hg]', snomedCode: '41633001' },
+  '79892-6': { type: 'intraocularPressureLeftEye', name: 'Intraocular Pressure (Left Eye)', unit: 'mm[Hg]', snomedCode: '41633001' },
 };
 
 /** FHIR observation categories that indicate vital signs */
@@ -268,7 +300,7 @@ export function mintSubjectUri(resource: any): string {
 export function commonTriples(subject: string): Quad[] {
   return [
     tripleRef(subject, NS.cascade + 'dataProvenance', NS.cascade + 'ClinicalGenerated'),
-    tripleStr(subject, NS.cascade + 'schemaVersion', '1.3'),
+    tripleStr(subject, NS.cascade + 'schemaVersion', SCHEMA_VERSION),
   ];
 }
 
