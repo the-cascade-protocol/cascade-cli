@@ -31,6 +31,17 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
     .option('--immunizations', 'Query immunizations')
     .option('--vital-signs', 'Query vital signs')
     .option('--supplements', 'Query supplements')
+    .option('--insurance', 'Query insurance / coverage plans')
+    .option('--procedures', 'Query procedures')
+    .option('--encounters', 'Query encounters')
+    .option('--documents', 'Query clinical documents')
+    .option('--lab-reports', 'Query laboratory reports (DiagnosticReport)')
+    .option('--medication-administrations', 'Query medication administrations')
+    .option('--devices', 'Query implanted devices')
+    .option('--imaging', 'Query imaging studies')
+    .option('--claims', 'Query insurance claims')
+    .option('--benefits', 'Query explanation of benefits')
+    .option('--fhir-passthrough', 'Query FHIR passthrough records (unmapped types)')
     .option('--all', 'Query all data')
     .action(
       async (
@@ -43,6 +54,17 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           immunizations?: boolean;
           vitalSigns?: boolean;
           supplements?: boolean;
+          insurance?: boolean;
+          procedures?: boolean;
+          encounters?: boolean;
+          documents?: boolean;
+          labReports?: boolean;
+          medicationAdministrations?: boolean;
+          devices?: boolean;
+          imaging?: boolean;
+          claims?: boolean;
+          benefits?: boolean;
+          fhirPassthrough?: boolean;
           all?: boolean;
         },
       ) => {
@@ -75,11 +97,22 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             if (options.immunizations) requestedTypes.push('immunizations');
             if (options.vitalSigns) requestedTypes.push('vital-signs');
             if (options.supplements) requestedTypes.push('supplements');
+            if (options.insurance) requestedTypes.push('insurance');
+            if (options.procedures) requestedTypes.push('procedures');
+            if (options.encounters) requestedTypes.push('encounters');
+            if (options.documents) requestedTypes.push('documents');
+            if (options.labReports) requestedTypes.push('lab-reports');
+            if (options.medicationAdministrations) requestedTypes.push('medication-administrations');
+            if (options.devices) requestedTypes.push('devices');
+            if (options.imaging) requestedTypes.push('imaging');
+            if (options.claims) requestedTypes.push('claims');
+            if (options.benefits) requestedTypes.push('benefits');
+            if (options.fhirPassthrough) requestedTypes.push('fhir-passthrough');
           }
 
           if (requestedTypes.length === 0) {
             printError(
-              'No query filter specified. Use --medications, --conditions, --all, etc.',
+              'No query filter specified. Use --medications, --conditions, --procedures, --all, etc.',
               globalOpts,
             );
             process.exitCode = 1;
