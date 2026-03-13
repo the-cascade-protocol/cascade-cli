@@ -21,6 +21,7 @@ import { registerInitSubcommand } from './init.js';
 import { registerQuerySubcommand } from './query.js';
 import { registerExportSubcommand } from './export.js';
 import { registerInfoSubcommand } from './info.js';
+import { registerImportSubcommand } from './import.js';
 
 export function registerPodCommand(program: Command): void {
   const pod = program.command('pod').description('Manage Cascade Pod structures');
@@ -29,4 +30,5 @@ export function registerPodCommand(program: Command): void {
   registerQuerySubcommand(pod, program);
   registerExportSubcommand(pod, program);
   registerInfoSubcommand(pod, program);
+  registerImportSubcommand(pod, program);
 }

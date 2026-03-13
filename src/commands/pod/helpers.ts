@@ -25,6 +25,8 @@ export interface DataTypeInfo {
   rdfTypes: string[];
   directory: 'clinical' | 'wellness';
   filename: string;
+  /** If true, type detection uses prefix-matching instead of exact IRI matching */
+  isFhirPassthroughBucket?: boolean;
 }
 
 export const DATA_TYPES: Record<string, DataTypeInfo> = {
@@ -66,7 +68,7 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
   },
   insurance: {
     label: 'Insurance',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'CoverageRecord'],
+    rdfTypes: [CASCADE_NAMESPACES.coverage + 'InsurancePlan'],
     directory: 'clinical',
     filename: 'insurance.ttl',
   },
@@ -108,6 +110,67 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
     rdfTypes: [CASCADE_NAMESPACES.clinical + 'Supplement'],
     directory: 'wellness',
     filename: 'supplements.ttl',
+  },
+  procedures: {
+    label: 'Procedures',
+    rdfTypes: [CASCADE_NAMESPACES.clinical + 'Procedure'],
+    directory: 'clinical',
+    filename: 'procedures.ttl',
+  },
+  encounters: {
+    label: 'Encounters',
+    rdfTypes: [CASCADE_NAMESPACES.clinical + 'Encounter'],
+    directory: 'clinical',
+    filename: 'encounters.ttl',
+  },
+  documents: {
+    label: 'Clinical Documents',
+    rdfTypes: [CASCADE_NAMESPACES.clinical + 'ClinicalDocument'],
+    directory: 'clinical',
+    filename: 'documents.ttl',
+  },
+  'lab-reports': {
+    label: 'Lab Reports',
+    rdfTypes: [CASCADE_NAMESPACES.clinical + 'LaboratoryReport'],
+    directory: 'clinical',
+    filename: 'lab-reports.ttl',
+  },
+  'medication-administrations': {
+    label: 'Medication Administrations',
+    rdfTypes: [CASCADE_NAMESPACES.clinical + 'MedicationAdministration'],
+    directory: 'clinical',
+    filename: 'medication-administrations.ttl',
+  },
+  devices: {
+    label: 'Implanted Devices',
+    rdfTypes: [CASCADE_NAMESPACES.clinical + 'ImplantedDevice'],
+    directory: 'clinical',
+    filename: 'devices.ttl',
+  },
+  imaging: {
+    label: 'Imaging Studies',
+    rdfTypes: [CASCADE_NAMESPACES.clinical + 'ImagingStudy'],
+    directory: 'clinical',
+    filename: 'imaging.ttl',
+  },
+  claims: {
+    label: 'Claims',
+    rdfTypes: ['https://ns.cascadeprotocol.org/coverage/v1#ClaimRecord'],
+    directory: 'clinical',
+    filename: 'claims.ttl',
+  },
+  benefits: {
+    label: 'Benefit Statements',
+    rdfTypes: ['https://ns.cascadeprotocol.org/coverage/v1#BenefitStatement'],
+    directory: 'clinical',
+    filename: 'benefits.ttl',
+  },
+  'fhir-passthrough': {
+    label: 'FHIR Passthrough',
+    rdfTypes: ['http://hl7.org/fhir/'],
+    directory: 'clinical',
+    filename: 'fhir-passthrough.ttl',
+    isFhirPassthroughBucket: true,
   },
 };
 
