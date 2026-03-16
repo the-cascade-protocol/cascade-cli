@@ -95,6 +95,28 @@ function getCapabilities(version: string): CapabilitiesOutput {
         status: 'implemented',
       },
       {
+        name: 'pod import',
+        description: 'Import FHIR R4 JSON or Cascade Turtle files into a Pod, converting and reconciling records into the Pod directory structure',
+        usage: 'cascade pod import <pod-dir> <files...> [options]',
+        parameters: [
+          { name: 'pod-dir', type: 'string', required: true, description: 'Path to the target Cascade Pod' },
+          { name: 'files', type: 'string[]', required: true, description: 'One or more FHIR R4 JSON or Cascade Turtle files to import' },
+          { name: '--source-system', type: 'string', required: false, description: 'Label for the source health system (e.g., "Virginia Mason")' },
+          { name: '--no-reconcile', type: 'boolean', required: false, description: 'Skip reconciliation; append records without merging duplicates' },
+          { name: '--trust', type: 'string', required: false, description: 'Comma-separated trust scores per source (0.0–1.0), in file order' },
+          { name: '--report', type: 'string', required: false, description: 'Write a JSON import report to this file path' },
+          { name: '--dry-run', type: 'boolean', required: false, description: 'Parse and convert without writing to the Pod' },
+          { name: '--passthrough', type: 'string', required: false, description: 'Passthrough mode for unconverted records', choices: ['full', 'minimal'] },
+          { name: '--json', type: 'boolean', required: false, description: 'Output results as JSON' },
+        ],
+        examples: [
+          'cascade pod import ./my-pod patient.json --source-system "Virginia Mason"',
+          'cascade pod import ./my-pod vm.json swedish.json --source-system "primary,specialist" --report report.json',
+          'cascade pod import ./my-pod records.ttl --no-reconcile',
+        ],
+        status: 'implemented',
+      },
+      {
         name: 'pod query',
         description: 'Query data within a Cascade Pod by type',
         usage: 'cascade pod query <pod-dir> [options]',
@@ -104,10 +126,19 @@ function getCapabilities(version: string): CapabilitiesOutput {
           { name: '--conditions', type: 'boolean', required: false, description: 'Query conditions' },
           { name: '--allergies', type: 'boolean', required: false, description: 'Query allergies' },
           { name: '--lab-results', type: 'boolean', required: false, description: 'Query lab results' },
-          { name: '--all', type: 'boolean', required: false, description: 'Query all data' },
-          { name: '--json', type: 'boolean', required: false, description: 'Output as JSON' },
+          { name: '--immunizations', type: 'boolean', required: false, description: 'Query immunizations' },
+          { name: '--vital-signs', type: 'boolean', required: false, description: 'Query vital signs' },
+          { name: '--supplements', type: 'boolean', required: false, description: 'Query supplements' },
+          { name: '--procedures', type: 'boolean', required: false, description: 'Query procedures' },
+          { name: '--encounters', type: 'boolean', required: false, description: 'Query clinical encounters' },
+          { name: '--all', type: 'boolean', required: false, description: 'Query all data types' },
+          { name: '--json', type: 'boolean', required: false, description: 'Output results as JSON (machine-readable)' },
         ],
-        examples: ['cascade pod query ./my-pod --medications --json', 'cascade pod query ./my-pod --all --json'],
+        examples: [
+          'cascade pod query ./my-pod --medications --json',
+          'cascade pod query ./my-pod --encounters --conditions --json',
+          'cascade pod query ./my-pod --all --json',
+        ],
         status: 'implemented',
       },
       {
@@ -127,6 +158,23 @@ function getCapabilities(version: string): CapabilitiesOutput {
           { name: '--format', type: 'string', required: false, description: 'Export format', default: 'zip', choices: ['zip', 'directory'] },
         ],
         examples: ['cascade pod export ./my-pod', 'cascade pod export ./my-pod --format directory'],
+        status: 'implemented',
+      },
+      {
+        name: 'reconcile',
+        description: 'Reconcile Cascade RDF records from multiple sources into a normalized record set, resolving conflicts using trust-weighted scoring',
+        usage: 'cascade reconcile <files...> [options]',
+        parameters: [
+          { name: 'files', type: 'string[]', required: true, description: 'Two or more Cascade Turtle files to reconcile' },
+          { name: '--output', type: 'string', required: false, description: 'Write merged output to this file (defaults to stdout)' },
+          { name: '--report', type: 'string', required: false, description: 'Write a JSON reconciliation report to this file path' },
+          { name: '--trust', type: 'string', required: false, description: 'Comma-separated trust scores per source (0.0–1.0), in file order' },
+          { name: '--json', type: 'boolean', required: false, description: 'Output results as JSON' },
+        ],
+        examples: [
+          'cascade reconcile system-a.ttl system-b.ttl --output merged.ttl --report report.json',
+          'cascade reconcile vm.ttl swedish.ttl --trust 0.9,0.7 --output merged.ttl',
+        ],
         status: 'implemented',
       },
       {
@@ -170,11 +218,21 @@ function getCapabilities(version: string): CapabilitiesOutput {
         parameters: { path: { type: 'string', description: 'Pod directory path (optional, uses CASCADE_POD_PATH)', required: false } },
       },
       {
+        name: 'cascade_pod_import',
+        description: 'Import FHIR R4 JSON or Cascade Turtle files into a Pod, converting and reconciling records',
+        parameters: {
+          podPath: { type: 'string', description: 'Pod directory path', required: true },
+          files: { type: 'array', description: 'File paths to import (FHIR JSON or Cascade Turtle)', required: true },
+          sourceSystem: { type: 'string', description: 'Label for the source health system', required: false },
+          noReconcile: { type: 'boolean', description: 'Skip reconciliation', required: false },
+        },
+      },
+      {
         name: 'cascade_pod_query',
         description: 'Query records from a Pod by data type',
         parameters: {
           path: { type: 'string', description: 'Pod directory path (optional)', required: false },
-          dataType: { type: 'string', description: 'Data type to query', required: true, enum: ['medications', 'conditions', 'allergies', 'lab-results', 'immunizations', 'vital-signs', 'supplements', 'insurance', 'patient-profile', 'heart-rate', 'blood-pressure', 'activity', 'sleep', 'all'] },
+          dataType: { type: 'string', description: 'Data type to query', required: true, enum: ['medications', 'conditions', 'allergies', 'lab-results', 'immunizations', 'vital-signs', 'supplements', 'procedures', 'encounters', 'insurance', 'patient-profile', 'heart-rate', 'blood-pressure', 'activity', 'sleep', 'all'] },
         },
       },
       {
