@@ -143,14 +143,26 @@ export async function convert(
     }
 
     // Inject cascade:sourceSystem into every record if --source-system was given.
-    // We add one triple per unique subject that has an rdf:type (i.e. a real record).
-    if (sourceSystem) {
-      const recordSubjects = new Set<string>();
-      for (const q of allQuads) {
-        if (q.predicate.value === NS.rdf + 'type') {
-          recordSubjects.add(q.subject.value);
+    // Also inject clinical:importedAt and clinical:sourceEHR for ClinicalDocument subtypes
+    // (LaboratoryReport, ImagingReport, etc.) which require these fields per the SHACL shapes.
+    const clinicalDocTypes = new Set([
+      NS.clinical + 'LaboratoryReport',
+      NS.clinical + 'ImagingReport',
+      NS.clinical + 'ClinicalDocument',
+      NS.clinical + 'VisitSummary',
+    ]);
+    const conversionTimestamp = new Date().toISOString();
+    const clinicalDocSubjects = new Set<string>();
+    const recordSubjects = new Set<string>();
+    for (const q of allQuads) {
+      if (q.predicate.value === NS.rdf + 'type') {
+        recordSubjects.add(q.subject.value);
+        if (clinicalDocTypes.has(q.object.value)) {
+          clinicalDocSubjects.add(q.subject.value);
         }
       }
+    }
+    if (sourceSystem) {
       for (const subjectUri of recordSubjects) {
         allQuads.push(
           makeQuad(
@@ -158,6 +170,17 @@ export async function convert(
             namedNode(NS.cascade + 'sourceSystem'),
             literal(sourceSystem),
           ),
+        );
+      }
+    }
+    for (const subjectUri of clinicalDocSubjects) {
+      allQuads.push(
+        makeQuad(namedNode(subjectUri), namedNode(NS.clinical + 'importedAt'),
+          literal(conversionTimestamp, namedNode(NS.xsd + 'dateTime'))),
+      );
+      if (sourceSystem) {
+        allQuads.push(
+          makeQuad(namedNode(subjectUri), namedNode(NS.clinical + 'sourceEHR'), literal(sourceSystem)),
         );
       }
     }

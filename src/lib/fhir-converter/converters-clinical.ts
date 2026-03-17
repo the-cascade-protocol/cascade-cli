@@ -722,10 +722,16 @@ export function convertLaboratoryReport(resource: any): ConversionResult & { _qu
     }
   }
 
-  // Effective date
+  // Effective date (when procedure/analysis was performed)
   const effectiveDate = resource.effectiveDateTime ?? resource.effectivePeriod?.start;
   if (effectiveDate) {
     quads.push(tripleDateTime(subjectUri, NS.clinical + 'performedDate', effectiveDate));
+  }
+
+  // documentDate (when results were finalized/issued) — required by LaboratoryReportShape
+  const issuedDate = resource.issued ?? resource.effectiveDateTime ?? resource.effectivePeriod?.start;
+  if (issuedDate) {
+    quads.push(tripleDateTime(subjectUri, NS.clinical + 'documentDate', issuedDate));
   }
 
   // Provider from first performer
@@ -755,7 +761,9 @@ export function convertLaboratoryReport(resource: any): ConversionResult & { _qu
 
   if (resource.id) {
     quads.push(tripleStr(subjectUri, NS.clinical + 'sourceRecordId', resource.id));
+    quads.push(tripleStr(subjectUri, NS.clinical + 'fhirResourceId', resource.id));
   }
+  quads.push(tripleStr(subjectUri, NS.clinical + 'fhirResourceType', 'DiagnosticReport'));
 
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
 

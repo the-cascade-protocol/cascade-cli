@@ -70,17 +70,23 @@ const KNOWN_TYPES: Record<string, CascadeRecordType> = {
 // Parser: Turtle → records
 // ---------------------------------------------------------------------------
 
+interface RdfValue {
+  value: string;
+  /** xsd:* datatype URI for typed literals; undefined for URIs and plain strings */
+  datatype?: string;
+}
+
 interface ParsedRecord {
   uri: string;
   type: CascadeRecordType;
   sourceSystem: string;
-  properties: Map<string, string[]>;
+  properties: Map<string, RdfValue[]>;
 }
 
 export async function parseTurtle(turtle: string, defaultSystem: string): Promise<ParsedRecord[]> {
   return new Promise((resolve, reject) => {
     const parser = new Parser({ format: 'Turtle' });
-    const bySubject = new Map<string, Array<{ pred: string; obj: string }>>();
+    const bySubject = new Map<string, Array<{ pred: string; obj: RdfValue }>>();
 
     parser.parse(turtle, (error, quad) => {
       if (error) { reject(error); return; }
@@ -88,24 +94,28 @@ export async function parseTurtle(turtle: string, defaultSystem: string): Promis
         const records: ParsedRecord[] = [];
         for (const [uri, triples] of bySubject) {
           const typeTriple = triples.find(t => t.pred === NS.rdf + 'type');
-          if (!typeTriple || !KNOWN_TYPES[typeTriple.obj]) continue;
+          if (!typeTriple || !KNOWN_TYPES[typeTriple.obj.value]) continue;
 
-          const properties = new Map<string, string[]>();
+          const properties = new Map<string, RdfValue[]>();
           for (const t of triples) {
             const existing = properties.get(t.pred);
             if (existing) existing.push(t.obj);
             else properties.set(t.pred, [t.obj]);
           }
 
-          const sourceSystem = properties.get(NS.cascade + 'sourceSystem')?.[0] ?? defaultSystem;
-          records.push({ uri, type: KNOWN_TYPES[typeTriple.obj], sourceSystem, properties });
+          const sourceSystem = properties.get(NS.cascade + 'sourceSystem')?.[0]?.value ?? defaultSystem;
+          records.push({ uri, type: KNOWN_TYPES[typeTriple.obj.value], sourceSystem, properties });
         }
         resolve(records);
         return;
       }
       const subj = quad.subject.value;
       if (!bySubject.has(subj)) bySubject.set(subj, []);
-      bySubject.get(subj)!.push({ pred: quad.predicate.value, obj: quad.object.value });
+      const obj = quad.object;
+      const rdfVal: RdfValue = obj.termType === 'Literal' && obj.datatype?.value && obj.datatype.value !== NS.xsd + 'string'
+        ? { value: obj.value, datatype: obj.datatype.value }
+        : { value: obj.value };
+      bySubject.get(subj)!.push({ pred: quad.predicate.value, obj: rdfVal });
     });
   });
 }
@@ -126,7 +136,7 @@ function normalizeConditionName(name: string): string {
 }
 
 function getProp(r: ParsedRecord, pred: string): string | undefined {
-  return r.properties.get(pred)?.[0];
+  return r.properties.get(pred)?.[0]?.value;
 }
 
 function codeFromUri(uri: string): string {
@@ -138,8 +148,8 @@ function dateOnly(dt: string): string { return dt.split('T')[0] ?? dt; }
 type MatchResult = { match: boolean; confidence: number; matchedOn: string };
 
 function matchMedications(a: ParsedRecord, b: ParsedRecord): MatchResult {
-  const rxA = (a.properties.get(NS.health + 'rxNormCode') ?? []).map(codeFromUri);
-  const rxB = (b.properties.get(NS.health + 'rxNormCode') ?? []).map(codeFromUri);
+  const rxA = (a.properties.get(NS.health + 'rxNormCode') ?? []).map(v => codeFromUri(v.value));
+  const rxB = (b.properties.get(NS.health + 'rxNormCode') ?? []).map(v => codeFromUri(v.value));
   const shared = rxA.find(c => c && rxB.includes(c));
   if (shared) return { match: true, confidence: 1.0, matchedOn: `rxnorm:${shared}` };
 
@@ -352,7 +362,11 @@ async function serializeGroups(
 
       for (const [pred, vals] of res.canonical.properties) {
         for (const val of vals) {
-          const obj = val.startsWith('http') || val.startsWith('urn:') ? namedNode(val) : literal(val);
+          const obj = val.value.startsWith('http') || val.value.startsWith('urn:')
+            ? namedNode(val.value)
+            : val.datatype
+              ? literal(val.value, namedNode(val.datatype))
+              : literal(val.value);
           writer.addQuad(makeQuad(subj, namedNode(pred), obj));
         }
       }
