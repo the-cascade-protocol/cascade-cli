@@ -21,8 +21,8 @@
     dct:description "Vocabulary for consumer-generated wellness observations from wearable devices and HealthKit. Maps Cascade wellness properties to established SNOMED CT and LOINC codes following the three-layer ontology architecture."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-01-29"^^xsd:date ;
-    dct:modified "2026-02-17"^^xsd:date ;
-    owl:versionInfo "2.2" ;
+    dct:modified "2026-02-28"^^xsd:date ;
+    owl:versionInfo "2.3" ;
     rdfs:comment """Three-layer ontology for wellness data:
         Layer 1 (Established standards): SNOMED CT concept IDs + LOINC observation codes
         Layer 2 (Cascade health vocabulary): health: namespace properties linking to Layer 1
@@ -30,6 +30,14 @@
     rdfs:seeAlso <https://cascadeprotocol.org/docs/health/v1/> .
 
 # Changelog:
+# v2.3 (2026-02-28): BUG-006 — Added 6 Pattern A flat-property vocabulary terms
+#     for VitalSignReading blank nodes: health:value (generic numeric value),
+#     health:date (observation timestamp), health:sdnn (HRV SDNN measurement),
+#     health:systolic and health:diastolic (blood pressure components),
+#     health:walkingSteadinessLevel (enum ObjectProperty). Also added
+#     health:WalkingSteadinessUnknown individual. These replace the Pattern B
+#     fhir:Observation nesting in HealthProfileSerializer.
+#
 # v2.2 (2026-02-17): Added 2 container linking ObjectProperties:
 #     health:hasHRVStatistics, health:hasBPStatistics. These link a wellness
 #     profile or intake form to its statistical summary nodes. Previously dark
@@ -201,7 +209,8 @@ health:walkingSteadiness a owl:DatatypeProperty ;
     health:snomedCode sct:364832000 ;  # Balance finding
     rdfs:comment "SNOMED mapping note: 364832000 (Balance finding) is the closest available concept. Alternatives considered: 250043000 (Gait finding), 282097004 (Ability to walk). Apple's OK/Low/Very Low classification is proprietary."@en .
 
-# Valid values for walkingSteadiness
+# Valid values for walkingSteadiness (legacy named individuals)
+# health:WalkingSteadinessUnknown also defined in Pattern A section (v2.3)
 health:WalkingSteadinessOK a health:WalkingSteadinessLevel ;
     rdfs:label "OK" .
 health:WalkingSteadinessLow a health:WalkingSteadinessLevel ;
@@ -544,6 +553,56 @@ health:trendPolarity a owl:AnnotationProperty ;
     rdfs:comment "Whether an increase in this metric is generally favorable ('higher_is_better'), unfavorable ('lower_is_better'), or context-dependent ('neutral'). Used by presentation layers to determine trend arrow color semantics. This is a general heuristic — individual clinical context may differ."@en .
 
 # ============================================================================
+# Pattern A Flat Observation Properties (v2.3 — BUG-006)
+# ============================================================================
+# These properties are used in Pattern A flat blank nodes emitted by
+# HealthProfileSerializer. They replace the fhir:Observation nesting
+# (Pattern B) for all wellness vital sign readings.
+
+health:value a owl:DatatypeProperty ;
+    rdfs:label "Observation Value"@en ;
+    rdfs:comment "Generic numeric value for a wellness observation blank node. Used in Pattern A flat serialization where the observation type is identified by the enclosing property (e.g., health:restingHeartRate). The unit is carried by health:unit on the same blank node."@en ;
+    rdfs:range xsd:double .
+
+health:date a owl:DatatypeProperty ;
+    rdfs:label "Observation Date"@en ;
+    rdfs:comment "Timestamp of a wellness observation in Pattern A flat serialization. Equivalent in role to fhir:effectiveDateTime but scoped to health: namespace blank nodes."@en ;
+    rdfs:range xsd:dateTime .
+
+health:sdnn a owl:DatatypeProperty ;
+    rdfs:label "SDNN (HRV)"@en ;
+    rdfs:comment "Standard deviation of normal-to-normal R-R intervals. The primary HRV scalar emitted in Pattern A HRVReading blank nodes."@en ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:80404004 ;
+    health:loincCode loinc:80404-7 ;
+    health:unit "ms" .
+
+health:systolic a owl:DatatypeProperty ;
+    rdfs:label "Systolic Blood Pressure (reading)"@en ;
+    rdfs:comment "Systolic component value in a Pattern A BloodPressureReading blank node. Distinct from health:systolicBP which is a domain-level property on fhir:Observation."@en ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:271649006 ;
+    health:loincCode loinc:8480-6 ;
+    health:unit "mmHg" .
+
+health:diastolic a owl:DatatypeProperty ;
+    rdfs:label "Diastolic Blood Pressure (reading)"@en ;
+    rdfs:comment "Diastolic component value in a Pattern A BloodPressureReading blank node. Distinct from health:diastolicBP which is a domain-level property on fhir:Observation."@en ;
+    rdfs:range xsd:double ;
+    health:snomedCode sct:271650006 ;
+    health:loincCode loinc:8462-4 ;
+    health:unit "mmHg" .
+
+health:walkingSteadinessLevel a owl:ObjectProperty ;
+    rdfs:label "Walking Steadiness Level"@en ;
+    rdfs:comment "Links a Pattern A WalkingSteadiness blank node to its level individual (health:WalkingSteadinessOK, health:WalkingSteadinessLow, health:WalkingSteadinessVeryLow, health:WalkingSteadinessUnknown)."@en ;
+    rdfs:range health:WalkingSteadinessLevel .
+
+# health:WalkingSteadinessUnknown added v2.3 (previously only OK/Low/VeryLow defined)
+health:WalkingSteadinessUnknown a health:WalkingSteadinessLevel ;
+    rdfs:label "Unknown" .
+
+# ============================================================================
 # VO2 Max Statistics Properties (v1.7)
 # ============================================================================
 # Statistical analysis of VO2 Max readings with trend detection and fitness
@@ -836,6 +895,16 @@ health:hasBPStatistics a owl:ObjectProperty ;
     rdfs:label "has BP statistics"@en ;
     rdfs:comment "Links a wellness profile to its blood pressure statistical summary."@en ;
     rdfs:range health:BPStatistics .
+
+# Named individuals for walkingSteadinessLevel (Pattern A short-form, v2.3)
+health:OK a health:WalkingSteadinessLevel ;
+    rdfs:label "OK" .
+health:Low a health:WalkingSteadinessLevel ;
+    rdfs:label "Low" .
+health:VeryLow a health:WalkingSteadinessLevel ;
+    rdfs:label "Very Low" .
+health:Unknown a health:WalkingSteadinessLevel ;
+    rdfs:label "Unknown" .
 
 # ============================================================================
 # Standard Code Reference Table (for documentation)

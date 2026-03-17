@@ -20,8 +20,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-02-22"^^xsd:date ;
-    owl:versionInfo "1.6" ;
+    dct:modified "2026-03-12"^^xsd:date ;
+    owl:versionInfo "1.7" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -752,7 +752,7 @@ clinical:icd10Code a owl:DatatypeProperty ;
 
 clinical:linkedConditionIds a owl:DatatypeProperty ;
     rdfs:label "Linked Condition IDs"@en ;
-    rdfs:comment "Space-separated UUIDs of related ConditionSummary records. Enables graph traversal between related diagnoses (e.g., complication to root condition)."@en ;
+    rdfs:comment "Space-separated UUIDs of related ConditionSummary records (e.g., linking a complication to its root condition). Enables graph traversal between related diagnoses."@en ;
     rdfs:domain clinical:Condition ;
     rdfs:range xsd:string .
 
@@ -768,7 +768,7 @@ clinical:vaccineName a owl:DatatypeProperty ;
 
 clinical:vaccineCode a owl:DatatypeProperty ;
     rdfs:label "Vaccine Code"@en ;
-    rdfs:comment "CVX code for the vaccine"@en ;
+    rdfs:comment "CVX code for the vaccine (legacy — use clinical:cvxCode for new serialization; v1.6)"@en ;
     rdfs:domain clinical:Immunization ;
     rdfs:range xsd:string .
 
@@ -1298,6 +1298,15 @@ clinical:isActive a owl:DatatypeProperty ;
 # Changelog
 # ============================================================================
 #
+# Version 1.6 (2026-02-22)
+# - Added clinical:linkedConditionIds DatatypeProperty on clinical:Condition
+#   for linking related ConditionSummary records via space-separated UUIDs.
+#   Enables graph traversal between related diagnoses (e.g., complication to
+#   root condition). Part of Health Map v3 Pre-Phase Track A (Task A2).
+# - Annotated clinical:vaccineCode as legacy in favor of clinical:cvxCode
+#   (both defined; cvxCode added v1.1, vaccineCode retained for backward
+#   compatibility).
+#
 # Version 1.5 (2026-02-10)
 # - Added CoverageRecord class (11 properties) for insurance coverage data
 #   Maps to fhir:Coverage. Layer 2 complement to checkup:InsuranceInfo (Layer 3).
@@ -1367,3 +1376,182 @@ clinical:isActive a owl:DatatypeProperty ;
 # All documents imported via clinical: vocabulary use cascade:ClinicalGenerated provenance
 # Source: Apple HealthKit HKClinicalRecord API
 # Privacy: Documents may contain PHI - encrypted storage required
+
+# ============================================================================
+# New Class: clinical:Encounter
+# Added in v1.7 — supports FHIR Encounter conversion
+# ============================================================================
+
+clinical:Encounter a owl:Class ;
+    rdfs:label "Clinical Encounter"@en ;
+    rdfs:comment "A clinical encounter — any interaction between a patient and a healthcare provider. Enables grouping of clinical events (procedures, observations, prescriptions) that occurred in the same visit context."@en ;
+    rdfs:subClassOf prov:Entity .
+
+clinical:encounterClass a owl:DatatypeProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range xsd:string ;
+    rdfs:label "Encounter Class"@en ;
+    rdfs:comment "Values: ambulatory, emergency, inpatient, home-health"@en .
+
+clinical:encounterStatus a owl:DatatypeProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range xsd:string ;
+    rdfs:label "Encounter Status"@en ;
+    rdfs:comment "Values: finished, in-progress, cancelled"@en .
+
+clinical:encounterType a owl:DatatypeProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range xsd:string ;
+    rdfs:label "Encounter Type"@en ;
+    rdfs:comment "Display name from SNOMED/FHIR code"@en .
+
+clinical:encounterStart a owl:DatatypeProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "Encounter Start"@en .
+
+clinical:encounterEnd a owl:DatatypeProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "Encounter End"@en .
+
+clinical:facilityName a owl:DatatypeProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range xsd:string ;
+    rdfs:label "Facility Name"@en .
+
+# ============================================================================
+# New Class: clinical:MedicationAdministration
+# Added in v1.7 — supports FHIR MedicationAdministration conversion
+# ============================================================================
+
+clinical:MedicationAdministration a owl:Class ;
+    rdfs:label "Medication Administration"@en ;
+    rdfs:comment "A single administration event of a medication given at a specific time by a provider (e.g., IV antibiotics administered pre-surgery, vaccine injection at visit). Semantically distinct from clinical:Medication (ongoing prescription regimens): represents a one-time event, not an ongoing regimen."@en ;
+    rdfs:subClassOf prov:Entity .
+
+clinical:administeredDate a owl:DatatypeProperty ;
+    rdfs:domain clinical:MedicationAdministration ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "Administered Date"@en .
+
+clinical:administeredDose a owl:DatatypeProperty ;
+    rdfs:domain clinical:MedicationAdministration ;
+    rdfs:range xsd:string ;
+    rdfs:label "Administered Dose"@en ;
+    rdfs:comment "e.g., '1g', '500mg'"@en .
+
+clinical:administeredRoute a owl:DatatypeProperty ;
+    rdfs:domain clinical:MedicationAdministration ;
+    rdfs:range xsd:string ;
+    rdfs:label "Administered Route"@en ;
+    rdfs:comment "Values: oral, IV, IM, subcutaneous, topical"@en .
+
+clinical:administrationStatus a owl:DatatypeProperty ;
+    rdfs:domain clinical:MedicationAdministration ;
+    rdfs:range xsd:string ;
+    rdfs:label "Administration Status"@en ;
+    rdfs:comment "Values: completed, not-done, in-progress"@en .
+
+# ============================================================================
+# New Class: clinical:ImplantedDevice
+# Added in v1.7 — supports FHIR Device conversion
+# ============================================================================
+
+clinical:ImplantedDevice a owl:Class ;
+    rdfs:label "Implanted Device"@en ;
+    rdfs:comment "A medical device implanted in or attached to the patient as a permanent part of their health profile (e.g., pacemaker, cardiac stent, cochlear implant, insulin pump). Presence affects medication safety, imaging eligibility (MRI contraindications), and surgical risk."@en ;
+    rdfs:subClassOf prov:Entity .
+
+clinical:deviceType a owl:DatatypeProperty ;
+    rdfs:domain clinical:ImplantedDevice ;
+    rdfs:range xsd:string ;
+    rdfs:label "Device Type"@en ;
+    rdfs:comment "e.g., pacemaker, stent, cochlear-implant"@en .
+
+clinical:implantDate a owl:DatatypeProperty ;
+    rdfs:domain clinical:ImplantedDevice ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "Implant Date"@en .
+
+clinical:deviceManufacturer a owl:DatatypeProperty ;
+    rdfs:domain clinical:ImplantedDevice ;
+    rdfs:range xsd:string ;
+    rdfs:label "Device Manufacturer"@en .
+
+clinical:udiCarrier a owl:DatatypeProperty ;
+    rdfs:domain clinical:ImplantedDevice ;
+    rdfs:range xsd:string ;
+    rdfs:label "UDI Carrier"@en ;
+    rdfs:comment "Unique Device Identifier"@en .
+
+clinical:deviceStatus a owl:DatatypeProperty ;
+    rdfs:domain clinical:ImplantedDevice ;
+    rdfs:range xsd:string ;
+    rdfs:label "Device Status"@en ;
+    rdfs:comment "Values: active, inactive, entered-in-error"@en .
+
+# ============================================================================
+# New Class: clinical:ImagingStudy
+# Added in v1.7 — supports FHIR ImagingStudy conversion
+# ============================================================================
+
+clinical:ImagingStudy a owl:Class ;
+    rdfs:label "Imaging Study"@en ;
+    rdfs:comment "Metadata record for a diagnostic imaging study (CT, MRI, X-ray, ultrasound). Records that imaging exists and its key characteristics without requiring access to DICOM images. Useful for clinical timeline, pre-procedure review, and agent reasoning about the patient's imaging history."@en ;
+    rdfs:subClassOf prov:Entity .
+
+clinical:imagingModality a owl:DatatypeProperty ;
+    rdfs:domain clinical:ImagingStudy ;
+    rdfs:range xsd:string ;
+    rdfs:label "Imaging Modality"@en ;
+    rdfs:comment "Values: CT, MR, DX, US, NM"@en .
+
+clinical:studyDescription a owl:DatatypeProperty ;
+    rdfs:domain clinical:ImagingStudy ;
+    rdfs:range xsd:string ;
+    rdfs:label "Study Description"@en .
+
+clinical:numberOfSeries a owl:DatatypeProperty ;
+    rdfs:domain clinical:ImagingStudy ;
+    rdfs:range xsd:integer ;
+    rdfs:label "Number of Series"@en .
+
+clinical:studyDate a owl:DatatypeProperty ;
+    rdfs:domain clinical:ImagingStudy ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "Study Date"@en .
+
+clinical:dicomStudyUid a owl:DatatypeProperty ;
+    rdfs:domain clinical:ImagingStudy ;
+    rdfs:range xsd:string ;
+    rdfs:label "DICOM Study UID"@en .
+
+clinical:retrieveUrl a owl:DatatypeProperty ;
+    rdfs:domain clinical:ImagingStudy ;
+    rdfs:range xsd:anyURI ;
+    rdfs:label "Retrieve URL"@en ;
+    rdfs:comment "URL to DICOM server if available"@en .
+
+# ============================================================================
+# New Properties on existing class: clinical:LaboratoryReport
+# Added in v1.7 — supports DiagnosticReport panel grouping
+# ============================================================================
+
+clinical:hasLabResult a owl:ObjectProperty ;
+    rdfs:label "Has Lab Result"@en ;
+    rdfs:comment "Links a LaboratoryReport panel to its constituent clinical:LabResult observations. Enables grouping of lab values (e.g., CBC components) under the ordering panel. FHIR alignment: fhir:DiagnosticReport.result."@en ;
+    rdfs:domain clinical:LaboratoryReport ;
+    rdfs:range clinical:LabResult .
+
+clinical:panelName a owl:DatatypeProperty ;
+    rdfs:domain clinical:LaboratoryReport ;
+    rdfs:range xsd:string ;
+    rdfs:label "Panel Name"@en ;
+    rdfs:comment "e.g., 'Complete Blood Count'"@en .
+
+clinical:reportCategory a owl:DatatypeProperty ;
+    rdfs:domain clinical:LaboratoryReport ;
+    rdfs:range xsd:string ;
+    rdfs:label "Report Category"@en ;
+    rdfs:comment "Values: LAB, RAD, PATH"@en .

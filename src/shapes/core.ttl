@@ -17,8 +17,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-02-22"^^xsd:date ;
-    owl:versionInfo "2.3" ;
+    dct:modified "2026-03-12"^^xsd:date ;
+    owl:versionInfo "2.8" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -154,9 +154,19 @@ cascade:sourceMetricCoverage a owl:ObjectProperty ;
     rdfs:domain cascade:DataSource .
 
 # ============================================================================
-# ============================================================================
 # Provenance Detail Properties (v2.3)
 # ============================================================================
+# Lightweight provenance detail properties for record-level attribution.
+# These properties are placed on record instances directly (not on DataSource
+# objects) for display in Health Map provenance badges without requiring
+# full DataSource graph traversal.
+#
+# cascade:sourceOrganization — populated from FHIR meta.source or contained
+# Organization reference during clinical record import. Examples: "Kaiser
+# Permanente", "Mayo Clinic".
+#
+# cascade:sourceDeviceName — populated from HealthKit HKSource contributing
+# app/device name. Examples: "Apple Watch Series 9", "Omron BP Monitor".
 
 cascade:sourceOrganization a owl:DatatypeProperty ;
     rdfs:label "Source Organization"@en ;
@@ -168,6 +178,7 @@ cascade:sourceDeviceName a owl:DatatypeProperty ;
     rdfs:comment "Device or app that recorded this measurement (e.g., 'Apple Watch Series 9', 'Omron BP Monitor'). Populated from HealthKit HKSource contributing app/device name."@en ;
     rdfs:range xsd:string .
 
+# ============================================================================
 # Vocabulary Organization (v1.3)
 # ============================================================================
 
@@ -532,6 +543,117 @@ cascade:advanceDirectiveNotes a owl:DatatypeProperty ;
     rdfs:range xsd:string .
 
 # ============================================================================
+# Reconciliation Properties (v2.4)
+# ============================================================================
+# Used by the Cascade reconciliation pipeline to annotate merged records with
+# provenance and conflict resolution metadata.
+
+cascade:sourceSystem a owl:DatatypeProperty ;
+    rdfs:label "Source System"@en ;
+    rdfs:comment "The name of the EHR or health system that originally held this record (e.g. 'primary-care', 'hospital'). Added during cross-system conversion to enable reconciliation."@en ;
+    rdfs:domain owl:Thing ;
+    rdfs:range xsd:string .
+
+cascade:reconciliationStatus a owl:ObjectProperty ;
+    rdfs:label "Reconciliation Status"@en ;
+    rdfs:comment "The outcome of reconciliation for this record. Value is one of the cascade:ReconciliationStatus named individuals: cascade:Canonical, cascade:Merged, cascade:ConflictResolved, cascade:UnresolvedConflict."@en ;
+    rdfs:domain owl:Thing ;
+    rdfs:range cascade:ReconciliationStatus .
+
+cascade:ReconciliationStatus a owl:Class ;
+    rdfs:label "Reconciliation Status"@en ;
+    rdfs:comment "Closed enumeration of possible reconciliation outcomes."@en .
+
+cascade:Canonical a owl:NamedIndividual, cascade:ReconciliationStatus ;
+    rdfs:label "Canonical"@en ;
+    rdfs:comment "Record is unique — no matching record found across other source systems."@en .
+
+cascade:Merged a owl:NamedIndividual, cascade:ReconciliationStatus ;
+    rdfs:label "Merged"@en ;
+    rdfs:comment "Record was deduplicated from two or more identical or near-identical source records."@en .
+
+cascade:ConflictResolved a owl:NamedIndividual, cascade:ReconciliationStatus ;
+    rdfs:label "Conflict Resolved"@en ;
+    rdfs:comment "Conflicting values across source records were resolved automatically using a trust-priority or merge strategy."@en .
+
+cascade:UnresolvedConflict a owl:NamedIndividual, cascade:ReconciliationStatus ;
+    rdfs:label "Unresolved Conflict"@en ;
+    rdfs:comment "Conflicting values could not be automatically resolved (trust scores too similar). Requires manual clinical review."@en .
+
+cascade:WithinSourceDuplicate a owl:NamedIndividual, cascade:ReconciliationStatus ;
+    rdfs:label "Within-Source Duplicate"@en ;
+    rdfs:comment "Record is a duplicate of another record within the same source system (e.g. same condition recorded across multiple clinical encounters). Suppressed from cross-system reconciliation output during Pass 1 deduplication."@en .
+
+cascade:mergedFrom a owl:ObjectProperty ;
+    rdfs:label "Merged From"@en ;
+    rdfs:comment "Links a reconciled record to the source record URIs that were merged into it. Used together with prov:wasDerivedFrom for semantic interoperability."@en ;
+    rdfs:domain owl:Thing ;
+    rdfs:range owl:Thing ;
+    rdfs:subPropertyOf prov:wasDerivedFrom .
+
+cascade:conflictResolution a owl:ObjectProperty ;
+    rdfs:label "Conflict Resolution Strategy"@en ;
+    rdfs:comment "The strategy used to resolve a conflict. Value is one of the cascade:ConflictResolutionStrategy named individuals: cascade:TrustPriority, cascade:MergeValues, cascade:FlagUnresolved."@en ;
+    rdfs:domain owl:Thing ;
+    rdfs:range cascade:ConflictResolutionStrategy .
+
+cascade:ConflictResolutionStrategy a owl:Class ;
+    rdfs:label "Conflict Resolution Strategy"@en ;
+    rdfs:comment "Closed enumeration of reconciliation resolution strategies."@en .
+
+cascade:TrustPriority a owl:NamedIndividual, cascade:ConflictResolutionStrategy ;
+    rdfs:label "Trust Priority"@en ;
+    rdfs:comment "The record from the highest-trust source system is selected as canonical."@en .
+
+cascade:MergeValues a owl:NamedIndividual, cascade:ConflictResolutionStrategy ;
+    rdfs:label "Merge Values"@en ;
+    rdfs:comment "The canonical record is built by taking the winner's fields and filling any gaps from lower-trust sources."@en .
+
+cascade:FlagUnresolved a owl:NamedIndividual, cascade:ConflictResolutionStrategy ;
+    rdfs:label "Flag Unresolved"@en ;
+    rdfs:comment "The conflict could not be automatically resolved. Record is tagged cascade:UnresolvedConflict for manual clinical review."@en .
+
+cascade:conflictField a owl:ObjectProperty ;
+    rdfs:label "Conflict Field"@en ;
+    rdfs:comment "The predicate URI on which a conflict was detected during reconciliation (e.g. health:status, health:resultValue). Stored as a URI reference, not a prefixed name string."@en ;
+    rdfs:domain owl:Thing ;
+    rdfs:range rdfs:Resource .
+
+cascade:conflictDescription a owl:DatatypeProperty ;
+    rdfs:label "Conflict Description"@en ;
+    rdfs:comment "Removed v2.7. Was informational prose describing conflicting values per source system. Replaced by cascade:conflictDetail structured blank node (v2.5), which uses rdfs:comment on the blank node for human readability."@en ;
+    owl:deprecated true ;
+    rdfs:domain owl:Thing ;
+    rdfs:range xsd:string .
+
+cascade:conflictDetail a owl:ObjectProperty ;
+    rdfs:label "Conflict Detail"@en ;
+    rdfs:comment "Links a reconciled record to a structured cascade:ConflictDetail blank node describing the per-system values that conflicted. The blank node carries an rdfs:comment with a human-readable summary."@en ;
+    rdfs:domain owl:Thing ;
+    rdfs:range cascade:ConflictDetail .
+
+cascade:ConflictDetail a owl:Class ;
+    rdfs:label "Conflict Detail"@en ;
+    rdfs:comment "A structured representation of conflicting values across source systems for a single property. Used as a blank node linked from cascade:conflictDetail."@en .
+
+cascade:conflictFor a owl:ObjectProperty ;
+    rdfs:label "Conflict For"@en ;
+    rdfs:comment "The predicate URI on which the conflict was detected (e.g. <https://ns.cascadeprotocol.org/health/v1#status>). Links a cascade:ConflictDetail to the conflicting property."@en ;
+    rdfs:domain cascade:ConflictDetail ;
+    rdfs:range rdfs:Resource .
+
+cascade:systemValue a owl:ObjectProperty ;
+    rdfs:label "System Value"@en ;
+    rdfs:comment "Links a cascade:ConflictDetail to a blank node representing one source system's value for the conflicting property. Each participating source system has its own cascade:systemValue blank node."@en ;
+    rdfs:domain cascade:ConflictDetail .
+
+cascade:forSystem a owl:DatatypeProperty ;
+    rdfs:label "For System"@en ;
+    rdfs:comment "The name of the source EHR system (e.g. 'primary-care', 'specialist') within a cascade:systemValue blank node."@en ;
+    rdfs:domain cascade:ConflictDetail ;
+    rdfs:range xsd:string .
+
+# ============================================================================
 # Alignment with W3C PROV-O
 # ============================================================================
 
@@ -554,6 +676,42 @@ cascade:advanceDirectiveNotes a owl:DatatypeProperty ;
 # ============================================================================
 # Changelog
 # ============================================================================
+# v2.7 (2026-03-12): Removed cascade:conflictDescription (deprecated since v2.5).
+#     cascade:conflictDetail blank nodes now carry an rdfs:comment with a human-readable
+#     summary of the conflicting values, replacing the separate prose property.
+# v2.6 (2026-03-11): Within-source deduplication vocabulary. Added
+#     cascade:WithinSourceDuplicate named individual for cascade:ReconciliationStatus.
+#     Represents encounter-instance duplicate records suppressed during Pass 1
+#     within-source deduplication. Phase 6 of reconciliation pipeline.
+# v2.5 (2026-03-11): Structured conflict representation. Added cascade:ConflictDetail
+#     class and 4 supporting properties: cascade:conflictDetail (ObjectProperty,
+#     links record to ConflictDetail blank node), cascade:conflictFor (ObjectProperty,
+#     the conflicting predicate URI), cascade:systemValue (ObjectProperty, per-system
+#     value blank node), cascade:forSystem (DatatypeProperty, system name string).
+#     Deprecated cascade:conflictDescription (informational prose, replaced by
+#     cascade:conflictDetail structured blank node). Phase 5 of reconciliation pipeline.
+# v2.4 (2026-03-11): Added reconciliation vocabulary for multi-system EHR data
+#     merging. Properties: cascade:sourceSystem (EHR origin tag, xsd:string),
+#     cascade:reconciliationStatus (ObjectProperty, range cascade:ReconciliationStatus),
+#     cascade:mergedFrom (ObjectProperty, subPropertyOf prov:wasDerivedFrom),
+#     cascade:conflictResolution (ObjectProperty, range cascade:ConflictResolutionStrategy),
+#     cascade:conflictField (ObjectProperty, range rdfs:Resource, stores full predicate URI),
+#     cascade:conflictDescription (DatatypeProperty, informational prose).
+#     Declared named individuals: cascade:Canonical, cascade:Merged,
+#     cascade:ConflictResolved, cascade:UnresolvedConflict (ReconciliationStatus);
+#     cascade:TrustPriority, cascade:MergeValues, cascade:FlagUnresolved
+#     (ConflictResolutionStrategy). Note: cascade:mergedSources (dropped —
+#     redundant with mergedFrom+sourceSystem) and cascade:conflictValues
+#     (renamed to cascade:conflictDescription) were in the initial design but
+#     corrected before the TTL was finalized. Supports CLI v0.2.5 reconcile command.
+# v2.3 (2026-02-22): Added 2 provenance detail properties for record-level
+#     attribution: cascade:sourceOrganization (organization that provided a
+#     record, populated from FHIR meta.source or contained Organization
+#     reference during clinical import) and cascade:sourceDeviceName (device
+#     or app that recorded a measurement, populated from HealthKit HKSource
+#     contributing app/device name). Used across all 11 CheckupShared record
+#     models for Health Map provenance display. Part of Health Map v3
+#     Pre-Phase Track A (Task A4).
 # v2.2 (2026-02-18): FHIR-aligned Address expansion and PatientProfile
 #     completeness (Phase 3.5 ONT1 + ONT2).
 #     ONT1: Added 9 FHIR Address.* aligned properties (addressUse, addressType,
@@ -601,3 +759,40 @@ cascade:advanceDirectiveNotes a owl:DatatypeProperty ;
 #     AIExtracted (under ClinicalGenerated). Aligns with SDK DataProvenance
 #     enum (6 cases). Backward-compatible: existing data using
 #     cascade:ConsumerGenerated/ClinicalGenerated remains valid.
+
+# ============================================================================
+# Layer Promotion Status (FHIR Conversion)
+# Added in v2.8 — supports lossless FHIR ↔ Cascade round-trip conversion
+# ============================================================================
+
+cascade:LayerPromotionStatusValue a owl:Class ;
+    rdfs:label "Layer Promotion Status Value"@en ;
+    rdfs:comment "Closed enumeration of Layer 2 promotion states for converted FHIR records."@en .
+
+cascade:layerPromotionStatus a owl:ObjectProperty ;
+    rdfs:label "Layer Promotion Status"@en ;
+    rdfs:comment "Indicates whether a record has been fully mapped to Cascade Layer 2 vocabulary or is preserved as a Layer 1 FHIR passthrough pending future mapping."@en ;
+    rdfs:range cascade:LayerPromotionStatusValue .
+
+cascade:FullyMapped a owl:NamedIndividual, cascade:LayerPromotionStatusValue ;
+    rdfs:label "Fully Mapped"@en ;
+    rdfs:comment "Record has been fully mapped to Cascade Layer 2 vocabulary."@en .
+
+cascade:PendingLayerTwoPromotion a owl:NamedIndividual, cascade:LayerPromotionStatusValue ;
+    rdfs:label "Pending Layer 2 Promotion"@en ;
+    rdfs:comment "Record is preserved as Layer 1 FHIR passthrough. Full Layer 2 vocabulary mapping has not yet been defined. Original FHIR JSON is retained in cascade:fhirJson for round-trip export."@en .
+
+cascade:fhirJson a owl:DatatypeProperty ;
+    rdfs:label "Original FHIR JSON"@en ;
+    rdfs:comment "Preserves the complete original FHIR resource JSON for Layer 1 passthrough records. Always stored as plain xsd:string (FHIR JSON is always valid UTF-8). Used for lossless round-trip export. Self-contained — survives reconciliation without sidecar file dependencies."@en ;
+    rdfs:range xsd:string .
+
+cascade:fhirResourceType a owl:DatatypeProperty ;
+    rdfs:label "FHIR Resource Type"@en ;
+    rdfs:comment "FHIR R4 resourceType of the source record. Populated on Layer 1 passthrough records."@en ;
+    rdfs:range xsd:string .
+
+cascade:sourceRecordDate a owl:DatatypeProperty ;
+    rdfs:label "Source Record Date"@en ;
+    rdfs:comment "Minimal date projection triple for Layer 1 passthrough records. Copied from effectiveDateTime, date, period.start, or created field if present."@en ;
+    rdfs:range xsd:dateTime .

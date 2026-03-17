@@ -18,8 +18,8 @@
     dct:description "Domain vocabulary for patient-owned insurance, benefits, and financial health data. Layer 2 vocabulary resolving the overlap between checkup:InsuranceInfo (patient-reported) and clinical:CoverageRecord (EHR-imported) with a unified, standardized representation."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-02-18"^^xsd:date ;
-    dct:modified "2026-02-18"^^xsd:date ;
-    owl:versionInfo "1.0" ;
+    dct:modified "2026-03-17"^^xsd:date ;
+    owl:versionInfo "1.3" ;
     rdfs:comment "Insurance and benefits data is cross-cutting: not clinical (it's administrative/financial), not app-specific (any health app benefits from knowing coverage), and contributed by both patient self-report and EHR import. This vocabulary provides a single Layer 2 domain model that both checkup: (Layer 3, patient-reported) and clinical: (Layer 2, EHR-imported) can reference via the mixed namespace pattern. Recommended Pod storage path: /coverage/"@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/coverage/v1/> .
 
@@ -166,6 +166,13 @@ coverage:rxGroup a owl:DatatypeProperty ;
 # Changelog
 # ============================================================================
 #
+# v1.3 (2026-03-17): Added coverage:deniedClinicalContext (ObjectProperty linking DenialNotice to clinical evidence in the Pod),
+#   coverage:outcomeReason (free-text explanation of appeal outcome), coverage:reversalAmount (reimbursement if approved),
+#   coverage:DenialReasonCode named individuals (standard-mapped enum values for denialReasonCode),
+#   rdfs:seeAlso mappings to HL7 ClaimResponse.adjudication and CARIN IG adjudication codes.
+#
+# v1.2 (2026-03-16): Added coverage:DenialNotice class, coverage:AppealRecord class, and 11 new properties for denial/appeal workflow.
+#
 # Version 1.0 (2026-02-18)
 # - Initial release as part of Schema Refactoring Plan Phase 2 (WS4)
 # - Created to resolve overlap between checkup:InsuranceInfo (L3, patient-reported)
@@ -180,3 +187,319 @@ coverage:rxGroup a owl:DatatypeProperty ;
 # - Layer 2 domain vocabulary per three-layer architecture
 # - Recommended Pod storage: /coverage/plans/{plan-id}.ttl
 #
+
+# ============================================================================
+# New Classes: ClaimRecord and BenefitStatement
+# Added in v1.1 — supports FHIR Claim and ExplanationOfBenefit conversion
+# ============================================================================
+
+coverage:ClaimRecord a owl:Class ;
+    rdfs:label "Claim Record"@en ;
+    rdfs:comment "A medical claim submitted to an insurer for reimbursement. FHIR alignment: fhir:Claim"@en .
+
+coverage:BenefitStatement a owl:Class ;
+    rdfs:label "Benefit Statement (EOB)"@en ;
+    rdfs:comment "An Explanation of Benefits document — the insurer's formal response to a claim, including adjudication, denial reasons, and patient cost responsibility. FHIR alignment: fhir:ExplanationOfBenefit. CMS mandates patient access via CARIN Alliance FHIR IG."@en .
+
+coverage:DenialNotice a owl:Class ;
+    rdfs:label "Denial Notice"@en ;
+    rdfs:comment "A formal denial of coverage issued by an insurer. Distinct from BenefitStatement — a DenialNotice initiates an appeal process, not a payment record. Recommended Pod storage: /coverage/denials/{id}.ttl"@en ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:seeAlso fhir:ExplanationOfBenefit .
+
+coverage:AppealRecord a owl:Class ;
+    rdfs:label "Appeal Record"@en ;
+    rdfs:comment "A formal appeal filing contesting a denial notice. One record per appeal level. Recommended Pod storage: /coverage/appeals/{id}.ttl"@en ;
+    rdfs:subClassOf prov:Activity ;
+    rdfs:seeAlso fhir:Task .
+
+# ============================================================================
+# New Properties: coverage:Deductible
+# ============================================================================
+
+coverage:deductibleAmount a owl:DatatypeProperty ;
+    rdfs:domain coverage:Deductible ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "Deductible Amount"@en .
+
+coverage:deductibleCurrency a owl:DatatypeProperty ;
+    rdfs:domain coverage:Deductible ;
+    rdfs:range xsd:string ;
+    rdfs:label "Deductible Currency"@en .
+
+coverage:deductibleMetAmount a owl:DatatypeProperty ;
+    rdfs:domain coverage:Deductible ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "Deductible Met Amount"@en .
+
+coverage:deductiblePeriod a owl:DatatypeProperty ;
+    rdfs:domain coverage:Deductible ;
+    rdfs:range xsd:string ;
+    rdfs:label "Deductible Period"@en .
+
+coverage:deductibleType a owl:DatatypeProperty ;
+    rdfs:domain coverage:Deductible ;
+    rdfs:range xsd:string ;
+    rdfs:label "Deductible Type"@en ;
+    rdfs:comment "Values: individual, family, in-network, out-of-network"@en .
+
+# ============================================================================
+# New Properties: coverage:CopaySchedule
+# ============================================================================
+
+coverage:copayAmount a owl:DatatypeProperty ;
+    rdfs:domain coverage:CopaySchedule ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "Copay Amount"@en .
+
+coverage:copayCurrency a owl:DatatypeProperty ;
+    rdfs:domain coverage:CopaySchedule ;
+    rdfs:range xsd:string ;
+    rdfs:label "Copay Currency"@en .
+
+coverage:copayType a owl:DatatypeProperty ;
+    rdfs:domain coverage:CopaySchedule ;
+    rdfs:range xsd:string ;
+    rdfs:label "Copay Type"@en ;
+    rdfs:comment "Values: primary-care, specialist, emergency, prescription"@en .
+
+# ============================================================================
+# New Properties: coverage:ClaimRecord
+# ============================================================================
+
+coverage:claimDate a owl:DatatypeProperty ;
+    rdfs:domain coverage:ClaimRecord ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "Claim Date"@en .
+
+coverage:claimTotal a owl:DatatypeProperty ;
+    rdfs:domain coverage:ClaimRecord ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "Claim Total"@en .
+
+coverage:claimStatus a owl:DatatypeProperty ;
+    rdfs:domain coverage:ClaimRecord ;
+    rdfs:range xsd:string ;
+    rdfs:label "Claim Status"@en ;
+    rdfs:comment "Values: active, cancelled, draft, entered-in-error"@en .
+
+coverage:claimType a owl:DatatypeProperty ;
+    rdfs:domain coverage:ClaimRecord ;
+    rdfs:range xsd:string ;
+    rdfs:label "Claim Type"@en ;
+    rdfs:comment "Values: professional, institutional, oral, pharmacy, vision"@en .
+
+coverage:billingProvider a owl:DatatypeProperty ;
+    rdfs:domain coverage:ClaimRecord ;
+    rdfs:range xsd:string ;
+    rdfs:label "Billing Provider"@en .
+
+coverage:hasDiagnosis a owl:DatatypeProperty ;
+    rdfs:domain coverage:ClaimRecord ;
+    rdfs:range xsd:string ;
+    rdfs:label "Has Diagnosis"@en ;
+    rdfs:comment "ICD-10 code URI"@en .
+
+coverage:hasProcedure a owl:DatatypeProperty ;
+    rdfs:domain coverage:ClaimRecord ;
+    rdfs:range xsd:string ;
+    rdfs:label "Has Procedure"@en ;
+    rdfs:comment "CPT/SNOMED code URI"@en .
+
+coverage:sourceRecordId a owl:DatatypeProperty ;
+    rdfs:range xsd:string ;
+    rdfs:label "Source Record ID"@en ;
+    rdfs:comment "Original source system record identifier. No domain restriction — shared by ClaimRecord and BenefitStatement."@en .
+
+# ============================================================================
+# New Properties: coverage:BenefitStatement
+# ============================================================================
+
+coverage:adjudicationDate a owl:DatatypeProperty ;
+    rdfs:domain coverage:BenefitStatement ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "Adjudication Date"@en .
+
+coverage:adjudicationStatus a owl:DatatypeProperty ;
+    rdfs:domain coverage:BenefitStatement ;
+    rdfs:range xsd:string ;
+    rdfs:label "Adjudication Status"@en ;
+    rdfs:comment "Values: completed, cancelled, entered-in-error"@en .
+
+coverage:outcomeCode a owl:DatatypeProperty ;
+    rdfs:domain coverage:BenefitStatement ;
+    rdfs:range xsd:string ;
+    rdfs:label "Outcome Code"@en ;
+    rdfs:comment "Values: queued, complete, error, partial"@en .
+
+coverage:denialReason a owl:DatatypeProperty ;
+    rdfs:domain coverage:BenefitStatement ;
+    rdfs:range xsd:string ;
+    rdfs:label "Denial Reason"@en .
+
+coverage:totalBilled a owl:DatatypeProperty ;
+    rdfs:domain coverage:BenefitStatement ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "Total Billed"@en .
+
+coverage:totalAllowed a owl:DatatypeProperty ;
+    rdfs:domain coverage:BenefitStatement ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "Total Allowed"@en .
+
+coverage:totalPaid a owl:DatatypeProperty ;
+    rdfs:domain coverage:BenefitStatement ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "Total Paid"@en .
+
+coverage:patientResponsibility a owl:DatatypeProperty ;
+    rdfs:domain coverage:BenefitStatement ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "Patient Responsibility"@en .
+
+coverage:relatedClaim a owl:ObjectProperty ;
+    rdfs:domain coverage:BenefitStatement ;
+    rdfs:range coverage:ClaimRecord ;
+    rdfs:label "Related Claim"@en ;
+    rdfs:comment "Links an ExplanationOfBenefit to its corresponding Claim."@en .
+
+# ============================================================================
+# v1.2 DenialNotice Properties
+# ============================================================================
+
+coverage:deniedProcedureCode a owl:DatatypeProperty ;
+    rdfs:label "Denied Procedure Code"@en ;
+    rdfs:comment "CPT or HCPCS code of the denied service (e.g., E0787 for CGM)."@en ;
+    rdfs:domain coverage:DenialNotice ;
+    rdfs:range xsd:string .
+
+coverage:denialReasonCode a owl:DatatypeProperty ;
+    rdfs:label "Denial Reason Code"@en ;
+    rdfs:comment "Structured coded denial reason. Recommended values are coverage:DenialReasonCode named individuals (coverage:NotMedicallyNecessary, coverage:LCDCriteriaNotMet, coverage:NCDCriteriaNotMet, coverage:ServiceNotCovered, coverage:PriorAuthorizationRequired, coverage:DuplicateClaim, coverage:InformationRequested). Distinct from the free-text coverage:denialReason. Aligns with HL7 ClaimResponse adjudication and CARIN IG Blue Button STU2."@en ;
+    rdfs:domain coverage:DenialNotice ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso <http://terminology.hl7.org/CodeSystem/adjudication> ,
+                 <http://hl7.org/fhir/us/carin-bb/STU2/> .
+
+coverage:denialLetterDate a owl:DatatypeProperty ;
+    rdfs:label "Denial Letter Date"@en ;
+    rdfs:comment "Date the denial notice was issued. The appeal deadline clock starts from this date."@en ;
+    rdfs:domain coverage:DenialNotice ;
+    rdfs:range xsd:date .
+
+coverage:appealDeadline a owl:DatatypeProperty ;
+    rdfs:label "Appeal Deadline"@en ;
+    rdfs:comment "Computed deadline for filing an appeal, based on the denial date, plan type, and applicable jurisdiction rules."@en ;
+    rdfs:domain coverage:DenialNotice ;
+    rdfs:range xsd:date .
+
+coverage:coveragePolicyReference a owl:DatatypeProperty ;
+    rdfs:label "Coverage Policy Reference"@en ;
+    rdfs:comment "The LCD, NCD, or coverage policy cited as the basis for denial (e.g., LCD L33822)."@en ;
+    rdfs:domain coverage:DenialNotice ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# v1.2 AppealRecord Properties
+# ============================================================================
+
+coverage:appealLevel a owl:DatatypeProperty ;
+    rdfs:label "Appeal Level"@en ;
+    rdfs:comment "The administrative level of this appeal. Values: redetermination, qio_reconsideration, alj_hearing, mac_review, federal_court, internal_level1, internal_level2, external_review, state_insurance_dept, litigation."@en ;
+    rdfs:domain coverage:AppealRecord ;
+    rdfs:range xsd:string .
+
+coverage:appealFiledDate a owl:DatatypeProperty ;
+    rdfs:label "Appeal Filed Date"@en ;
+    rdfs:comment "Date the appeal was formally filed."@en ;
+    rdfs:domain coverage:AppealRecord ;
+    rdfs:range xsd:date .
+
+coverage:appealOutcome a owl:DatatypeProperty ;
+    rdfs:label "Appeal Outcome"@en ;
+    rdfs:comment "Outcome of the appeal. Values: approved, denied, partial, withdrawn, pending."@en ;
+    rdfs:domain coverage:AppealRecord ;
+    rdfs:range xsd:string .
+
+coverage:appealOutcomeDate a owl:DatatypeProperty ;
+    rdfs:label "Appeal Outcome Date"@en ;
+    rdfs:comment "Date the appeal outcome was received."@en ;
+    rdfs:domain coverage:AppealRecord ;
+    rdfs:range xsd:date .
+
+coverage:relatedDenialNotice a owl:ObjectProperty ;
+    rdfs:label "Related Denial Notice"@en ;
+    rdfs:comment "Links an AppealRecord to the DenialNotice it contests."@en ;
+    rdfs:domain coverage:AppealRecord ;
+    rdfs:range coverage:DenialNotice .
+
+# ============================================================================
+# v1.3 Properties
+# ============================================================================
+
+coverage:deniedClinicalContext a owl:ObjectProperty ;
+    rdfs:label "Denied Clinical Context"@en ;
+    rdfs:comment "References clinical or health records in the Pod that are relevant to this denial — procedures, lab results, diagnoses, device readings. Enables appeals to cite specific clinical evidence against policy criteria. Range is intentionally open (rdfs:Resource) to allow linking across clinical:, health:, and pots: namespaces."@en ;
+    rdfs:domain coverage:DenialNotice ;
+    rdfs:range rdfs:Resource .
+
+coverage:outcomeReason a owl:DatatypeProperty ;
+    rdfs:label "Outcome Reason"@en ;
+    rdfs:comment "Free-text explanation of why the appeal was approved, denied, or partially approved. Captures the insurer's stated rationale for the outcome."@en ;
+    rdfs:domain coverage:AppealRecord ;
+    rdfs:range xsd:string .
+
+coverage:reversalAmount a owl:DatatypeProperty ;
+    rdfs:label "Reversal Amount"@en ;
+    rdfs:comment "Reimbursement amount granted if the appeal was approved or partially approved. Expressed as a decimal in the currency of the related InsurancePlan."@en ;
+    rdfs:domain coverage:AppealRecord ;
+    rdfs:range xsd:decimal .
+
+# ============================================================================
+# v1.3 Named Individuals: DenialReasonCode
+# Standard-mapped enumeration values for coverage:denialReasonCode
+# Source mappings:
+#   HL7 ClaimResponse.adjudication: http://terminology.hl7.org/CodeSystem/adjudication
+#   CARIN IG for Blue Button: http://hl7.org/fhir/us/carin-bb/STU2/
+#   CMS Medicare denial codes: https://www.cms.gov/medicare/coding-billing/place-of-service-codes
+# ============================================================================
+
+coverage:NotMedicallyNecessary a coverage:DenialReasonCode ;
+    rdfs:label "Not Medically Necessary"@en ;
+    rdfs:comment "Service denied as not meeting medical necessity criteria for the diagnosis. HL7 alignment: adjudication code 'noauth'. CMS reason: 50 (not medically necessary)."@en ;
+    rdfs:seeAlso <http://terminology.hl7.org/CodeSystem/adjudication> .
+
+coverage:LCDCriteriaNotMet a coverage:DenialReasonCode ;
+    rdfs:label "LCD Criteria Not Met"@en ;
+    rdfs:comment "Service denied because the patient does not meet the criteria in the applicable Local Coverage Determination (LCD). CMS LCD search: https://www.cms.gov/medicare-coverage-database/"@en ;
+    rdfs:seeAlso <https://www.cms.gov/medicare-coverage-database/> .
+
+coverage:NCDCriteriaNotMet a coverage:DenialReasonCode ;
+    rdfs:label "NCD Criteria Not Met"@en ;
+    rdfs:comment "Service denied because the patient does not meet the criteria in the applicable National Coverage Determination (NCD)."@en ;
+    rdfs:seeAlso <https://www.cms.gov/medicare-coverage-database/> .
+
+coverage:ServiceNotCovered a coverage:DenialReasonCode ;
+    rdfs:label "Service Not Covered"@en ;
+    rdfs:comment "The requested service is explicitly excluded from the patient's plan benefits. HL7 alignment: adjudication code 'benefit'."@en ;
+    rdfs:seeAlso <http://terminology.hl7.org/CodeSystem/adjudication> .
+
+coverage:PriorAuthorizationRequired a coverage:DenialReasonCode ;
+    rdfs:label "Prior Authorization Required"@en ;
+    rdfs:comment "The service requires prior authorization which was not obtained before service delivery. HL7 alignment: adjudication code 'noauth'. CARIN IG: X12 835 reason code 4."@en ;
+    rdfs:seeAlso <http://hl7.org/fhir/us/carin-bb/STU2/> .
+
+coverage:DuplicateClaim a coverage:DenialReasonCode ;
+    rdfs:label "Duplicate Claim"@en ;
+    rdfs:comment "Claim denied as a duplicate of a previously processed claim. X12 835 reason code 18."@en .
+
+coverage:InformationRequested a coverage:DenialReasonCode ;
+    rdfs:label "Additional Information Requested"@en ;
+    rdfs:comment "Claim suspended or denied pending submission of additional clinical documentation. X12 835 reason code 16."@en .
+
+# DenialReasonCode type declaration (supports named individuals above)
+coverage:DenialReasonCode a owl:Class ;
+    rdfs:label "Denial Reason Code"@en ;
+    rdfs:comment "Enumeration class for structured denial reason codes. Use named individuals (coverage:NotMedicallyNecessary, etc.) as values for coverage:denialReasonCode. Aligns with HL7 ClaimResponse adjudication codes and CARIN IG for Blue Button (STU2)."@en ;
+    rdfs:seeAlso <http://terminology.hl7.org/CodeSystem/adjudication> ,
+                 <http://hl7.org/fhir/us/carin-bb/STU2/> .
