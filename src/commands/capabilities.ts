@@ -25,6 +25,7 @@ interface ToolDescriptor {
   usage: string;
   parameters: ToolParameter[];
   examples: string[];
+  outputSchema?: Record<string, unknown>;
   status: 'implemented';
 }
 
@@ -139,6 +140,23 @@ function getCapabilities(version: string): CapabilitiesOutput {
           'cascade pod query ./my-pod --encounters --conditions --json',
           'cascade pod query ./my-pod --all --json',
         ],
+        outputSchema: {
+          description: 'JSON output structure for --json flag',
+          shape: '{ pod: string, dataTypes: { [type]: { count: number, file: string, records: Record[] } } }',
+          recordShape: '{ id: string, type: string, properties: { [prefixed-property]: string } }',
+          propertyPrefixes: {
+            'health:': 'wellness/device data — health:testName, health:resultValue, health:resultUnit, health:performedDate, health:testCode (LOINC URI), health:conditionName, health:conditionCategory (FHIR category: problem-list-item|encounter-diagnosis|social-history), health:snomedSemanticTag (semantic type from SNOMED display name: disorder|finding|situation|procedure|observable entity), health:status (active/inactive/resolved), health:onsetDate, health:medicationName, health:isActive (true/false string), health:rxNormCode',
+            'clinical:': 'EHR-imported clinical data — clinical:encounterDate, clinical:encounterType, clinical:procedureName, clinical:procedureDate, clinical:drugCode, clinical:clinicalIntent',
+            'core:': 'provenance — core:sourceSystem, core:dataProvenance, core:schemaVersion, core:reconciliationStatus, core:mergedSources',
+          },
+          jqExamples: [
+            "# Clinical conditions only (excludes social findings): jq '[.dataTypes.conditions.records[] | select(.properties.\"health:status\" == \"active\" and .properties.\"health:snomedSemanticTag\" == \"disorder\") | .properties.\"health:conditionName\"]'",
+            "# All active conditions including findings: jq '[.dataTypes.conditions.records[] | select(.properties.\"health:status\" == \"active\") | {name: .properties.\"health:conditionName\", type: .properties.\"health:snomedSemanticTag\"}]'",
+            "# HbA1c trend (most recent first): jq '[.dataTypes.\"lab-results\".records[] | select(.properties.\"health:testName\" | test(\"A1c|Hemoglobin A1c\"; \"i\")) | {date: .properties.\"health:performedDate\", value: .properties.\"health:resultValue\", unit: .properties.\"health:resultUnit\"}] | sort_by(.date) | reverse'",
+            "# Active medications: jq '[.dataTypes.medications.records[] | select(.properties.\"health:isActive\" == \"true\") | .properties.\"health:medicationName\"]'",
+            "# Medications with source provenance: jq '[.dataTypes.medications.records[] | {name: .properties.\"health:medicationName\", active: .properties.\"health:isActive\", sources: .properties.\"core:mergedSources\"}]'",
+          ],
+        },
         status: 'implemented',
       },
       {

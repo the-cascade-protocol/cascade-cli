@@ -151,6 +151,20 @@ export function convertCondition(resource: any): ConversionResult & { _quads: Qu
   const condName = codeableConceptText(resource.code) ?? 'Unknown Condition';
   quads.push(tripleStr(subjectUri, NS.health + 'conditionName', condName));
 
+  // FHIR Condition.category — e.g. problem-list-item, encounter-diagnosis, social-history
+  const fhirCategory = resource.category?.[0]?.coding?.[0]?.code ?? resource.category?.[0]?.text;
+  if (fhirCategory) {
+    quads.push(tripleStr(subjectUri, NS.health + 'conditionCategory', fhirCategory));
+  }
+
+  // SNOMED semantic tag — the parenthetical type suffix in the display name, e.g. "(disorder)",
+  // "(finding)", "(situation)". Lets downstream tools distinguish clinical from administrative records
+  // without a full SNOMED hierarchy lookup.
+  const semanticTagMatch = condName.match(/\(([^)]+)\)$/);
+  if (semanticTagMatch) {
+    quads.push(tripleStr(subjectUri, NS.health + 'snomedSemanticTag', semanticTagMatch[1]));
+  }
+
   const clinicalStatus = resource.clinicalStatus?.coding?.[0]?.code ?? 'active';
   quads.push(tripleStr(subjectUri, NS.health + 'status', clinicalStatus));
 
