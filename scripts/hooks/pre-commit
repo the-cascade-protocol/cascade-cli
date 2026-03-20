@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# cascade-cli pre-commit hook
+# Checks that VOCAB_VERSIONS is updated when vocabulary files change.
+
+set -euo pipefail
+
+SHAPES_CHANGED=$(git diff --cached --name-only | grep -E '^src/shapes/' || true)
+
+if [[ -z "$SHAPES_CHANGED" ]]; then
+  exit 0
+fi
+
+if ! git diff --cached --name-only | grep -q "VOCAB_VERSIONS"; then
+  echo ""
+  echo "ERROR: src/shapes/ changed but VOCAB_VERSIONS was not updated."
+  echo "Update VOCAB_VERSIONS to reflect the vocabulary versions in the new shapes files,"
+  echo "then stage it: git add VOCAB_VERSIONS"
+  echo ""
+  exit 1
+fi
