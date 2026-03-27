@@ -37,6 +37,7 @@ import {
   commonTriples,
   quadsToJsonLd,
   mintSubjectUri,
+  contentHashedUri,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -45,7 +46,12 @@ import {
 
 export function convertMedicationStatement(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const patientRef = resource.subject?.reference ?? resource.patient?.reference ?? '';
+  const subjectUri = contentHashedUri('MedicationRequest', {
+    patient: patientRef,
+    rxNormCode: resource.medicationCodeableConcept?.coding?.find((c: any) => c.system?.includes('rxnorm'))?.code,
+    startDate: (resource.authoredOn ?? resource.effectivePeriod?.start)?.split('T')[0],
+  }, resource.id);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'MedicationRecord'));
@@ -142,7 +148,13 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
 
 export function convertCondition(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const patientRef = resource.subject?.reference ?? '';
+  const subjectUri = contentHashedUri('Condition', {
+    patient: patientRef,
+    snomedCode: resource.code?.coding?.find((c: any) => c.system?.includes('snomed'))?.code,
+    icd10Code: resource.code?.coding?.find((c: any) => c.system?.includes('icd'))?.code,
+    onsetDate: (resource.onsetDateTime ?? resource.onsetPeriod?.start)?.split('T')[0],
+  }, resource.id);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'ConditionRecord'));
@@ -215,7 +227,12 @@ export function convertCondition(resource: any): ConversionResult & { _quads: Qu
 
 export function convertAllergyIntolerance(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const patientRef = resource.patient?.reference ?? '';
+  const subjectUri = contentHashedUri('AllergyIntolerance', {
+    patient: patientRef,
+    allergenCode: resource.code?.coding?.[0]?.code,
+    allergenName: resource.code?.text,
+  }, resource.id);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'AllergyRecord'));
@@ -303,7 +320,12 @@ export function isVitalSignObservation(resource: any): boolean {
 
 export function convertObservationLab(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const patientRef = resource.subject?.reference ?? '';
+  const subjectUri = contentHashedUri('Observation', {
+    patient: patientRef,
+    loincCode: resource.code?.coding?.find((c: any) => c.system?.includes('loinc'))?.code,
+    date: (resource.effectiveDateTime ?? resource.effectivePeriod?.start)?.split('T')[0],
+  }, resource.id);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'LabResultRecord'));

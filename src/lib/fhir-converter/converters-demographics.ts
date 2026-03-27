@@ -22,6 +22,7 @@ import {
   commonTriples,
   quadsToJsonLd,
   mintSubjectUri,
+  contentHashedUri,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,12 @@ import {
 
 export function convertPatient(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = contentHashedUri('Patient', {
+    dob: resource.birthDate,
+    sex: resource.gender,
+    family: resource.name?.[0]?.family,
+    given: resource.name?.[0]?.given?.[0],
+  }, resource.id);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.cascade + 'PatientProfile'));
@@ -112,7 +118,12 @@ export function convertPatient(resource: any): ConversionResult & { _quads: Quad
 
 export function convertImmunization(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const patientRef = resource.patient?.reference ?? '';
+  const subjectUri = contentHashedUri('Immunization', {
+    patient: patientRef,
+    cvxCode: resource.vaccineCode?.coding?.[0]?.code,
+    date: resource.occurrenceDateTime?.split('T')[0],
+  }, resource.id);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'ImmunizationRecord'));

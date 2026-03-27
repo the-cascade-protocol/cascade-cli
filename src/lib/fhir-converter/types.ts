@@ -297,6 +297,37 @@ export function mintSubjectUri(resource: any): string {
   return `urn:uuid:${deterministicUuid(`${resourceType}:${id}`)}`;
 }
 
+/**
+ * Generate a deterministic urn:uuid: URI from clinical content fields.
+ * Used when no stable FHIR resource ID is available.
+ *
+ * Identity fields are sorted by key for stability, then hashed via SHA-1
+ * (same algorithm as deterministicUuid — determinism only, not security).
+ *
+ * Falls back to resourceId-based hash if no content fields have values,
+ * then to random UUID as an absolute last resort.
+ */
+export function contentHashedUri(
+  resourceType: string,
+  contentFields: Record<string, string | undefined>,
+  fallbackId?: string,
+): string {
+  // Filter out undefined/empty values and sort keys for stability
+  const content = Object.entries(contentFields)
+    .filter(([, v]) => v != null && v.trim().length > 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('|');
+
+  if (content.length > 0) {
+    return `urn:uuid:${deterministicUuid(`${resourceType}::${content}`)}`;
+  }
+  if (fallbackId) {
+    return `urn:uuid:${deterministicUuid(`${resourceType}:${fallbackId}`)}`;
+  }
+  return `urn:uuid:${randomUUID()}`;  // true last resort
+}
+
 /** Common triples every Cascade resource gets */
 export function commonTriples(subject: string): Quad[] {
   return [
