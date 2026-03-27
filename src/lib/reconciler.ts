@@ -207,12 +207,61 @@ function matchLabs(a: ParsedRecord, b: ParsedRecord, tol: number): MatchResult {
 }
 
 function matchImmunizations(a: ParsedRecord, b: ParsedRecord): MatchResult {
+  // Tier 1: CVX code + exact date (high confidence)
   const cA = getProp(a, NS.health + 'cvxCode');
   const cB = getProp(b, NS.health + 'cvxCode');
   const dA = dateOnly(getProp(a, NS.health + 'administrationDate') ?? getProp(a, NS.health + 'startDate') ?? '');
   const dB = dateOnly(getProp(b, NS.health + 'administrationDate') ?? getProp(b, NS.health + 'startDate') ?? '');
+
   if (cA && cB && codeFromUri(cA) === codeFromUri(cB) && dA && dA === dB)
     return { match: true, confidence: 1.0, matchedOn: `cvx:${codeFromUri(cA)}+${dA}` };
+
+  // Tier 2: Vaccine name (normalized) + date -- fallback when CVX absent
+  const nA = (getProp(a, NS.health + 'vaccineName') ?? '').toLowerCase().trim();
+  const nB = (getProp(b, NS.health + 'vaccineName') ?? '').toLowerCase().trim();
+  if (nA && nB && nA !== 'unknown vaccine' && nA === nB && dA && dA === dB)
+    return { match: true, confidence: 0.80, matchedOn: `name:"${nA}"+${dA}` };
+
+  // Tier 3: Vaccine name match, no date -- very conservative
+  if (nA && nB && nA !== 'unknown vaccine' && nA === nB)
+    return { match: true, confidence: 0.60, matchedOn: `name-only:"${nA}"` };
+
+  return { match: false, confidence: 0, matchedOn: '' };
+}
+
+function matchVitalSigns(a: ParsedRecord, b: ParsedRecord): MatchResult {
+  const lcA = getProp(a, NS.health + 'testCode');  // LOINC
+  const lcB = getProp(b, NS.health + 'testCode');
+  const dtA = dateOnly(getProp(a, NS.health + 'effectiveDate') ?? getProp(a, NS.health + 'performedDate') ?? '');
+  const dtB = dateOnly(getProp(b, NS.health + 'effectiveDate') ?? getProp(b, NS.health + 'performedDate') ?? '');
+
+  if (lcA && lcB && codeFromUri(lcA) === codeFromUri(lcB) && dtA && dtA === dtB) {
+    // Same LOINC, same day -- check value proximity
+    const vA = parseFloat(getProp(a, NS.health + 'value') ?? 'NaN');
+    const vB = parseFloat(getProp(b, NS.health + 'value') ?? 'NaN');
+    if (!isNaN(vA) && !isNaN(vB)) {
+      const diff = Math.abs(vA - vB) / Math.max(Math.abs(vA), 0.001);
+      if (diff <= 0.05) return { match: true, confidence: 0.95, matchedOn: `loinc:${codeFromUri(lcA)}+${dtA}` };
+      if (diff <= 0.15) return { match: true, confidence: 0.75, matchedOn: `loinc-approx:${codeFromUri(lcA)}+${dtA}` };
+    }
+    return { match: true, confidence: 0.85, matchedOn: `loinc:${codeFromUri(lcA)}+${dtA}` };
+  }
+  return { match: false, confidence: 0, matchedOn: '' };
+}
+
+function matchPatientProfiles(a: ParsedRecord, b: ParsedRecord): MatchResult {
+  const dobA = getProp(a, NS.cascade + 'dateOfBirth');
+  const dobB = getProp(b, NS.cascade + 'dateOfBirth');
+  const sexA = getProp(a, NS.cascade + 'biologicalSex');
+  const sexB = getProp(b, NS.cascade + 'biologicalSex');
+
+  if (dobA && dobB && dobA === dobB && sexA && sexB && sexA === sexB) {
+    return { match: true, confidence: 0.95, matchedOn: `dob:${dobA}+sex:${sexA}` };
+  }
+  // Try DOB alone (lower confidence)
+  if (dobA && dobB && dobA === dobB) {
+    return { match: true, confidence: 0.75, matchedOn: `dob:${dobA}` };
+  }
   return { match: false, confidence: 0, matchedOn: '' };
 }
 
@@ -224,6 +273,8 @@ function doRecordsMatch(a: ParsedRecord, b: ParsedRecord, tol: number): MatchRes
     case 'health:AllergyRecord':      return matchAllergies(a, b);
     case 'health:LabResultRecord':    return matchLabs(a, b, tol);
     case 'health:ImmunizationRecord': return matchImmunizations(a, b);
+    case 'clinical:VitalSign':        return matchVitalSigns(a, b);
+    case 'cascade:PatientProfile':    return matchPatientProfiles(a, b);
     default:                          return { match: false, confidence: 0, matchedOn: '' };
   }
 }
@@ -432,8 +483,8 @@ export async function runReconciliation(
   for (let i = 0; i < allRecords.length; i++) {
     const a = allRecords[i];
     if (assigned.has(a.uri)) continue;
-    if (a.type === 'cascade:PatientProfile' || a.type === 'coverage:InsurancePlan') {
-      groups.push({ matchType: 'pass_through', confidence: 1.0, records: [a], matchedOn: 'profile' });
+    if (a.type === 'coverage:InsurancePlan') {
+      groups.push({ matchType: 'pass_through', confidence: 1.0, records: [a], matchedOn: 'coverage' });
       assigned.add(a.uri);
       continue;
     }
