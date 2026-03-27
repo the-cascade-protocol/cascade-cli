@@ -237,10 +237,22 @@ export async function convert(
       })),
     };
   } else if (from === 'c-cda') {
-    return {
-      success: false, output: '', format: to, resourceCount: 0, skippedCount: 0,
-      warnings: [], errors: ['C-CDA conversion is not yet supported'], results: [],
-    };
+    // Native C-CDA converter — preserves CVX, LOINC, SNOMED, RxNorm, ICD-10 codes
+    const { convertCcda } = await import('../ccda-converter/index.js');
+
+    // Detect if input looks like an IHE XDM zip (binary PK header)
+    let inputData: string | Buffer;
+    const firstTwo = input.charCodeAt(0) === 0x50 && input.charCodeAt(1) === 0x4b;
+    if (firstTwo) {
+      inputData = Buffer.from(input, 'binary');
+    } else {
+      inputData = input;
+    }
+
+    return await convertCcda(inputData, {
+      sourceSystem,
+      importedAt: new Date().toISOString(),
+    });
   } else {
     return {
       success: false, output: '', format: to, resourceCount: 0, skippedCount: 0,
