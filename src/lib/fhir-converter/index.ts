@@ -56,7 +56,7 @@ const { namedNode, literal, quad: makeQuad } = DataFactory;
 
 import { convertFhirResourceToQuads } from './fhir-to-cascade.js';
 import { convertCascadeToFhir } from './cascade-to-fhir.js';
-import { EXCLUDED_TYPES, EXCLUDED_REASONS } from './converters-passthrough.js';
+import { EXCLUDED_TYPES } from './converters-passthrough.js';
 
 // Re-export public types
 export type { InputFormat, OutputFormat, ConversionResult, BatchConversionResult };
@@ -87,6 +87,7 @@ export async function convert(
   const warnings: string[] = [];
   const errors: string[] = [];
   const results: ConversionResult[] = [];
+  let skippedCount = 0;
 
   if (from === 'fhir' && (to === 'cascade' || to === 'turtle' || to === 'jsonld')) {
     // FHIR -> Cascade
@@ -95,7 +96,7 @@ export async function convert(
       parsed = JSON.parse(input);
     } catch {
       return {
-        success: false, output: '', format: to, resourceCount: 0,
+        success: false, output: '', format: to, resourceCount: 0, skippedCount: 0,
         warnings: [], errors: ['Invalid JSON input'], results: [],
       };
     }
@@ -110,7 +111,7 @@ export async function convert(
       fhirResources.push(parsed);
     } else {
       return {
-        success: false, output: '', format: to, resourceCount: 0,
+        success: false, output: '', format: to, resourceCount: 0, skippedCount: 0,
         warnings: [], errors: ['Input does not appear to be a FHIR resource or Bundle'], results: [],
       };
     }
@@ -118,7 +119,7 @@ export async function convert(
     const allQuads: Quad[] = [];
     for (const res of fhirResources) {
       if (EXCLUDED_TYPES.has(res.resourceType)) {
-        warnings.push(`Skipping excluded FHIR resource type: ${res.resourceType} — ${EXCLUDED_REASONS[res.resourceType] ?? 'intentionally excluded'}`);
+        skippedCount++;
         continue;
       }
       const result = convertFhirResourceToQuads(res, passthroughMinimal);
@@ -137,7 +138,7 @@ export async function convert(
 
     if (allQuads.length === 0) {
       return {
-        success: false, output: '', format: to, resourceCount: 0,
+        success: false, output: '', format: to, resourceCount: 0, skippedCount,
         warnings, errors: ['No convertible FHIR resources found'], results: [],
       };
     }
@@ -199,6 +200,7 @@ export async function convert(
       output,
       format: to === 'cascade' ? (outputSerialization === 'jsonld' ? 'jsonld' : 'turtle') : to,
       resourceCount: results.length,
+      skippedCount,
       warnings,
       errors,
       results,
@@ -210,7 +212,7 @@ export async function convert(
 
     if (resources.length === 0) {
       return {
-        success: false, output: '', format: 'fhir', resourceCount: 0,
+        success: false, output: '', format: 'fhir', resourceCount: 0, skippedCount: 0,
         warnings, errors: ['No resources converted from Cascade Turtle'], results: [],
       };
     }
@@ -224,6 +226,7 @@ export async function convert(
       output,
       format: 'fhir',
       resourceCount: resources.length,
+      skippedCount: 0,
       warnings,
       errors,
       results: resources.map(r => ({
@@ -235,12 +238,12 @@ export async function convert(
     };
   } else if (from === 'c-cda') {
     return {
-      success: false, output: '', format: to, resourceCount: 0,
+      success: false, output: '', format: to, resourceCount: 0, skippedCount: 0,
       warnings: [], errors: ['C-CDA conversion is not yet supported'], results: [],
     };
   } else {
     return {
-      success: false, output: '', format: to, resourceCount: 0,
+      success: false, output: '', format: to, resourceCount: 0, skippedCount: 0,
       warnings: [], errors: [`Unsupported conversion: ${from} -> ${to}`], results: [],
     };
   }

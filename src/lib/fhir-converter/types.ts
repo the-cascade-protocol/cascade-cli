@@ -29,6 +29,7 @@ export interface BatchConversionResult {
   output: string;
   format: OutputFormat;
   resourceCount: number;
+  skippedCount: number;
   warnings: string[];
   errors: string[];
   results: ConversionResult[];

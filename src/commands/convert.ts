@@ -152,6 +152,7 @@ export function registerConvertCommand(program: Command): void {
               to: options.to,
               format: result.format,
               resourceCount: result.resourceCount,
+              skippedCount: result.skippedCount,
               warnings: result.warnings,
               output: result.output,
               resources: result.results.map(r => ({
@@ -172,6 +173,9 @@ export function registerConvertCommand(program: Command): void {
               `Converted ${result.resourceCount} resource${result.resourceCount > 1 ? 's' : ''} ` +
               `(${options.from} -> ${result.format})`,
             );
+          }
+          if (result.skippedCount > 0) {
+            printVerbose(`${result.skippedCount} resource type${result.skippedCount > 1 ? 's' : ''} skipped (CareTeam, CarePlan, SupplyDelivery — not patient health data)`, globalOpts);
           }
           if (result.warnings.length > 0) {
             console.error(`${result.warnings.length} warning${result.warnings.length > 1 ? 's' : ''}`);
