@@ -2,6 +2,7 @@
 # Compare against spec/VOCAB_VERSIONS to detect drift.
 # Run scripts/check-downstream-versions.sh from spec/ to check all repos at once.
 # Update this file whenever you sync shapes from spec and bump the CLI version.
+# Updated 2026-03-27: checkup v3.2 — removed deprecated supplyEndDate shape property
 core=2.9
 health=2.4
 clinical=1.7
