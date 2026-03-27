@@ -39,12 +39,52 @@ interface ImportReport {
   importedAt: string;
   podDir: string;
   sources: Array<{ file: string; system: string; resourceCount: number; warnings: string[] }>;
-  reconciliation?: { enabled: boolean; summary?: object };
+  reconciliation?: {
+    enabled: boolean;
+    crossBatch?: boolean;
+    existingRecordsLoaded?: number;
+    summary?: object;
+  };
   filesWritten: Array<{ path: string; recordsAdded: number; type: string }>;
   typeCounts: Record<string, number>;
   totalRecordsImported: number;
   warnings: string[];
   dryRun: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Load existing pod data as ReconcilerInput records for cross-batch dedup
+// ---------------------------------------------------------------------------
+
+async function loadExistingPodData(podDir: string): Promise<ReconcilerInput[]> {
+  // Pod data directories that contain reconcilable records
+  const DATA_DIRS = ['clinical', 'wellness'];
+  const inputs: ReconcilerInput[] = [];
+
+  for (const dir of DATA_DIRS) {
+    const dirPath = path.join(podDir, dir);
+    let files: string[];
+    try {
+      files = await fs.readdir(dirPath);
+    } catch {
+      continue; // Directory doesn't exist yet
+    }
+
+    for (const file of files) {
+      if (!file.endsWith('.ttl')) continue;
+      const filePath = path.join(dirPath, file);
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        if (content.trim().length > 0) {
+          inputs.push({ content, systemName: 'existing-pod' });
+        }
+      } catch {
+        // Skip unreadable files
+      }
+    }
+  }
+
+  return inputs;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +225,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
     .argument('<files...>', 'FHIR JSON or Cascade Turtle files to import')
     .option('--source-system <name>', 'Tag all imported records with this system name')
     .option('--no-reconcile', 'Skip reconciliation even when importing multiple files')
+    .option('--reconcile-existing', 'Include existing pod records in reconciliation pass (cross-batch dedup)')
+    .option('--no-reconcile-existing', 'Skip loading existing pod records (additive import only)')
     .option('--trust <scores>', 'Trust scores e.g. hospital=0.95,clinic=0.85')
     .option('--dry-run', 'Preview the import without writing any files')
     .option('--report <file>', 'Write import report JSON to this file')
@@ -195,6 +237,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       options: {
         sourceSystem?: string;
         reconcile: boolean;
+        reconcileExisting?: boolean;
         trust?: string;
         dryRun?: boolean;
         report?: string;
@@ -285,11 +328,21 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       let mergedTurtle: string;
       let reconciliationSummary: object | undefined;
 
-      const shouldReconcile = options.reconcile !== false && reconcilerInputs.length > 1;
+      // Load existing pod data as an implicit source 0 when --reconcile-existing is set
+      let existingInputs: ReconcilerInput[] = [];
+      if (options.reconcileExisting === true) {
+        existingInputs = await loadExistingPodData(podDir);
+        if (existingInputs.length > 0) {
+          printVerbose(`Loaded ${existingInputs.length} existing pod file(s) for cross-batch reconciliation.`, globalOpts);
+        }
+      }
+
+      const allInputs = [...existingInputs, ...reconcilerInputs];
+      const shouldReconcile = options.reconcile !== false && allInputs.length > 1;
 
       if (shouldReconcile) {
-        printVerbose(`Reconciling ${reconcilerInputs.length} inputs...`, globalOpts);
-        const reconcileResult = await runReconciliation(reconcilerInputs, {
+        printVerbose(`Reconciling ${allInputs.length} inputs (${existingInputs.length} existing + ${reconcilerInputs.length} new)...`, globalOpts);
+        const reconcileResult = await runReconciliation(allInputs, {
           trustScores,
           labTolerance: 0.05,
         });
@@ -297,8 +350,12 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         reconciliationSummary = reconcileResult.report.summary;
         printVerbose(`Reconciliation complete. Final records: ${reconcileResult.report.summary.finalRecordCount}`, globalOpts);
       } else {
-        mergedTurtle = reconcilerInputs.map(i => i.content).join('\n\n');
+        mergedTurtle = allInputs.map(i => i.content).join('\n\n');
       }
+
+      // When cross-batch reconciliation ran, the output already represents the
+      // complete merged state — use replace mode in the write step below.
+      const useCrossBatchReplace = existingInputs.length > 0 && shouldReconcile;
 
       // --- Step 4: Parse merged Turtle into quads grouped by subject ---
       let subjectQuads: Map<string, Quad[]>;
@@ -342,7 +399,15 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         let recordsAdded = subjectQArrays.length;
         let isNewFile = true;
 
-        if (await fileExists(targetFile)) {
+        if (useCrossBatchReplace) {
+          // Cross-batch reconciliation: the reconciler output already represents
+          // the complete merged state (existing + new, deduped). Write it directly
+          // without re-merging against the existing file to avoid duplicates.
+          isNewFile = !(await fileExists(targetFile));
+          finalTurtle = newTurtle;
+          // recordsAdded reflects the full set of subjects in this bucket after reconciliation
+          recordsAdded = subjectQArrays.length;
+        } else if (await fileExists(targetFile)) {
           isNewFile = false;
           // Merge: parse existing, combine unique subjects
           let existingQuads: Map<string, Quad[]>;
@@ -422,7 +487,12 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         podDir,
         sources: sourceReport,
         reconciliation: shouldReconcile
-          ? { enabled: true, summary: reconciliationSummary }
+          ? {
+              enabled: true,
+              crossBatch: existingInputs.length > 0,
+              existingRecordsLoaded: existingInputs.length,
+              summary: reconciliationSummary,
+            }
           : { enabled: false },
         filesWritten,
         typeCounts,
