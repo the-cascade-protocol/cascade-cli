@@ -429,8 +429,51 @@ cascade:AdvanceDirectivesShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Shapes: UserResolution and PendingConflict (v2.9)
+# ============================================================================
+
+cascade:UserResolutionShape a sh:NodeShape ;
+    sh:targetClass cascade:UserResolution ;
+    rdfs:label "User Resolution Shape"@en ;
+    sh:property [
+        sh:path cascade:conflictId ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Conflict ID"@en ;
+        sh:message "UserResolution requires a conflictId"@en
+    ] ;
+    sh:property [
+        sh:path cascade:resolution ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Resolution"@en ;
+        sh:message "UserResolution requires a resolution decision"@en
+    ] .
+
+cascade:PendingConflictShape a sh:NodeShape ;
+    sh:targetClass cascade:PendingConflict ;
+    rdfs:label "Pending Conflict Shape"@en ;
+    sh:property [
+        sh:path cascade:conflictId ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Conflict ID"@en ;
+        sh:message "PendingConflict requires a conflictId"@en
+    ] .
+
+# ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.1 (2026-03-27)
+# - Added UserResolutionShape: VIOLATION for conflictId, resolution
+# - Added PendingConflictShape: VIOLATION for conflictId
 #
 # Version 1.0 (2026-02-18)
 # - Initial release of core vocabulary SHACL shapes (Phase 4)

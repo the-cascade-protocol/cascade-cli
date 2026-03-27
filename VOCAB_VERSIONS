@@ -2,8 +2,8 @@
 # Compare against spec/VOCAB_VERSIONS to detect drift.
 # Run scripts/check-downstream-versions.sh from spec/ to check all repos at once.
 # Update this file whenever you sync shapes from spec and bump the CLI version.
-core=2.8
-health=2.3
+core=2.9
+health=2.4
 clinical=1.7
 coverage=1.3
 checkup=3.2

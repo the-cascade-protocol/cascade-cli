@@ -17,8 +17,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-03-12"^^xsd:date ;
-    owl:versionInfo "2.8" ;
+    dct:modified "2026-03-27"^^xsd:date ;
+    owl:versionInfo "2.9" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -676,6 +676,18 @@ cascade:forSystem a owl:DatatypeProperty ;
 # ============================================================================
 # Changelog
 # ============================================================================
+# v2.9 (2026-03-27): EHR Import Reconciliation (P1-C) — Added conflict resolution
+#     persistence classes: cascade:UserResolution (patient's recorded decision for
+#     resolving a data conflict) and cascade:PendingConflict (unresolved conflict
+#     awaiting user resolution). Added conflict resolution properties: conflictId,
+#     resolution, keptRecord, discardedRecords, userNote, candidateRecords,
+#     detectedAt, autoResolved. Added document provenance properties: documentType,
+#     sectionCode, sourceRecordId.
+# v2.8 (2026-03-12): Layer Promotion Status vocabulary for FHIR round-trip support.
+#     Added cascade:LayerPromotionStatusValue class, cascade:layerPromotionStatus
+#     ObjectProperty, cascade:FullyMapped and cascade:PendingLayerTwoPromotion named
+#     individuals. Added cascade:fhirJson (lossless FHIR JSON passthrough),
+#     cascade:fhirResourceType, cascade:sourceRecordDate properties.
 # v2.7 (2026-03-12): Removed cascade:conflictDescription (deprecated since v2.5).
 #     cascade:conflictDetail blank nodes now carry an rdfs:comment with a human-readable
 #     summary of the conflicting values, replacing the separate prose property.
@@ -796,3 +808,79 @@ cascade:sourceRecordDate a owl:DatatypeProperty ;
     rdfs:label "Source Record Date"@en ;
     rdfs:comment "Minimal date projection triple for Layer 1 passthrough records. Copied from effectiveDateTime, date, period.start, or created field if present."@en ;
     rdfs:range xsd:dateTime .
+
+# ============================================================================
+# Conflict Resolution (v2.9)
+# ============================================================================
+
+###  Conflict Resolution Classes
+cascade:UserResolution a owl:Class ;
+    rdfs:label "User Resolution"@en ;
+    rdfs:comment "A patient's recorded decision for resolving a data conflict between two source records."@en ;
+    owl:versionInfo "Added in core v2.9" .
+
+cascade:PendingConflict a owl:Class ;
+    rdfs:label "Pending Conflict"@en ;
+    rdfs:comment "An unresolved conflict between two or more records from different sources, awaiting user resolution."@en ;
+    owl:versionInfo "Added in core v2.9" .
+
+###  Conflict Resolution Properties
+cascade:conflictId a owl:DatatypeProperty ;
+    rdfs:label "Conflict ID"@en ;
+    rdfs:comment "A deterministic string identifier for a conflict, derived from the record type and identity fields. Stable across re-imports."@en ;
+    rdfs:domain [ owl:unionOf (cascade:UserResolution cascade:PendingConflict) ] ;
+    rdfs:range xsd:string .
+
+cascade:resolution a owl:DatatypeProperty ;
+    rdfs:label "Resolution"@en ;
+    rdfs:comment "The user's resolution decision. One of: kept-source-a, kept-source-b, kept-both, manual-edit."@en ;
+    rdfs:domain cascade:UserResolution ;
+    rdfs:range xsd:string .
+
+cascade:keptRecord a owl:ObjectProperty ;
+    rdfs:label "Kept Record"@en ;
+    rdfs:comment "The record that was kept as the canonical version after conflict resolution."@en ;
+    rdfs:domain cascade:UserResolution .
+
+cascade:discardedRecords a owl:ObjectProperty ;
+    rdfs:label "Discarded Records"@en ;
+    rdfs:comment "Records that were discarded during conflict resolution."@en ;
+    rdfs:domain cascade:UserResolution .
+
+cascade:userNote a owl:DatatypeProperty ;
+    rdfs:label "User Note"@en ;
+    rdfs:comment "Optional free-text note from the patient about their resolution decision."@en ;
+    rdfs:domain cascade:UserResolution ;
+    rdfs:range xsd:string .
+
+cascade:candidateRecords a owl:ObjectProperty ;
+    rdfs:label "Candidate Records"@en ;
+    rdfs:comment "The conflicting records in a PendingConflict, awaiting user resolution."@en ;
+    rdfs:domain cascade:PendingConflict .
+
+cascade:detectedAt a owl:DatatypeProperty ;
+    rdfs:label "Detected At"@en ;
+    rdfs:comment "When the conflict was first detected during import."@en ;
+    rdfs:domain cascade:PendingConflict ;
+    rdfs:range xsd:dateTime .
+
+cascade:autoResolved a owl:DatatypeProperty ;
+    rdfs:label "Auto Resolved"@en ;
+    rdfs:comment "True when a conflict was automatically resolved by applying a stored user resolution preference."@en ;
+    rdfs:range xsd:boolean .
+
+###  Document Provenance Properties
+cascade:documentType a owl:DatatypeProperty ;
+    rdfs:label "Document Type"@en ;
+    rdfs:comment "The type of clinical document. Values: summarization, progress-note, discharge-summary, consultation-note, operative-note, history-physical."@en ;
+    rdfs:range xsd:string .
+
+cascade:sectionCode a owl:DatatypeProperty ;
+    rdfs:label "Section Code"@en ;
+    rdfs:comment "LOINC code of the originating C-CDA section for this record."@en ;
+    rdfs:range xsd:string .
+
+cascade:sourceRecordId a owl:DatatypeProperty ;
+    rdfs:label "Source Record ID"@en ;
+    rdfs:comment "The original source system record identifier (e.g., C-CDA <id> element value) preserved for provenance."@en ;
+    rdfs:range xsd:string .

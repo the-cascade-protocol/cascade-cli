@@ -677,8 +677,35 @@ health:HealthProfileShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Shape: SocialHistoryRecord (v2.4)
+# ============================================================================
+
+health:SocialHistoryRecordShape a sh:NodeShape ;
+    sh:targetClass health:SocialHistoryRecord ;
+    rdfs:label "Social History Record Shape"@en ;
+    sh:property [
+        sh:path cascade:sourceSystem ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Source System"@en ;
+        sh:message "Source system attribution is recommended for social history records"@en
+    ] ;
+    sh:property [
+        sh:path health:smokingStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Smoking Status"@en ;
+        sh:message "Smoking status is a key social history field"@en
+    ] .
+
+# ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.1 (2026-03-27)
+# - Added SocialHistoryRecordShape for health:SocialHistoryRecord (health v2.4)
 #
 # Version 1.0 (2026-02-18)
 # - Initial release of Health & Wellness SHACL shapes (Phase 4)
