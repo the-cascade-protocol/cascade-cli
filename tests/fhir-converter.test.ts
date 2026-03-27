@@ -1036,10 +1036,11 @@ describe('Edge cases', () => {
     expect(result.warnings.some(w => w.includes('Unknown Cascade RDF type'))).toBe(true);
   });
 
-  it('should reject unsupported conversion direction', async () => {
+  it('should fail gracefully for invalid C-CDA XML', async () => {
+    // Now that C-CDA is supported, an empty/invalid doc returns no output (not an "unsupported" error)
     const result = await convert('<xml/>', 'c-cda', 'turtle');
     expect(result.success).toBe(false);
-    expect(result.errors.some(e => e.includes('C-CDA'))).toBe(true);
+    expect(result.resourceCount).toBe(0);
   });
 
   it('should handle Condition with missing optional fields', () => {
@@ -1618,7 +1619,7 @@ describe('Layer 1 FHIR passthrough', () => {
     }
   });
 
-  it('should skip excluded types in batch conversion with a warning', async () => {
+  it('should skip excluded types in batch conversion and track skippedCount', async () => {
     const bundle = {
       resourceType: 'Bundle',
       type: 'collection',
@@ -1630,7 +1631,7 @@ describe('Layer 1 FHIR passthrough', () => {
     const result = await convert(JSON.stringify(bundle), 'fhir', 'turtle');
     expect(result.success).toBe(true);
     expect(result.resourceCount).toBe(1); // Only Claim converted
-    expect(result.warnings.some(w => w.includes('SupplyDelivery'))).toBe(true);
+    expect(result.skippedCount).toBe(1);  // SupplyDelivery counted in skippedCount, not as a warning
   });
 });
 
