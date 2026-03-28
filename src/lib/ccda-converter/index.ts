@@ -182,7 +182,16 @@ function convertSingleCcda(
   count++;
 
   // Process each section
-  const body = ccdaDoc?.component?.structuredBody ?? ccdaDoc?.structuredBody;
+  // ccdaDoc.component is always an array (fast-xml-parser isArray config), so we must
+  // search through the array for the element that contains structuredBody rather than
+  // accessing .structuredBody directly on the array.
+  const componentTopLevel = ccdaDoc?.component;
+  const componentTopArr = Array.isArray(componentTopLevel)
+    ? componentTopLevel
+    : componentTopLevel ? [componentTopLevel] : [];
+  const body =
+    componentTopArr.find((c: any) => c?.structuredBody)?.structuredBody
+    ?? ccdaDoc?.structuredBody;
   const components = body?.component ?? [];
   const componentArr = Array.isArray(components) ? components : [components];
 

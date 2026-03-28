@@ -20,7 +20,9 @@ export function extractImmunizationQuads(
   const quads: Quad[] = [];
 
   for (const entry of entries) {
-    const sa = entry?.substanceAdministration ?? entry;
+    // entry.substanceAdministration is always an array from fast-xml-parser's isArray config — unwrap first element
+    const saRaw = entry?.substanceAdministration;
+    const sa = Array.isArray(saRaw) ? saRaw[0] : (saRaw ?? entry);
     if (!sa) continue;
 
     // Extract vaccine code

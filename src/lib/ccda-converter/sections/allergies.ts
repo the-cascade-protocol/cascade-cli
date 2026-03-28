@@ -19,7 +19,9 @@ export function extractAllergyQuads(
   const quads: Quad[] = [];
 
   for (const entry of entries) {
-    const act = entry?.act ?? entry;
+    // entry.act is always an array from fast-xml-parser's isArray config — unwrap first element
+    const actRaw = entry?.act;
+    const act = Array.isArray(actRaw) ? actRaw[0] : (actRaw ?? entry);
     const obs = act?.entryRelationship?.observation ?? act?.observation ?? act;
     const obsArr = Array.isArray(obs) ? obs : [obs];
 

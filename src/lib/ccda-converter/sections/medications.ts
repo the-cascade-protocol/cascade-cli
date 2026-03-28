@@ -21,7 +21,9 @@ export function extractMedicationQuads(
   const rxNormOid = '2.16.840.1.113883.6.88';
 
   for (const entry of entries) {
-    const sa = entry?.substanceAdministration ?? entry;
+    // entry.substanceAdministration is always an array from fast-xml-parser's isArray config — unwrap first element
+    const saRaw = entry?.substanceAdministration;
+    const sa = Array.isArray(saRaw) ? saRaw[0] : (saRaw ?? entry);
     if (!sa) continue;
 
     const material = sa?.consumable?.manufacturedProduct?.manufacturedMaterial;

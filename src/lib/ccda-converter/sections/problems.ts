@@ -23,9 +23,15 @@ export function extractProblemQuads(
 
   for (const entry of entries) {
     // Conditions are inside an act/observation
-    const act = entry?.act ?? entry;
-    const obs = act?.entryRelationship?.observation ?? act?.observation ?? act;
-    const obsArr = Array.isArray(obs) ? obs : [obs];
+    // entry.act is always an array from fast-xml-parser's isArray config — unwrap first element
+    const actRaw = entry?.act;
+    const act = Array.isArray(actRaw) ? actRaw[0] : (actRaw ?? entry);
+    const entryRelArr = Array.isArray(act?.entryRelationship) ? act.entryRelationship : (act?.entryRelationship ? [act.entryRelationship] : []);
+    const obs = entryRelArr.flatMap((er: any) => {
+      const o = er?.observation;
+      return Array.isArray(o) ? o : (o ? [o] : []);
+    });
+    const obsArr = obs.length > 0 ? obs : (act?.observation ? (Array.isArray(act.observation) ? act.observation : [act.observation]) : [act]);
 
     for (const observation of obsArr) {
       if (!observation?.code && !observation?.value) continue;
