@@ -276,9 +276,24 @@ export function tripleDate(subject: string, predicate: string, dateStr: string):
 
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/**
+ * Cascade Protocol Deterministic UUID (CDP-UUID)
+ *
+ * Algorithm:
+ *   Input:   UTF-8 string
+ *   Hash:    SHA-1(input) -> 40-char lowercase hex digest `h`
+ *   Layout:  {h[0:8]}-{h[8:12]}-5{h[13:16]}-{v}{h[18:20]}-{h[20:32]}
+ *            where v = (parseInt(h[16:18], 16) & 0x3f | 0x80).toString(16).padStart(2,'0')
+ *            (Sets UUID version nibble to 5, variant bits to 10xx -- same layout as RFC 4122 v5
+ *             but hashing the raw input string directly, not a namespace+name pair)
+ *
+ * Cross-SDK verification:
+ *   SHA-1("hello") == "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d"
+ *   deterministicUuid("hello") == "aaf4c61d-dcc5-58a2-9abe-de0f3b482cd9"
+ *   (verify this value before using in any SDK implementation)
+ */
 function deterministicUuid(input: string): string {
   const hash = createHash('sha1').update(input).digest('hex');
-  // Format as a deterministic UUID-shaped string (SHA-1 based, not strict v5)
   const v = ((parseInt(hash.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, '0');
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${v}${hash.slice(18, 20)}-${hash.slice(20, 32)}`;
 }
@@ -301,11 +316,24 @@ export function mintSubjectUri(resource: any): string {
  * Generate a deterministic urn:uuid: URI from clinical content fields.
  * Used when no stable FHIR resource ID is available.
  *
- * Identity fields are sorted by key for stability, then hashed via SHA-1
- * (same algorithm as deterministicUuid — determinism only, not security).
+ * Identity string construction:
+ *   "{resourceType}::{sortedKeyValuePairs}"
+ *   where sortedKeyValuePairs =
+ *     entries of contentFields where value is non-null and non-empty after .trim()
+ *     sorted ascending by key (localeCompare)
+ *     mapped as "key=value"
+ *     joined with "|"
  *
- * Falls back to resourceId-based hash if no content fields have values,
- * then to random UUID as an absolute last resort.
+ * URI selection:
+ *   If identity string has content: return "urn:uuid:" + deterministicUuid(identity)
+ *   Else if fallbackId:             return "urn:uuid:" + deterministicUuid("{resourceType}:{fallbackId}")
+ *   Else:                           return "urn:uuid:" + randomUUID()  (non-deterministic fallback)
+ *
+ * Example:
+ *   contentHashedUri("Patient", { dob:"1985-03-15", sex:"male", family:"Smith", given:"John" })
+ *   -> identity: "Patient::dob=1985-03-15|family=Smith|given=John|sex=male"
+ *   -> urn:uuid:{deterministicUuid("Patient::dob=1985-03-15|family=Smith|given=John|sex=male")}
+ *   -> urn:uuid:aba8c9f5-fdc6-5187-a363-0d5a7cb72438
  */
 export function contentHashedUri(
   resourceType: string,
