@@ -68,6 +68,7 @@ export async function loadUserResolutions(podDir: string): Promise<Map<string, U
   return new Promise((resolve) => {
     const parser = new Parser({ format: 'Turtle' });
     const bySubject = new Map<string, Map<string, string>>();
+    const discardedBySubject = new Map<string, string[]>();
 
     parser.parse(content, (error, quad) => {
       if (error) { resolve(map); return; }  // Soft failure — return empty map
@@ -89,12 +90,18 @@ export async function loadUserResolutions(podDir: string): Promise<Map<string, U
             resolvedAt: resolvedAtStr ? new Date(resolvedAtStr) : new Date(),
             resolution: resolution ?? 'kept-source-a',
             keptRecordUri,
-            discardedRecordUris: [],  // Simplified — list parsing omitted for brevity
+            discardedRecordUris: discardedBySubject.get(uri) ?? [],
             userNote: props.get(NS.cascade + 'userNote'),
           });
         }
         resolve(map);
         return;
+      }
+
+      if (quad.predicate.value === NS.cascade + 'discardedRecords') {
+        const arr = discardedBySubject.get(quad.subject.value) ?? [];
+        arr.push(quad.object.value);
+        discardedBySubject.set(quad.subject.value, arr);
       }
 
       if (!bySubject.has(quad.subject.value)) bySubject.set(quad.subject.value, new Map());
