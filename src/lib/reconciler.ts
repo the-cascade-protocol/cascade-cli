@@ -265,6 +265,25 @@ function matchPatientProfiles(a: ParsedRecord, b: ParsedRecord): MatchResult {
   return { match: false, confidence: 0, matchedOn: '' };
 }
 
+/**
+ * Returns the confidence threshold to use when comparing two records.
+ *
+ * Records from summarization documents (LOINC 34133-9, e.g. MyChart "Summarization
+ * of Episode Note") contain the patient's full history snapshot.  When the same
+ * patient imports multiple such summaries, every clinical fact appears once per
+ * summary export.  A lower threshold (0.50) catches these cross-summary duplicates
+ * that would otherwise be missed at the standard threshold of 0.65.
+ *
+ * Additive documents (progress notes, discharge summaries) represent a single
+ * encounter; their records are kept at the standard 0.65 threshold.
+ */
+function getMatchThreshold(a: ParsedRecord, b: ParsedRecord): number {
+  const aIsSummary = getProp(a, NS.cascade + 'documentType') === 'summarization';
+  const bIsSummary = getProp(b, NS.cascade + 'documentType') === 'summarization';
+  if (aIsSummary || bIsSummary) return 0.50;
+  return 0.65;
+}
+
 function doRecordsMatch(a: ParsedRecord, b: ParsedRecord, tol: number): MatchResult {
   if (a.type !== b.type) return { match: false, confidence: 0, matchedOn: '' };
   switch (a.type) {
@@ -497,7 +516,8 @@ export async function runReconciliation(
       const b = allRecords[j];
       if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
       const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
-      if (match && confidence >= 0.65) {
+      const threshold = getMatchThreshold(a, b);
+      if (match && confidence >= threshold) {
         matched.push(b);
         assigned.add(b.uri);
         if (!matchedOn) { matchedOn = mo; bestConf = confidence; }
@@ -537,6 +557,7 @@ export async function runReconciliation(
       conflictField: g.conflictField,
       conflictValues: g.conflictValues,
       resolved: res.resolved,
+      documentType: getProp(g.records[0], NS.cascade + 'documentType'),
     };
 
     switch (g.matchType) {
@@ -547,7 +568,7 @@ export async function runReconciliation(
     }
 
     if (g.matchType !== 'pass_through') transformations.push(t);
-    if (!res.resolved) unresolvedList.push(t);
+    if (!res.resolved) unresolvedList.push({ ...t, candidateUris: g.records.map(r => r.uri) });
   }
 
   return {

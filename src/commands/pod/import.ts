@@ -30,6 +30,12 @@ import {
   resolvePodDir,
   fileExists,
 } from './helpers.js';
+import {
+  writePendingConflicts,
+  generateConflictId,
+  type PendingConflict,
+} from '../../lib/user-resolutions.js';
+import { randomUUID } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // Import report type
@@ -349,6 +355,28 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         mergedTurtle = reconcileResult.turtle;
         reconciliationSummary = reconcileResult.report.summary;
         printVerbose(`Reconciliation complete. Final records: ${reconcileResult.report.summary.finalRecordCount}`, globalOpts);
+
+        // Persist unresolved conflicts to settings/pending-conflicts.ttl
+        if (!dryRun) {
+          const pendingConflicts: PendingConflict[] = (reconcileResult.report.unresolvedConflicts as Array<{
+            recordType: string;
+            matchedOn: string;
+            sources?: string[];
+            candidateUris?: string[];
+          }>).map((c) => ({
+            uri: `urn:uuid:conflict-${randomUUID()}`,
+            conflictId: generateConflictId(c.recordType, c.matchedOn),
+            recordType: c.recordType,
+            detectedAt: new Date(),
+            candidateRecordUris: c.candidateUris ?? [],
+            sourceA: c.sources?.[0],
+            sourceB: c.sources?.[1],
+          }));
+          await writePendingConflicts(podDir, pendingConflicts);
+          if (pendingConflicts.length > 0) {
+            printVerbose(`  ${pendingConflicts.length} unresolved conflict(s) written to settings/pending-conflicts.ttl`, globalOpts);
+          }
+        }
       } else {
         mergedTurtle = allInputs.map(i => i.content).join('\n\n');
       }
