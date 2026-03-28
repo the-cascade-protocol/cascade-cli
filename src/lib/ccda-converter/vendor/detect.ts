@@ -4,12 +4,18 @@
 
 export type EhrVendor = 'epic' | 'cerner' | 'athena' | 'unknown';
 
-export function detectVendor(doc: any): EhrVendor {
-  const custodianName = (
+function extractOrgName(doc: any): string {
+  const raw =
     doc?.ClinicalDocument?.custodian?.assignedCustodian?.representedCustodianOrganization?.name?.['#text'] ??
     doc?.ClinicalDocument?.custodian?.assignedCustodian?.representedCustodianOrganization?.name ??
-    ''
-  ).toLowerCase();
+    '';
+  // fast-xml-parser's isArray config may wrap <name> in an array
+  if (Array.isArray(raw)) return (raw[0]?.['#text'] ?? raw[0] ?? '').toString();
+  return raw.toString();
+}
+
+export function detectVendor(doc: any): EhrVendor {
+  const custodianName = extractOrgName(doc).toLowerCase();
 
   if (custodianName.includes('epic') || custodianName.includes('mychart') || custodianName.includes('kaiser') || custodianName.includes('ucsf') || custodianName.includes('stanford')) {
     return 'epic';
@@ -24,9 +30,6 @@ export function detectVendor(doc: any): EhrVendor {
 }
 
 export function getSourceSystemName(doc: any): string {
-  return (
-    doc?.ClinicalDocument?.custodian?.assignedCustodian?.representedCustodianOrganization?.name?.['#text'] ??
-    doc?.ClinicalDocument?.custodian?.assignedCustodian?.representedCustodianOrganization?.name ??
-    'Unknown EHR'
-  );
+  const name = extractOrgName(doc);
+  return name || 'Unknown EHR';
 }
