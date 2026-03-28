@@ -15,6 +15,7 @@ import { existsSync } from 'fs';
 
 const CLI_PATH = resolve(__dirname, '../dist/index.js');
 const REFERENCE_POD = resolve(__dirname, '../../reference-patient-pod');
+const skipIfNoPod = !existsSync(REFERENCE_POD);
 
 function runCli(args: string): string {
   try {
@@ -229,7 +230,7 @@ describe('pod init', () => {
 // Tests: Pod info (using reference patient pod)
 // =============================================================================
 
-describe('pod info', () => {
+describe.skipIf(skipIfNoPod)('pod info', () => {
   it('should output JSON with data summary', () => {
     const output = runCli(`--json pod info ${REFERENCE_POD}`);
     const parsed = JSON.parse(output);
@@ -291,7 +292,7 @@ describe('pod info', () => {
 // Tests: Pod query (using reference patient pod)
 // =============================================================================
 
-describe('pod query', () => {
+describe.skipIf(skipIfNoPod)('pod query', () => {
   it('should query medications and return records', () => {
     const output = runCli(`--json pod query ${REFERENCE_POD} --medications`);
     const parsed = JSON.parse(output);
@@ -352,7 +353,7 @@ describe('pod query', () => {
 // Tests: Pod export
 // =============================================================================
 
-describe('pod export', () => {
+describe.skipIf(skipIfNoPod)('pod export', () => {
   let tempExportDir: string;
 
   beforeEach(async () => {
