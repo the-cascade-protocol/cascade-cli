@@ -499,37 +499,138 @@ export async function runReconciliation(
   const groups: Group[] = [];
   const assigned = new Set<string>();
 
-  for (let i = 0; i < allRecords.length; i++) {
-    const a = allRecords[i];
-    if (assigned.has(a.uri)) continue;
-    if (a.type === 'coverage:InsurancePlan') {
-      groups.push({ matchType: 'pass_through', confidence: 1.0, records: [a], matchedOn: 'coverage' });
-      assigned.add(a.uri);
-      continue;
+  const hasExistingPod = allRecords.some(r => r.sourceSystem === 'existing-pod');
+
+  if (hasExistingPod) {
+    // ---------------------------------------------------------------------------
+    // Fast path: O(n_new × k) type-indexed matching for --reconcile-existing mode
+    // ---------------------------------------------------------------------------
+
+    const existingRecords = allRecords.filter(r => r.sourceSystem === 'existing-pod');
+    const newRecords = allRecords.filter(r => r.sourceSystem !== 'existing-pod');
+
+    // Build a type index over existing records only
+    const existingIndex = new Map<string, ParsedRecord[]>();
+    for (const r of existingRecords) {
+      const bucket = existingIndex.get(r.type);
+      if (bucket) bucket.push(r);
+      else existingIndex.set(r.type, [r]);
     }
 
-    const matched = [a];
-    let matchedOn = '';
-    let bestConf = 1.0;
+    // Cross-batch pass: match each new record against same-type existing records
+    for (const a of newRecords) {
+      if (assigned.has(a.uri)) continue;
+      if (a.type === 'coverage:InsurancePlan') {
+        groups.push({ matchType: 'pass_through', confidence: 1.0, records: [a], matchedOn: 'coverage' });
+        assigned.add(a.uri);
+        continue;
+      }
 
-    for (let j = i + 1; j < allRecords.length; j++) {
-      const b = allRecords[j];
-      if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
-      const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
-      const threshold = getMatchThreshold(a, b);
-      if (match && confidence >= threshold) {
-        matched.push(b);
-        assigned.add(b.uri);
-        if (!matchedOn) { matchedOn = mo; bestConf = confidence; }
+      const matched: ParsedRecord[] = [a];
+      let matchedOn = '';
+      let bestConf = 1.0;
+
+      const candidates = existingIndex.get(a.type) ?? [];
+      for (const b of candidates) {
+        if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
+        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
+        const threshold = getMatchThreshold(a, b);
+        if (match && confidence >= threshold) {
+          matched.push(b);
+          assigned.add(b.uri);
+          if (!matchedOn) { matchedOn = mo; bestConf = confidence; }
+        }
+      }
+      assigned.add(a.uri);
+
+      if (matched.length === 1) {
+        groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
+      } else {
+        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol);
+        groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
       }
     }
-    assigned.add(a.uri);
 
-    if (matched.length === 1) {
-      groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
-    } else {
-      const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol);
-      groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
+    // Within-batch pass: pairwise loop over newRecords only (existing-pod records
+    // from the same sourceSystem never match each other)
+    for (let i = 0; i < newRecords.length; i++) {
+      const a = newRecords[i];
+      if (assigned.has(a.uri)) continue;
+      if (a.type === 'coverage:InsurancePlan') {
+        // Already handled above; skip if already assigned
+        continue;
+      }
+
+      const matched: ParsedRecord[] = [a];
+      let matchedOn = '';
+      let bestConf = 1.0;
+
+      for (let j = i + 1; j < newRecords.length; j++) {
+        const b = newRecords[j];
+        if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
+        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
+        const threshold = getMatchThreshold(a, b);
+        if (match && confidence >= threshold) {
+          matched.push(b);
+          assigned.add(b.uri);
+          if (!matchedOn) { matchedOn = mo; bestConf = confidence; }
+        }
+      }
+      assigned.add(a.uri);
+
+      if (matched.length === 1) {
+        groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
+      } else {
+        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol);
+        groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
+      }
+    }
+
+    // Existing-pod pass-through: records not matched into any group must still
+    // appear as their own pass-through groups so they are written back to the pod
+    for (const r of existingRecords) {
+      if (assigned.has(r.uri)) continue;
+      groups.push({ matchType: 'pass_through', confidence: 1.0, records: [r], matchedOn: '' });
+      assigned.add(r.uri);
+    }
+
+  } else {
+    // ---------------------------------------------------------------------------
+    // Original O(n²) algorithm — unchanged when no existing-pod records present
+    // ---------------------------------------------------------------------------
+
+    for (let i = 0; i < allRecords.length; i++) {
+      const a = allRecords[i];
+      if (assigned.has(a.uri)) continue;
+      if (a.type === 'coverage:InsurancePlan') {
+        groups.push({ matchType: 'pass_through', confidence: 1.0, records: [a], matchedOn: 'coverage' });
+        assigned.add(a.uri);
+        continue;
+      }
+
+      const matched = [a];
+      let matchedOn = '';
+      let bestConf = 1.0;
+
+      for (let j = i + 1; j < allRecords.length; j++) {
+        const b = allRecords[j];
+        if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
+        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
+        const threshold = getMatchThreshold(a, b);
+        if (match && confidence >= threshold) {
+          matched.push(b);
+          assigned.add(b.uri);
+          if (!matchedOn) { matchedOn = mo; bestConf = confidence; }
+        }
+      }
+      assigned.add(a.uri);
+
+      if (matched.length === 1) {
+        groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
+      } else {
+        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol);
+        groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
+      }
     }
   }
 
