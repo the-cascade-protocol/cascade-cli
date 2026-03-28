@@ -27,6 +27,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `discardedRecordUris` fully deserialized from `settings/user-resolutions.ttl`.
 - Conformance fixtures: CDP-UUID cross-SDK test vectors and C-CDA conversion fixtures.
 
+### Changed
+
+- `--reconcile-existing` is now `true` by default for `cascade pod import`. Disable with `--no-reconcile-existing`.
+
 ### Fixed
 
 - `cascade convert` no longer mixes status messages with Turtle output on stdout. All progress/summary output is directed to stderr.

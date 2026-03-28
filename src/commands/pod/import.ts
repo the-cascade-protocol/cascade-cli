@@ -231,7 +231,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
     .argument('<files...>', 'FHIR JSON or Cascade Turtle files to import')
     .option('--source-system <name>', 'Tag all imported records with this system name')
     .option('--no-reconcile', 'Skip reconciliation even when importing multiple files')
-    .option('--reconcile-existing', 'Include existing pod records in reconciliation pass (cross-batch dedup)')
+    .option('--reconcile-existing', 'Include existing pod records in reconciliation pass (cross-batch dedup, on by default; disable with --no-reconcile-existing)', true)
     .option('--no-reconcile-existing', 'Skip loading existing pod records (additive import only)')
     .option('--trust <scores>', 'Trust scores e.g. hospital=0.95,clinic=0.85')
     .option('--dry-run', 'Preview the import without writing any files')
@@ -336,7 +336,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
 
       // Load existing pod data as an implicit source 0 when --reconcile-existing is set
       let existingInputs: ReconcilerInput[] = [];
-      if (options.reconcileExisting === true) {
+      if (options.reconcileExisting !== false) {
         existingInputs = await loadExistingPodData(podDir);
         if (existingInputs.length > 0) {
           printVerbose(`Loaded ${existingInputs.length} existing pod file(s) for cross-batch reconciliation.`, globalOpts);
