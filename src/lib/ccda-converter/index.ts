@@ -17,8 +17,10 @@
  */
 
 import AdmZip from 'adm-zip';
-import { Writer } from 'n3';
-import { TURTLE_PREFIXES, type BatchConversionResult } from '../fhir-converter/types.js';
+import { Writer, DataFactory } from 'n3';
+import { NS, TURTLE_PREFIXES, type BatchConversionResult } from '../fhir-converter/types.js';
+
+const { namedNode, literal, quad: makeQuad } = DataFactory;
 import { parseCcdaXml } from './parser.js';
 import { detectVendor, getSourceSystemName } from './vendor/detect.js';
 import { applyVendorNormalization } from './vendor/normalize.js';
@@ -219,6 +221,27 @@ function convertSingleCcda(
         ? section.entry
         : section?.entry ? [section.entry] : [];
       const quads = handler.extract(entries, patientUri, sourceSystem);
+
+      // Tag each structured record from a summarization document so the
+      // reconciler can apply a lower confidence threshold for deduplication.
+      // Summarization documents (LOINC 34133-9) contain the patient's full
+      // history snapshot — the same record appearing in two such documents is
+      // almost certainly a duplicate.
+      if (documentType === 'summarization') {
+        const subjects = new Set(
+          quads
+            .filter((q: any) => q.predicate.value === NS.rdf + 'type')
+            .map((q: any) => q.subject.value),
+        );
+        for (const subjectUri of subjects) {
+          quads.push(makeQuad(
+            namedNode(subjectUri),
+            namedNode(NS.cascade + 'documentType'),
+            literal(documentType),
+          ));
+        }
+      }
+
       allQuads.push(...quads);
       count += entries.length;
     } else if (templateIds.length > 0) {
