@@ -10,7 +10,23 @@ Package: `@the-cascade-protocol/cli`
 - `src/shapes/` — Embedded SHACL shape files (copied from `spec/`). **Do not edit these manually.**
 - `src/commands/` — CLI command implementations
 - `src/lib/fhir-converter/` — FHIR R4 → Cascade Turtle conversion logic
+- `src/lib/ccda-converter/` — Native C-CDA → Cascade Turtle converter (12 section handlers; vendor normalization for Epic/Cerner; IHE XDM zip support)
+- `src/lib/reconciler.ts` — Semantic deduplication engine with type-specific matching (Patient, Immunization, Lab, Condition, Allergy, Medication, Vital Sign)
+- `src/lib/user-resolutions.ts` — Conflict resolution persistence (`settings/user-resolutions.ttl`, `settings/pending-conflicts.ttl`)
 - `src/lib/validator/` — SHACL validation against embedded shapes
+
+## Key Commands Added in Phase 0–2 (EHR Import Plan)
+
+- `cascade convert --from c-cda` — converts C-CDA XML or IHE XDM zip to Cascade Turtle natively
+- `cascade pod import --reconcile-existing` — cross-batch deduplication: loads existing pod records before reconciling new import
+- `cascade pod conflicts <pod-dir>` — lists unresolved conflicts; exits 1 if any (CI-friendly)
+- `cascade pod resolve <pod-dir> --conflict <id> --keep <source>` — records a resolution decision to `settings/user-resolutions.ttl`
+
+## Known Issues (as of 2026-03-27)
+
+- **Reconciler is O(n²)** — `src/lib/reconciler.ts:502–525` uses nested for loops. Acceptable for small batches; will be slow for `--reconcile-existing` on large pods. Fix: build a keyed index for existing-pod records before the main loop.
+- **`discardedRecordUris` not deserialized** — `src/lib/user-resolutions.ts:92` hardcodes `[]` when loading resolutions. Write path is correct; read path omits multi-record discard info.
+- **`deterministicUuid()` is SHA-1 pseudo-v5** — Not RFC 4122 compliant. The algorithm must be documented precisely before SDK ports (Phase 3) can produce identical URIs.
 
 ## MANDATORY: Deployment Discipline
 
