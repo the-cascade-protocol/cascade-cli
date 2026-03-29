@@ -212,13 +212,20 @@ function convertSingleCcda(
     // Get LOINC from section code
     const sectionCode = section?.code?.['@_code'] ?? section?.code?.code ?? '';
 
-    // Extract narrative
+    // Extract structured entries (needed before narrative to know requiresLLMExtraction)
+    const entries = Array.isArray(section?.entry)
+      ? section.entry
+      : section?.entry ? [section.entry] : [];
+
+    // Extract narrative — always attempt, even if section also has entries
     const sectionText = section?.text;
-    if (sectionText) {
+    const requiresLLMExtraction = entries.length === 0;
+    if (sectionText || requiresLLMExtraction) {
       const effectiveLoinc =
         sectionCode || (matchedTemplateId ? (SECTION_HANDLERS[matchedTemplateId]?.loinc ?? '') : '');
       const narrativeQuads = extractNarrativeQuads(
         sectionText, effectiveLoinc, documentType, documentId, sourceSystem, importedAt,
+        requiresLLMExtraction,
       );
       allQuads.push(...narrativeQuads);
     }
@@ -226,9 +233,6 @@ function convertSingleCcda(
     // Extract structured entries
     if (matchedTemplateId && SECTION_HANDLERS[matchedTemplateId]) {
       const handler = SECTION_HANDLERS[matchedTemplateId];
-      const entries = Array.isArray(section?.entry)
-        ? section.entry
-        : section?.entry ? [section.entry] : [];
       const quads = handler.extract(entries, patientUri, sourceSystem);
 
       // Tag each structured record from a summarization document so the

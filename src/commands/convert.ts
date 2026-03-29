@@ -27,6 +27,8 @@ import { printResult, printError, printVerbose, type OutputOptions } from '../li
 import { convert, detectFormat, type InputFormat, type OutputFormat } from '../lib/fhir-converter/index.js';
 import { buildImportManifest } from '../lib/fhir-converter/import-manifest.js';
 import { EXCLUDED_TYPES } from '../lib/fhir-converter/converters-passthrough.js';
+import { parseCcdaXml } from '../lib/ccda-converter/parser.js';
+import { collectNarrativeBlocks } from '../lib/ccda-converter/narrative-extractor.js';
 
 /**
  * Read input from file or stdin.
@@ -52,10 +54,11 @@ export function registerConvertCommand(program: Command): void {
     .option('--source-system <name>', 'Tag all records with a source system name (adds cascade:sourceSystem for reconciliation)')
     .option('--passthrough <mode>', 'Passthrough mode for unmapped FHIR types: full (store fhirJson, round-trip supported) or minimal (omit fhirJson, smaller output)', 'full')
     .option('--manifest [file]', 'Write import manifest JSON alongside output (default: {input}-manifest.json). Only applies when --from fhir.')
+    .option('--extract-narratives', 'Extract narrative text blocks from C-CDA sections and write a JSON sidecar <file>.narratives.json. Only applies when --from c-cda.')
     .action(
       async (
         file: string | undefined,
-        options: { from: string; to: string; format: string; sourceSystem?: string; passthrough: string; manifest?: string | boolean },
+        options: { from: string; to: string; format: string; sourceSystem?: string; passthrough: string; manifest?: string | boolean; extractNarratives?: boolean },
       ) => {
         const globalOpts = program.opts() as OutputOptions;
 
@@ -219,6 +222,30 @@ export function registerConvertCommand(program: Command): void {
 
           writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
           console.error(`Import manifest written to: ${manifestPath}`);
+        }
+
+        // P5.1-C: --extract-narratives (c-cda only)
+        // Writes a JSON sidecar <file>.narratives.json with all narrative blocks.
+        // Stdout remains TTL-only per RC-6 stdout discipline — all status goes to stderr.
+        if (options.extractNarratives && options.from === 'c-cda' && result.success) {
+          try {
+            const parsedDoc = parseCcdaXml(input);
+            const blocks = collectNarrativeBlocks(parsedDoc);
+
+            let narrativesPath: string;
+            if (file) {
+              narrativesPath = join(dirname(file), `${basename(file)}.narratives.json`);
+            } else {
+              narrativesPath = 'ccda-narratives.json';
+            }
+
+            writeFileSync(narrativesPath, JSON.stringify(blocks, null, 2));
+            console.error(`Narrative blocks written to: ${narrativesPath}`);
+          } catch (err: any) {
+            console.error(`Warning: Failed to extract narratives: ${err.message}`);
+          }
+        } else if (options.extractNarratives && options.from !== 'c-cda') {
+          console.error('Warning: --extract-narratives is only supported for --from c-cda');
         }
       },
     );
