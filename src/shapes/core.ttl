@@ -17,8 +17,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-03-27"^^xsd:date ;
-    owl:versionInfo "2.9" ;
+    dct:modified "2026-03-28"^^xsd:date ;
+    owl:versionInfo "3.0" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -676,6 +676,18 @@ cascade:forSystem a owl:DatatypeProperty ;
 # ============================================================================
 # Changelog
 # ============================================================================
+# v3.0 (2026-03-28): AI extraction provenance + abstract HealthRecord base class.
+#     Added cascade:HealthRecord abstract base class for all patient health records
+#     (enables cross-domain consent scoping and pod path policies).
+#     Added cascade:AIExtractionActivity (prov:Activity subclass) — distinct from
+#     existing cascade:AIExtracted DataProvenance marker — with properties:
+#     extractionConfidence, extractionModel, sourceNarrativeSection, requiresUserReview,
+#     requiresLLMExtraction.
+#     Added cascade:AIDiscardedExtraction for low-confidence extraction audit log
+#     (confidence < 0.50), with properties: discardedEntityType, discardedFrom,
+#     discardedAt, discardConfidence.
+#     Added cascade:SocialHistoryConsent named individual for 42 CFR Part 2 compliant
+#     social history consent scoping.
 # v2.9 (2026-03-27): EHR Import Reconciliation (P1-C) — Added conflict resolution
 #     persistence classes: cascade:UserResolution (patient's recorded decision for
 #     resolving a data conflict) and cascade:PendingConflict (unresolved conflict
@@ -884,3 +896,87 @@ cascade:sourceRecordId a owl:DatatypeProperty ;
     rdfs:label "Source Record ID"@en ;
     rdfs:comment "The original source system record identifier (e.g., C-CDA <id> element value) preserved for provenance."@en ;
     rdfs:range xsd:string .
+
+# ============================================================================
+# Abstract Health Record Base Class (v3.0)
+# ============================================================================
+
+# Abstract base class for all patient health records (v3.0)
+cascade:HealthRecord a owl:Class ;
+    rdfs:label "Health Record"@en ;
+    rdfs:comment "Abstract base class for all patient health records. Both clinical:ClinicalRecord and clinical:SocialHistoryRecord subclass this. Enables cross-domain consent scoping and pod path policies."@en ;
+    owl:versionInfo "Added in core v3.0" .
+
+# ============================================================================
+# AI Extraction Provenance (v3.0)
+# ============================================================================
+# NOTE: cascade:AIExtracted (DataProvenance subclass) already exists above.
+# The following classes are DISTINCT provenance infrastructure for the P5.3
+# LLM extraction pipeline — they track activities and discard logs, not
+# the provenance classification of individual records.
+
+# AI Extraction Activity (v3.0) — DISTINCT from cascade:AIExtracted (existing DataProvenance marker)
+cascade:AIExtractionActivity a owl:Class ;
+    rdfs:subClassOf prov:Activity ;
+    rdfs:label "AI Extraction Activity"@en ;
+    rdfs:comment "An LLM-powered extraction activity that produced one or more clinical records from unstructured narrative text. Link from record to activity via prov:wasGeneratedBy. The record itself carries cascade:dataProvenance cascade:AIExtracted (existing DataProvenance marker)."@en ;
+    owl:versionInfo "Added in core v3.0" .
+
+cascade:extractionConfidence a owl:DatatypeProperty ;
+    rdfs:domain cascade:AIExtractionActivity ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment "Confidence score 0.0-1.0 from the extraction model."@en .
+
+cascade:extractionModel a owl:DatatypeProperty ;
+    rdfs:domain cascade:AIExtractionActivity ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Model identifier used for extraction, e.g. 'qwen3.5-4b-q4_k_m'."@en .
+
+cascade:sourceNarrativeSection a owl:DatatypeProperty ;
+    rdfs:domain cascade:AIExtractionActivity ;
+    rdfs:range xsd:string ;
+    rdfs:comment "The C-CDA section name from which the narrative text was extracted (e.g. 'medications', 'problems')."@en .
+
+cascade:requiresUserReview a owl:DatatypeProperty ;
+    rdfs:domain cascade:AIExtractionActivity ;
+    rdfs:range xsd:boolean ;
+    rdfs:comment "True if extraction confidence < 0.85 and record should enter the patient review queue."@en .
+
+cascade:requiresLLMExtraction a owl:DatatypeProperty ;
+    rdfs:range xsd:boolean ;
+    rdfs:comment "True if a C-CDA section contains only narrative text (no structured entries); signals the P5.3 LLM extraction pipeline."@en .
+
+# Discard log entry for low-confidence extractions
+cascade:AIDiscardedExtraction a owl:Class ;
+    rdfs:label "AI Discarded Extraction"@en ;
+    rdfs:comment "A low-confidence extraction (confidence < 0.50) retained in the patient's pod at pod/analysis/discarded-extractions.ttl. Not auto-imported. Patient can review and rescue into the review queue."@en ;
+    owl:versionInfo "Added in core v3.0" .
+
+cascade:discardedEntityType a owl:DatatypeProperty ;
+    rdfs:domain cascade:AIDiscardedExtraction ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Type of entity that was discarded: medication | condition | lab | socialHistory | vital."@en .
+
+cascade:discardedFrom a owl:DatatypeProperty ;
+    rdfs:domain cascade:AIDiscardedExtraction ;
+    rdfs:range xsd:string ;
+    rdfs:comment "C-CDA section name from which the discarded extraction originated."@en .
+
+cascade:discardedAt a owl:DatatypeProperty ;
+    rdfs:domain cascade:AIDiscardedExtraction ;
+    rdfs:range xsd:dateTime ;
+    rdfs:comment "Timestamp when the extraction was discarded by the pipeline."@en .
+
+cascade:discardConfidence a owl:DatatypeProperty ;
+    rdfs:domain cascade:AIDiscardedExtraction ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment "Confidence score that caused the discard (< 0.50)."@en .
+
+# ============================================================================
+# Consent Scopes (v3.0)
+# ============================================================================
+
+# Consent scope for social history records
+cascade:SocialHistoryConsent a owl:NamedIndividual ;
+    rdfs:label "Social History Consent"@en ;
+    rdfs:comment "Consent scope for social history data. Patient can share clinical/ pod without exposing social-history/. Subject to 42 CFR Part 2 for substance use disorder records."@en .

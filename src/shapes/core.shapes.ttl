@@ -468,8 +468,63 @@ cascade:PendingConflictShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Shape: AI Extraction Activity (v3.0)
+# ============================================================================
+
+cascade:AIExtractionActivityShape a sh:NodeShape ;
+    sh:targetClass cascade:AIExtractionActivity ;
+    rdfs:label "AI Extraction Activity Shape"@en ;
+
+    # Required: extractionConfidence (0.0 to 1.0)
+    sh:property [
+        sh:path cascade:extractionConfidence ;
+        sh:datatype xsd:decimal ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0.0 ;
+        sh:maxInclusive 1.0 ;
+        sh:severity sh:Violation ;
+        sh:name "Extraction Confidence"@en ;
+        sh:message "AIExtractionActivity requires extractionConfidence between 0.0 and 1.0"@en
+    ] ;
+
+    # Required: extractionModel
+    sh:property [
+        sh:path cascade:extractionModel ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Extraction Model"@en ;
+        sh:message "AIExtractionActivity requires an extractionModel identifier"@en
+    ] ;
+
+    # Optional: sourceNarrativeSection
+    sh:property [
+        sh:path cascade:sourceNarrativeSection ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Source Narrative Section"@en
+    ] ;
+
+    # Optional: requiresUserReview
+    sh:property [
+        sh:path cascade:requiresUserReview ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Requires User Review"@en
+    ] .
+
+# ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.2 (2026-03-28)
+# - Added AIExtractionActivityShape for AI extraction provenance tracking
+#   - REQUIRED: extractionConfidence (xsd:decimal, 0.0-1.0), extractionModel
+#   - OPTIONAL: sourceNarrativeSection, requiresUserReview
 #
 # Version 1.1 (2026-03-27)
 # - Added UserResolutionShape: VIOLATION for conflictId, resolution

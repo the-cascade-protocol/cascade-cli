@@ -1328,8 +1328,62 @@ clinical:SupplementShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Shape: Social History Record (v1.8)
+# ============================================================================
+
+clinical:SocialHistoryRecordShape a sh:NodeShape ;
+    sh:targetClass clinical:SocialHistoryRecord ;
+    rdfs:label "Social History Record Shape"@en ;
+
+    # Required: socialHistoryCategory (must be one of defined values)
+    sh:property [
+        sh:path clinical:socialHistoryCategory ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("smokingStatus" "alcoholUse" "substanceUse" "occupation" "exercise" "diet" "sexualHistory" "other") ;
+        sh:severity sh:Violation ;
+        sh:name "Social History Category"@en ;
+        sh:message "SocialHistoryRecord requires a socialHistoryCategory from the defined value set"@en
+    ] ;
+
+    # Optional: packsPerYear
+    sh:property [
+        sh:path clinical:packsPerYear ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0.0 ;
+        sh:severity sh:Warning ;
+        sh:name "Packs Per Year"@en
+    ] ;
+
+    # Optional: alcoholDrinksPerWeek
+    sh:property [
+        sh:path clinical:alcoholDrinksPerWeek ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0.0 ;
+        sh:severity sh:Warning ;
+        sh:name "Alcohol Drinks Per Week"@en
+    ] ;
+
+    # Optional: occupationTitle
+    sh:property [
+        sh:path clinical:occupationTitle ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Occupation Title"@en
+    ] .
+
+# ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.8 (2026-03-28)
+# - Added SocialHistoryRecordShape for EHR-extracted social history records
+#   - REQUIRED: socialHistoryCategory (enumerated value set)
+#   - OPTIONAL: packsPerYear, alcoholDrinksPerWeek, occupationTitle
 #
 # Version 1.2 (2026-01-15)
 # - Added MedicationUseEpisodeShape for longitudinal medication tracking

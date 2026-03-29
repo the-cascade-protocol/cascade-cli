@@ -20,8 +20,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-03-12"^^xsd:date ;
-    owl:versionInfo "1.7" ;
+    dct:modified "2026-03-28"^^xsd:date ;
+    owl:versionInfo "1.8" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -1298,6 +1298,25 @@ clinical:isActive a owl:DatatypeProperty ;
 # Changelog
 # ============================================================================
 #
+# Version 1.8 (2026-03-28)
+# - Added clinical:SocialHistoryRecord class (EHR-extracted social history)
+#   - Subclass of cascade:HealthRecord (new abstract base in core v3.0)
+#   - Distinct from health:SocialHistoryRecord (consumer-reported)
+#   - Separate pod path: social-history/; consent scope: cascade:SocialHistoryConsent
+#   - Subject to 42 CFR Part 2 for substance use disorder records
+#   - Reuses health:smokingStatus, health:alcoholUse from health: namespace
+#   - Adds clinical-specific: socialHistoryCategory, packsPerYear,
+#     alcoholDrinksPerWeek, occupationTitle
+#
+# Version 1.7 (2026-03-12)
+# - Added clinical:Encounter class and properties for FHIR Encounter conversion
+# - Added clinical:MedicationAdministration class and properties for
+#   FHIR MedicationAdministration conversion
+# - Added clinical:DeviceRecord class and properties for FHIR Device conversion
+# - Added clinical:ImagingStudy class and properties for FHIR ImagingStudy conversion
+# - Added clinical:hasLabResult, clinical:panelName, clinical:reportCategory
+#   on clinical:LaboratoryReport for DiagnosticReport panel grouping
+#
 # Version 1.6 (2026-02-22)
 # - Added clinical:linkedConditionIds DatatypeProperty on clinical:Condition
 #   for linking related ConditionSummary records via space-separated UUIDs.
@@ -1555,3 +1574,37 @@ clinical:reportCategory a owl:DatatypeProperty ;
     rdfs:range xsd:string ;
     rdfs:label "Report Category"@en ;
     rdfs:comment "Values: LAB, RAD, PATH"@en .
+
+# ============================================================================
+# Social History Classes and Properties (v1.8)
+# ============================================================================
+# Social History (v1.8) — EHR-extracted social history with 42 CFR Part 2 compliance
+
+clinical:SocialHistoryRecord a owl:Class ;
+    rdfs:subClassOf cascade:HealthRecord ;
+    rdfs:label "Social History Record"@en ;
+    rdfs:comment "An EHR-extracted social or behavioral history observation from a C-CDA Social History section. Distinct from health:SocialHistoryRecord (consumer-reported). Requires separate consent scope (cascade:SocialHistoryConsent) and pod path (social-history/). Subject to 42 CFR Part 2 for substance use records."@en ;
+    owl:versionInfo "Added in clinical v1.8" .
+
+clinical:socialHistoryCategory a owl:DatatypeProperty ;
+    rdfs:domain clinical:SocialHistoryRecord ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Category of social history observation. Values: smokingStatus | alcoholUse | substanceUse | occupation | exercise | diet | sexualHistory | other"@en .
+
+# NOTE: health:smokingStatus and health:alcoholUse are REUSED from health: namespace (no domain restriction).
+# clinical: adds only properties with no equivalent in health: namespace:
+
+clinical:packsPerYear a owl:DatatypeProperty ;
+    rdfs:domain clinical:SocialHistoryRecord ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment "Pack-years of tobacco use (packs/day x years smoked). EHR-specific quantitative field."@en .
+
+clinical:alcoholDrinksPerWeek a owl:DatatypeProperty ;
+    rdfs:domain clinical:SocialHistoryRecord ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment "Average alcoholic drinks per week (quantitative EHR field)."@en .
+
+clinical:occupationTitle a owl:DatatypeProperty ;
+    rdfs:domain clinical:SocialHistoryRecord ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Patient-reported occupation title from EHR social history section."@en .
