@@ -40,7 +40,14 @@ export function extractProblemQuads(
       const valueEl = observation?.value ?? observation?.code ?? {};
       const code = valueEl?.['@_code'] ?? valueEl?.code ?? '';
       const codeSystem = valueEl?.['@_codeSystem'] ?? valueEl?.codeSystem ?? '';
-      const displayName = valueEl?.['@_displayName'] ?? valueEl?.displayName ?? '';
+      // Epic MyChart omits displayName on the value element itself; it's in translation children
+      const firstTranslation = (() => {
+        const t = valueEl?.translation;
+        return Array.isArray(t) ? t[0] : t;
+      })();
+      const displayName =
+        valueEl?.['@_displayName'] ?? valueEl?.displayName ??
+        firstTranslation?.['@_displayName'] ?? firstTranslation?.displayName ?? '';
 
       const isSnomed = codeSystem.includes('6.96') || codeSystem === snomedOid;
       const isIcd10 = codeSystem.includes('6.90') || codeSystem === icd10Oid;

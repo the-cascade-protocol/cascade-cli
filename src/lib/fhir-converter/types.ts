@@ -59,6 +59,7 @@ export const NS = {
   xsd: 'http://www.w3.org/2001/XMLSchema#',
   prov: 'http://www.w3.org/ns/prov#',
   rdf: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
+  vcard: 'http://www.w3.org/2006/vcard/ns#',
 } as const;
 
 /** Standard Turtle prefix block for all generated output. */
@@ -73,6 +74,7 @@ export const TURTLE_PREFIXES: Record<string, string> = {
   rxnorm: NS.rxnorm,
   xsd: NS.xsd,
   prov: NS.prov,
+  vcard: NS.vcard,
 };
 
 // ---------------------------------------------------------------------------

@@ -99,8 +99,13 @@ export async function parseTurtle(turtle: string, defaultSystem: string): Promis
           const properties = new Map<string, RdfValue[]>();
           for (const t of triples) {
             const existing = properties.get(t.pred);
-            if (existing) existing.push(t.obj);
-            else properties.set(t.pred, [t.obj]);
+            if (existing) {
+              // Deduplicate: skip if this exact value is already present
+              const isDup = existing.some(v => v.value === t.obj.value && v.datatype === t.obj.datatype);
+              if (!isDup) existing.push(t.obj);
+            } else {
+              properties.set(t.pred, [t.obj]);
+            }
           }
 
           const sourceSystem = properties.get(NS.cascade + 'sourceSystem')?.[0]?.value ?? defaultSystem;

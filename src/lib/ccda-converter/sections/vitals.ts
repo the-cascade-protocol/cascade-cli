@@ -28,10 +28,14 @@ export function extractVitalQuads(
         ? entry.organizer.component
         : [entry.organizer.component];
       for (const comp of comps) {
-        if (comp?.observation) observations.push(comp.observation);
+        if (comp?.observation) {
+          const obs = Array.isArray(comp.observation) ? comp.observation : [comp.observation];
+          observations.push(...obs);
+        }
       }
     } else if (entry?.observation) {
-      observations.push(entry.observation);
+      const obs = Array.isArray(entry.observation) ? entry.observation : [entry.observation];
+      observations.push(...obs);
     }
 
     for (const obs of observations) {

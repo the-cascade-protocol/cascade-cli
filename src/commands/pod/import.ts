@@ -283,9 +283,10 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
 
       for (const filePath of files) {
         const absPath = path.resolve(process.cwd(), filePath);
-        let content: string;
+        const isZip = absPath.toLowerCase().endsWith('.zip') || absPath.toLowerCase().endsWith('.xml');
+        let rawContent: string | Buffer;
         try {
-          content = await fs.readFile(absPath, 'utf-8');
+          rawContent = isZip ? await fs.readFile(absPath) : await fs.readFile(absPath, 'utf-8');
         } catch {
           printError(`Cannot read file: ${absPath}`, globalOpts);
           process.exitCode = 1;
@@ -293,12 +294,28 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         }
 
         const systemName = options.sourceSystem ?? path.basename(filePath, path.extname(filePath));
-        const trimmed = content.trim();
         const warnings: string[] = [];
 
         let turtleContent: string;
         let resourceCount = 0;
 
+        // Detect C-CDA ZIP/XML vs FHIR JSON vs Turtle
+        if (Buffer.isBuffer(rawContent)) {
+          // C-CDA ZIP or XML — convert natively
+          printVerbose(`Converting C-CDA: ${filePath}`, globalOpts);
+          const result = await convert(rawContent, 'c-cda', 'cascade', 'turtle', systemName, passthroughMinimal);
+          if (!result.success) {
+            printError(`Failed to convert ${filePath}: ${result.errors.join(', ')}`, globalOpts);
+            process.exitCode = 1;
+            return;
+          }
+          turtleContent = result.output;
+          resourceCount = result.resourceCount;
+          warnings.push(...result.warnings);
+          allWarnings.push(...result.warnings.map(w => `${filePath}: ${w}`));
+        } else {
+          const content = rawContent;
+          const trimmed = content.trim();
         // Detect FHIR JSON vs Turtle
         if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
           // FHIR JSON
@@ -325,6 +342,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             resourceCount = 0;
           }
         }
+        } // end non-ZIP branch
 
         reconcilerInputs.push({ content: turtleContent, systemName });
         sourceReport.push({ file: filePath, system: systemName, resourceCount, warnings });
@@ -503,6 +521,97 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           const appended = await appendIndexContains(indexTtlPath, relPath, dryRun);
           if (appended) {
             printVerbose(`  ${dryRun ? '[dry-run] ' : ''}Added ${relPath} to index.ttl`, globalOpts);
+          }
+        }
+      }
+
+      // --- Step 9b: Populate card.ttl (name only) and profile/extended.ttl (PHI) ---
+      const cardPath = path.join(podDir, 'profile', 'card.ttl');
+      const extendedPath = path.join(podDir, 'profile', 'extended.ttl');
+      if (!dryRun && await fileExists(cardPath)) {
+        const profileFile = path.join(podDir, 'clinical', 'patient-profile.ttl');
+        if (await fileExists(profileFile)) {
+          try {
+            const profileTurtle = await fs.readFile(profileFile, 'utf-8');
+            const profileQuads = await parseTurtleToQuads(profileTurtle);
+            // Find the PatientProfile subject
+            const NS_CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
+            const NS_VCARD = 'http://www.w3.org/2006/vcard/ns#';
+            let patientSubjectQuads: Quad[] | undefined;
+            for (const [, quads] of profileQuads) {
+              if (quads.some(q =>
+                q.predicate.value === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' &&
+                q.object.value === `${NS_CASCADE}PatientProfile`)) {
+                patientSubjectQuads = quads;
+                break;
+              }
+            }
+            if (patientSubjectQuads) {
+              const getCascade = (pred: string) =>
+                patientSubjectQuads!.find(q => q.predicate.value === `${NS_CASCADE}${pred}`)?.object.value ?? '';
+              const getVcard = (pred: string) =>
+                patientSubjectQuads!.find(q => q.predicate.value === `${NS_VCARD}${pred}`)?.object.value ?? '';
+
+              const givenName = getCascade('givenName');
+              const familyName = getCascade('familyName');
+              const dob = getCascade('dateOfBirth');
+              const sex = getCascade('biologicalSex');
+              const phone = getVcard('hasTelephone');
+              const email = getVcard('hasEmail');
+
+              // Flat address predicates (stored directly on the patient subject)
+              const street = getCascade('addressLine');
+              const city = getCascade('addressCity');
+              const state = getCascade('addressState');
+              const postalCode = getCascade('addressPostalCode');
+
+              const fullName = [givenName, familyName].filter(Boolean).join(' ');
+
+              // ── card.ttl: public-safe name fields only ──
+              if (fullName || givenName || familyName) {
+                const cardTurtle = await fs.readFile(cardPath, 'utf-8');
+                const nameFields: string[] = [];
+                if (fullName) nameFields.push(`    foaf:name "${fullName}" ;`);
+                if (givenName) nameFields.push(`    foaf:givenName "${givenName}" ;`);
+                if (familyName) nameFields.push(`    foaf:familyName "${familyName}" ;`);
+                // Replace the commented-out identity block
+                const updated = cardTurtle.replace(
+                  /    # ── Identity \(safe to make public\) ──\n(    #[^\n]*\n)*/,
+                  `    # ── Identity (safe to make public) ──\n${nameFields.join('\n')}\n`,
+                );
+                await fs.writeFile(cardPath, updated, 'utf-8');
+                printVerbose('  Populated profile/card.ttl with name from PatientProfile', globalOpts);
+              }
+
+              // ── extended.ttl: PHI (DOB, sex, address, phone, email) ──
+              const hasPhiData = dob || sex || phone || email || street;
+              if (hasPhiData && await fileExists(extendedPath)) {
+                const phiFields: string[] = [];
+                if (dob) phiFields.push(`    cascade:dateOfBirth "${dob}"^^xsd:date ;`);
+                if (sex) phiFields.push(`    cascade:biologicalSex "${sex}" ;`);
+                if (phone) phiFields.push(`    vcard:hasTelephone "${phone}" ;`);
+                if (email) phiFields.push(`    vcard:hasEmail "${email}" ;`);
+                if (street || city || state || postalCode) {
+                  const addrLines: string[] = [];
+                  if (street) addrLines.push(`        cascade:addressLine "${street}" ;`);
+                  if (city) addrLines.push(`        cascade:addressCity "${city}" ;`);
+                  if (state) addrLines.push(`        cascade:addressState "${state}" ;`);
+                  if (postalCode) addrLines.push(`        cascade:addressPostalCode "${postalCode}" ;`);
+                  phiFields.push(`    cascade:address [\n${addrLines.join('\n')}\n    ] ;`);
+                }
+
+                const extTurtle = await fs.readFile(extendedPath, 'utf-8');
+                // Replace the commented-out PHI block (from # ── Demographics to the trailing dot)
+                const updated = extTurtle.replace(
+                  /    # ── Demographics ──\n[\s\S]*?\n    \./,
+                  `    # ── Demographics ──\n${phiFields.join('\n')}\n    .`,
+                );
+                await fs.writeFile(extendedPath, updated, 'utf-8');
+                printVerbose('  Populated profile/extended.ttl with PHI from PatientProfile', globalOpts);
+              }
+            }
+          } catch {
+            // Non-fatal: profile population is best-effort
           }
         }
       }

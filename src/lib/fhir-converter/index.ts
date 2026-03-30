@@ -77,7 +77,7 @@ export { convertCascadeToFhir } from './cascade-to-fhir.js';
  *                            Produces smaller output for display-only scenarios.
  */
 export async function convert(
-  input: string,
+  input: string | Buffer,
   from: InputFormat,
   to: OutputFormat,
   outputSerialization: 'turtle' | 'jsonld' = 'turtle',
@@ -91,9 +91,10 @@ export async function convert(
 
   if (from === 'fhir' && (to === 'cascade' || to === 'turtle' || to === 'jsonld')) {
     // FHIR -> Cascade
+    const inputStr = Buffer.isBuffer(input) ? input.toString('utf-8') : input;
     let parsed: any;
     try {
-      parsed = JSON.parse(input);
+      parsed = JSON.parse(inputStr);
     } catch {
       return {
         success: false, output: '', format: to, resourceCount: 0, skippedCount: 0,
@@ -207,7 +208,7 @@ export async function convert(
     };
   } else if (from === 'cascade' && to === 'fhir') {
     // Cascade -> FHIR
-    const { resources, warnings: convWarnings } = await convertCascadeToFhir(input);
+    const { resources, warnings: convWarnings } = await convertCascadeToFhir(Buffer.isBuffer(input) ? input.toString('utf-8') : input);
     warnings.push(...convWarnings);
 
     if (resources.length === 0) {
@@ -240,14 +241,8 @@ export async function convert(
     // Native C-CDA converter — preserves CVX, LOINC, SNOMED, RxNorm, ICD-10 codes
     const { convertCcda } = await import('../ccda-converter/index.js');
 
-    // Detect if input looks like an IHE XDM zip (binary PK header)
-    let inputData: string | Buffer;
-    const firstTwo = input.charCodeAt(0) === 0x50 && input.charCodeAt(1) === 0x4b;
-    if (firstTwo) {
-      inputData = Buffer.from(input, 'binary');
-    } else {
-      inputData = input;
-    }
+    // Pass Buffer directly (ZIP) or string (XML); no lossy re-encoding needed.
+    const inputData: string | Buffer = Buffer.isBuffer(input) ? input : input;
 
     return await convertCcda(inputData, {
       sourceSystem,

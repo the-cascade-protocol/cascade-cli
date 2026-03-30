@@ -32,11 +32,14 @@ import { collectNarrativeBlocks } from '../lib/ccda-converter/narrative-extracto
 
 /**
  * Read input from file or stdin.
- * If file is provided, reads from disk.
- * Otherwise reads all of stdin synchronously.
+ * Returns a Buffer for ZIP files (to preserve binary content for IHE XDM bundles),
+ * or a UTF-8 string for all other files and stdin.
  */
-function readInput(file: string | undefined): string {
+function readInput(file: string | undefined, asBinary = false): string | Buffer {
   if (file) {
+    if (asBinary || file.toLowerCase().endsWith('.zip')) {
+      return readFileSync(file);
+    }
     return readFileSync(file, 'utf-8');
   }
   // Read from stdin
@@ -74,16 +77,16 @@ export function registerConvertCommand(program: Command): void {
         }
 
         // 1. Read input
-        let input: string;
+        let input: string | Buffer;
         try {
-          input = readInput(file);
+          input = readInput(file, options.from === 'c-cda');
         } catch (err: any) {
           printError(`Failed to read input: ${err.message}`, globalOpts);
           process.exitCode = 1;
           return;
         }
 
-        if (!input.trim()) {
+        if (Buffer.isBuffer(input) ? input.length === 0 : !input.trim()) {
           printError('Empty input', globalOpts);
           process.exitCode = 1;
           return;
@@ -106,7 +109,7 @@ export function registerConvertCommand(program: Command): void {
         }
 
         // 3. Auto-detect format if helpful (validate matches declared)
-        const detected = detectFormat(input);
+        const detected = Buffer.isBuffer(input) ? null : detectFormat(input);
         if (detected && detected !== options.from) {
           printVerbose(
             `Note: Input appears to be ${detected} but --from says ${options.from}. Proceeding with declared format.`,
@@ -190,7 +193,7 @@ export function registerConvertCommand(program: Command): void {
           // Count excluded types from the source bundle
           const excludedCounts: Record<string, number> = {};
           try {
-            const parsed = JSON.parse(input);
+            const parsed = JSON.parse(Buffer.isBuffer(input) ? input.toString('utf-8') : input);
             const resources: any[] =
               parsed.resourceType === 'Bundle'
                 ? (parsed.entry ?? []).map((e: any) => e.resource).filter(Boolean)
@@ -229,7 +232,7 @@ export function registerConvertCommand(program: Command): void {
         // Stdout remains TTL-only per RC-6 stdout discipline — all status goes to stderr.
         if (options.extractNarratives && options.from === 'c-cda' && result.success) {
           try {
-            const parsedDoc = parseCcdaXml(input);
+            const parsedDoc = parseCcdaXml(Buffer.isBuffer(input) ? input.toString('utf-8') : input);
             const blocks = collectNarrativeBlocks(parsedDoc);
 
             let narrativesPath: string;

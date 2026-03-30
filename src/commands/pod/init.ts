@@ -20,6 +20,7 @@ function wellKnownSolid(absPath: string): string {
       pod_root: '/',
       profile: '/profile/card.ttl#me',
       storage: '/',
+      preferencesFile: '/settings/preferences',
       publicTypeIndex: '/settings/publicTypeIndex.ttl',
       privateTypeIndex: '/settings/privateTypeIndex.ttl',
       podUri: `file://${absPath}/`,
@@ -30,32 +31,34 @@ function wellKnownSolid(absPath: string): string {
   );
 }
 
-const PROFILE_CARD_TTL = `@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
-@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+const PROFILE_CARD_TTL = `@prefix foaf: <http://xmlns.com/foaf/0.1/> .
 @prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix pim: <http://www.w3.org/ns/pim/space#> .
-@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
 
 # =============================================================================
-# WebID Profile Card
+# WebID Profile Card  (public)
 # =============================================================================
-# This is a Solid-compatible WebID profile for the Pod owner.
-# Edit this file to add patient demographics and identity information.
-#
-# The <#me> fragment serves as the WebID for this Pod.
+# This document is publicly readable per Solid conventions.
+# Keep it to identity and discovery links only — no PHI.
+# PHI (DOB, address, phone, email) belongs in profile/extended.ttl (private).
 # =============================================================================
+
+</profile/card.ttl> a foaf:PersonalProfileDocument ;
+    foaf:primaryTopic <#me> .
 
 <#me> a foaf:Person ;
-    # ── Edit the fields below to personalize your Pod ──
+    # ── Identity (safe to make public) ──
     # foaf:name "First Last" ;
     # foaf:givenName "First" ;
     # foaf:familyName "Last" ;
-    # cascade:dateOfBirth "1990-01-01"^^xsd:date ;
 
     # ── Discovery links (do not remove) ──
-    solid:publicTypeIndex </settings/publicTypeIndex.ttl> ;
-    solid:privateTypeIndex </settings/privateTypeIndex.ttl> ;
     pim:storage </> ;
+    pim:preferencesFile </settings/preferences> ;
+    solid:publicTypeIndex </settings/publicTypeIndex.ttl> ;
+    rdfs:seeAlso </profile/extended.ttl> ;
 
     cascade:schemaVersion "1.3" .
 `;
@@ -111,6 +114,59 @@ const PRIVATE_TYPE_INDEX_TTL = `@prefix solid: <http://www.w3.org/ns/solid/terms
 #     solid:instance </wellness/heart-rate.ttl> .
 `;
 
+const PREFERENCES_TTL = `@prefix pim: <http://www.w3.org/ns/pim/space#> .
+@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# =============================================================================
+# Private Preferences  (owner-only)
+# =============================================================================
+# This file is the root of all private configuration for this Pod.
+# It holds the pointer to the private type index and may link to
+# further private extended profiles via rdfs:seeAlso.
+# =============================================================================
+
+<> a pim:ConfigurationFile .
+
+<#me>
+    solid:privateTypeIndex </settings/privateTypeIndex.ttl> ;
+    rdfs:seeAlso </profile/extended.ttl> .
+`;
+
+const EXTENDED_PROFILE_TTL = `@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix vcard: <http://www.w3.org/2006/vcard/ns#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# =============================================================================
+# Extended Profile  (private, owner-only)
+# =============================================================================
+# This document holds PHI and private contact information.
+# It must NOT be publicly accessible — apply an owner-only ACL.
+# Linked from profile/card.ttl via rdfs:seeAlso and from
+# settings/preferences via rdfs:seeAlso.
+# =============================================================================
+
+<#me>
+    # ── Demographics ──
+    # cascade:dateOfBirth "1990-01-01"^^xsd:date ;
+    # cascade:biologicalSex "M" ;
+
+    # ── Contact ──
+    # vcard:hasTelephone "+1-555-000-0000" ;
+    # vcard:hasEmail "user@example.com" ;
+
+    # ── Address ──
+    # cascade:address [
+    #     cascade:addressLine "123 Main St" ;
+    #     cascade:addressCity "Seattle" ;
+    #     cascade:addressState "WA" ;
+    #     cascade:addressPostalCode "98101" ;
+    #     cascade:addressCountry "US" ;
+    # ] ;
+    .
+`;
+
 function indexTtl(dirName: string): string {
   const now = new Date().toISOString();
   return `@prefix ldp: <http://www.w3.org/ns/ldp#> .
@@ -137,6 +193,8 @@ function indexTtl(dirName: string): string {
     # ── Profile & Settings ──
     ldp:contains
         <profile/card.ttl> ,
+        <profile/extended.ttl> ,
+        <settings/preferences> ,
         <settings/publicTypeIndex.ttl> ,
         <settings/privateTypeIndex.ttl> .
 
@@ -154,23 +212,26 @@ This directory is a **Cascade Protocol Pod** -- a portable, self-describing coll
 
 \`\`\`
 .well-known/
-  solid              # Pod discovery document (JSON)
+  solid                    # Pod discovery document (JSON)
 profile/
-  card.ttl           # WebID profile (identity + discovery links)
+  card.ttl                 # WebID profile (public — identity + discovery links only)
+  extended.ttl             # Extended profile (private — PHI: DOB, address, phone, email)
 settings/
-  publicTypeIndex.ttl    # Maps clinical data types to file locations
-  privateTypeIndex.ttl   # Maps wellness data types to file locations
-clinical/            # Clinical records (EHR-sourced data)
-wellness/            # Wellness records (device and self-reported data)
-index.ttl            # Root LDP container listing all resources
+  preferences              # Private preferences (owner-only — links to privateTypeIndex)
+  publicTypeIndex.ttl      # Maps clinical data types to file locations
+  privateTypeIndex.ttl     # Maps wellness data types to file locations
+clinical/                  # Clinical records (EHR-sourced data)
+wellness/                  # Wellness records (device and self-reported data)
+index.ttl                  # Root LDP container listing all resources
 \`\`\`
 
 ## Getting Started
 
-1. Edit \`profile/card.ttl\` to set the Pod owner's name and demographics.
-2. Add clinical data files (e.g., \`clinical/medications.ttl\`) and register them in \`settings/publicTypeIndex.ttl\`.
-3. Add wellness data files (e.g., \`wellness/heart-rate.ttl\`) and register them in \`settings/privateTypeIndex.ttl\`.
-4. Update \`index.ttl\` to list all resources.
+1. Edit \`profile/card.ttl\` to set the Pod owner's display name (public-safe).
+2. Edit \`profile/extended.ttl\` to fill in PHI (DOB, address, phone, email) — keep this private.
+3. Add clinical data files (e.g., \`clinical/medications.ttl\`) and register them in \`settings/publicTypeIndex.ttl\`.
+4. Add wellness data files (e.g., \`wellness/heart-rate.ttl\`) and register them in \`settings/privateTypeIndex.ttl\`.
+5. Update \`index.ttl\` to list all resources.
 
 ## Useful Commands
 
@@ -226,6 +287,8 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
         // Write template files
         await fs.writeFile(path.join(absDir, '.well-known', 'solid'), wellKnownSolid(absDir));
         await fs.writeFile(path.join(absDir, 'profile', 'card.ttl'), PROFILE_CARD_TTL);
+        await fs.writeFile(path.join(absDir, 'profile', 'extended.ttl'), EXTENDED_PROFILE_TTL);
+        await fs.writeFile(path.join(absDir, 'settings', 'preferences'), PREFERENCES_TTL);
         await fs.writeFile(path.join(absDir, 'settings', 'publicTypeIndex.ttl'), PUBLIC_TYPE_INDEX_TTL);
         await fs.writeFile(path.join(absDir, 'settings', 'privateTypeIndex.ttl'), PRIVATE_TYPE_INDEX_TTL);
         await fs.writeFile(path.join(absDir, 'index.ttl'), indexTtl(dirName));
@@ -234,6 +297,8 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
         const filesCreated = [
           '.well-known/solid',
           'profile/card.ttl',
+          'profile/extended.ttl',
+          'settings/preferences',
           'settings/publicTypeIndex.ttl',
           'settings/privateTypeIndex.ttl',
           'clinical/',

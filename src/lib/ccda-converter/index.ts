@@ -112,10 +112,19 @@ export async function convertCcda(
     }
   }
 
+  // Deduplicate quads (same record can appear in multiple C-CDA documents within one ZIP)
+  const seen = new Set<string>();
+  const uniqueQuads = allQuads.filter(q => {
+    const key = `${q.subject.value}\x00${q.predicate.value}\x00${q.object.value}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
   // Serialize all quads to Turtle
   const output = await new Promise<string>((resolve, reject) => {
     const writer = new Writer({ prefixes: TURTLE_PREFIXES });
-    for (const q of allQuads) writer.addQuad(q);
+    for (const q of uniqueQuads) writer.addQuad(q);
     writer.end((err, result) => (err ? reject(err) : resolve(result)));
   });
 
