@@ -663,6 +663,22 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         for (const [type, count] of Object.entries(typeCounts)) {
           if (count > 0) console.log(`  ${type}: +${count}`);
         }
+
+        // Nudge: check if any C-CDA narrative blocks need LLM extraction
+        if (!dryRun) {
+          try {
+            const documentsPath = path.join(podDir, 'clinical', 'documents.ttl');
+            if (await fileExists(documentsPath)) {
+              const docContent = await fs.readFile(documentsPath, 'utf-8');
+              const narrativeCount = (docContent.match(/cascade:requiresLLMExtraction/g) ?? []).length;
+              if (narrativeCount > 0) {
+                console.log('');
+                console.log(`  ℹ  Found ${narrativeCount} section(s) with narrative text for AI extraction.`);
+                console.log(`     Run: cascade pod extract ${podDirArg}`);
+              }
+            }
+          } catch { /* non-fatal */ }
+        }
       }
     });
 }

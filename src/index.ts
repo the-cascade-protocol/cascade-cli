@@ -12,8 +12,9 @@
  *   validate      Validate Cascade data against SHACL shapes
  *   convert       Convert between health data formats
  *   pod           Manage Cascade Pod structures
+ *   agent         Natural language interface for Cascade operations
  *   conformance   Run conformance test suite
- *   serve         Start local agent server
+ *   serve         Start local MCP server
  *   capabilities  Show machine-readable tool descriptions
  */
 
@@ -25,6 +26,7 @@ import { registerPodCommand } from './commands/pod/index.js';
 import { registerConformanceCommand } from './commands/conformance.js';
 import { registerServeCommand } from './commands/serve.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';
+import { registerAgentCommand } from '@the-cascade-protocol/agent';
 import pkg from '../package.json' with { type: 'json' };
 
 const program = new Command();
@@ -44,6 +46,7 @@ registerPodCommand(program);
 registerConformanceCommand(program);
 registerServeCommand(program);
 registerCapabilitiesCommand(program);
+registerAgentCommand(program);
 
 // Custom help text with examples
 program.addHelpText(
@@ -55,6 +58,10 @@ Examples:
   cascade convert --from fhir --to cascade --source-system primary-care patient.json
   cascade reconcile system-a.ttl system-b.ttl system-c.ttl --output merged.ttl --report report.json
   cascade pod init ./my-pod
+  cascade pod import ./my-pod records.xml
+  cascade pod extract ./my-pod
+  cascade agent
+  cascade agent serve
   cascade capabilities
   cascade capabilities --json
 `,
