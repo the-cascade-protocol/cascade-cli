@@ -1,6 +1,6 @@
 {
   "name": "@the-cascade-protocol/cli",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "Cascade Protocol CLI - Validate, convert, and manage health data",
   "bin": {
     "cascade": "dist/index.js"
@@ -48,7 +48,7 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
-    "@the-cascade-protocol/agent": "^1.1.2",
+    "@the-cascade-protocol/agent": "^1.1.3",
     "adm-zip": "^0.5.16",
     "commander": "^13.0.0",
     "fast-xml-parser": "^5.5.9",
