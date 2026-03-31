@@ -22,11 +22,9 @@ Package: `@the-cascade-protocol/cli`
 - `cascade pod conflicts <pod-dir>` — lists unresolved conflicts; exits 1 if any (CI-friendly)
 - `cascade pod resolve <pod-dir> --conflict <id> --keep <source>` — records a resolution decision to `settings/user-resolutions.ttl`
 
-## Known Issues (as of 2026-03-27)
+## URI Derivation Algorithm
 
-- **Reconciler is O(n²)** — `src/lib/reconciler.ts:502–525` uses nested for loops. Acceptable for small batches; will be slow for `--reconcile-existing` on large pods. Fix: build a keyed index for existing-pod records before the main loop.
-- **`discardedRecordUris` not deserialized** — `src/lib/user-resolutions.ts:92` hardcodes `[]` when loading resolutions. Write path is correct; read path omits multi-record discard info.
-- **`deterministicUuid()` is SHA-1 pseudo-v5** — Not RFC 4122 compliant. The algorithm must be documented precisely before SDK ports (Phase 3) can produce identical URIs.
+`deterministicUuid()` in `src/lib/fhir-converter/types.ts` is the canonical Cascade URI derivation algorithm. It is intentionally not RFC 4122 v5 (no namespace UUID prefix) — treat it as a locked-in spec. **Do not change the algorithm without coordinating all SDK ports (TypeScript, Python, Swift).** Contract tests live in `tests/uri-generation.test.ts`.
 
 ## MANDATORY: Deployment Discipline
 

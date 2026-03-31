@@ -601,11 +601,18 @@ export async function runReconciliation(
 
   } else {
     // ---------------------------------------------------------------------------
-    // Original O(n²) algorithm — unchanged when no existing-pod records present
+    // Type-indexed O(n × k/T) algorithm for single-batch reconciliation
     // ---------------------------------------------------------------------------
 
-    for (let i = 0; i < allRecords.length; i++) {
-      const a = allRecords[i];
+    // Build a type index so each record is only compared against same-type records
+    const typeIndex = new Map<string, ParsedRecord[]>();
+    for (const r of allRecords) {
+      const bucket = typeIndex.get(r.type);
+      if (bucket) bucket.push(r);
+      else typeIndex.set(r.type, [r]);
+    }
+
+    for (const a of allRecords) {
       if (assigned.has(a.uri)) continue;
       if (a.type === 'coverage:InsurancePlan') {
         groups.push({ matchType: 'pass_through', confidence: 1.0, records: [a], matchedOn: 'coverage' });
@@ -617,9 +624,9 @@ export async function runReconciliation(
       let matchedOn = '';
       let bestConf = 1.0;
 
-      for (let j = i + 1; j < allRecords.length; j++) {
-        const b = allRecords[j];
-        if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
+      const candidates = typeIndex.get(a.type) ?? [];
+      for (const b of candidates) {
+        if (b === a || assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
         const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
