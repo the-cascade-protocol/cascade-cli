@@ -87,7 +87,7 @@ describe('user-resolutions', () => {
   it('preserves other resolution fields alongside discardedRecordUris', async () => {
     const resolution: UserResolution = {
       uri: 'urn:uuid:resolution-test-003',
-      conflictId: 'health:MedicationRecord::lisinopril',
+      conflictId: 'clinical:Medication::lisinopril',
       resolvedAt: new Date('2026-03-10T14:00:00.000Z'),
       resolution: 'manual-edit',
       keptRecordUri: 'urn:uuid:record-kept-003',

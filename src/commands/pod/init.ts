@@ -83,7 +83,7 @@ const PUBLIC_TYPE_INDEX_TTL = `@prefix solid: <http://www.w3.org/ns/solid/terms#
 # Type registrations will be added as data is populated.
 # Example:
 # <#medications> a solid:TypeRegistration ;
-#     solid:forClass health:MedicationRecord ;
+#     solid:forClass clinical:Medication ;
 #     solid:instance </clinical/medications.ttl> .
 #
 # <#conditions> a solid:TypeRegistration ;

@@ -480,7 +480,7 @@ const TTL_PREFIXES = `@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#>
 /**
  * Build Turtle for auto-accepted entities.
  *
- * Each extracted entity is typed with its domain RDF class (e.g. health:MedicationRecord)
+ * Each extracted entity is typed with its domain RDF class (e.g. clinical:Medication)
  * rather than cascade:AIExtractionActivity. A separate cascade:AIExtractionActivity
  * node is emitted per extraction call and linked via prov:wasGeneratedBy, keeping
  * provenance and entity data properly separated.

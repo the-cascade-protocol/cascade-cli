@@ -247,7 +247,7 @@ describe('TYPE_MAPPING', () => {
   });
 
   it('should use correct RDF types', () => {
-    expect(TYPE_MAPPING['medications'].rdfType).toBe('health:MedicationRecord');
+    expect(TYPE_MAPPING['medications'].rdfType).toBe('clinical:Medication');
     expect(TYPE_MAPPING['conditions'].rdfType).toBe('health:ConditionRecord');
     expect(TYPE_MAPPING['allergies'].rdfType).toBe('health:AllergyRecord');
     expect(TYPE_MAPPING['lab-results'].rdfType).toBe('health:LabResultRecord');
@@ -272,8 +272,8 @@ describe('PROPERTY_PREDICATES', () => {
   });
 
   it('should map common medical fields correctly', () => {
-    expect(PROPERTY_PREDICATES['dose']).toBe('health:dose');
-    expect(PROPERTY_PREDICATES['frequency']).toBe('health:frequency');
+    expect(PROPERTY_PREDICATES['dose']).toBe('clinical:dosage');
+    expect(PROPERTY_PREDICATES['frequency']).toBe('clinical:frequency');
     expect(PROPERTY_PREDICATES['severity']).toBe('health:allergySeverity');
     expect(PROPERTY_PREDICATES['resultValue']).toBe('health:resultValue');
     expect(PROPERTY_PREDICATES['interpretation']).toBe('health:interpretation');
@@ -296,11 +296,11 @@ describe('buildRecordTurtle', () => {
       '2026-02-20T10:00:00Z',
     );
 
-    expect(turtle).toContain('<urn:uuid:test-001> a health:MedicationRecord');
-    expect(turtle).toContain('health:medicationName "Aspirin"');
-    expect(turtle).toContain('health:dose "81 mg"');
-    expect(turtle).toContain('health:frequency "daily"');
-    expect(turtle).toContain('health:isActive true');
+    expect(turtle).toContain('<urn:uuid:test-001> a clinical:Medication');
+    expect(turtle).toContain('clinical:drugName "Aspirin"');
+    expect(turtle).toContain('clinical:dosage "81 mg"');
+    expect(turtle).toContain('clinical:frequency "daily"');
+    expect(turtle).toContain('clinical:status true');
     expect(turtle).toContain('cascade:dataProvenance cascade:AIGenerated');
     expect(turtle).toContain('cascade:schemaVersion "1.3"');
     expect(turtle).toContain('prov:wasGeneratedBy');
@@ -319,7 +319,7 @@ describe('buildRecordTurtle', () => {
 
     expect(turtle).toContain('a health:ConditionRecord');
     expect(turtle).toContain('health:conditionName "Hypertension"');
-    expect(turtle).toContain('health:status "active"');
+    expect(turtle).toContain('clinical:status "active"');
     expect(turtle).toContain('"2020-03-15"^^xsd:dateTime');
   });
 
@@ -367,9 +367,9 @@ describe('buildRecordTurtle', () => {
       '2026-02-20T10:00:00Z',
     );
 
-    expect(turtle).not.toContain('health:dose');
-    expect(turtle).not.toContain('health:frequency');
-    expect(turtle).toContain('health:medicationName "Test"');
+    expect(turtle).not.toContain('clinical:dosage');
+    expect(turtle).not.toContain('clinical:frequency');
+    expect(turtle).toContain('clinical:drugName "Test"');
   });
 
   it('should use correct name predicate per data type', () => {

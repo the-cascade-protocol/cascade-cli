@@ -5,7 +5,7 @@
  * and returns a FHIR R4 resource object, or null if the type is not handled here.
  *
  * Handles:
- *   health:MedicationRecord          -> MedicationStatement
+ *   clinical:Medication               -> MedicationStatement
  *   health:ConditionRecord           -> Condition
  *   health:AllergyRecord             -> AllergyIntolerance
  *   health:LabResultRecord           -> Observation (lab)
@@ -34,11 +34,11 @@ export function restoreMedicationRecord(pv: PV, warnings: string[]): FhirResourc
   const fhirResource: FhirResource = {
     resourceType: 'MedicationStatement',
     status: 'active',
-    medicationCodeableConcept: { text: getFirst(NS.health + 'medicationName') ?? '' },
+    medicationCodeableConcept: { text: getFirst(NS.clinical + 'drugName') ?? '' },
   };
 
-  const isActive = getFirst(NS.health + 'isActive');
-  if (isActive === 'false') fhirResource.status = 'stopped';
+  const status = getFirst(NS.clinical + 'status');
+  if (status) fhirResource.status = status;
 
   const drugCodes = pv.get(NS.clinical + 'drugCode') ?? [];
   const codingArr: any[] = [];
@@ -51,7 +51,7 @@ export function restoreMedicationRecord(pv: PV, warnings: string[]): FhirResourc
   }
   if (codingArr.length > 0) fhirResource.medicationCodeableConcept.coding = codingArr;
 
-  const doseText = getFirst(NS.health + 'dose');
+  const doseText = getFirst(NS.clinical + 'dosage');
   if (doseText) fhirResource.dosage = [{ text: doseText }];
 
   const startDate = getFirst(NS.health + 'startDate');

@@ -673,17 +673,17 @@ describe('FHIR -> Cascade converters', () => {
     });
   });
 
-  describe('MedicationStatement -> MedicationRecord', () => {
+  describe('MedicationStatement -> clinical:Medication', () => {
     it('should convert MedicationStatement with full details', () => {
       const result = convertMedicationStatement(sampleMedicationStatement);
-      expect(result.cascadeType).toBe('health:MedicationRecord');
+      expect(result.cascadeType).toBe('clinical:Medication');
 
       const quads = result._quads;
-      expect(findQuadValue(quads, NS.health + 'medicationName')).toBe('Metformin 500mg');
-      expect(findQuadValue(quads, NS.health + 'isActive')).toBe('true');
-      expect(findQuadValue(quads, NS.health + 'dose')).toBe('500mg twice daily');
-      expect(findQuadValue(quads, NS.health + 'route')).toBe('oral');
-      expect(findQuadValue(quads, NS.health + 'frequency')).toBe('2 times daily');
+      expect(findQuadValue(quads, NS.clinical + 'drugName')).toBe('Metformin 500mg');
+      expect(findQuadValue(quads, NS.clinical + 'status')).toBe('active');
+      expect(findQuadValue(quads, NS.clinical + 'dosage')).toBe('500mg twice daily');
+      expect(findQuadValue(quads, NS.clinical + 'route')).toBe('oral');
+      expect(findQuadValue(quads, NS.clinical + 'frequency')).toBe('2 times daily');
       expect(findQuadValue(quads, NS.clinical + 'sourceFhirResourceType')).toBe('MedicationStatement');
       expect(findQuadValue(quads, NS.clinical + 'clinicalIntent')).toBe('reportedUse');
     });
@@ -691,7 +691,7 @@ describe('FHIR -> Cascade converters', () => {
     it('should map RxNorm drug codes', () => {
       const result = convertMedicationStatement(sampleMedicationStatement);
       const quads = result._quads;
-      const rxCodes = findAllQuadValues(quads, NS.health + 'rxNormCode');
+      const rxCodes = findAllQuadValues(quads, NS.clinical + 'rxNormCode');
       expect(rxCodes).toContain(NS.rxnorm + '1049502');
     });
 
@@ -701,13 +701,13 @@ describe('FHIR -> Cascade converters', () => {
     });
   });
 
-  describe('MedicationRequest -> MedicationRecord', () => {
+  describe('MedicationRequest -> clinical:Medication', () => {
     it('should convert MedicationRequest with prescribed intent', () => {
       const result = convertMedicationStatement(sampleMedicationRequest);
-      expect(result.cascadeType).toBe('health:MedicationRecord');
+      expect(result.cascadeType).toBe('clinical:Medication');
 
       const quads = result._quads;
-      expect(findQuadValue(quads, NS.health + 'medicationName')).toBe('Lisinopril 10mg');
+      expect(findQuadValue(quads, NS.clinical + 'drugName')).toBe('Lisinopril 10mg');
       expect(findQuadValue(quads, NS.clinical + 'sourceFhirResourceType')).toBe('MedicationRequest');
       expect(findQuadValue(quads, NS.clinical + 'clinicalIntent')).toBe('prescribed');
     });
@@ -785,7 +785,7 @@ describe('FHIR -> Cascade converters', () => {
 // =============================================================================
 
 describe('Cascade -> FHIR converters', () => {
-  describe('MedicationRecord -> MedicationStatement', () => {
+  describe('clinical:Medication -> MedicationStatement', () => {
     it('should round-trip MedicationStatement', async () => {
       const fhirResult = await convertFhirToCascade(sampleMedicationStatement);
       expect(fhirResult.turtle).toBeTruthy();
@@ -927,7 +927,7 @@ describe('Batch conversion', () => {
     const result = await convert(JSON.stringify(bundle), 'fhir', 'turtle');
     expect(result.success).toBe(true);
     expect(result.resourceCount).toBe(3);
-    expect(result.output).toContain('MedicationRecord');
+    expect(result.output).toContain('clinical:Medication');
     expect(result.output).toContain('ConditionRecord');
     expect(result.output).toContain('AllergyRecord');
   });
@@ -1062,7 +1062,7 @@ describe('Edge cases', () => {
       medicationCodeableConcept: { text: 'OldMed' },
     };
     const result = convertMedicationStatement(stopped);
-    expect(findQuadValue(result._quads, NS.health + 'isActive')).toBe('false');
+    expect(findQuadValue(result._quads, NS.clinical + 'status')).toBe('stopped');
   });
 
   it('should include common triples on every converted resource', () => {

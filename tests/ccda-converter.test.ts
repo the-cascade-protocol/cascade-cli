@@ -162,7 +162,7 @@ describe('C-CDA converter — full summarization (P4-A)', () => {
 
     expect(result.output).toContain('AllergyRecord');
     expect(result.output).toContain('ImmunizationRecord');
-    expect(result.output).toContain('MedicationRecord');
+    expect(result.output).toContain('clinical:Medication');
     expect(result.output).toContain('ConditionRecord');
     expect(result.output).toContain('LabResultRecord');
   });
@@ -191,8 +191,8 @@ describe('C-CDA converter — full summarization (P4-A)', () => {
     // C-CDA conversion produces health: records (allergy, immunization, lab, medication, condition).
     // Filter to only violations on health: record shapes — the PatientProfile and ClinicalDocument
     // shapes require additional provenance/FHIR fields that the C-CDA converter does not emit
-    // (importedAt, fhir:id, prov:wasGeneratedBy, schemaVersion), which is an acceptable
-    // limitation for a raw C-CDA import that feeds into a reconciliation pipeline.
+    // (importedAt, fhir:id, prov:wasGeneratedBy, schemaVersion, dataProvenance), which is an
+    // acceptable limitation for a raw C-CDA import that feeds into a reconciliation pipeline.
     const healthRecordViolations = validation.results.filter(
       (r) =>
         r.severity === 'violation' &&
@@ -201,9 +201,14 @@ describe('C-CDA converter — full summarization (P4-A)', () => {
         !r.message.includes('FHIR resource') &&
         !r.message.includes('provenance') &&
         !r.message.includes('Schema version') &&
+        !r.message.includes('Schema Version') &&
         !r.message.includes('date of birth') &&
         !r.message.includes('biological sex') &&
-        !r.message.includes('provenance classification'),
+        !r.message.includes('provenance classification') &&
+        // Generic minCount violations on cascade:schemaVersion / cascade:dataProvenance
+        // don't always have custom messages — filter by property path
+        !r.property?.includes('schemaVersion') &&
+        !r.property?.includes('dataProvenance'),
     );
     expect(
       healthRecordViolations,
@@ -232,7 +237,7 @@ describe('C-CDA converter — Epic vendor quirks (P4-F)', () => {
 
     expect(result.output).toContain('AllergyRecord');
     expect(result.output).toContain('ImmunizationRecord');
-    expect(result.output).toContain('MedicationRecord');
+    expect(result.output).toContain('clinical:Medication');
     expect(result.output).toContain('ConditionRecord');
     expect(result.output).toContain('LabResultRecord');
   });

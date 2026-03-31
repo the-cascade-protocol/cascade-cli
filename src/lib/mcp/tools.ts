@@ -524,7 +524,7 @@ export function generatePrefixes(): string {
 
 /** Map from data type key to rdf:type and name predicate. */
 export const TYPE_MAPPING: Record<string, { rdfType: string; nameKey: string; namePred: string }> = {
-  medications: { rdfType: 'health:MedicationRecord', nameKey: 'name', namePred: 'health:medicationName' },
+  medications: { rdfType: 'clinical:Medication', nameKey: 'name', namePred: 'clinical:drugName' },
   conditions: { rdfType: 'health:ConditionRecord', nameKey: 'name', namePred: 'health:conditionName' },
   allergies: { rdfType: 'health:AllergyRecord', nameKey: 'name', namePred: 'health:allergen' },
   'lab-results': { rdfType: 'health:LabResultRecord', nameKey: 'name', namePred: 'health:testName' },
@@ -535,14 +535,14 @@ export const TYPE_MAPPING: Record<string, { rdfType: string; nameKey: string; na
 
 /** Property name mapping from JSON keys to Turtle predicates. */
 export const PROPERTY_PREDICATES: Record<string, string> = {
-  dose: 'health:dose',
-  frequency: 'health:frequency',
-  route: 'health:route',
-  prescriber: 'health:prescriber',
+  dose: 'clinical:dosage',
+  frequency: 'clinical:frequency',
+  route: 'clinical:route',
+  prescriber: 'clinical:prescriber',
   startDate: 'health:startDate',
   endDate: 'health:endDate',
-  isActive: 'health:isActive',
-  status: 'health:status',
+  isActive: 'clinical:status',
+  status: 'clinical:status',
   onsetDate: 'health:onsetDate',
   reaction: 'health:reaction',
   severity: 'health:allergySeverity',

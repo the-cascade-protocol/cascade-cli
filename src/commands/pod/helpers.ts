@@ -32,7 +32,7 @@ export interface DataTypeInfo {
 export const DATA_TYPES: Record<string, DataTypeInfo> = {
   medications: {
     label: 'Medications',
-    rdfTypes: [CASCADE_NAMESPACES.health + 'MedicationRecord'],
+    rdfTypes: [CASCADE_NAMESPACES.clinical + 'Medication'],
     directory: 'clinical',
     filename: 'medications.ttl',
   },

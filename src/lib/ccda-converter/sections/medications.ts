@@ -70,10 +70,10 @@ export function extractMedicationQuads(
     quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Medication')));
     quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(sourceSystem)));
 
-    if (isRxNorm && code) quads.push(makeQuad(subj, namedNode(NS.health + 'rxNormCode'), namedNode(resolveCodeUri(rxNormOid, code))));
-    if (displayName) quads.push(makeQuad(subj, namedNode(NS.health + 'medicationName'), literal(displayName)));
+    if (isRxNorm && code) quads.push(makeQuad(subj, namedNode(NS.clinical + 'rxNormCode'), namedNode(resolveCodeUri(rxNormOid, code))));
+    if (displayName) quads.push(makeQuad(subj, namedNode(NS.clinical + 'drugName'), literal(displayName)));
     if (startDate) quads.push(makeQuad(subj, namedNode(NS.health + 'startDate'), literal(startDate)));
-    if (dose) quads.push(makeQuad(subj, namedNode(NS.health + 'doseQuantity'), literal(dose)));
+    if (dose) quads.push(makeQuad(subj, namedNode(NS.clinical + 'dosage'), literal(dose)));
     if (doseUnit) quads.push(makeQuad(subj, namedNode(NS.health + 'doseUnit'), literal(doseUnit)));
     if (sourceId) quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceRecordId'), literal(sourceId)));
   }

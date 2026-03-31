@@ -2,7 +2,7 @@
  * FHIR -> Cascade converters for clinical record types.
  *
  * Converts:
- *   - MedicationStatement / MedicationRequest -> health:MedicationRecord
+ *   - MedicationStatement / MedicationRequest -> clinical:Medication
  *   - Condition -> health:ConditionRecord
  *   - AllergyIntolerance -> health:AllergyRecord
  *   - Observation (lab) -> health:LabResultRecord
@@ -28,7 +28,6 @@ import {
   extractCodings,
   codeableConceptText,
   tripleStr,
-  tripleBool,
   tripleDouble,
   tripleRef,
   tripleType,
@@ -54,19 +53,18 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
   }, resource.id);
   const quads: Quad[] = [];
 
-  quads.push(tripleType(subjectUri, NS.health + 'MedicationRecord'));
+  quads.push(tripleType(subjectUri, NS.clinical + 'Medication'));
   quads.push(...commonTriples(subjectUri));
 
   // Medication name
   const medName = codeableConceptText(resource.medicationCodeableConcept)
     ?? resource.medicationReference?.display
     ?? 'Unknown Medication';
-  quads.push(tripleStr(subjectUri, NS.health + 'medicationName', medName));
+  quads.push(tripleStr(subjectUri, NS.clinical + 'drugName', medName));
 
-  // isActive from FHIR status
+  // Status from FHIR status field
   const status = resource.status as string | undefined;
-  const isActive = status === 'active' || status === 'intended' || status === 'on-hold';
-  quads.push(tripleBool(subjectUri, NS.health + 'isActive', isActive));
+  if (status) quads.push(tripleStr(subjectUri, NS.clinical + 'status', status));
 
   // Drug codes
   const codings = extractCodings(resource.medicationCodeableConcept);
@@ -75,7 +73,7 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
     if (nsUri) {
       quads.push(tripleRef(subjectUri, NS.clinical + 'drugCode', nsUri + coding.code));
       if (nsUri === NS.rxnorm) {
-        quads.push(tripleRef(subjectUri, NS.health + 'rxNormCode', nsUri + coding.code));
+        quads.push(tripleRef(subjectUri, NS.clinical + 'rxNormCode', nsUri + coding.code));
       }
     } else {
       warnings.push(`Unknown coding system: ${coding.system} (code ${coding.code})`);
@@ -86,19 +84,19 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
   const dosage = Array.isArray(resource.dosage) ? resource.dosage[0] : undefined;
   if (dosage) {
     if (dosage.text) {
-      quads.push(tripleStr(subjectUri, NS.health + 'dose', dosage.text));
+      quads.push(tripleStr(subjectUri, NS.clinical + 'dosage', dosage.text));
     }
     if (dosage.route?.text) {
-      quads.push(tripleStr(subjectUri, NS.health + 'route', dosage.route.text));
+      quads.push(tripleStr(subjectUri, NS.clinical + 'route', dosage.route.text));
     } else if (dosage.route?.coding?.[0]?.display) {
-      quads.push(tripleStr(subjectUri, NS.health + 'route', dosage.route.coding[0].display));
+      quads.push(tripleStr(subjectUri, NS.clinical + 'route', dosage.route.coding[0].display));
     }
     if (dosage.timing?.repeat?.frequency) {
       const freq = dosage.timing.repeat.frequency;
       const periodUnit = dosage.timing.repeat.periodUnit ?? 'd';
       const unitLabel = periodUnit === 'd' ? 'daily' : periodUnit === 'wk' ? 'weekly' : periodUnit;
       const freqText = freq === 1 ? `once ${unitLabel}` : `${freq} times ${unitLabel}`;
-      quads.push(tripleStr(subjectUri, NS.health + 'frequency', freqText));
+      quads.push(tripleStr(subjectUri, NS.clinical + 'frequency', freqText));
     }
   }
 
@@ -136,8 +134,8 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
     turtle: '',
     warnings,
     resourceType: fhirResourceType,
-    cascadeType: 'health:MedicationRecord',
-    jsonld: quadsToJsonLd(quads, 'health:MedicationRecord'),
+    cascadeType: 'clinical:Medication',
+    jsonld: quadsToJsonLd(quads, 'clinical:Medication'),
     _quads: quads,
   } as ConversionResult & { _quads: Quad[] };
 }

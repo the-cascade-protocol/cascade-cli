@@ -4,7 +4,7 @@
  * Converts between FHIR R4 JSON and Cascade Protocol RDF (Turtle/JSON-LD).
  *
  * Supported FHIR R4 resource types (Layer 2 — full vocabulary mapping):
- *   - MedicationStatement / MedicationRequest -> health:MedicationRecord
+ *   - MedicationStatement / MedicationRequest -> clinical:Medication
  *   - Condition                               -> health:ConditionRecord
  *   - AllergyIntolerance                      -> health:AllergyRecord
  *   - Observation (lab)                       -> health:LabResultRecord

@@ -46,7 +46,7 @@ export interface ReconcilerResult {
 // ---------------------------------------------------------------------------
 
 type CascadeRecordType =
-  | 'health:MedicationRecord'
+  | 'clinical:Medication'
   | 'health:ConditionRecord'
   | 'health:AllergyRecord'
   | 'health:LabResultRecord'
@@ -56,7 +56,7 @@ type CascadeRecordType =
   | 'coverage:InsurancePlan';
 
 const KNOWN_TYPES: Record<string, CascadeRecordType> = {
-  [NS.health + 'MedicationRecord']:   'health:MedicationRecord',
+  [NS.clinical + 'Medication']:        'clinical:Medication',
   [NS.health + 'ConditionRecord']:    'health:ConditionRecord',
   [NS.health + 'AllergyRecord']:      'health:AllergyRecord',
   [NS.health + 'LabResultRecord']:    'health:LabResultRecord',
@@ -153,13 +153,13 @@ function dateOnly(dt: string): string { return dt.split('T')[0] ?? dt; }
 type MatchResult = { match: boolean; confidence: number; matchedOn: string };
 
 function matchMedications(a: ParsedRecord, b: ParsedRecord): MatchResult {
-  const rxA = (a.properties.get(NS.health + 'rxNormCode') ?? []).map(v => codeFromUri(v.value));
-  const rxB = (b.properties.get(NS.health + 'rxNormCode') ?? []).map(v => codeFromUri(v.value));
+  const rxA = (a.properties.get(NS.clinical + 'rxNormCode') ?? []).map(v => codeFromUri(v.value));
+  const rxB = (b.properties.get(NS.clinical + 'rxNormCode') ?? []).map(v => codeFromUri(v.value));
   const shared = rxA.find(c => c && rxB.includes(c));
   if (shared) return { match: true, confidence: 1.0, matchedOn: `rxnorm:${shared}` };
 
-  const nA = normalizeMedName(getProp(a, NS.health + 'medicationName') ?? '');
-  const nB = normalizeMedName(getProp(b, NS.health + 'medicationName') ?? '');
+  const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '');
+  const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '');
   if (nA && nB && nA === nB) return { match: true, confidence: 0.85, matchedOn: `name:"${nA}"` };
   if (nA && nB && (nA.includes(nB) || nB.includes(nA))) return { match: true, confidence: 0.70, matchedOn: `partial-name` };
   return { match: false, confidence: 0, matchedOn: '' };
@@ -292,7 +292,7 @@ function getMatchThreshold(a: ParsedRecord, b: ParsedRecord): number {
 function doRecordsMatch(a: ParsedRecord, b: ParsedRecord, tol: number): MatchResult {
   if (a.type !== b.type) return { match: false, confidence: 0, matchedOn: '' };
   switch (a.type) {
-    case 'health:MedicationRecord':   return matchMedications(a, b);
+    case 'clinical:Medication':        return matchMedications(a, b);
     case 'health:ConditionRecord':    return matchConditions(a, b);
     case 'health:AllergyRecord':      return matchAllergies(a, b);
     case 'health:LabResultRecord':    return matchLabs(a, b, tol);
@@ -337,9 +337,9 @@ function classifyGroup(
       if (diff > 0)   return { matchType: 'near_duplicate' };
     }
   }
-  if (a.type === 'health:MedicationRecord') {
-    const nA = normalizeMedName(getProp(a, NS.health + 'medicationName') ?? '');
-    const nB = normalizeMedName(getProp(b, NS.health + 'medicationName') ?? '');
+  if (a.type === 'clinical:Medication') {
+    const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '');
+    const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '');
     if (nA !== nB) return { matchType: 'near_duplicate' };
   }
   return { matchType: 'exact_duplicate' };

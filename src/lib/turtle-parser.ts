@@ -230,7 +230,7 @@ export function getAllTypes(store: Store): string[] {
 
 /**
  * Shorten a full IRI using known Cascade namespace prefixes.
- * Returns the prefixed form (e.g., "health:MedicationRecord") or the full IRI if no match.
+ * Returns the prefixed form (e.g., "clinical:Medication") or the full IRI if no match.
  */
 export function shortenIRI(iri: string, prefixes?: Record<string, string>): string {
   const allPrefixes: Record<string, string> = {

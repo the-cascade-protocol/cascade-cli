@@ -89,7 +89,7 @@ export async function convertCascadeToFhir(turtle: string): Promise<{
     // Dispatch to per-type handler
     let resource: any | null = null;
 
-    if (rdfType === NS.health + 'MedicationRecord') {
+    if (rdfType === NS.clinical + 'Medication') {
       resource = restoreMedicationRecord(pv, warnings);
     } else if (rdfType === NS.health + 'ConditionRecord') {
       resource = restoreConditionRecord(pv, warnings);

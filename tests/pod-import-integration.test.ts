@@ -276,7 +276,7 @@ describe('C-CDA import pipeline (integration)', () => {
     expect(result.output).toContain('health:AllergyRecord');
     expect(result.output).toContain('health:ImmunizationRecord');
     expect(result.output).toContain('health:ConditionRecord');
-    expect(result.output).toContain('health:MedicationRecord');
+    expect(result.output).toContain('clinical:Medication');
   });
 
   // ─── Test 2: Re-import idempotency — same document twice → same URIs ───────
@@ -416,6 +416,6 @@ describe('C-CDA import pipeline (integration)', () => {
     expect(result.output).toContain('health:AllergyRecord');
     expect(result.output).toContain('health:ImmunizationRecord');
     expect(result.output).toContain('health:ConditionRecord');
-    expect(result.output).toContain('health:MedicationRecord');
+    expect(result.output).toContain('clinical:Medication');
   });
 });
