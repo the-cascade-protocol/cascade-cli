@@ -22,7 +22,10 @@
 
 import { Command } from 'commander';
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import { spawn, type ChildProcess } from 'child_process';
 import crypto from 'crypto';
 import { parseTurtleFile, getProperties, CASCADE_NAMESPACES } from '../../lib/turtle-parser.js';
 import { resolvePodDir, fileExists } from './helpers.js';
@@ -139,6 +142,43 @@ async function appendIndexContains(indexPath: string, relPath: string): Promise<
   return true;
 }
 
+// ── Auto-spawn helpers ────────────────────────────────────────────────────────
+
+/** Check ~/.config/cascade-agent/models/ for a downloaded GGUF model. */
+function findLocalModel(): string | null {
+  const modelsDir = path.join(os.homedir(), '.config', 'cascade-agent', 'models');
+  try {
+    const files = fsSync.readdirSync(modelsDir);
+    return files.find((f) => f.endsWith('.gguf')) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Poll the agent's /health endpoint until modelAvailable is true or timeout.
+ * Shows a dot every 3 seconds so the user knows something is happening.
+ */
+async function waitForAgent(agentUrl: string, timeoutMs: number): Promise<boolean> {
+  const start = Date.now();
+  let lastDot = start;
+  while (Date.now() - start < timeoutMs) {
+    await new Promise<void>((r) => setTimeout(r, 800));
+    const now = Date.now();
+    if (now - lastDot >= 3000) {
+      process.stdout.write('.');
+      lastDot = now;
+    }
+    try {
+      const res = await fetch(`${agentUrl}/health`, { signal: AbortSignal.timeout(2000) });
+      if (!res.ok) continue;
+      const body = await res.json() as { modelAvailable?: boolean };
+      if (body.modelAvailable) return true;
+    } catch { /* not ready yet */ }
+  }
+  return false;
+}
+
 // ── Command ───────────────────────────────────────────────────────────────────
 
 export function registerExtractSubcommand(pod: Command): void {
@@ -155,6 +195,7 @@ export function registerExtractSubcommand(pod: Command): void {
     ) => {
       const globalOpts = cmd.parent?.parent?.opts() as { json?: boolean; verbose?: boolean } ?? {};
       const podDir = resolvePodDir(podDirArg);
+      let spawnedAgent: ChildProcess | null = null;
 
       // ── 1. Find narrative blocks in documents.ttl ─────────────────────────
 
@@ -218,28 +259,64 @@ export function registerExtractSubcommand(pod: Command): void {
         return;
       }
 
-      // ── 3. Check agent health ─────────────────────────────────────────────
+      // ── 3. Check agent health (auto-spawn if not running) ─────────────────
 
       const agentUrl = opts.agentUrl.replace(/\/$/, '');
-      try {
-        const health = await fetch(`${agentUrl}/health`, { signal: AbortSignal.timeout(3000) });
-        if (!health.ok) throw new Error(`HTTP ${health.status}`);
-        const body = await health.json() as { modelAvailable?: boolean; modelId?: string };
-        if (!body.modelAvailable) {
-          console.error('cascade-agent is running but no extraction model is loaded.');
-          console.error('  Restart with: cascade agent serve   (will prompt to download the model)');
+
+      const checkAgent = async (): Promise<'ready' | 'no-model' | 'unreachable'> => {
+        try {
+          const res = await fetch(`${agentUrl}/health`, { signal: AbortSignal.timeout(3000) });
+          if (!res.ok) return 'unreachable';
+          const body = await res.json() as { modelAvailable?: boolean; modelId?: string };
+          if (globalOpts.verbose) console.error(`[extract] Agent: ${agentUrl}  model: ${body.modelId}`);
+          return body.modelAvailable ? 'ready' : 'no-model';
+        } catch {
+          return 'unreachable';
+        }
+      };
+
+      let agentStatus = await checkAgent();
+
+      if (agentStatus === 'no-model') {
+        console.error('cascade-agent is running but no extraction model is loaded.');
+        console.error('  Restart with: cascade agent serve   (will prompt to download the model)');
+        process.exitCode = 1;
+        return;
+      }
+
+      if (agentStatus === 'unreachable') {
+        const modelFile = findLocalModel();
+        if (!modelFile) {
+          console.error(`cascade-agent is not reachable at ${agentUrl}.`);
+          console.error('  No local extraction model found.');
+          console.error('  Download one with: cascade agent login --provider local');
           process.exitCode = 1;
           return;
         }
-        if (globalOpts.verbose) {
-          console.error(`[extract] Agent: ${agentUrl}  model: ${body.modelId}`);
+
+        // Auto-spawn cascade agent serve
+        const agentPort = new URL(agentUrl).port || '8765';
+        console.log(`  cascade-agent not running — starting automatically (model: ${modelFile})`);
+        spawnedAgent = spawn('cascade', ['agent', 'serve', '--port', agentPort], {
+          stdio: 'ignore',
+          detached: false,
+        });
+        spawnedAgent.on('error', () => { /* suppress spawn errors — handled by timeout below */ });
+
+        process.stdout.write('  Loading model ');
+        const ready = await waitForAgent(agentUrl, 120_000);
+        console.log('');
+
+        if (!ready) {
+          spawnedAgent.kill();
+          spawnedAgent = null;
+          console.error('  Timed out waiting for cascade-agent to start (120s).');
+          console.error('  Start it manually: cascade agent serve');
+          process.exitCode = 1;
+          return;
         }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`cascade-agent is not reachable at ${agentUrl}/health: ${msg}`);
-        console.error('  Start it with: cascade agent serve');
-        process.exitCode = 1;
-        return;
+        console.log('  cascade-agent ready\n');
+        agentStatus = 'ready';
       }
 
       // ── 4. Extract each block ─────────────────────────────────────────────
@@ -380,6 +457,14 @@ export function registerExtractSubcommand(pod: Command): void {
       }
 
       console.log('');
+
+      // ── 7. Clean up auto-spawned agent ──────────────────────────────────
+
+      if (spawnedAgent) {
+        spawnedAgent.kill();
+        spawnedAgent = null;
+        console.log('  (stopped auto-spawned cascade-agent)');
+      }
     });
 }
 

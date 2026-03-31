@@ -26,6 +26,53 @@ import {
   normalizeProvenanceLabel,
 } from './helpers.js';
 
+// ── Extraction pipeline status helper ─────────────────────────────────────────
+
+async function getExtractionStatus(podDir: string): Promise<{
+  narrativeBlocks: number;
+  aiExtracted: number;
+  pendingReview: number;
+}> {
+  let narrativeBlocks = 0;
+  let aiExtracted = 0;
+  let pendingReview = 0;
+
+  // Count narrative blocks in documents.ttl
+  const documentsPath = path.join(podDir, 'clinical', 'documents.ttl');
+  if (await fileExists(documentsPath)) {
+    try {
+      const content = await fs.readFile(documentsPath, 'utf-8');
+      narrativeBlocks = (content.match(/cascade:requiresLLMExtraction/g) ?? []).length;
+    } catch { /* non-fatal */ }
+  }
+
+  // Count AI-extracted entities
+  const aiExtractedPath = path.join(podDir, 'clinical', 'ai-extracted.ttl');
+  if (await fileExists(aiExtractedPath)) {
+    try {
+      const result = await parseTurtleFile(aiExtractedPath);
+      if (result.success) {
+        // Count subjects that aren't AIExtractionActivity (those are provenance nodes)
+        aiExtracted = result.subjects.filter(
+          (s) => !s.types.some((t) => t.includes('AIExtractionActivity')),
+        ).length;
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  // Count pending review items
+  const reviewPath = path.join(podDir, 'analysis', 'review-queue.json');
+  if (await fileExists(reviewPath)) {
+    try {
+      const raw = await fs.readFile(reviewPath, 'utf-8');
+      const items = JSON.parse(raw) as Array<{ status?: string }>;
+      pendingReview = items.filter((i) => !i.status || i.status === 'pending').length;
+    } catch { /* non-fatal */ }
+  }
+
+  return { narrativeBlocks, aiExtracted, pendingReview };
+}
+
 export function registerInfoSubcommand(pod: Command, program: Command): void {
   pod
     .command('info')
@@ -161,6 +208,8 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
           }
         }
 
+        const extractionStatus = await getExtractionStatus(absDir);
+
         if (globalOpts.json) {
           printResult(
             {
@@ -183,6 +232,7 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
                 provenance: s.provenance,
               })),
               provenanceSources: Array.from(provenanceSources),
+              extraction: extractionStatus,
             },
             globalOpts,
           );
@@ -221,6 +271,25 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
 
           if (provenanceSources.size > 0) {
             console.log(`\nProvenance Sources: ${Array.from(provenanceSources).join(', ')}`);
+          }
+
+          // ── Extraction pipeline status ──────────────────────────────────
+          if (extractionStatus.narrativeBlocks > 0 || extractionStatus.aiExtracted > 0) {
+            console.log('\nAI Extraction:');
+            if (extractionStatus.narrativeBlocks > 0) {
+              console.log(`  Narrative blocks:   ${extractionStatus.narrativeBlocks} in clinical/documents.ttl`);
+            }
+            if (extractionStatus.aiExtracted > 0) {
+              console.log(`  Auto-accepted:      ${extractionStatus.aiExtracted} entities in clinical/ai-extracted.ttl`);
+            }
+            if (extractionStatus.pendingReview > 0) {
+              console.log(`  Pending review:     ${extractionStatus.pendingReview} item(s) in analysis/review-queue.json`);
+            }
+            if (extractionStatus.narrativeBlocks > 0 && extractionStatus.aiExtracted === 0) {
+              console.log('\n  Next step: cascade pod extract ' + podDir);
+            } else if (extractionStatus.pendingReview > 0) {
+              console.log('\n  Next step: cascade agent review --pod ' + podDir);
+            }
           }
 
           if (clinicalSummary.length === 0 && wellnessSummary.length === 0) {
