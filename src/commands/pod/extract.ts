@@ -109,6 +109,15 @@ interface ReviewQueueItem {
   extractedAt: string;
 }
 
+interface ExtractionError {
+  blockUri: string;
+  section: string;
+  charCount: number;
+  errorType: 'context_overflow' | 'timeout' | 'server_error' | 'unknown';
+  errorMessage: string;
+  timestamp: string;
+}
+
 // ── Deterministic ID helpers ──────────────────────────────────────────────────
 //
 // URIs are derived by hashing stable inputs so that re-running `pod extract`
@@ -140,6 +149,108 @@ async function appendIndexContains(indexPath: string, relPath: string): Promise<
   if (content.includes(relPath)) return false;
   await fs.appendFile(indexPath, `\n<> <http://www.w3.org/ns/ldp#contains> <${relPath}> .\n`, 'utf-8');
   return true;
+}
+
+// ── Chunking helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Maximum input tokens for the extraction model context.
+ * Qwen3.5-4B Q4_K_M has a 32K token context. Reserve ~4K for system prompt,
+ * output, and template overhead → 28K usable for narrative input.
+ * In chars: 28K * 4 = 112K, but the real bottleneck is tokenizer overhead on
+ * tables/structured text, so use a conservative 24K char threshold.
+ */
+const MAX_BLOCK_CHARS = 24_000;
+
+/**
+ * Split a large narrative block along natural boundaries (double-newlines,
+ * then single newlines, then mid-text) into chunks ≤ maxChars.
+ */
+function chunkNarrativeBlock(text: string, maxChars: number = MAX_BLOCK_CHARS): string[] {
+  if (text.length <= maxChars) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > maxChars) {
+    // Try to split on a double-newline (paragraph break)
+    let splitIdx = remaining.lastIndexOf('\n\n', maxChars);
+    // Fall back to single newline
+    if (splitIdx < maxChars * 0.3) splitIdx = remaining.lastIndexOf('\n', maxChars);
+    // Last resort: split mid-sentence at a space
+    if (splitIdx < maxChars * 0.3) splitIdx = remaining.lastIndexOf(' ', maxChars);
+    // Absolute last resort: hard split
+    if (splitIdx < maxChars * 0.3) splitIdx = maxChars;
+
+    chunks.push(remaining.slice(0, splitIdx).trim());
+    remaining = remaining.slice(splitIdx).trim();
+  }
+  if (remaining.length > 0) chunks.push(remaining);
+  return chunks;
+}
+
+// ── Idempotency helpers ──────────────────────────────────────────────────────
+
+/**
+ * Load fingerprints for blocks already extracted. Uses the deterministic
+ * queue ID (section + narrative hash, model-independent) as the key.
+ *
+ * Sources:
+ * - review-queue.json: item.id is exactly the queue ID
+ * - ai-extracted.ttl: sourceNarrativeSection predicates paired with
+ *   activity URIs tell us which sections were processed, but the activity
+ *   hash includes modelId. Instead, we look at whether extractedEntities
+ *   reference the same section; however the most reliable signal is the
+ *   queue. For auto-accepted blocks (not in review queue), we store a
+ *   separate extraction-done.json manifest.
+ * - extraction-done.json: written after each successful extraction run
+ */
+async function loadCompletedBlockIds(podDir: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+
+  // From review-queue.json
+  const queuePath = path.join(podDir, 'analysis', 'review-queue.json');
+  if (await fileExists(queuePath)) {
+    try {
+      const raw = await fs.readFile(queuePath, 'utf-8');
+      const items = JSON.parse(raw) as Array<{ id: string }>;
+      for (const item of items) ids.add(item.id);
+    } catch { /* non-fatal */ }
+  }
+
+  // From extraction-done.json (written by this command after each run)
+  const donePath = path.join(podDir, 'analysis', 'extraction-done.json');
+  if (await fileExists(donePath)) {
+    try {
+      const raw = await fs.readFile(donePath, 'utf-8');
+      const doneIds = JSON.parse(raw) as string[];
+      for (const id of doneIds) ids.add(id);
+    } catch { /* non-fatal */ }
+  }
+
+  return ids;
+}
+
+// ── Error classification ─────────────────────────────────────────────────────
+
+function classifyExtractionError(errMsg: string, httpStatus?: number): ExtractionError['errorType'] {
+  if (errMsg.includes('Eval has failed') || errMsg.includes('context')) return 'context_overflow';
+  if (errMsg.includes('aborted') || errMsg.includes('timeout') || errMsg.includes('TimeoutError')) return 'timeout';
+  if (httpStatus && httpStatus >= 500) return 'server_error';
+  return 'unknown';
+}
+
+function humanReadableError(errorType: ExtractionError['errorType'], charCount: number): string {
+  switch (errorType) {
+    case 'context_overflow':
+      return `block too large (${charCount.toLocaleString()} chars) — exceeded model context window`;
+    case 'timeout':
+      return `inference timed out (${charCount.toLocaleString()} chars) — block may be too large or model too slow`;
+    case 'server_error':
+      return `agent server error — check cascade agent serve logs`;
+    default:
+      return `unexpected error`;
+  }
 }
 
 // ── Auto-spawn helpers ────────────────────────────────────────────────────────
@@ -319,71 +430,147 @@ export function registerExtractSubcommand(pod: Command): void {
         agentStatus = 'ready';
       }
 
-      // ── 4. Extract each block ─────────────────────────────────────────────
+      // ── 4. Check idempotency — skip already-extracted blocks ────────────
 
-      console.log(`\nExtracting ${blocks.length} narrative block(s) via ${agentUrl}…\n`);
+      const completedIds = await loadCompletedBlockIds(podDir);
+      const pendingBlocks: NarrativeBlock[] = [];
+      let skippedCount = 0;
+
+      for (const block of blocks) {
+        const blockId = deterministicQueueId(block.section, block.narrativeText);
+        if (completedIds.has(blockId)) {
+          skippedCount++;
+          continue;
+        }
+        pendingBlocks.push(block);
+      }
+
+      if (skippedCount > 0) {
+        console.log(`  Skipping ${skippedCount} already-extracted block(s)`);
+      }
+
+      if (pendingBlocks.length === 0) {
+        console.log('\nAll narrative blocks have already been extracted.');
+        console.log('  Re-import the C-CDA to generate new blocks, or delete');
+        console.log('  clinical/ai-extracted.ttl and analysis/review-queue.json to re-extract.');
+        return;
+      }
+
+      // ── 5. Extract each block (with chunking for oversized blocks) ───────
+
+      console.log(`\nExtracting ${pendingBlocks.length} narrative block(s) via ${agentUrl}…\n`);
 
       const autoAccepted: Array<{ block: NarrativeBlock; entity: ExtractedEntity; result: ExtractionResult }> = [];
       const needsReview:  ReviewQueueItem[] = [];
       const discardedEntities: Array<{ block: NarrativeBlock; entity: ExtractedEntity }> = [];
+      const extractionErrors: ExtractionError[] = [];
+      const succeededBlockIds: string[] = [];
       let errorCount = 0;
 
-      for (const block of blocks) {
-        process.stdout.write(`  [${block.section}] `);
-        try {
-          const res = await fetch(`${agentUrl}/extract`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ section: block.section, narrativeText: block.narrativeText }),
-            signal: AbortSignal.timeout(60_000),
-          });
-          if (!res.ok) {
-            const err = await res.text();
-            console.log(`error (HTTP ${res.status}: ${err.slice(0, 80)})`);
-            errorCount++;
-            continue;
-          }
-          const result = await res.json() as ExtractionResult;
+      for (const block of pendingBlocks) {
+        const chunks = chunkNarrativeBlock(block.narrativeText);
+        const isChunked = chunks.length > 1;
 
-          // Route entities by confidence. All entities in a block are processed;
-          // at most one review queue entry is created per block (the entry contains
-          // the full result so the reviewer sees all medium-confidence entities).
-          let accepted = 0, review = 0, discarded = 0;
-          let addedToReview = false;
+        if (isChunked) {
+          process.stdout.write(`  [${block.section}] (${block.narrativeText.length.toLocaleString()} chars → ${chunks.length} chunks) `);
+        } else {
+          process.stdout.write(`  [${block.section}] `);
+        }
 
-          for (const entity of result.entities) {
-            if (entity.confidence >= 0.85) {
-              autoAccepted.push({ block, entity, result });
-              accepted++;
-            } else if (entity.confidence >= 0.50) {
-              if (!addedToReview) {
-                // One review entry per block; the full result contains all entities
-                needsReview.push({
-                  id: deterministicQueueId(block.section, block.narrativeText),
-                  section: block.section,
-                  narrativeText: block.narrativeText,
-                  result,
-                  status: 'pending',
-                  extractedAt: new Date().toISOString(),
-                });
-                addedToReview = true;
+        // Scale timeout with block size: base 60s + 20ms per char, capped at 5 min
+        const timeoutMs = Math.min(300_000, 60_000 + block.narrativeText.length * 20);
+
+        let blockAccepted = 0, blockReview = 0, blockDiscarded = 0;
+        let blockError = false;
+        let totalLatencyMs = 0;
+        let addedToReview = false;
+
+        for (let ci = 0; ci < chunks.length; ci++) {
+          const chunkText = chunks[ci];
+          try {
+            const res = await fetch(`${agentUrl}/extract`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ section: block.section, narrativeText: chunkText }),
+              signal: AbortSignal.timeout(timeoutMs),
+            });
+            if (!res.ok) {
+              const errText = await res.text();
+              const errorType = classifyExtractionError(errText, res.status);
+              const readable = humanReadableError(errorType, chunkText.length);
+              if (isChunked) {
+                console.log(`\n    chunk ${ci + 1}/${chunks.length}: ${readable}`);
+              } else {
+                console.log(readable);
               }
-              review++;
-            } else {
-              discardedEntities.push({ block, entity });
-              discarded++;
+              extractionErrors.push({
+                blockUri: block.subjectUri,
+                section: block.section,
+                charCount: chunkText.length,
+                errorType,
+                errorMessage: errText.slice(0, 200),
+                timestamp: new Date().toISOString(),
+              });
+              blockError = true;
+              continue;
             }
-          }
+            const result = await res.json() as ExtractionResult;
+            totalLatencyMs += result.latencyMs;
 
-          console.log(`${result.entities.length} entities  ✓${accepted} review${review} discard${discarded}  (${result.latencyMs}ms)`);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.log(`error: ${msg.slice(0, 60)}`);
+            for (const entity of result.entities) {
+              if (entity.confidence >= 0.85) {
+                autoAccepted.push({ block, entity, result });
+                blockAccepted++;
+              } else if (entity.confidence >= 0.50) {
+                if (!addedToReview) {
+                  needsReview.push({
+                    id: deterministicQueueId(block.section, block.narrativeText),
+                    section: block.section,
+                    narrativeText: block.narrativeText,
+                    result,
+                    status: 'pending',
+                    extractedAt: new Date().toISOString(),
+                  });
+                  addedToReview = true;
+                }
+                blockReview++;
+              } else {
+                discardedEntities.push({ block, entity });
+                blockDiscarded++;
+              }
+            }
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const errorType = classifyExtractionError(msg);
+            const readable = humanReadableError(errorType, chunkText.length);
+            if (isChunked) {
+              console.log(`\n    chunk ${ci + 1}/${chunks.length}: ${readable}`);
+            } else {
+              console.log(readable);
+            }
+            extractionErrors.push({
+              blockUri: block.subjectUri,
+              section: block.section,
+              charCount: chunkText.length,
+              errorType,
+              errorMessage: msg.slice(0, 200),
+              timestamp: new Date().toISOString(),
+            });
+            blockError = true;
+          }
+        }
+
+        if (blockError && blockAccepted === 0 && blockReview === 0) {
           errorCount++;
+        } else {
+          succeededBlockIds.push(deterministicQueueId(block.section, block.narrativeText));
+          const totalEntities = blockAccepted + blockReview + blockDiscarded;
+          const chunkSuffix = isChunked ? ` [${chunks.length} chunks]` : '';
+          console.log(`${totalEntities} entities  ✓${blockAccepted} review${blockReview} discard${blockDiscarded}  (${totalLatencyMs}ms)${chunkSuffix}`);
         }
       }
 
-      // ── 5. Write results to pod ───────────────────────────────────────────
+      // ── 6. Write results to pod ───────────────────────────────────────────
 
       await fs.mkdir(path.join(podDir, 'clinical'), { recursive: true });
       await fs.mkdir(path.join(podDir, 'analysis'), { recursive: true });
@@ -391,7 +578,7 @@ export function registerExtractSubcommand(pod: Command): void {
       const indexTtlPath = path.join(podDir, 'index.ttl');
       const newFiles: string[] = [];
 
-      // 5a. Auto-accepted → clinical/ai-extracted.ttl
+      // 6a. Auto-accepted → clinical/ai-extracted.ttl
       if (autoAccepted.length > 0) {
         const extractedPath = path.join(podDir, 'clinical', 'ai-extracted.ttl');
         const isNew = !(await fileExists(extractedPath));
@@ -400,7 +587,7 @@ export function registerExtractSubcommand(pod: Command): void {
         if (isNew) newFiles.push('clinical/ai-extracted.ttl');
       }
 
-      // 5b. Needs-review → analysis/review-queue.json (append, deduplicate by id)
+      // 6b. Needs-review → analysis/review-queue.json (append, deduplicate by id)
       if (needsReview.length > 0) {
         const queuePath = path.join(podDir, 'analysis', 'review-queue.json');
         let existing: ReviewQueueItem[] = [];
@@ -420,7 +607,7 @@ export function registerExtractSubcommand(pod: Command): void {
         }
       }
 
-      // 5c. Discarded → analysis/discarded-extractions.ttl (actual RDF records)
+      // 6c. Discarded → analysis/discarded-extractions.ttl (actual RDF records)
       if (discardedEntities.length > 0) {
         const discardPath = path.join(podDir, 'analysis', 'discarded-extractions.ttl');
         const isNew = !(await fileExists(discardPath));
@@ -429,16 +616,50 @@ export function registerExtractSubcommand(pod: Command): void {
         if (isNew) newFiles.push('analysis/discarded-extractions.ttl');
       }
 
-      // 5d. Update pod index.ttl for any new files written this run
+      // 6d. Record successfully-processed block IDs for idempotency
+      if (succeededBlockIds.length > 0) {
+        const donePath = path.join(podDir, 'analysis', 'extraction-done.json');
+        let existing: string[] = [];
+        if (await fileExists(donePath)) {
+          try { existing = JSON.parse(await fs.readFile(donePath, 'utf-8')) as string[]; } catch { /* fresh */ }
+        }
+        const existingSet = new Set(existing);
+        const newIds = succeededBlockIds.filter((id) => !existingSet.has(id));
+        if (newIds.length > 0) {
+          await fs.writeFile(donePath, JSON.stringify([...existing, ...newIds], null, 2), 'utf-8');
+        }
+      }
+
+      // 6e. Extraction errors → analysis/extraction-errors.json
+      if (extractionErrors.length > 0) {
+        const errorsPath = path.join(podDir, 'analysis', 'extraction-errors.json');
+        let existing: ExtractionError[] = [];
+        if (await fileExists(errorsPath)) {
+          try {
+            existing = JSON.parse(await fs.readFile(errorsPath, 'utf-8')) as ExtractionError[];
+          } catch { /* start fresh */ }
+        }
+        // Deduplicate by blockUri + section
+        const existingKeys = new Set(existing.map((e) => `${e.blockUri}:${e.section}`));
+        const newErrors = extractionErrors.filter((e) => !existingKeys.has(`${e.blockUri}:${e.section}`));
+        if (newErrors.length > 0) {
+          await fs.writeFile(errorsPath, JSON.stringify([...existing, ...newErrors], null, 2), 'utf-8');
+        }
+      }
+
+      // 6e. Update pod index.ttl for any new files written this run
       if (newFiles.length > 0 && await fileExists(indexTtlPath)) {
         for (const relPath of newFiles) {
           await appendIndexContains(indexTtlPath, relPath);
         }
       }
 
-      // ── 6. Summary ────────────────────────────────────────────────────────
+      // ── 7. Summary ────────────────────────────────────────────────────────
 
       console.log('');
+      if (skippedCount > 0) {
+        console.log(`  - Skipped        ${skippedCount} already-extracted block(s)`);
+      }
       console.log(`  ✓ Auto-accepted  ${autoAccepted.length} entities → clinical/ai-extracted.ttl`);
       if (needsReview.length > 0) {
         console.log(`  ⟳ Needs review   ${needsReview.length} block(s) → analysis/review-queue.json`);
@@ -447,7 +668,13 @@ export function registerExtractSubcommand(pod: Command): void {
         console.log(`  ✗ Discarded      ${discardedEntities.length} entities (confidence < 0.50)`);
       }
       if (errorCount > 0) {
-        console.log(`  ! Errors         ${errorCount} block(s) failed`);
+        console.log(`  ! Errors         ${errorCount} block(s) failed → analysis/extraction-errors.json`);
+        // Summarize error types
+        const byType = new Map<string, number>();
+        for (const e of extractionErrors) byType.set(e.errorType, (byType.get(e.errorType) ?? 0) + 1);
+        for (const [type, count] of byType) {
+          console.log(`                   ${count}x ${type.replace('_', ' ')}`);
+        }
       }
 
       if (needsReview.length > 0) {
@@ -458,7 +685,7 @@ export function registerExtractSubcommand(pod: Command): void {
 
       console.log('');
 
-      // ── 7. Clean up auto-spawned agent ──────────────────────────────────
+      // ── 8. Clean up auto-spawned agent ──────────────────────────────────
 
       if (spawnedAgent) {
         spawnedAgent.kill();
