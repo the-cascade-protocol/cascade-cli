@@ -67,7 +67,7 @@ export function extractMedicationQuads(
     }, sourceId || undefined);
 
     const subj = namedNode(uri);
-    quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.health + 'MedicationRecord')));
+    quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Medication')));
     quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(sourceSystem)));
 
     if (isRxNorm && code) quads.push(makeQuad(subj, namedNode(NS.health + 'rxNormCode'), namedNode(resolveCodeUri(rxNormOid, code))));
