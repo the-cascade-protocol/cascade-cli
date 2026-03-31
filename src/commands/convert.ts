@@ -28,7 +28,8 @@ import { convert, detectFormat, type InputFormat, type OutputFormat } from '../l
 import { buildImportManifest } from '../lib/fhir-converter/import-manifest.js';
 import { EXCLUDED_TYPES } from '../lib/fhir-converter/converters-passthrough.js';
 import { parseCcdaXml } from '../lib/ccda-converter/parser.js';
-import { collectNarrativeBlocks } from '../lib/ccda-converter/narrative-extractor.js';
+import { collectNarrativeBlocks, type NarrativeBlock } from '../lib/ccda-converter/narrative-extractor.js';
+import AdmZip from 'adm-zip';
 
 /**
  * Read input from file or stdin.
@@ -229,11 +230,35 @@ export function registerConvertCommand(program: Command): void {
 
         // P5.1-C: --extract-narratives (c-cda only)
         // Writes a JSON sidecar <file>.narratives.json with all narrative blocks.
+        // For IHE XDM ZIP inputs, extracts narrative blocks from each XML document.
         // Stdout remains TTL-only per RC-6 stdout discipline — all status goes to stderr.
         if (options.extractNarratives && options.from === 'c-cda' && result.success) {
           try {
-            const parsedDoc = parseCcdaXml(Buffer.isBuffer(input) ? input.toString('utf-8') : input);
-            const blocks = collectNarrativeBlocks(parsedDoc);
+            const allBlocks: NarrativeBlock[] = [];
+
+            // Detect ZIP input by magic bytes (PK signature: 0x50 0x4B)
+            const isZip = Buffer.isBuffer(input) && input[0] === 0x50 && input[1] === 0x4b;
+
+            if (isZip) {
+              // Extract all .XML files from the ZIP and parse each one
+              const zip = new AdmZip(input);
+              const xmlEntries = zip.getEntries()
+                .filter((e) => !e.isDirectory && e.entryName.toUpperCase().endsWith('.XML'));
+              for (const entry of xmlEntries) {
+                try {
+                  const xml = entry.getData().toString('utf-8');
+                  const parsedDoc = parseCcdaXml(xml);
+                  const blocks = collectNarrativeBlocks(parsedDoc);
+                  allBlocks.push(...blocks);
+                } catch {
+                  // Skip unparseable entries — partial results are still valuable
+                }
+              }
+            } else {
+              const xml = Buffer.isBuffer(input) ? input.toString('utf-8') : input;
+              const parsedDoc = parseCcdaXml(xml);
+              allBlocks.push(...collectNarrativeBlocks(parsedDoc));
+            }
 
             let narrativesPath: string;
             if (file) {
@@ -242,8 +267,8 @@ export function registerConvertCommand(program: Command): void {
               narrativesPath = 'ccda-narratives.json';
             }
 
-            writeFileSync(narrativesPath, JSON.stringify(blocks, null, 2));
-            console.error(`Narrative blocks written to: ${narrativesPath}`);
+            writeFileSync(narrativesPath, JSON.stringify(allBlocks, null, 2));
+            console.error(`Narrative blocks written to: ${narrativesPath} (${allBlocks.length} blocks)`);
           } catch (err: any) {
             console.error(`Warning: Failed to extract narratives: ${err.message}`);
           }
