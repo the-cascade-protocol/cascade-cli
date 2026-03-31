@@ -4,6 +4,7 @@
 
 import { NS, contentHashedUri } from '../../fhir-converter/types.js';
 import { resolveCodeUri } from '../code-systems.js';
+import { lookupRxNormName } from '../rxnorm-lookup.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
 
@@ -30,10 +31,12 @@ export function extractMedicationQuads(
     const codeEl = material?.code ?? {};
     const code = codeEl?.['@_code'] ?? codeEl?.code ?? '';
     const codeSystem = codeEl?.['@_codeSystem'] ?? codeEl?.codeSystem ?? '';
-    const displayName =
+    const rawDisplayName =
       codeEl?.['@_displayName'] ?? codeEl?.displayName ??
       (typeof material?.name === 'string' ? material.name : material?.name?.['#text'] ?? '');
     const isRxNorm = codeSystem.includes('6.88') || codeSystem === rxNormOid;
+    // Fall back to RxNorm lookup when the C-CDA entry omits displayName (common in Epic exports)
+    const displayName = rawDisplayName || (isRxNorm && code ? lookupRxNormName(code) ?? '' : '');
 
     // Extract dates
     const effectiveTimeRaw = sa?.effectiveTime;
