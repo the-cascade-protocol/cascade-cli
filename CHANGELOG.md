@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.9] - 2026-04-10
+
+### Added
+
+- `LICENSE` file (Apache 2.0). Previous published versions declared `"license": "Apache-2.0"` in `package.json` and listed `LICENSE` in the `files` array but had no `LICENSE` file in the repo, so npm packages shipped without one. This release ships the file.
+
+---
+
 ## [0.4.0] - 2026-03-27
 
 ### Added
