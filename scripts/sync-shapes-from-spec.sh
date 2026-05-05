@@ -11,7 +11,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SPEC_ROOT="$(cd "$CLI_ROOT/../spec" && pwd)"
+# SPEC_ROOT may be overridden via env (useful when running from a worktree
+# whose parent is not the development root). Default: sibling of CLI_ROOT.
+if [[ -z "${SPEC_ROOT:-}" ]]; then
+  if [[ -d "$CLI_ROOT/../spec" ]]; then
+    SPEC_ROOT="$(cd "$CLI_ROOT/../spec" && pwd)"
+  elif [[ -d "$HOME/Development/spec" ]]; then
+    SPEC_ROOT="$(cd "$HOME/Development/spec" && pwd)"
+  else
+    echo "Error: cannot locate spec/ — set SPEC_ROOT env var" >&2
+    exit 1
+  fi
+fi
 
 DRY_RUN=false
 if [[ "${1:-}" == "--dry-run" ]]; then
@@ -49,6 +60,17 @@ echo "=== Syncing ontologies to src/shapes/ ==="
 for vocab in core clinical coverage; do
   copy_file "$SPEC_ROOT/ontologies/$vocab/v1/$vocab.ttl" \
             "$CLI_ROOT/src/shapes/$vocab.ttl"
+done
+
+# Draft vocabularies (per D-PATH, NOT registered in VOCAB_VERSIONS).
+# Mirror the shapes file so cascade validate can target the new classes
+# while drafts are still pre-stable.
+echo ""
+echo "=== Syncing draft shapes to src/shapes/ ==="
+DRAFT_VOCABS=(genomics advisory)
+for vocab in "${DRAFT_VOCABS[@]}"; do
+  copy_file "$SPEC_ROOT/ontologies/$vocab/v1-draft/$vocab.shapes.ttl" \
+            "$CLI_ROOT/src/shapes/$vocab.shapes.ttl"
 done
 
 echo ""

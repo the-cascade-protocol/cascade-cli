@@ -1,0 +1,455 @@
+@prefix sh:       <http://www.w3.org/ns/shacl#> .
+@prefix advisory: <https://ns.cascadeprotocol.org/advisory/v1#> .
+@prefix cascade:  <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix prov:     <http://www.w3.org/ns/prov#> .
+@prefix xsd:      <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs:     <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ============================================================================
+# Cascade Protocol — Advisory Vocabulary SHACL Validation Shapes
+# ============================================================================
+# Version: 1.0-draft (TASK-0.4, 2026-05-05)
+# Validates against: advisory.ttl v1.0-draft (advisory@v1-draft.0.1)
+#
+# Shapes authored:
+#   1. advisory:CascadeAdvisoryPatchShape — envelope of a CAP file
+#   2. advisory:TrustedIssuerShape       — per-pod trusted-issuer record
+#   3. advisory:AutoApplyPolicyShape     — per-pod auto-apply policy
+#   4. advisory:AutoApplyScopeShape      — (issuer x advisoryClass) tuple
+#
+# SEVERITY LEVELS
+#   sh:Violation — Must fix (blocks application; the CAP applier MUST reject)
+#   sh:Warning   — Should address (recommended for completeness/UX)
+#   sh:Info      — Suggestion (nice to have)
+#
+# SCOPE OF THESE SHAPES
+# These shapes validate the RDF *envelope metadata* of a CAP file — i.e. the
+# triples describing the advisory itself. They do NOT validate:
+#
+#   - LDPatch syntax (Add-only, single-Bind, ≤64 triples, etc.). PROFILE.md
+#     constraints C1–C5 are pre-graph parser concerns enforced by the CAP
+#     applier in cascade-cli (TASK-4.2). SHACL operates on the parsed RDF
+#     graph after the patch body has been applied; the .ldpatch file syntax
+#     is not visible to SHACL.
+#   - Signature cryptographic verification. The detached-JWS signature
+#     (D-Q4, RFC 7515 Ed25519) is verified at runtime by the CAP applier
+#     (TASK-4.3) against the public key on the matching TrustedIssuer.
+#     SHACL constrains the *presence and shape* of advisory:signature and
+#     its claim properties but cannot verify the cryptographic signature.
+#   - Trusted-issuer membership. Per Decision Tracker row D-Q3, the
+#     trusted-issuer allowlist lives PER-POD (typically at
+#     <pod>/trust/issuers.ttl), not in the spec. The protocol is positioned
+#     as an extensible framework rather than a gatekeeper; community-driven
+#     issuer evaluation/certification is a separate parallel workstream.
+#     Therefore these shapes ONLY require that advisory:issuer is present
+#     and is an IRI — issuer-trust enforcement is a runtime concern handled
+#     by the CAP applier (cascade-cli) reading the per-pod trust graph,
+#     NOT a spec-time SHACL check.
+# ============================================================================
+
+# ============================================================================
+# Shape 1: Cascade Advisory Patch (envelope)
+# ============================================================================
+
+advisory:CascadeAdvisoryPatchShape a sh:NodeShape ;
+    sh:targetClass advisory:CascadeAdvisoryPatch ;
+    rdfs:label "Cascade Advisory Patch Shape"@en ;
+    rdfs:comment "Validation constraints for the envelope of a CAP file (advisory:CascadeAdvisoryPatch). Implements the required-envelope-metadata clause of PROFILE.md C6 and the closed-enumeration constraints on advisory:advisoryClass and advisory:cadence. Trusted-issuer membership is NOT validated here — see the file-level comment about D-Q3."@en ;
+
+    # ────────────────────────────────────────────────────────────────────
+    # Required envelope properties (PROFILE.md C6)
+    # ────────────────────────────────────────────────────────────────────
+
+    # VIOLATION: humanSummary required — the user-facing string the queue UI
+    # displays when prompting for approval. The applier MUST reject patches
+    # without it (PROFILE.md §C6, advisory.ttl).
+    sh:property [
+        sh:path advisory:humanSummary ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Human Summary"@en ;
+        sh:message "CascadeAdvisoryPatch must carry exactly one non-empty advisory:humanSummary (PROFILE.md C6)"@en
+    ] ;
+
+    # VIOLATION: advisoryClass required and must be one of the six published
+    # named individuals. Closed enumeration — adding a new class requires a
+    # vocabulary version bump.
+    sh:property [
+        sh:path advisory:advisoryClass ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in (
+            advisory:SafetyCritical
+            advisory:VariantReclassification
+            advisory:DrugInteraction
+            advisory:LabReferenceRangeUpdate
+            advisory:SurveillanceGuidelineUpdate
+            advisory:CarrierFrequencyUpdate
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Advisory Class"@en ;
+        sh:message "CascadeAdvisoryPatch must declare advisory:advisoryClass as one of the six published advisory:AdvisoryClass named individuals (SafetyCritical, VariantReclassification, DrugInteraction, LabReferenceRangeUpdate, SurveillanceGuidelineUpdate, CarrierFrequencyUpdate)"@en
+    ] ;
+
+    # VIOLATION: issuer required. Per D-Q3 the trusted-issuer allowlist is
+    # per-pod, so this shape does NOT enforce membership — only that the
+    # property is present and is an IRI. Runtime trust check happens in the
+    # CAP applier against <pod>/trust/issuers.ttl.
+    sh:property [
+        sh:path advisory:issuer ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:severity sh:Violation ;
+        sh:name "Issuer"@en ;
+        sh:message "CascadeAdvisoryPatch must declare advisory:issuer as a single IRI. Per-pod issuer-trust enforcement (D-Q3) is a runtime concern handled by the CAP applier reading <pod>/trust/issuers.ttl, not this shape."@en
+    ] ;
+
+    # VIOLATION: issuedAt required.
+    sh:property [
+        sh:path advisory:issuedAt ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Issued At"@en ;
+        sh:message "CascadeAdvisoryPatch must declare exactly one advisory:issuedAt xsd:dateTime"@en
+    ] ;
+
+    # ────────────────────────────────────────────────────────────────────
+    # Optional envelope properties
+    # ────────────────────────────────────────────────────────────────────
+
+    # advisoryId — optional, IRI when present.
+    sh:property [
+        sh:path advisory:advisoryId ;
+        sh:maxCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:severity sh:Warning ;
+        sh:name "Advisory ID"@en ;
+        sh:message "advisory:advisoryId is recommended so later advisories can target this one via advisory:supersedes"@en
+    ] ;
+
+    # supersedes — optional; if present, MUST point to a CascadeAdvisoryPatch
+    # IRI (per advisory.ttl rdfs:range).
+    sh:property [
+        sh:path advisory:supersedes ;
+        sh:nodeKind sh:IRI ;
+        sh:class advisory:CascadeAdvisoryPatch ;
+        sh:severity sh:Warning ;
+        sh:name "Supersedes"@en ;
+        sh:message "advisory:supersedes must reference an advisory:CascadeAdvisoryPatch IRI"@en
+    ] ;
+
+    # applicableUntil — optional dateTime upper bound for clinical applicability.
+    sh:property [
+        sh:path advisory:applicableUntil ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Applicable Until"@en ;
+        sh:message "advisory:applicableUntil should be an xsd:dateTime; absence means open-ended applicability"@en
+    ] ;
+
+    # profileVersion — optional but recommended; lets the applier reject
+    # patches written against an unsupported profile version.
+    sh:property [
+        sh:path advisory:profileVersion ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Profile Version"@en ;
+        sh:message "advisory:profileVersion is recommended (e.g. \"0.1\") so the applier can reject unsupported profile versions"@en
+    ] ;
+
+    # issuerName — optional human-readable convenience name.
+    sh:property [
+        sh:path advisory:issuerName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Issuer Display Name"@en
+    ] ;
+
+    # evidenceUrl — optional IRI of supporting public evidence (ClinVar, CPIC, etc.).
+    sh:property [
+        sh:path advisory:evidenceUrl ;
+        sh:nodeKind sh:IRI ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Evidence URL"@en ;
+        sh:message "advisory:evidenceUrl should be an IRI pointing at publicly-citable supporting evidence"@en
+    ] ;
+
+    # appliesToActiveOnly — optional boolean (PGx-style gating).
+    sh:property [
+        sh:path advisory:appliesToActiveOnly ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Applies To Active Only"@en
+    ] ;
+
+    # cadence — optional override; closed enumeration over the six Cadence
+    # named individuals.
+    sh:property [
+        sh:path advisory:cadence ;
+        sh:maxCount 1 ;
+        sh:in (
+            advisory:EveryAppOpen
+            advisory:Daily
+            advisory:Weekly
+            advisory:Monthly
+            advisory:Quarterly
+            advisory:Annually
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Cadence"@en ;
+        sh:message "advisory:cadence, if present, must be one of the six published advisory:Cadence named individuals (EveryAppOpen, Daily, Weekly, Monthly, Quarterly, Annually)"@en
+    ] ;
+
+    # ────────────────────────────────────────────────────────────────────
+    # Detached-JWS signature properties (D-Q4)
+    # ────────────────────────────────────────────────────────────────────
+    # Cryptographic verification is a runtime concern (TASK-4.3); these
+    # constraints only validate presence/shape of the signature claims.
+
+    sh:property [
+        sh:path advisory:signature ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Signature"@en ;
+        sh:message "advisory:signature (detached JWS, RFC 7515) is strongly recommended; absence forces the applier to queue the patch for explicit user trust review (PROFILE.md §Profile validation step 4)"@en
+    ] ;
+
+    sh:property [
+        sh:path advisory:signatureIssuer ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Signature Issuer (iss)"@en
+    ] ;
+
+    sh:property [
+        sh:path advisory:signatureIssuedAt ;
+        sh:datatype xsd:long ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Signature Issued At (iat)"@en
+    ] ;
+
+    sh:property [
+        sh:path advisory:signatureExpiresAt ;
+        sh:datatype xsd:long ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Signature Expires At (exp)"@en
+    ] ;
+
+    sh:property [
+        sh:path advisory:signatureContentType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Signature Content Type (cty)"@en ;
+        sh:message "advisory:signatureContentType, if present, should be \"application/x-cascade-advisory-patch\" for v0.1"@en
+    ] .
+
+# ============================================================================
+# Shape 2: Trusted Issuer (per-pod, per D-Q3)
+# ============================================================================
+
+advisory:TrustedIssuerShape a sh:NodeShape ;
+    sh:targetClass advisory:TrustedIssuer ;
+    rdfs:label "Trusted Issuer Shape"@en ;
+    rdfs:comment "Validation constraints for advisory:TrustedIssuer records. These records live per-pod (typically at <pod>/trust/issuers.ttl) — the protocol does NOT operate a centralized registry. How the record entered the pod's trust graph is captured by advisory:trustSource."@en ;
+
+    # VIOLATION: trustedIssuerId required — the IRI/DID that MUST equal
+    # advisory:issuer on patches signed by this issuer.
+    sh:property [
+        sh:path advisory:trustedIssuerId ;
+        sh:datatype xsd:anyURI ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Trusted Issuer ID"@en ;
+        sh:message "TrustedIssuer must carry exactly one advisory:trustedIssuerId (xsd:anyURI). It MUST equal advisory:issuer on any patch this issuer signs."@en
+    ] ;
+
+    # VIOLATION: trustedIssuerPublicKey required — used to verify the
+    # detached-JWS Ed25519 signature.
+    sh:property [
+        sh:path advisory:trustedIssuerPublicKey ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Trusted Issuer Public Key"@en ;
+        sh:message "TrustedIssuer must carry exactly one advisory:trustedIssuerPublicKey (Ed25519, JWK string or multibase-encoded raw bytes) for signature verification"@en
+    ] ;
+
+    # VIOLATION: trustSource required — provenance of how the issuer
+    # entered the pod's trust graph. Closed enumeration over the four
+    # TrustSourceEnum named individuals.
+    sh:property [
+        sh:path advisory:trustSource ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in (
+            advisory:RecommendedStarterList
+            advisory:UserAdded
+            advisory:ImportedFromRegistry
+            advisory:VerifiedViaDID
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Trust Source"@en ;
+        sh:message "TrustedIssuer must declare advisory:trustSource as one of the four published advisory:TrustSourceEnum named individuals (RecommendedStarterList, UserAdded, ImportedFromRegistry, VerifiedViaDID)"@en
+    ] ;
+
+    # WARNING: trustedIssuerName recommended for UI display.
+    sh:property [
+        sh:path advisory:trustedIssuerName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Trusted Issuer Display Name"@en ;
+        sh:message "advisory:trustedIssuerName is recommended for human-readable UI display"@en
+    ] ;
+
+    # INFO: trustAddedAt — provenance timestamp.
+    sh:property [
+        sh:path advisory:trustAddedAt ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Trust Added At"@en
+    ] .
+
+# ============================================================================
+# Shape 3: Auto-Apply Policy (per-pod)
+# ============================================================================
+
+advisory:AutoApplyPolicyShape a sh:NodeShape ;
+    sh:targetClass advisory:AutoApplyPolicy ;
+    rdfs:label "Auto-Apply Policy Shape"@en ;
+    rdfs:comment "Validation constraints for advisory:AutoApplyPolicy records. Auto-apply is opt-in by default; the user adds policy records explicitly. Each policy MUST link to at least one advisory:AutoApplyScope tuple."@en ;
+
+    # VIOLATION: appliesTo required — at least one AutoApplyScope tuple.
+    sh:property [
+        sh:path advisory:appliesTo ;
+        sh:minCount 1 ;
+        sh:class advisory:AutoApplyScope ;
+        sh:severity sh:Violation ;
+        sh:name "Applies To (Auto-Apply Scope)"@en ;
+        sh:message "AutoApplyPolicy must link to at least one advisory:AutoApplyScope via advisory:appliesTo"@en
+    ] ;
+
+    # INFO: effectiveFrom recommended.
+    sh:property [
+        sh:path advisory:effectiveFrom ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Effective From"@en
+    ] ;
+
+    # INFO: effectiveUntil optional.
+    sh:property [
+        sh:path advisory:effectiveUntil ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Effective Until"@en
+    ] ;
+
+    # INFO: requiresQuorum forward-compat flag (v0.1 applier ignores).
+    sh:property [
+        sh:path advisory:requiresQuorum ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Requires Quorum"@en ;
+        sh:message "advisory:requiresQuorum is a v1.0 forward-compat hook; v0.1 appliers MUST treat it as if absent"@en
+    ] .
+
+# ============================================================================
+# Shape 4: Auto-Apply Scope ((issuer x advisoryClass) tuple)
+# ============================================================================
+
+advisory:AutoApplyScopeShape a sh:NodeShape ;
+    sh:targetClass advisory:AutoApplyScope ;
+    rdfs:label "Auto-Apply Scope Shape"@en ;
+    rdfs:comment "Validation constraints for advisory:AutoApplyScope tuples. Each scope MUST pair exactly one trusted issuer with exactly one advisory class — the auto-apply matcher fires only when a patch's (advisory:issuer, advisory:advisoryClass) equals at least one scope."@en ;
+
+    # VIOLATION: scopeIssuer required and must reference a TrustedIssuer.
+    sh:property [
+        sh:path advisory:scopeIssuer ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class advisory:TrustedIssuer ;
+        sh:severity sh:Violation ;
+        sh:name "Scope Issuer"@en ;
+        sh:message "AutoApplyScope must declare exactly one advisory:scopeIssuer referencing an advisory:TrustedIssuer record"@en
+    ] ;
+
+    # VIOLATION: scopeAdvisoryClass required and must be one of the six
+    # published AdvisoryClass named individuals.
+    sh:property [
+        sh:path advisory:scopeAdvisoryClass ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in (
+            advisory:SafetyCritical
+            advisory:VariantReclassification
+            advisory:DrugInteraction
+            advisory:LabReferenceRangeUpdate
+            advisory:SurveillanceGuidelineUpdate
+            advisory:CarrierFrequencyUpdate
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Scope Advisory Class"@en ;
+        sh:message "AutoApplyScope must declare exactly one advisory:scopeAdvisoryClass drawn from the six published advisory:AdvisoryClass named individuals"@en
+    ] .
+
+# ============================================================================
+# Cross-vocabulary note
+# ============================================================================
+# cascade:AdvisoryApplicationActivity is declared in core/v1 (v3.1) and its
+# SHACL shape (cascade:AdvisoryApplicationActivityShape, requiring prov:used
+# minCount 2) lives in core.shapes.ttl. This file does NOT redeclare or
+# augment that shape — its constraints are domain-general and core-shaped.
+# If a future advisory-domain-specific constraint is identified (e.g., the
+# matched-record reference must be an IRI not a literal), it will be added
+# here as an additional NodeShape targeting cascade:AdvisoryApplicationActivity.
+
+# ============================================================================
+# Changelog
+# ============================================================================
+#
+# Version 1.0-draft (2026-05-05) — TASK-0.4
+# - Initial release of advisory vocabulary SHACL shapes.
+# - CascadeAdvisoryPatchShape: VIOLATION for humanSummary, advisoryClass
+#   (sh:in over six AdvisoryClass individuals), issuer (IRI, presence-only;
+#   per-pod trust enforcement is runtime per D-Q3), issuedAt; sh:in for
+#   cadence over six Cadence individuals; sh:class advisory:CascadeAdvisoryPatch
+#   on supersedes; WARNING for advisoryId, profileVersion, signature; INFO
+#   for issuerName, evidenceUrl, appliesToActiveOnly, applicableUntil, and
+#   the JWS signature claim properties.
+# - TrustedIssuerShape: VIOLATION for trustedIssuerId, trustedIssuerPublicKey,
+#   trustSource (sh:in over four TrustSourceEnum individuals); WARNING for
+#   trustedIssuerName; INFO for trustAddedAt.
+# - AutoApplyPolicyShape: VIOLATION for appliesTo (minCount 1, sh:class
+#   advisory:AutoApplyScope); INFO for effectiveFrom, effectiveUntil,
+#   requiresQuorum.
+# - AutoApplyScopeShape: VIOLATION for scopeIssuer (sh:class
+#   advisory:TrustedIssuer) and scopeAdvisoryClass (sh:in over six
+#   AdvisoryClass individuals).
+# - Out-of-scope (documented at file head): LDPatch syntactic constraints
+#   C1–C5 (parser concern, TASK-4.2); cryptographic signature verification
+#   (runtime concern, TASK-4.3); trusted-issuer membership enforcement
+#   (per-pod runtime concern, D-Q3).

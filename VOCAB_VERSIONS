@@ -4,7 +4,11 @@
 # Update this file whenever you sync shapes from spec and bump the CLI version.
 # Updated 2026-03-27: checkup v3.2 — removed deprecated supplyEndDate shape property
 # Updated 2026-03-28: core v3.0 + clinical v1.8 — AIExtractionActivity, SocialHistoryRecord
-core=3.0
+# Updated 2026-05-05: core v3.1 — AdvisoryApplicationActivity + AIGenerationActivity
+#   (Genomics & Advisory v0.1 workstream, TASK-0.0 / TASK-0.6).
+#   Pre-stable drafts genomics/v1-draft and advisory/v1-draft are NOT
+#   registered here per D-PATH; they land at v1.0 graduation.
+core=3.1
 health=2.4
 clinical=1.8
 coverage=1.3
