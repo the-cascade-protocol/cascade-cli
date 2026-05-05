@@ -76,10 +76,23 @@ export async function convertGenomicsBundle(
   // "discrete-variant" or "urn:uuid:...") → minted Cascade IRI.
   const idIndex = new Map<string, string>();
 
-  const resources: any[] =
+  // Build a fullUrl-aware enumeration. FHIR Genomics IG bundles often use
+  // urn:uuid: fullUrls in cross-references (compound-het bundle's hasMember
+  // points at fullUrl, not Resource/id). Track the mapping per entry so we
+  // can register every variant under its own resource.id AND its fullUrl.
+  const entries: Array<{ resource: any; fullUrl?: string }> =
     parsed?.resourceType === 'Bundle'
-      ? (parsed.entry ?? []).map((e: any) => e?.resource).filter(Boolean)
-      : [parsed];
+      ? (parsed.entry ?? [])
+          .filter((e: any) => e?.resource)
+          .map((e: any) => ({ resource: e.resource, fullUrl: e.fullUrl }))
+      : [{ resource: parsed }];
+  const resources: any[] = entries.map((e) => e.resource);
+  // Pre-index entries by fullUrl alone so registerId can look up the
+  // corresponding resource later.
+  const fullUrlByResource = new Map<any, string>();
+  for (const e of entries) {
+    if (e.fullUrl) fullUrlByResource.set(e.resource, e.fullUrl);
+  }
 
   // -------- Pass 1: Variants, Haplotypes, ServiceRequests --------
   // Variants must land first so haplotype/genotype `hasComponent` references resolve.
@@ -99,7 +112,7 @@ export async function convertGenomicsBundle(
           sourceType: 'FHIR.Observation.variant',
           sourceId: out.record.sourceId,
         });
-        registerId(idIndex, r, out.record.iri);
+        registerId(idIndex, r, out.record.iri, fullUrlByResource.get(r));
       }
     } else if (r.resourceType === 'ServiceRequest') {
       const out = parseServiceRequest(r, ctx);
@@ -114,7 +127,7 @@ export async function convertGenomicsBundle(
           sourceType: 'FHIR.ServiceRequest',
           sourceId: out.record.sourceId,
         });
-        registerId(idIndex, r, out.record.iri);
+        registerId(idIndex, r, out.record.iri, fullUrlByResource.get(r));
       }
     }
   }
@@ -136,7 +149,7 @@ export async function convertGenomicsBundle(
           sourceType: 'FHIR.Observation.haplotype',
           sourceId: out.record.sourceId,
         });
-        registerId(idIndex, r, out.record.iri);
+        registerId(idIndex, r, out.record.iri, fullUrlByResource.get(r));
       }
     }
   }
@@ -158,7 +171,7 @@ export async function convertGenomicsBundle(
           sourceType: 'FHIR.Observation.genotype',
           sourceId: out.record.sourceId,
         });
-        registerId(idIndex, r, out.record.iri);
+        registerId(idIndex, r, out.record.iri, fullUrlByResource.get(r));
       }
     }
   }
@@ -169,7 +182,10 @@ export async function convertGenomicsBundle(
     records.filter((r) => r.cascadeType === 'genomics:Variant').map((r) => r.iri),
   );
 
-  // -------- Pass 4: Diagnostic implications + reports --------
+  // -------- Pass 4a: Diagnostic-implication observations --------
+  // Run these BEFORE DiagnosticReports so DR.result[] references resolve
+  // to Interpretation IRIs (we still filter out non-Variants — but at
+  // least the resolution succeeds and the gap-set stays clean).
   for (const r of resources) {
     if (!r || typeof r !== 'object') continue;
     const profile = profileOf(r);
@@ -190,9 +206,30 @@ export async function convertGenomicsBundle(
             sourceId: rec.sourceId,
           });
         }
+        // Register the FHIR Observation under any of its resolution keys —
+        // we use the FIRST emitted Interpretation IRI as the canonical
+        // mapping (DR.result[] only needs *something* resolvable; the
+        // variantsObserved filter then drops non-Variants).
+        if (out.records.length > 0) {
+          registerId(idIndex, r, out.records[0].iri, fullUrlByResource.get(r));
+        }
         warnings.push(...out.warnings);
         vocabularyGaps.push(...out.gaps);
       }
+    }
+  }
+
+  // -------- Pass 4b: DiagnosticReport + deferred profiles --------
+  for (const r of resources) {
+    if (!r || typeof r !== 'object') continue;
+    const profile = profileOf(r);
+
+    if (
+      r.resourceType === 'Observation' &&
+      profile === GENOMICS_PROFILES.diagnosticImplication
+    ) {
+      // already handled in Pass 4a
+      continue;
     } else if (r.resourceType === 'DiagnosticReport') {
       const out = parseDiagnosticReport(r, idIndex, ctx, variantIris);
       if (out) {
@@ -206,7 +243,7 @@ export async function convertGenomicsBundle(
           sourceType: 'FHIR.DiagnosticReport',
           sourceId: out.record.sourceId,
         });
-        registerId(idIndex, r, out.record.iri);
+        registerId(idIndex, r, out.record.iri, fullUrlByResource.get(r));
       }
     } else if (
       r.resourceType === 'Observation' &&
@@ -262,17 +299,23 @@ export async function convertGenomicsBundle(
 
 /**
  * Index a resource under its plain id, its `ResourceType/id` form, and
- * any `fullUrl` (urn:uuid:...) found on its bundle entry.
+ * any `fullUrl` (urn:uuid:...) found on its bundle entry. The fullUrl
+ * registration is what makes compound-het hasMember references resolve —
+ * those bundles use urn:uuid: refs, not ResourceType/id refs.
  */
 function registerId(
   idx: Map<string, string>,
   resource: any,
   cascadeIri: string,
+  fullUrl?: string,
 ): void {
   if (resource?.id) {
     idx.set(resource.id, cascadeIri);
     if (resource.resourceType) {
       idx.set(`${resource.resourceType}/${resource.id}`, cascadeIri);
     }
+  }
+  if (fullUrl) {
+    idx.set(fullUrl, cascadeIri);
   }
 }

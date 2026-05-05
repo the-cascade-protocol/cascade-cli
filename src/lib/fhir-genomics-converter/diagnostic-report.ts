@@ -172,11 +172,19 @@ export function parseDiagnosticReport(
   }
 
   // ---- Test date ----
-  const dateRaw: string | undefined = resource.effectiveDateTime ?? resource.issued;
+  // Prefer issued (full YYYY-MM-DD) over effectiveDateTime (which the IG
+  // examples often leave at year-only granularity, e.g. '2016'). Year-only
+  // strings would fail xsd:date validation, so upgrade them to YYYY-01-01.
+  const issuedDate: string | undefined = resource.issued;
+  const effectiveDate: string | undefined = resource.effectiveDateTime;
+  let dateRaw: string | undefined = issuedDate ?? effectiveDate;
   if (dateRaw) {
-    const dateOnly = String(dateRaw).split('T')[0];
+    let dateOnly = String(dateRaw).split('T')[0];
+    if (/^\d{4}$/.test(dateOnly)) dateOnly = `${dateOnly}-01-01`;
+    if (/^\d{4}-\d{2}$/.test(dateOnly)) dateOnly = `${dateOnly}-01`;
     quads.push(tripleDate(iri, GENOMICS_NS + 'testDate', dateOnly));
   }
+  void dateRaw;
 
   // ---- Performing lab ----
   const performer = resource.performer?.[0]?.display ?? resource.performer?.[0]?.reference;

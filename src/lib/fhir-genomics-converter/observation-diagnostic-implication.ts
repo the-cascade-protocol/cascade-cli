@@ -278,7 +278,11 @@ export function parseDiagnosticImplication(
 
     if (issued) {
       // interpretedDate is xsd:date (per ontology) — use date-only form.
-      const dateOnly = String(issued).split('T')[0];
+      // Year-only strings (Genomics IG corpus has 'effectiveDateTime: 2016')
+      // would fail xsd:date validation; upgrade to YYYY-01-01.
+      let dateOnly = String(issued).split('T')[0];
+      if (/^\d{4}$/.test(dateOnly)) dateOnly = `${dateOnly}-01-01`;
+      if (/^\d{4}-\d{2}$/.test(dateOnly)) dateOnly = `${dateOnly}-01`;
       quads.push(tripleDate(iri, GENOMICS_NS + 'interpretedDate', dateOnly));
     }
     if (performer) {
