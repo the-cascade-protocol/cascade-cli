@@ -163,6 +163,12 @@ export async function convertGenomicsBundle(
     }
   }
 
+  // Index of IRIs that are genomics:Variant — used by the DiagnosticReport
+  // parser to filter result[] to true variants.
+  const variantIris = new Set<string>(
+    records.filter((r) => r.cascadeType === 'genomics:Variant').map((r) => r.iri),
+  );
+
   // -------- Pass 4: Diagnostic implications + reports --------
   for (const r of resources) {
     if (!r || typeof r !== 'object') continue;
@@ -188,7 +194,7 @@ export async function convertGenomicsBundle(
         vocabularyGaps.push(...out.gaps);
       }
     } else if (r.resourceType === 'DiagnosticReport') {
-      const out = parseDiagnosticReport(r, idIndex, ctx);
+      const out = parseDiagnosticReport(r, idIndex, ctx, variantIris);
       if (out) {
         records.push(out.record);
         quads.push(...out.record.quads);
