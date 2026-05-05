@@ -294,7 +294,7 @@ const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[
  *   deterministicUuid("hello") == "aaf4c61d-dcc5-58a2-9abe-de0f3b482cd9"
  *   (verify this value before using in any SDK implementation)
  */
-function deterministicUuid(input: string): string {
+export function deterministicUuid(input: string): string {
   const hash = createHash('sha1').update(input).digest('hex');
   const v = ((parseInt(hash.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, '0');
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${v}${hash.slice(18, 20)}-${hash.slice(20, 32)}`;
