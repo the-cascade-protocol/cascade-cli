@@ -133,9 +133,10 @@ export function parseDiagnosticReport(
   }
 
   // ---- Variants observed (filter result[] to Variant records) ----
-  // result[] mixes Variants, VariantInterpretations, Haplotypes, and PGx
-  // therapeutic-implication observations. Only Variants belong on
-  // genomics:variantsObserved per the v1-draft semantics.
+  // result[] mixes Variants, VariantInterpretations, Haplotypes, Diplotypes,
+  // and PGx therapeutic-implication observations. Only Variants belong on
+  // genomics:variantsObserved per the v1-draft semantics
+  // (rdfs:range genomics:Variant — see genomics.ttl).
   const results: any[] = resource.result ?? [];
   let variantsLinked = 0;
   for (const ref of results) {
@@ -149,15 +150,32 @@ export function parseDiagnosticReport(
       });
       continue;
     }
-    if (variantIris.size > 0 && !variantIris.has(resolved)) {
-      // resolved to a non-Variant record (Interpretation, Haplotype, etc.) —
-      // not eligible for variantsObserved, but the link is still preserved
-      // implicitly via that record's own variantInterpreted / hasComponent
-      // wiring. Skip silently.
+    if (!variantIris.has(resolved)) {
+      // Resolved to a non-Variant record (Interpretation, Haplotype,
+      // Diplotype, PGx implication, etc.) — not eligible for
+      // variantsObserved given its declared range. The link is still
+      // preserved implicitly via that record's own variantInterpreted /
+      // hasComponent / hapA / hapB wiring back to constituent Variants.
+      // Skip silently.
       continue;
     }
     quads.push(tripleRef(iri, GENOMICS_NS + 'variantsObserved', resolved));
     variantsLinked += 1;
+  }
+
+  if (results.length > 0 && variantsLinked === 0) {
+    // Bundle expresses a genomic report whose result[] references only
+    // non-Variant records (typically Diplotypes for HLA / PGx, or
+    // Haplotypes alone). v1-draft has no direct GeneticTest -> Diplotype
+    // or Haplotype linkage predicate; v1.x should consider
+    // genomics:reportedRecord (generic) or the type-specific
+    // genomics:diplotypesObserved / haplotypesObserved.
+    gaps.push({
+      sourceField: `DiagnosticReport/${sourceId}.result`,
+      reason: `Genomic report references ${results.length} record(s) but none are true genomics:Variant instances (likely Diplotypes/Haplotypes/PGx implications). v1-draft has no direct GeneticTest-to-Diplotype/Haplotype linkage predicate; consider genomics:reportedRecord or type-specific predicates in v1.x.`,
+      severity: 'info',
+      context: sourceId,
+    });
   }
 
   if (variantsLinked === 0 && results.length === 0) {
