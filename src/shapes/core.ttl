@@ -17,8 +17,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-03-28"^^xsd:date ;
-    owl:versionInfo "3.0" ;
+    dct:modified "2026-05-05"^^xsd:date ;
+    owl:versionInfo "3.1" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -676,6 +676,21 @@ cascade:forSystem a owl:DatatypeProperty ;
 # ============================================================================
 # Changelog
 # ============================================================================
+# v3.1 (2026-05-05): Genomics & Advisory provenance (TASK-0.0).
+#     Added cascade:AdvisoryApplicationActivity (prov:Activity subclass) for
+#     recording application of a Cascade Advisory Patch to a pod; advisory
+#     and matched record are linked via prov:used.
+#     Added cascade:AIGenerationActivity (prov:Activity subclass), sibling of
+#     cascade:AIExtractionActivity, for LLM-generated narrative chunks
+#     (e.g., checkup:VariantNarrative). Reuses extractionModel,
+#     extractionConfidence, sourceNarrativeSection, requiresUserReview from
+#     AIExtractionActivity; adds cascade:promptVersion, cascade:generationTemperature.
+#     Added cascade:trigger ObjectProperty (domain AIGenerationActivity, range
+#     cascade:GenerationTrigger) with three named individuals:
+#     cascade:InitialGeneration, cascade:RegenerationAfterReclassification,
+#     cascade:AudienceRetargeting. Decision: a single AIGenerationActivity class
+#     with a trigger property is preferred over multiple subclasses (e.g., a
+#     separate AIRegenerationActivity) — avoids over-modeling.
 # v3.0 (2026-03-28): AI extraction provenance + abstract HealthRecord base class.
 #     Added cascade:HealthRecord abstract base class for all patient health records
 #     (enables cross-domain consent scoping and pod path policies).
@@ -980,3 +995,71 @@ cascade:discardConfidence a owl:DatatypeProperty ;
 cascade:SocialHistoryConsent a owl:NamedIndividual ;
     rdfs:label "Social History Consent"@en ;
     rdfs:comment "Consent scope for social history data. Patient can share clinical/ pod without exposing social-history/. Subject to 42 CFR Part 2 for substance use disorder records."@en .
+
+# ============================================================================
+# Genomics & Advisory Provenance (v3.1)
+# ============================================================================
+# Two new prov:Activity subclasses supporting the Genomics & Advisory v0.1
+# workstream:
+#   - cascade:AdvisoryApplicationActivity records the application of a Cascade
+#     Advisory Patch to a pod, joining the patch and the matched record into
+#     a single auditable event.
+#   - cascade:AIGenerationActivity is a sibling of cascade:AIExtractionActivity
+#     for LLM-generated narrative content (e.g., checkup:VariantNarrative
+#     chunks). It captures the model + prompt + temperature used to generate
+#     the content and a cascade:trigger value distinguishing initial generation
+#     from regeneration after reclassification or audience retargeting.
+
+# Advisory Application Activity (v3.1) — records application of an advisory patch
+cascade:AdvisoryApplicationActivity a owl:Class ;
+    rdfs:subClassOf prov:Activity ;
+    rdfs:label "Advisory Application Activity"@en ;
+    rdfs:comment "An activity that applied a Cascade Advisory Patch to a pod. The activity joins to advisory provenance via prov:used <advisory-iri> and prov:used <matched-record-iri>, recording both the patch source and the record it was matched against. Use prov:wasGeneratedBy on records produced or modified by the patch."@en ;
+    owl:versionInfo "Added in core v3.1" .
+
+# AI Generation Activity (v3.1) — sibling of AIExtractionActivity for LLM-generated content
+cascade:AIGenerationActivity a owl:Class ;
+    rdfs:subClassOf prov:Activity ;
+    rdfs:label "AI Generation Activity"@en ;
+    rdfs:comment "An LLM-powered generation activity that produced narrative or summary content (e.g., checkup:VariantNarrative chunks). Sibling of cascade:AIExtractionActivity: extraction pulls structured records out of unstructured text, generation produces new prose. Records the model identifier, prompt version, temperature, and a cascade:trigger value indicating why the generation ran. Link from generated content to activity via prov:wasGeneratedBy."@en ;
+    owl:versionInfo "Added in core v3.1" .
+
+# AIGenerationActivity reuses the cascade:extractionModel, cascade:extractionConfidence,
+# cascade:sourceNarrativeSection, and cascade:requiresUserReview properties already
+# declared on AIExtractionActivity (extending their domain via the additions below).
+# It also introduces cascade:promptVersion, cascade:generationTemperature, and
+# cascade:trigger.
+
+cascade:promptVersion a owl:DatatypeProperty ;
+    rdfs:label "Prompt Version"@en ;
+    rdfs:domain cascade:AIGenerationActivity ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Identifier of the prompt template version used for this generation, e.g. 'variant-narrative-v2.1'. Pair with cascade:extractionModel for full reproducibility."@en .
+
+cascade:generationTemperature a owl:DatatypeProperty ;
+    rdfs:label "Generation Temperature"@en ;
+    rdfs:domain cascade:AIGenerationActivity ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment "Sampling temperature used during generation (typically 0.0-1.0). Recorded for reproducibility and to distinguish deterministic from creative outputs."@en .
+
+cascade:trigger a owl:ObjectProperty ;
+    rdfs:label "Trigger"@en ;
+    rdfs:domain cascade:AIGenerationActivity ;
+    rdfs:range cascade:GenerationTrigger ;
+    rdfs:comment "The reason this generation activity ran. One of the cascade:GenerationTrigger named individuals: cascade:InitialGeneration, cascade:RegenerationAfterReclassification, cascade:AudienceRetargeting."@en .
+
+cascade:GenerationTrigger a owl:Class ;
+    rdfs:label "Generation Trigger"@en ;
+    rdfs:comment "Closed enumeration of reasons an AIGenerationActivity may run."@en .
+
+cascade:InitialGeneration a owl:NamedIndividual, cascade:GenerationTrigger ;
+    rdfs:label "Initial Generation"@en ;
+    rdfs:comment "First-time generation of a narrative or summary chunk. No prior version existed."@en .
+
+cascade:RegenerationAfterReclassification a owl:NamedIndividual, cascade:GenerationTrigger ;
+    rdfs:label "Regeneration After Reclassification"@en ;
+    rdfs:comment "Regeneration triggered because an upstream classification (e.g., variant pathogenicity, condition status) changed and the prior narrative is now stale."@en .
+
+cascade:AudienceRetargeting a owl:NamedIndividual, cascade:GenerationTrigger ;
+    rdfs:label "Audience Retargeting"@en ;
+    rdfs:comment "Regeneration triggered to retarget existing content for a different audience (e.g., patient-facing vs. clinician-facing) without any underlying classification change."@en .
