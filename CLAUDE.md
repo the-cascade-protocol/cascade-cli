@@ -9,11 +9,25 @@ Package: `@the-cascade-protocol/cli`
 
 - `src/shapes/` — Embedded SHACL shape files (copied from `spec/`). **Do not edit these manually.**
 - `src/commands/` — CLI command implementations
+- `src/lib/import-types.ts` — Shared `FormatImporter`, `ImportContext`, `ImportResult`, `VocabularyGap` interfaces. Source of truth for the importer contract.
+- `src/lib/import-registry.ts` — Registry of all `--from <format>` importers. **To add a new format, append one entry here — do not edit `src/commands/convert.ts`.**
 - `src/lib/fhir-converter/` — FHIR R4 → Cascade Turtle conversion logic
+  - `registry-entry.ts` — `fhirImporter` (--from fhir) + `cascadeFhirImporter` (--from cascade --to fhir)
 - `src/lib/ccda-converter/` — Native C-CDA → Cascade Turtle converter (12 section handlers; vendor normalization for Epic/Cerner; IHE XDM zip support)
+  - `registry-entry.ts` — `ccdaImporter` (--from c-cda)
 - `src/lib/reconciler.ts` — Semantic deduplication engine with type-specific matching (Patient, Immunization, Lab, Condition, Allergy, Medication, Vital Sign)
 - `src/lib/user-resolutions.ts` — Conflict resolution persistence (`settings/user-resolutions.ttl`, `settings/pending-conflicts.ttl`)
 - `src/lib/validator/` — SHACL validation against embedded shapes
+
+## Adding a new `--from <format>` importer
+
+1. Create `src/lib/<format>-converter/` with your converter logic.
+2. Author a `registry-entry.ts` in that directory exporting a `FormatImporter` const. Implement `format`, `description`, `supportedOutputs`, `detect()`, `convert()`. Add `cliOptions` + `postProcess` only if you have sidecar files to write.
+3. Append the import + the const to `src/lib/import-registry.ts`'s `importers` array.
+4. Adapt your converter's internal result shape to the unified `ImportResult` (see `import-types.ts`). Populate `vocabularyGaps` and `importedIdentifiers` for genomics-era importers — these enable downstream gap reporting and reconcile.
+5. The `--from <your-format>` value is now wired through `cascade convert` automatically. `--help`, format validation, and content auto-detection follow from registry inspection.
+
+CLI flags declared in your `cliOptions` MUST be globally unique across all importers — the dispatcher errors at startup if two importers declare the same flag. If a flag is genuinely shared (e.g., a `--manifest` that every importer might emit), promote it to a top-level option in `convert.ts` instead.
 
 ## Key Commands Added in Phase 0–2 (EHR Import Plan)
 
