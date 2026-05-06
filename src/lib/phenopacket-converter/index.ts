@@ -36,6 +36,7 @@ import type { ParsedRecord } from '../fhir-genomics-converter/types.js';
 import { classifyPhenopacket } from './detect.js';
 import { parseSubject } from './subject.js';
 import { parsePhenotypicFeatures } from './phenotypic-features.js';
+import { parseInterpretations } from './interpretations.js';
 
 export { detectPhenopacket, classifyPhenopacket } from './detect.js';
 export { phenopacketImporter } from './registry-entry.js';
@@ -182,9 +183,32 @@ export async function convertPhenopacket(
       vocabularyGaps.push(...out.gaps);
     }
 
+    // ---- Interpretations → Variant + VariantInterpretation (TASK-2B.4 + 2B.5) ----
+    if (Array.isArray(unit.pp.interpretations)) {
+      const out = parseInterpretations(
+        unit.pp.interpretations,
+        unit.patientIri,
+        ctx,
+        ctxLabel,
+      );
+      records.push(...out.records);
+      quads.push(...out.quads);
+      warnings.push(...out.warnings);
+      vocabularyGaps.push(...out.gaps);
+      for (const rec of out.records) {
+        importedIdentifiers.push({
+          cascadeIri: rec.iri,
+          cascadeType: rec.cascadeType,
+          sourceType:
+            rec.cascadeType === 'genomics:VariantInterpretation'
+              ? 'Phenopacket.interpretation'
+              : 'Phenopacket.variationDescriptor',
+          sourceId: rec.sourceId,
+        });
+      }
+    }
+
     // Subsequent tasks add per-unit processing here:
-    //   - TASK-2B.4 interpretations    → VariantInterpretation records
-    //   - TASK-2B.5 variation desc.    → Variant / CNV records
     //   - TASK-2B.7 biosamples         → Specimen records
     //   - TASK-2B.8 medicalActions     → recommendedActions text on the patient
   }
