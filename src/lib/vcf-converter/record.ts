@@ -15,18 +15,19 @@
  *                               else ResearchGrade
  *   - prov:wasGeneratedBy → SequencingRun IRI (passed in)
  *   - genomics:zygosity   from per-sample GT (when FORMAT has GT)
+ *   - genomics:refAllele                        (v1-draft.0.2; from REF column)
+ *   - genomics:altAllele                        (v1-draft.0.2; per-ALT)
+ *   - genomics:genomicStartEnd                  (v1-draft.0.2; chr:pos-end)
+ *   - genomics:variantAlleleFrequency           (v1-draft.0.2; FORMAT/AF or /VAF)
+ *   - genomics:somaticStatus                    (v1-draft.0.2; INFO.SOMATIC flag)
  *
- * Gap-info entries for fields not yet in v1-draft (waiting on v1-draft.0.2
- * from the concurrent vocab-evolution agent):
+ * Gap-info entries for fields still not in v1-draft:
+ *   - variantQuality   (QUAL column)
+ *   - passedFilter     (FILTER column)
+ *   - observedIn       (per-sample observation link)
  *
- *   - refAllele, altAllele, genomicStartEnd  (chromosomal coords + REF/ALT)
- *   - variantAlleleFrequency                  (per-sample VAF / AF)
- *   - variantQuality                          (QUAL column)
- *   - passedFilter                            (FILTER column)
- *   - observedIn                              (per-sample observation link)
- *
- * For each gap field we ALSO emit a comment-style triple under
- * `cascade:sourceField` so the data isn't silently lost — a downstream
+ * For each remaining gap field we ALSO emit a comment-style triple under
+ * `cascade:unmappedField` so the data isn't silently lost — a downstream
  * reconciler can pick those up once the vocabulary lands.
  */
 
@@ -309,33 +310,34 @@ export function parseRecordLine(
       }
     }
 
-    // 6. Vocabulary gaps: REF / ALT / coordinates — v1-draft.0.2 PENDING.
-    //    Until refAllele / altAllele / genomicStartEnd land, store as
-    //    cascade:unmappedField literals so nothing is silently dropped.
-    recordGap(
-      quads,
-      gaps,
-      variantIri,
-      'VCF.REF',
-      split.REF,
-      'genomics:refAllele not in v1-draft.0.1; pending v1-draft.0.2 from vocab-evolution agent.',
-    );
-    recordGap(
-      quads,
-      gaps,
-      variantIri,
-      'VCF.ALT',
-      ALT,
-      'genomics:altAllele not in v1-draft.0.1; pending v1-draft.0.2 from vocab-evolution agent.',
-    );
-    recordGap(
-      quads,
-      gaps,
-      variantIri,
-      'VCF.CHROM:POS',
-      `${split.CHROM}:${split.POS}-${split.POS + Math.max(split.REF.length, ALT.length) - 1}`,
-      'genomics:genomicStartEnd not in v1-draft.0.1; pending v1-draft.0.2.',
-    );
+    // 6. Coordinates + alleles (v1-draft.0.2):
+    //      REF column         → genomics:refAllele
+    //      ALT_i              → genomics:altAllele
+    //      CHROM:POS-end      → genomics:genomicStartEnd
+    //                            (end = POS + len(REF) - 1, 1-based inclusive)
+    quads.push(tripleStr(variantIri, GENOMICS_NS + 'refAllele', split.REF));
+    quads.push(tripleStr(variantIri, GENOMICS_NS + 'altAllele', ALT));
+    {
+      const chrLabel = split.CHROM.startsWith('chr') ? split.CHROM : `chr${split.CHROM}`;
+      const endPos = split.POS + Math.max(1, split.REF.length) - 1;
+      quads.push(
+        tripleStr(
+          variantIri,
+          GENOMICS_NS + 'genomicStartEnd',
+          `${chrLabel}:${split.POS}-${endPos}`,
+        ),
+      );
+    }
+
+    // 6b. INFO.SOMATIC flag (v1-draft.0.2). Present → Somatic. VCF has no
+    // clean germline indicator (the inverse of SOMATIC is implicit), so
+    // when the flag is absent we omit the triple. Closed-enum SHACL has
+    // no minCount on somaticStatus, so omission is fine.
+    if (split.INFO.has('SOMATIC')) {
+      quads.push(
+        tripleRef(variantIri, GENOMICS_NS + 'somaticStatus', GENOMICS_NS + 'Somatic'),
+      );
+    }
 
     // 7. QUAL column (variantQuality — gap)
     if (split.QUAL && split.QUAL !== '.') {
@@ -478,14 +480,22 @@ export function parseRecordLine(
         if (afOrVafIdx >= 0) {
           const af = fields[afOrVafIdx];
           if (af && af !== '.') {
-            recordGap(
-              quads,
-              gaps,
-              variantIri,
-              afIdx >= 0 ? 'VCF.FORMAT.AF' : 'VCF.FORMAT.VAF',
-              af,
-              'genomics:variantAlleleFrequency not in v1-draft.0.1; pending v1-draft.0.2.',
-            );
+            // Multi-allelic VCFs may carry comma-separated AF values per
+            // ALT; pick the entry at altIdx if available.
+            const piece = af.split(',')[altIdx] ?? af.split(',')[0];
+            const n = Number(piece);
+            if (Number.isFinite(n) && n >= 0 && n <= 1) {
+              quads.push(
+                makeQuad(
+                  namedNode(variantIri),
+                  namedNode(GENOMICS_NS + 'variantAlleleFrequency'),
+                  literal(String(n), namedNode(NS.xsd + 'decimal')),
+                ),
+              );
+            }
+            // If the value is outside 0..1 (some pipelines emit percent),
+            // we skip rather than coerce — the SHACL property shape on
+            // variantAlleleFrequency is sh:Violation severity for out-of-range.
           }
         }
         if (dpIdx >= 0) {
