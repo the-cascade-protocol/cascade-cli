@@ -19,6 +19,7 @@ import { fhirImporter, cascadeFhirImporter } from './fhir-converter/registry-ent
 import { ccdaImporter } from './ccda-converter/registry-entry.js';
 import { fhirGenomicsImporter } from './fhir-genomics-converter/registry-entry.js';
 import { phenopacketImporter } from './phenopacket-converter/registry-entry.js';
+import { clinvarImporter } from './clinvar-converter/registry-entry.js';
 
 /**
  * The registered importers. Order is not significant for dispatch but does
@@ -29,6 +30,7 @@ export const importers: ReadonlyArray<FormatImporter> = [
   fhirGenomicsImporter,  // before fhirImporter — auto-detect needs to match the more-specific profile first
   phenopacketImporter,   // phenopackets carry no resourceType, so detect can run independently of FHIR shape
   fhirImporter,
+  clinvarImporter,       // before ccdaImporter — ccda's detect() matches any '<?xml ...>' input, so the more-specific clinvar root tags must be checked first
   ccdaImporter,
   cascadeFhirImporter,
 ];
