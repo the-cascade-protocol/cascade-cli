@@ -120,6 +120,7 @@ export async function convertVcf(
       result.sequencingRunIri = sequencingRunIri;
       result.records.push(sequencingRun);
       result.quads.push(...sequencingRun.quads);
+      result.vocabularyGaps.push(...sequencingRun.gaps);
       result.importedIdentifiers.push({
         cascadeIri: sequencingRun.iri,
         cascadeType: sequencingRun.cascadeType,
@@ -164,6 +165,7 @@ export async function convertVcf(
     result.sequencingRunIri = sequencingRun.iri;
     result.records.push(sequencingRun);
     result.quads.push(...sequencingRun.quads);
+    result.vocabularyGaps.push(...sequencingRun.gaps);
     result.importedIdentifiers.push({
       cascadeIri: sequencingRun.iri,
       cascadeType: sequencingRun.cascadeType,
