@@ -29,6 +29,7 @@ import type {
 import type { ClinvarParsedRecord } from './types.js';
 import { parseClinvarXml } from './xml-parser.js';
 import { parseSimpleAllele } from './simple-allele.js';
+import { buildTraitSetIndex, parseRcvAccession } from './rcv-interpretation.js';
 
 export { detectClinvar } from './detect.js';
 export { clinvarImporter } from './registry-entry.js';
@@ -110,17 +111,51 @@ export async function convertClinvarXml(
 
     // ---- Variant ----
     const out = parseSimpleAllele(vcvAccession, vcvVariationId, simpleAllele, ctx);
-    if (out) {
-      records.push(out.record);
-      quads.push(...out.record.quads);
-      warnings.push(...out.warnings);
-      vocabularyGaps.push(...out.gaps);
-      importedIdentifiers.push({
-        cascadeIri: out.record.iri,
-        cascadeType: out.record.cascadeType,
-        sourceType: 'ClinVar.VariationArchive',
-        sourceId: vcvAccession,
-      });
+    if (!out) {
+      skippedCount += 1;
+      continue;
+    }
+    records.push(out.record);
+    quads.push(...out.record.quads);
+    warnings.push(...out.warnings);
+    vocabularyGaps.push(...out.gaps);
+    importedIdentifiers.push({
+      cascadeIri: out.record.iri,
+      cascadeType: out.record.cascadeType,
+      sourceType: 'ClinVar.VariationArchive',
+      sourceId: vcvAccession,
+    });
+
+    const variantIri = out.record.iri;
+
+    // ---- RCVAccession → VariantInterpretation (one per condition; D-Q5) ----
+    const traitSetIndex = buildTraitSetIndex(classified?.Classifications);
+    const rcvList: any[] = Array.isArray(classified?.RCVList?.RCVAccession)
+      ? classified.RCVList.RCVAccession
+      : classified?.RCVList?.RCVAccession
+      ? [classified.RCVList.RCVAccession]
+      : [];
+
+    for (const rcv of rcvList) {
+      const rcvOut = parseRcvAccession(
+        vcvAccession,
+        variantIri,
+        rcv,
+        traitSetIndex,
+        ctx,
+      );
+      for (const rec of rcvOut.records) {
+        records.push(rec);
+        quads.push(...rec.quads);
+        importedIdentifiers.push({
+          cascadeIri: rec.iri,
+          cascadeType: rec.cascadeType,
+          sourceType: 'ClinVar.RCVAccession',
+          sourceId: rec.sourceId,
+        });
+      }
+      warnings.push(...rcvOut.warnings);
+      vocabularyGaps.push(...rcvOut.gaps);
     }
   }
 
