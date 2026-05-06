@@ -8,8 +8,22 @@
 # ============================================================================
 # Cascade Protocol — Genomics Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.0-draft (TASK-0.2, 2026-05-05)
-# Validates against: genomics.ttl v1.0-draft (genomics@v1-draft.0.1)
+# Version: 1.0-draft (TASK-0.2, 2026-05-05; +v1-draft.0.2 additions, 2026-05-05)
+# Validates against: genomics.ttl v1.0-draft (genomics@v1-draft.0.2)
+#
+# Changelog:
+#   v1-draft.0.2 (2026-05-05): added VariantShape property shapes for the
+#     four new Variant-domain properties — genomics:refAllele, altAllele,
+#     genomicStartEnd (Info-severity datatype/maxCount checks),
+#     genomics:variantAlleleFrequency (Violation-severity 0.0–1.0 range),
+#     genomics:somaticStatus (Violation-severity sh:in over Germline /
+#     Somatic / UnknownSomaticStatus). All optional (no minCount). No
+#     NodeShape added for the new generic genomics:reportedRecord predicate
+#     — it is intentionally domain-broad on GeneticTest with no rdfs:range,
+#     so a SHACL constraint would fight the design intent. Existing fixtures
+#     never reference any of these new properties, so existing data passes
+#     unchanged.
+#   v1-draft.0.1 (2026-05-05): initial 12 NodeShapes (TASK-0.2).
 #
 # Shapes authored (12 sh:NodeShape):
 #   1.  genomics:VariantShape                — required identity, stable IDs,
@@ -207,6 +221,57 @@ genomics:VariantShape a sh:NodeShape ;
         sh:severity sh:Violation ;
         sh:name "Mosaicism Fraction (VAF)"@en ;
         sh:message "genomics:mosaicismFraction, if present, must be an xsd:decimal between 0.0 and 1.0 inclusive (variant allele fraction)"@en
+    ] ;
+
+    # Added in v1-draft.0.2: VAF as a distinct property from mosaicismFraction.
+    # Range 0.0–1.0 inclusive. Optional — no minCount.
+    sh:property [
+        sh:path genomics:variantAlleleFrequency ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0.0 ;
+        sh:maxInclusive 1.0 ;
+        sh:severity sh:Violation ;
+        sh:name "Variant Allele Frequency"@en ;
+        sh:message "genomics:variantAlleleFrequency, if present, must be an xsd:decimal between 0.0 and 1.0 inclusive (fraction of reads supporting the alternate allele)"@en
+    ] ;
+
+    # Added in v1-draft.0.2: VCF-style coordinate properties. All optional.
+    sh:property [
+        sh:path genomics:refAllele ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Reference Allele"@en
+    ] ;
+    sh:property [
+        sh:path genomics:altAllele ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Alternate Allele"@en
+    ] ;
+    sh:property [
+        sh:path genomics:genomicStartEnd ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Genomic Start-End Coordinates"@en
+    ] ;
+
+    # Added in v1-draft.0.2: somatic status (germline / somatic / unknown).
+    # Optional but value must be one of three published named individuals.
+    sh:property [
+        sh:path genomics:somaticStatus ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:Germline
+            genomics:Somatic
+            genomics:UnknownSomaticStatus
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Somatic Status"@en ;
+        sh:message "genomics:somaticStatus, if present, must be one of the three published genomics:SomaticStatus named individuals (Germline, Somatic, UnknownSomaticStatus)"@en
     ] .
 
 # Cross-class node-level violation message for the 'at least one stable ID'
