@@ -40,6 +40,7 @@ import { parseInterpretations } from './interpretations.js';
 import { parsePedigree } from './pedigree.js';
 import { parseBiosample, buildRawFileRecord } from './biosamples.js';
 import { parseMedicalActions } from './medical-actions.js';
+import { auditPhenopacketTopLevel, auditCohortWrapper } from './gap-audit.js';
 import { tripleRef, NS } from '../fhir-converter/types.js';
 
 export { detectPhenopacket, classifyPhenopacket } from './detect.js';
@@ -305,6 +306,14 @@ export async function convertPhenopacket(
       warnings.push(...out.warnings);
       vocabularyGaps.push(...out.gaps);
     }
+
+    // ---- Per-unit comprehensive gap audit (TASK-2B.10) ----
+    vocabularyGaps.push(...auditPhenopacketTopLevel(unit.pp, ctxLabel));
+  }
+
+  // ---- Top-level wrapper-level gap audit (cohort description, etc.) ----
+  if (kind === 'cohort') {
+    vocabularyGaps.push(...auditCohortWrapper(parsed));
   }
 
   return {
