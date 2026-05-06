@@ -20,6 +20,8 @@ import { ccdaImporter } from './ccda-converter/registry-entry.js';
 import { fhirGenomicsImporter } from './fhir-genomics-converter/registry-entry.js';
 import { phenopacketImporter } from './phenopacket-converter/registry-entry.js';
 import { clinvarImporter } from './clinvar-converter/registry-entry.js';
+import { vcfImporter } from './vcf-converter/registry-entry.js';
+import { vrsImporter } from './vrs-converter/registry-entry.js';
 
 /**
  * The registered importers. Order is not significant for dispatch but does
@@ -29,9 +31,11 @@ import { clinvarImporter } from './clinvar-converter/registry-entry.js';
 export const importers: ReadonlyArray<FormatImporter> = [
   fhirGenomicsImporter,  // before fhirImporter — auto-detect needs to match the more-specific profile first
   phenopacketImporter,   // phenopackets carry no resourceType, so detect can run independently of FHIR shape
+  vrsImporter,           // VRS Allele JSON; before generic fhir/cascade JSON to match canonical-Allele shape first
   fhirImporter,
   clinvarImporter,       // before ccdaImporter — ccda's detect() matches any '<?xml ...>' input, so the more-specific clinvar root tags must be checked first
   ccdaImporter,
+  vcfImporter,           // VCF auto-detect is text-prefix based; placed late so JSON / XML detectors can short-circuit binary-mode reads
   cascadeFhirImporter,
 ];
 

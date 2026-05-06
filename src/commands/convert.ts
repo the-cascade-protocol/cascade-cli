@@ -41,11 +41,20 @@ import { getImporter, listFormats, autoDetect, importers } from '../lib/import-r
  */
 function readInput(file: string | undefined, asBinary: boolean): string | Buffer {
   if (file) {
-    if (asBinary || file.toLowerCase().endsWith('.zip')) {
+    const lower = file.toLowerCase();
+    if (
+      asBinary ||
+      lower.endsWith('.zip') ||
+      lower.endsWith('.gz') ||
+      lower.endsWith('.bgz') ||
+      lower.endsWith('.vcf')
+    ) {
       return readFileSync(file);
     }
     return readFileSync(file, 'utf-8');
   }
+  // stdin: read as Buffer when the caller flagged binary (--from c-cda or --from vcf).
+  if (asBinary) return readFileSync(0);
   return readFileSync(0, 'utf-8');
 }
 
@@ -161,8 +170,8 @@ export function registerConvertCommand(program: Command): void {
       // 3. Read input
       let input: string | Buffer;
       try {
-        // C-CDA bundles can be ZIP (IHE XDM); other formats default to UTF-8.
-        const wantsBinary = options.from === 'c-cda';
+        // C-CDA bundles can be ZIP (IHE XDM); VCF can be plain or gzipped/BGZF.
+        const wantsBinary = options.from === 'c-cda' || options.from === 'vcf';
         input = readInput(file, wantsBinary);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
