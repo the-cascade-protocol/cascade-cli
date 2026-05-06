@@ -18,6 +18,7 @@ import type { FormatImporter, OutputFormat } from './import-types.js';
 import { fhirImporter, cascadeFhirImporter } from './fhir-converter/registry-entry.js';
 import { ccdaImporter } from './ccda-converter/registry-entry.js';
 import { fhirGenomicsImporter } from './fhir-genomics-converter/registry-entry.js';
+import { vcfImporter } from './vcf-converter/registry-entry.js';
 
 /**
  * The registered importers. Order is not significant for dispatch but does
@@ -26,6 +27,7 @@ import { fhirGenomicsImporter } from './fhir-genomics-converter/registry-entry.j
  */
 export const importers: ReadonlyArray<FormatImporter> = [
   fhirGenomicsImporter,  // before fhirImporter — auto-detect needs to match the more-specific profile first
+  vcfImporter,           // VCF auto-detect is text-prefix based and unambiguous
   fhirImporter,
   ccdaImporter,
   cascadeFhirImporter,
