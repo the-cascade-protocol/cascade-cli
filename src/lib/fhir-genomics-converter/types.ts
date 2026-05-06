@@ -70,6 +70,12 @@ export const LOINC = {
   variantPhase: '82120-7',       // Allelic phase (LOINC; Genomics IG uses 'phase' loosely)
   dnaChangeType: '48019-4',      // DNA change type (substitution etc.)
 
+  // VCF-style coordinate components (wired in v1-draft.0.2)
+  genomicRefAllele: '69547-8',   // Genomic ref allele [ID]
+  genomicAltAllele: '69551-0',   // Genomic alt allele [ID]
+  genomicStartEnd: '81254-5',    // Genomic allele start-end
+  genomicSourceClass: '48002-0', // Genomic source class [Type] (germline/somatic)
+
   // Haplotype / Genotype
   haplotypeName: '84414-2',      // Haplotype name
   genotypeDisplay: '84413-4',    // Genotype display name

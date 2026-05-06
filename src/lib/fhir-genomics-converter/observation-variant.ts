@@ -15,10 +15,15 @@
  *   81252-9  → genomics:clinvarVariationId (when ClinVar coding) +
  *              genomics:dbsnpRsId (when dbSNP coding)
  *   48019-4  → recognized; emitted as gap (no DNA-change-type term in v1-draft)
+ *   69547-8  → genomics:refAllele                 (v1-draft.0.2)
+ *   69551-0  → genomics:altAllele                 (v1-draft.0.2)
+ *   81254-5  → genomics:genomicStartEnd           (v1-draft.0.2)
+ *   48002-0  → genomics:somaticStatus             (v1-draft.0.2)
+ *   81258-6  → genomics:variantAlleleFrequency    (v1-draft.0.2; was mosaicismFraction)
  *
- * Other components (allele freq 81258-6, coverage 82121-5, ref/alt counts,
- * 48013-7 genomic ref, etc.) emit info-severity vocabulary gaps — they're
- * recognized but the v1-draft genomics ontology has no place for them yet.
+ * Other components (coverage 82121-5, ref/alt counts, 48013-7 genomic ref,
+ * etc.) emit info-severity vocabulary gaps — they're recognized but the
+ * v1-draft genomics ontology has no place for them yet.
  *
  * VRS hashes (D-Q6): preserved only — never computed. Looked for under
  * Observation.extension and (per Genomics IG draft proposals) under a
@@ -122,6 +127,11 @@ const HANDLED_LOINCS = new Set<string>([
   LOINC.dnaChangeType,
   LOINC.alleleFreq,
   LOINC.genomicRefSeq,
+  // v1-draft.0.2 — VCF-style coordinate components, somatic status.
+  LOINC.genomicRefAllele,
+  LOINC.genomicAltAllele,
+  LOINC.genomicStartEnd,
+  LOINC.genomicSourceClass,
   // Quantitative coverage / ref-alt counts used by some labs.
   '82121-5', // ref allele count
   '82155-3', // alt allele count
@@ -130,6 +140,32 @@ const HANDLED_LOINCS = new Set<string>([
   '81301-4', // copy number range / range start
   '81302-2', // genomic alt allele count or interpretation
 ]);
+
+/**
+ * Map LOINC answer codes / display strings on component 48002-0
+ * (Genomic source class) to the genomics:SomaticStatus named individuals.
+ *
+ *   LA6683-2 / "Germline" → Germline
+ *   LA6684-0 / "Somatic"  → Somatic
+ *   anything else         → UnknownSomaticStatus
+ */
+function mapSomaticStatus(
+  cc:
+    | { coding?: { system?: string; code?: string; display?: string }[]; text?: string }
+    | undefined,
+): 'Germline' | 'Somatic' | 'UnknownSomaticStatus' {
+  if (!cc) return 'UnknownSomaticStatus';
+  for (const c of cc.coding ?? []) {
+    const code = c.code ?? '';
+    const disp = (c.display ?? '').toLowerCase();
+    if (code === 'LA6683-2' || disp.startsWith('germline')) return 'Germline';
+    if (code === 'LA6684-0' || disp.startsWith('somatic')) return 'Somatic';
+  }
+  const text = (cc.text ?? '').toLowerCase();
+  if (text.startsWith('germline')) return 'Germline';
+  if (text.startsWith('somatic')) return 'Somatic';
+  return 'UnknownSomaticStatus';
+}
 
 export function parseVariantObservation(
   resource: any,
@@ -260,9 +296,9 @@ export function parseVariantObservation(
   if (vrsObject) quads.push(tripleStr(iri, GENOMICS_NS + 'vrsObject', vrsObject));
 
   // ---- Variant Allele Frequency (LOINC 81258-6) ----
-  // Genomics v1-draft has genomics:mosaicismFraction (xsd:decimal) for VAF —
-  // strictly speaking that's the mosaicism-relevant fraction, but for a
-  // single-variant observation the same field captures the lab-reported VAF.
+  // v1-draft.0.2: emit to genomics:variantAlleleFrequency. Was previously
+  // shoehorned into genomics:mosaicismFraction (semantically wrong — those
+  // two are now distinct properties per the v0.2 changelog).
   const vafComp = firstComponentByLoinc(resource, LOINC.alleleFreq);
   if (vafComp?.valueQuantity?.value !== undefined) {
     const v = vafComp.valueQuantity.value;
@@ -273,10 +309,56 @@ export function parseVariantObservation(
     quads.push(
       makeQuad(
         subject,
-        namedNode(GENOMICS_NS + 'mosaicismFraction'),
+        namedNode(GENOMICS_NS + 'variantAlleleFrequency'),
         literal(String(asFraction), namedNode(NS.xsd + 'decimal')),
       ),
     );
+  }
+
+  // ---- VCF-style coordinate properties (v1-draft.0.2) ----
+  // 69547-8 (Genomic ref allele) → genomics:refAllele
+  const refAlleleComp = firstComponentByLoinc(resource, LOINC.genomicRefAllele);
+  const refAlleleVal =
+    refAlleleComp?.valueString ??
+    ccCode(refAlleleComp?.valueCodeableConcept) ??
+    undefined;
+  if (refAlleleVal) {
+    quads.push(tripleStr(iri, GENOMICS_NS + 'refAllele', refAlleleVal));
+  }
+
+  // 69551-0 (Genomic alt allele) → genomics:altAllele
+  const altAlleleComp = firstComponentByLoinc(resource, LOINC.genomicAltAllele);
+  const altAlleleVal =
+    altAlleleComp?.valueString ??
+    ccCode(altAlleleComp?.valueCodeableConcept) ??
+    undefined;
+  if (altAlleleVal) {
+    quads.push(tripleStr(iri, GENOMICS_NS + 'altAllele', altAlleleVal));
+  }
+
+  // 81254-5 (Genomic allele start-end) → genomics:genomicStartEnd
+  // Inputs vary: valueRange { low.value, high.value } in IG examples;
+  // valueString fallback for "<low>-<high>" form.
+  const startEndComp = firstComponentByLoinc(resource, LOINC.genomicStartEnd);
+  if (startEndComp) {
+    let startEndStr: string | undefined;
+    const lo = startEndComp.valueRange?.low?.value;
+    const hi = startEndComp.valueRange?.high?.value;
+    if (lo !== undefined && hi !== undefined) {
+      startEndStr = `${lo}-${hi}`;
+    } else if (typeof startEndComp.valueString === 'string') {
+      startEndStr = startEndComp.valueString.trim();
+    }
+    if (startEndStr) {
+      quads.push(tripleStr(iri, GENOMICS_NS + 'genomicStartEnd', startEndStr));
+    }
+  }
+
+  // 48002-0 (Genomic source class) → genomics:somaticStatus
+  const sourceClassComp = firstComponentByLoinc(resource, LOINC.genomicSourceClass);
+  if (sourceClassComp) {
+    const status = mapSomaticStatus(sourceClassComp.valueCodeableConcept);
+    quads.push(tripleRef(iri, GENOMICS_NS + 'somaticStatus', GENOMICS_NS + status));
   }
 
   // ---- Source identity passthrough ----
