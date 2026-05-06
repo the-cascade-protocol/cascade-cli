@@ -361,6 +361,66 @@ export function parseClinicalAssertion(
     });
   }
 
+  // ---- ObservedIn / Sample / Origin / AffectedStatus ----
+  // ClinVar records sample provenance (germline / somatic / de novo / unknown)
+  // and affected-status (yes / no / unknown / not provided). v1-draft.0.1
+  // has no genomics:sampleOrigin or genomics:affectedStatus predicates.
+  // Critical for somatic vs germline interpretation; v1-draft.0.2 candidate.
+  for (const obsIn of asArray(ca?.ObservedInList?.ObservedIn)) {
+    const origin = textOf(obsIn?.Sample?.Origin);
+    const affectedStatus = textOf(obsIn?.Sample?.AffectedStatus);
+    if (origin) {
+      gaps.push({
+        sourceField: `ClinicalAssertion[${clinicalAssertionId}]/ObservedInList/ObservedIn/Sample/Origin`,
+        reason: `Sample origin "${origin}" (germline / somatic / de novo / unknown) has no v1-draft predicate. Critical for somatic vs germline interpretation. Candidate: genomics:sampleOrigin (v1-draft.0.2).`,
+        severity: 'warning',
+        context: scvAccession,
+      });
+    }
+    if (affectedStatus) {
+      gaps.push({
+        sourceField: `ClinicalAssertion[${clinicalAssertionId}]/ObservedInList/ObservedIn/Sample/AffectedStatus`,
+        reason: `AffectedStatus "${affectedStatus}" (yes / no / not provided / unknown) describes the sample's affection state. No v1-draft predicate; relevant to causality. Candidate: genomics:affectedStatus.`,
+        severity: 'info',
+        context: scvAccession,
+      });
+    }
+    // ObservedData / ObservedData/Attribute carry case descriptions and
+    // segregation evidence — surface once per ObservedIn.
+    if (obsIn?.ObservedData) {
+      gaps.push({
+        sourceField: `ClinicalAssertion[${clinicalAssertionId}]/ObservedInList/ObservedIn/ObservedData`,
+        reason:
+          'ObservedData carries free-text case descriptions, segregation evidence, and population frequencies. No v1-draft predicate; would map to genomics:observationNarrative or be split into structured evidence types in v1-draft.0.2.',
+        severity: 'info',
+        context: scvAccession,
+      });
+    }
+  }
+
+  // ---- Comment (assertion-level note) ----
+  for (const comment of asArray(ca?.Classification?.Comment)) {
+    void comment;
+    gaps.push({
+      sourceField: `ClinicalAssertion[${clinicalAssertionId}]/Classification/Comment`,
+      reason:
+        'ClinicalAssertion Comment carries human-readable notes from the submitter. No v1-draft predicate; candidate genomics:assertionComment (v1-draft.0.2).',
+      severity: 'info',
+      context: scvAccession,
+    });
+  }
+
+  // ---- StudyDescription (consortium-level description) ----
+  if (textOf(ca?.StudyDescription)) {
+    gaps.push({
+      sourceField: `ClinicalAssertion[${clinicalAssertionId}]/StudyDescription`,
+      reason:
+        'StudyDescription carries the broader study/consortium context for the assertion. No v1-draft predicate.',
+      severity: 'info',
+      context: scvAccession,
+    });
+  }
+
   // ---- Source identity passthrough ----
   quads.push(
     tripleStr(iri, NS.cascade + 'sourceFhirId', `${vcvAccession}:${scvAccession}`),

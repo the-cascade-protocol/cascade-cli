@@ -134,6 +134,49 @@ export async function convertClinvarXml(
 
     const variantIri = out.record.iri;
 
+    // ---- Aggregate Classifications block (citations, conditions, criteria) ----
+    // The VariationArchive's <Classifications>/<GermlineClassification> at
+    // the variant-level carries the curated aggregate (review status,
+    // SubmissionCount, Citations, ConditionList). Most of this is
+    // redundant with the per-RCV / per-SCV blocks we already process,
+    // but the rich citation list and explicit aggregate ContributesToAggregate
+    // counts have no per-record analogue. Surface as a single info gap
+    // so downstream tooling knows the source carries the aggregate.
+    if (classified?.Classifications) {
+      const agg = Array.isArray(classified.Classifications.GermlineClassification)
+        ? classified.Classifications.GermlineClassification[0]
+        : classified.Classifications.GermlineClassification;
+      if (agg?.Citation) {
+        const citCount = Array.isArray(agg.Citation) ? agg.Citation.length : 1;
+        vocabularyGaps.push({
+          sourceField: `VariationArchive[${vcvAccession}]/Classifications/GermlineClassification/Citation`,
+          reason: `Aggregate-level Classifications block carries ${citCount} curated citations (PubMed, DOI). No v1-draft predicate at the Variant level; candidate genomics:supportingEvidence (v1-draft.0.2).`,
+          severity: 'info',
+          context: vcvAccession,
+        });
+      }
+      if (agg?.['@_NumberOfSubmissions']) {
+        vocabularyGaps.push({
+          sourceField: `VariationArchive[${vcvAccession}]/Classifications/GermlineClassification/@NumberOfSubmissions|@NumberOfSubmitters`,
+          reason: `Aggregate counts (NumberOfSubmissions, NumberOfSubmitters) drive the ClinGen star-rating UI. No v1-draft predicate; candidate genomics:numberOfSubmitters.`,
+          severity: 'info',
+          context: vcvAccession,
+        });
+      }
+    }
+
+    // ---- TraitMappingList (referenced from SCVs; here we surface it as a separate field) ----
+    if (classified?.TraitMappingList) {
+      vocabularyGaps.push({
+        sourceField: `VariationArchive[${vcvAccession}]/TraitMappingList`,
+        reason:
+          'TraitMappingList connects each ClinicalAssertion to a normalized condition (MedGen / MONDO / OMIM). The mapping is consumed during SCV → SubmitterAssertion aggregation, but the per-mapping evidence (MappingType, MappingValue) is not preserved on the resulting graph.',
+        severity: 'info',
+        context: vcvAccession,
+      });
+    }
+
+
     // ---- RCVAccession → VariantInterpretation (one per condition; D-Q5) ----
     const traitSetIndex = buildTraitSetIndex(classified?.Classifications);
     const rcvList: any[] = Array.isArray(classified?.RCVList?.RCVAccession)

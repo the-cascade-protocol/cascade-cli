@@ -245,6 +245,42 @@ export function parseSimpleAllele(
     }
   }
 
+  // ---- Gene-level Haploinsufficiency / Triplosensitivity ----
+  // ClinGen dosage-sensitivity annotations (per-gene, not per-variant).
+  // No v1-draft Gene-level predicates yet; surface as info.
+  for (const gene of geneEntries) {
+    if (gene?.Haploinsufficiency || gene?.Triplosensitivity) {
+      gaps.push({
+        sourceField: `VariationArchive[${vcvAccession}]/SimpleAllele/GeneList/Gene/Haploinsufficiency|Triplosensitivity`,
+        reason:
+          'ClinGen dosage-sensitivity annotations on the Gene (Haploinsufficiency / Triplosensitivity) carry the dosage-pathogenicity evidence — not variant-level. No v1-draft Gene predicate; candidate genomics:haploinsufficiency / genomics:triplosensitivity at the Gene class level.',
+        severity: 'info',
+        context: vcvAccession,
+      });
+      break; // emit once per VCV
+    }
+    if (asArray(gene?.Property).length > 0) {
+      gaps.push({
+        sourceField: `VariationArchive[${vcvAccession}]/SimpleAllele/GeneList/Gene/Property`,
+        reason: `Gene properties (e.g., gene_acmg_incidental_2022) tag genes on ACMG actionability lists. No v1-draft predicate; useful for genome-screening reports.`,
+        severity: 'info',
+        context: vcvAccession,
+      });
+      break;
+    }
+  }
+
+  // ---- OtherNameList ----
+  if (simpleAllele?.OtherNameList) {
+    gaps.push({
+      sourceField: `VariationArchive[${vcvAccession}]/SimpleAllele/OtherNameList`,
+      reason:
+        'OtherNameList carries legacy / alias variant names ("p.C61G:TGT>GGT", "300T>G") that pre-date current HGVS conventions. No v1-draft alias-list predicate; could be added as genomics:variantAlias.',
+      severity: 'info',
+      context: vcvAccession,
+    });
+  }
+
   // ---- XRefList: ClinGen CAid + dbSNP rsId + OMIM allelic variant ----
   const xrefs = asArray(simpleAllele?.XRefList?.XRef);
   for (const x of xrefs) {
