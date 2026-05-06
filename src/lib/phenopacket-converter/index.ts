@@ -35,6 +35,7 @@ import type {
 import type { ParsedRecord } from '../fhir-genomics-converter/types.js';
 import { classifyPhenopacket } from './detect.js';
 import { parseSubject } from './subject.js';
+import { parsePhenotypicFeatures } from './phenotypic-features.js';
 
 export { detectPhenopacket, classifyPhenopacket } from './detect.js';
 export { phenopacketImporter } from './registry-entry.js';
@@ -160,13 +161,33 @@ export async function convertPhenopacket(
     }
   }
 
-  // Subsequent tasks add per-unit processing here:
-  //   - TASK-2B.3 phenotypicFeatures → HPO refs on the patient
-  //   - TASK-2B.4 interpretations    → VariantInterpretation records
-  //   - TASK-2B.5 variation desc.    → Variant / CNV records
-  //   - TASK-2B.7 biosamples         → Specimen records
-  //   - TASK-2B.8 medicalActions     → recommendedActions text on the patient
-  void units;
+  // -------- Per-unit processing --------
+  for (const unit of units) {
+    const ppId: string = typeof unit.pp?.id === 'string' ? unit.pp.id : '<no-id>';
+    const ctxLabel = `phenopacket(${ppId})`;
+
+    // ---- Phenotypic features → HPO terms on the patient (TASK-2B.3) ----
+    if (Array.isArray(unit.pp.phenotypicFeatures)) {
+      const out = parsePhenotypicFeatures(
+        unit.pp.phenotypicFeatures,
+        unit.patientIri,
+        ctx,
+        ctxLabel,
+      );
+      // Append to the patient record's quads + the global stream.
+      const patientRecord = records.find((r) => r.iri === unit.patientIri);
+      if (patientRecord) patientRecord.quads.push(...out.quads);
+      quads.push(...out.quads);
+      warnings.push(...out.warnings);
+      vocabularyGaps.push(...out.gaps);
+    }
+
+    // Subsequent tasks add per-unit processing here:
+    //   - TASK-2B.4 interpretations    → VariantInterpretation records
+    //   - TASK-2B.5 variation desc.    → Variant / CNV records
+    //   - TASK-2B.7 biosamples         → Specimen records
+    //   - TASK-2B.8 medicalActions     → recommendedActions text on the patient
+  }
 
   return {
     records,
