@@ -109,18 +109,28 @@ describe('vcf end-to-end — corpus sample-clinvar.input.vcf.gz', () => {
     expect(quads.length).toBeGreaterThan(0);
   });
 
-  it('surfaces v1-draft.0.1 vocabulary gaps for refAllele/altAllele/coords + CLNSIG', async () => {
+  it('emits v1-draft.0.2 properties for REF/ALT/coords and a CLNSIG gap-info', async () => {
     const input = fs.readFileSync(VCF_GZ_FIXTURE);
     const conversion = await convertVcf(input, CTX);
 
     const fields = new Set(conversion.vocabularyGaps.map((g) => g.sourceField));
-    expect(fields).toContain('VCF.REF');
-    expect(fields).toContain('VCF.ALT');
-    expect(fields).toContain('VCF.CHROM:POS');
+    // REF/ALT/coords gaps are no longer emitted — the v0.2 properties replace them.
+    expect(fields.has('VCF.REF')).toBe(false);
+    expect(fields.has('VCF.ALT')).toBe(false);
+    expect(fields.has('VCF.CHROM:POS')).toBe(false);
+    // CLNSIG is preserved as a gap pending Phase 2A reconciler integration.
     expect(fields).toContain('VCF.INFO.CLNSIG');
     // ClinVar weekly is sites-only, so multi-sample / FORMAT gaps must be absent.
     expect(fields.has('VCF.multi-sample')).toBe(false);
     expect(fields.has('VCF.FORMAT.AF')).toBe(false);
+
+    // Spot check that at least one Variant carries the new properties.
+    const sampleVariant = conversion.records.find((r) => r.cascadeType === 'genomics:Variant');
+    expect(sampleVariant).toBeDefined();
+    const preds = new Set(sampleVariant!.quads.map((q) => q.predicate.value));
+    expect(preds.has('https://ns.cascadeprotocol.org/genomics/v1#refAllele')).toBe(true);
+    expect(preds.has('https://ns.cascadeprotocol.org/genomics/v1#altAllele')).toBe(true);
+    expect(preds.has('https://ns.cascadeprotocol.org/genomics/v1#genomicStartEnd')).toBe(true);
   });
 
   it('IRIs are deterministic across two consecutive runs', async () => {

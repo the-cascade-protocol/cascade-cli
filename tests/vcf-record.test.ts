@@ -104,17 +104,25 @@ describe('parseRecordLine — ClinVar single-ALT site', () => {
     expect(hgvs?.object.value).toBe('NC_000001.11:g.69134A>G');
   });
 
-  it('surfaces gap-info for refAllele / altAllele / coords / FILTER (non-PASS)', () => {
+  it('emits refAllele / altAllele / genomicStartEnd as triples (v1-draft.0.2)', () => {
     const line = '1\t69134\t.\tA\tG\t30\tLowQual\tCLNSIG=Pathogenic';
     const out = parseRecordLine(line, header, profile, RUN_IRI, CTX)!;
+    const findOne = (predLocal: string) =>
+      out.records[0].quads.find((q) => q.predicate.value === GENOMICS_NS + predLocal);
+    expect(findOne('refAllele')?.object.value).toBe('A');
+    expect(findOne('altAllele')?.object.value).toBe('G');
+    expect(findOne('genomicStartEnd')?.object.value).toBe('chr1:69134-69134');
+
+    // FILTER (non-PASS) and QUAL still surface as gaps in v0.2 (out of scope).
     const fields = out.gaps.map((g) => g.sourceField);
-    expect(fields).toContain('VCF.REF');
-    expect(fields).toContain('VCF.ALT');
-    expect(fields).toContain('VCF.CHROM:POS');
     expect(fields).toContain('VCF.QUAL');
     expect(fields).toContain('VCF.FILTER');
     const filterGap = out.gaps.find((g) => g.sourceField === 'VCF.FILTER')!;
     expect(filterGap.severity).toBe('warning');
+    // The v0.2 wiring drops the REF/ALT/coords gaps.
+    expect(fields).not.toContain('VCF.REF');
+    expect(fields).not.toContain('VCF.ALT');
+    expect(fields).not.toContain('VCF.CHROM:POS');
   });
 
   it('records FILTER=PASS as info-level gap, not warning', () => {
@@ -185,12 +193,17 @@ describe('parseRecordLine — multi-sample VCF (FORMAT)', () => {
     expect(fields).toContain('VCF.FORMAT.GT');
   });
 
-  it('emits VAF gap-info for FORMAT.AF', () => {
+  it('emits genomics:variantAlleleFrequency from FORMAT.AF (v1-draft.0.2)', () => {
     const line = '1\t100\t.\tA\tG\t30\tPASS\t.\tGT:AF\t0/1:0.42';
     const out = parseRecordLine(line, header, profile, RUN_IRI, CTX)!;
+    const vaf = out.records[0].quads.find(
+      (q) => q.predicate.value === GENOMICS_NS + 'variantAlleleFrequency',
+    );
+    expect(vaf).toBeDefined();
+    expect(vaf?.object.value).toBe('0.42');
+    // Gap entry no longer fires for FORMAT.AF — replaced by the property.
     const afGap = out.gaps.find((g) => g.sourceField === 'VCF.FORMAT.AF');
-    expect(afGap).toBeDefined();
-    expect(afGap?.reason).toMatch(/variantAlleleFrequency/);
+    expect(afGap).toBeUndefined();
   });
 
   it('flags multi-sample VCFs since observedIn is not in v1-draft.0.1', () => {

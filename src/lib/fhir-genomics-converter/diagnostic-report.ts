@@ -153,10 +153,13 @@ export function parseDiagnosticReport(
     if (!variantIris.has(resolved)) {
       // Resolved to a non-Variant record (Interpretation, Haplotype,
       // Diplotype, PGx implication, etc.) — not eligible for
-      // variantsObserved given its declared range. The link is still
-      // preserved implicitly via that record's own variantInterpreted /
-      // hasComponent / hapA / hapB wiring back to constituent Variants.
-      // Skip silently.
+      // variantsObserved given its declared range (genomics:Variant).
+      // v1-draft.0.2: emit genomics:reportedRecord instead — the generic
+      // GeneticTest → record predicate that resolves the HLA tie-break
+      // (cascade-coordination/tie-breaks/2026-05-05-task-1.9-hla-variantsObserved.md).
+      // For Variant-typed references we still prefer the more specific
+      // genomics:variantsObserved (rdfs:range genomics:Variant) below.
+      quads.push(tripleRef(iri, GENOMICS_NS + 'reportedRecord', resolved));
       continue;
     }
     quads.push(tripleRef(iri, GENOMICS_NS + 'variantsObserved', resolved));
@@ -166,13 +169,14 @@ export function parseDiagnosticReport(
   if (results.length > 0 && variantsLinked === 0) {
     // Bundle expresses a genomic report whose result[] references only
     // non-Variant records (typically Diplotypes for HLA / PGx, or
-    // Haplotypes alone). v1-draft has no direct GeneticTest -> Diplotype
-    // or Haplotype linkage predicate; v1.x should consider
-    // genomics:reportedRecord (generic) or the type-specific
-    // genomics:diplotypesObserved / haplotypesObserved.
+    // Haplotypes alone). v1-draft.0.2 covers these via genomics:reportedRecord
+    // (emitted above per non-Variant reference). Keep this info gap with
+    // reduced wording so downstream tooling still surfaces the situation;
+    // a more specific predicate (diplotypesObserved / haplotypesObserved)
+    // remains a v1.x evolution candidate.
     gaps.push({
       sourceField: `DiagnosticReport/${sourceId}.result`,
-      reason: `Genomic report references ${results.length} record(s) but none are true genomics:Variant instances (likely Diplotypes/Haplotypes/PGx implications). v1-draft has no direct GeneticTest-to-Diplotype/Haplotype linkage predicate; consider genomics:reportedRecord or type-specific predicates in v1.x.`,
+      reason: `Genomic report references only non-Variant records (Diplotypes/Haplotypes/PGx implications) — emitted via genomics:reportedRecord. Type-specific predicates (genomics:diplotypesObserved / haplotypesObserved) remain a v1.x evolution candidate.`,
       severity: 'info',
       context: sourceId,
     });

@@ -90,8 +90,14 @@ describe('parseVariationDescriptor — allele path', () => {
     expect(out).not.toBeNull();
     expect(findQuad(out!.record.quads, GENOMICS_NS + 'genomeAssembly')).toBe('GRCh38');
     expect(findQuad(out!.record.quads, GENOMICS_NS + 'hgvsGDot')).toBe('NC_000013.11:g.48367512C>T');
-    // Vocabulary-evolution gap should be emitted
-    expect(out!.gaps.some((g) => g.sourceField.endsWith('vcfRecord'))).toBe(true);
+    // v1-draft.0.2 wiring: refAllele / altAllele / genomicStartEnd are emitted
+    // directly from vcfRecord; the gap-info on .vcfRecord no longer fires.
+    expect(findQuad(out!.record.quads, GENOMICS_NS + 'refAllele')).toBe('C');
+    expect(findQuad(out!.record.quads, GENOMICS_NS + 'altAllele')).toBe('T');
+    expect(findQuad(out!.record.quads, GENOMICS_NS + 'genomicStartEnd')).toBe(
+      'NC_000013.11:48367512-48367512',
+    );
+    expect(out!.gaps.some((g) => g.sourceField.endsWith('vcfRecord'))).toBe(false);
   });
 
   it('emits ResearchGrade quality tier by default (D-QUALITY-TIER)', () => {

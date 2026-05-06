@@ -13,7 +13,15 @@
  *                                is the genomic g.HGVS instead of c.HGVS)
  *   <Gene Symbol>              → genomics:geneSymbol
  *   <Gene HGNC_ID>             → genomics:hgncId (raw 'HGNC:1100' form)
- *   <CanonicalSPDI>            → genomics:vrsObject (D-Q6 — preserve only)
+ *   <CanonicalSPDI>            → genomics:vrsObject (D-Q6 — preserve only),
+ *                                plus refAllele/altAllele/genomicStartEnd
+ *                                fallback decomposition when SequenceLocation
+ *                                doesn't carry VCF-style attributes (v0.2).
+ *   <Location/SequenceLocation> → genomics:refAllele, genomics:altAllele,
+ *                                genomics:genomicStartEnd (v0.2). Picks
+ *                                GRCh38 forDisplay="true" location when
+ *                                available; falls back to first GRCh38, then
+ *                                first location carrying VCF allele attrs.
  *   <HGVS Type='coding'>       → primary genomics:hgvsCDot if Name not c.*
  *   <HGVS Type='genomic, top-level' Assembly='GRCh38'>
  *                              → genomics:hgvsGDot (preferred)
@@ -371,18 +379,89 @@ export function parseSimpleAllele(
   }
 
   // ---- SequenceLocation (chrom + start/stop + ref/alt VCF-style) ----
-  // genomics v1-draft.0.1 has no genomicStartEnd / refAllele / altAllele
-  // predicates yet. Per the agent brief: emit info-severity gap-warnings
-  // and continue. (Concurrent vocab-evolution agent may add these for
-  // v1-draft.0.2.)
-  if (simpleAllele?.Location?.SequenceLocation) {
-    gaps.push({
-      sourceField: `VariationArchive[${vcvAccession}]/SimpleAllele/Location/SequenceLocation`,
-      reason:
-        'SequenceLocation (chr, start, stop, referenceAlleleVCF, alternateAlleleVCF) has no v1-draft genomics: predicate. Candidates: genomics:genomicStartEnd, genomics:refAllele, genomics:altAllele (v1-draft.0.2).',
-      severity: 'info',
-      context: vcvAccession,
-    });
+  // v1-draft.0.2 wired refAllele / altAllele / genomicStartEnd. Pick the
+  // GRCh38 location with forDisplay="true" when available; fall back to
+  // the first SequenceLocation that has VCF-style ref/alt allele attrs;
+  // last-resort fallback parses the CanonicalSPDI string.
+  const seqLocs = asArray(simpleAllele?.Location?.SequenceLocation);
+  let pickedLoc: any | undefined;
+  for (const sl of seqLocs) {
+    if (sl?.['@_Assembly'] === 'GRCh38' && sl?.['@_forDisplay'] === 'true') {
+      pickedLoc = sl;
+      break;
+    }
+  }
+  if (!pickedLoc) {
+    pickedLoc = seqLocs.find((sl: any) => sl?.['@_Assembly'] === 'GRCh38');
+  }
+  if (!pickedLoc) {
+    pickedLoc = seqLocs.find(
+      (sl: any) =>
+        sl?.['@_referenceAlleleVCF'] !== undefined ||
+        sl?.['@_alternateAlleleVCF'] !== undefined ||
+        sl?.['@_referenceAllele'] !== undefined ||
+        sl?.['@_alternateAllele'] !== undefined,
+    );
+  }
+  let emittedRef = false;
+  let emittedAlt = false;
+  let emittedStartEnd = false;
+  if (pickedLoc) {
+    const refVcf =
+      pickedLoc['@_referenceAlleleVCF'] ?? pickedLoc['@_referenceAllele'];
+    const altVcf =
+      pickedLoc['@_alternateAlleleVCF'] ?? pickedLoc['@_alternateAllele'];
+    if (typeof refVcf === 'string' && refVcf.length > 0) {
+      quads.push(tripleStr(iri, GENOMICS_NS + 'refAllele', refVcf));
+      emittedRef = true;
+    }
+    if (typeof altVcf === 'string' && altVcf.length > 0) {
+      quads.push(tripleStr(iri, GENOMICS_NS + 'altAllele', altVcf));
+      emittedAlt = true;
+    }
+    const chr = pickedLoc['@_Chr'];
+    const start = pickedLoc['@_start'];
+    const stop = pickedLoc['@_stop'];
+    if (chr && start !== undefined && stop !== undefined) {
+      // Format chrN:start-stop. ClinVar SequenceLocation start/stop are
+      // 1-based inclusive (per the assembly's coordinate system).
+      const chrLabel = String(chr).startsWith('chr') ? String(chr) : `chr${chr}`;
+      quads.push(
+        tripleStr(iri, GENOMICS_NS + 'genomicStartEnd', `${chrLabel}:${start}-${stop}`),
+      );
+      emittedStartEnd = true;
+    }
+  }
+
+  // Fallback: decompose CanonicalSPDI when SequenceLocation didn't yield
+  // these fields. SPDI is "<accession>:<position>:<deleted>:<inserted>"
+  // where position is 0-based interbase. For a SNV this means the genomic
+  // interval is [position+1, position + max(1, len(deleted))] in 1-based
+  // inclusive coordinates (matching the SequenceLocation start/stop semantics).
+  if (spdi && (!emittedRef || !emittedAlt || !emittedStartEnd)) {
+    const parts = spdi.split(':');
+    if (parts.length === 4) {
+      const [accession, posStr, deleted, inserted] = parts;
+      const pos = Number(posStr);
+      if (!emittedRef && deleted) {
+        quads.push(tripleStr(iri, GENOMICS_NS + 'refAllele', deleted));
+      }
+      if (!emittedAlt && inserted) {
+        quads.push(tripleStr(iri, GENOMICS_NS + 'altAllele', inserted));
+      }
+      if (!emittedStartEnd && Number.isFinite(pos)) {
+        const delLen = Math.max(1, deleted ? deleted.length : 1);
+        const startPos = pos + 1;
+        const endPos = pos + delLen;
+        quads.push(
+          tripleStr(
+            iri,
+            GENOMICS_NS + 'genomicStartEnd',
+            `${accession}:${startPos}-${endPos}`,
+          ),
+        );
+      }
+    }
   }
 
   // ---- ProteinChange element (one-letter form, e.g., 'C61G') ----
