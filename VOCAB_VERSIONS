@@ -8,6 +8,10 @@
 #   (Genomics & Advisory v0.1 workstream, TASK-0.0 / TASK-0.6).
 #   Pre-stable drafts genomics/v1-draft and advisory/v1-draft are NOT
 #   registered here per D-PATH; they land at v1.0 graduation.
+# Updated 2026-05-05: synced genomics.shapes.ttl for genomics@v1-draft.0.2
+#   (Phase 1 evolution: reportedRecord, ref/alt allele, somaticStatus enum,
+#   variantAlleleFrequency). Per D-PATH, still no row added — drafts land in
+#   VOCAB_VERSIONS only at v1.0 graduation.
 core=3.1
 health=2.4
 clinical=1.8
