@@ -37,6 +37,7 @@ import { classifyPhenopacket } from './detect.js';
 import { parseSubject } from './subject.js';
 import { parsePhenotypicFeatures } from './phenotypic-features.js';
 import { parseInterpretations } from './interpretations.js';
+import { parsePedigree } from './pedigree.js';
 
 export { detectPhenopacket, classifyPhenopacket } from './detect.js';
 export { phenopacketImporter } from './registry-entry.js';
@@ -96,6 +97,9 @@ export async function convertPhenopacket(
 
   // -------- Decompose into one or more "phenopacket units" --------
   const units: PhenopacketUnit[] = [];
+  // Map of phenopacket subject.id (or relative id) → minted patient IRI,
+  // used by parsePedigree to link PedigreeMember → cascade:PatientProfile.
+  const subjectIris = new Map<string, string>();
 
   if (kind === 'phenopacket') {
     const out = parseSubject(parsed.subject, parsed.id, ctx);
@@ -109,6 +113,7 @@ export async function convertPhenopacket(
       sourceType: 'Phenopacket.subject',
       sourceId: out.record.sourceId,
     });
+    if (out.record.sourceId) subjectIris.set(out.record.sourceId, out.record.iri);
     units.push({ pp: parsed, patientIri: out.record.iri });
   } else if (kind === 'family') {
     // Proband first.
@@ -124,6 +129,9 @@ export async function convertPhenopacket(
       sourceType: 'Phenopacket.family.proband.subject',
       sourceId: probandOut.record.sourceId,
     });
+    if (probandOut.record.sourceId) {
+      subjectIris.set(probandOut.record.sourceId, probandOut.record.iri);
+    }
     units.push({ pp: probandPp, patientIri: probandOut.record.iri });
 
     // Then each relative.
@@ -140,6 +148,7 @@ export async function convertPhenopacket(
           sourceType: 'Phenopacket.family.relative.subject',
           sourceId: relOut.record.sourceId,
         });
+        if (relOut.record.sourceId) subjectIris.set(relOut.record.sourceId, relOut.record.iri);
         units.push({ pp: rel, patientIri: relOut.record.iri });
       }
     }
@@ -157,8 +166,31 @@ export async function convertPhenopacket(
           sourceType: 'Phenopacket.cohort.member.subject',
           sourceId: memberOut.record.sourceId,
         });
+        if (memberOut.record.sourceId) {
+          subjectIris.set(memberOut.record.sourceId, memberOut.record.iri);
+        }
         units.push({ pp: member, patientIri: memberOut.record.iri });
       }
+    }
+  }
+
+  // -------- Pedigree (only for family resources) --------
+  if (kind === 'family') {
+    const pedOut = parsePedigree(parsed, subjectIris, ctx);
+    records.push(...pedOut.records);
+    quads.push(...pedOut.quads);
+    warnings.push(...pedOut.warnings);
+    vocabularyGaps.push(...pedOut.gaps);
+    for (const rec of pedOut.records) {
+      importedIdentifiers.push({
+        cascadeIri: rec.iri,
+        cascadeType: rec.cascadeType,
+        sourceType:
+          rec.cascadeType === 'genomics:Pedigree'
+            ? 'Phenopacket.family.pedigree'
+            : 'Phenopacket.family.pedigree.member',
+        sourceId: rec.sourceId,
+      });
     }
   }
 
