@@ -369,14 +369,9 @@ export function parseClinicalAssertion(
   for (const obsIn of asArray(ca?.ObservedInList?.ObservedIn)) {
     const origin = textOf(obsIn?.Sample?.Origin);
     const affectedStatus = textOf(obsIn?.Sample?.AffectedStatus);
-    if (origin) {
-      gaps.push({
-        sourceField: `ClinicalAssertion[${clinicalAssertionId}]/ObservedInList/ObservedIn/Sample/Origin`,
-        reason: `Sample origin "${origin}" (germline / somatic / de novo / unknown) has no v1-draft predicate. Critical for somatic vs germline interpretation. Candidate: genomics:sampleOrigin (v1-draft.0.2).`,
-        severity: 'warning',
-        context: scvAccession,
-      });
-    }
+    void origin; // v1-draft.0.2: aggregated to genomics:somaticStatus on the
+                 // parent Variant in clinvar-converter/index.ts. Per-SCV gap
+                 // dropped — somaticStatus replaces the warning.
     if (affectedStatus) {
       gaps.push({
         sourceField: `ClinicalAssertion[${clinicalAssertionId}]/ObservedInList/ObservedIn/Sample/AffectedStatus`,

@@ -50,7 +50,10 @@ describe('clinvar vocabulary-gap audit (TASK-2A.7)', () => {
     const fields = r.vocabularyGaps.map((g) => g.sourceField).join('\n');
 
     // Variant-level
-    expect(fields).toContain('SequenceLocation'); // chr/start/stop/ref/alt VCF
+    // Note (v1-draft.0.2): SequenceLocation gap dropped — chr/start/stop +
+    // referenceAlleleVCF/alternateAlleleVCF are now emitted as
+    // genomics:refAllele/altAllele/genomicStartEnd. The Origin gap was also
+    // replaced by the aggregate genomics:somaticStatus on the parent Variant.
     expect(fields).toContain('AlleleFrequencyList'); // population VAF
     expect(fields).toContain('VariantType'); // structural kind
     expect(fields).toContain('OtherNameList'); // legacy aliases
@@ -65,7 +68,6 @@ describe('clinvar vocabulary-gap audit (TASK-2A.7)', () => {
     expect(fields).toMatch(/Classification@DateLastEvaluated/); // per-SCV date
     expect(fields).toMatch(/@SubmissionDate/); // submission lifecycle dates
     expect(fields).toContain('ObservedIn/Method'); // method types
-    expect(fields).toContain('ObservedIn/Sample/Origin'); // germline / somatic
     expect(fields).toContain('Citation'); // PMIDs / DOIs
 
     // Aggregate-level
@@ -96,7 +98,10 @@ describe('clinvar vocabulary-gap audit (TASK-2A.7)', () => {
     // Warnings should be sparse — we use them only when downstream
     // SHACL/contract is materially affected (non-canonical ACMG class,
     // missing required gene symbol, sample origin which affects causality).
-    expect(warnings.length).toBeGreaterThan(0); // sample Origin gap should fire
+    // Warnings include non-canonical ACMG strings (assertion-skip path)
+    // and similar shape-affecting concerns. The sample-Origin gap was
+    // replaced by the aggregate genomics:somaticStatus property in v0.2.
+    expect(warnings.length).toBeGreaterThan(0);
     expect(warnings.length).toBeLessThan(infos.length);
   });
 });

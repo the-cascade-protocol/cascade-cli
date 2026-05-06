@@ -134,6 +134,60 @@ export async function convertClinvarXml(
 
     const variantIri = out.record.iri;
 
+    // ---- Aggregate somaticStatus (v1-draft.0.2) ----
+    // genomics:somaticStatus has rdfs:domain Variant, but the source data
+    // (germline/somatic/unknown) lives per-SCV under
+    // ClinicalAssertion/ObservedInList/ObservedIn/Sample/Origin. Aggregate
+    // across all SCVs: if any SCV reports germline AND none report somatic,
+    // emit Germline. If any report somatic AND none germline, emit Somatic.
+    // Mixed or all-unknown → UnknownSomaticStatus. Absent ObservedIn → omit
+    // (closed-enum SHACL has no minCount, so omission is fine).
+    const caListForOrigin: any[] = Array.isArray(
+      classified?.ClinicalAssertionList?.ClinicalAssertion,
+    )
+      ? classified.ClinicalAssertionList.ClinicalAssertion
+      : classified?.ClinicalAssertionList?.ClinicalAssertion
+      ? [classified.ClinicalAssertionList.ClinicalAssertion]
+      : [];
+    let sawGermline = false;
+    let sawSomatic = false;
+    let sawAnyOrigin = false;
+    for (const ca of caListForOrigin) {
+      const obsInList = Array.isArray(ca?.ObservedInList?.ObservedIn)
+        ? ca.ObservedInList.ObservedIn
+        : ca?.ObservedInList?.ObservedIn
+        ? [ca.ObservedInList.ObservedIn]
+        : [];
+      for (const obsIn of obsInList) {
+        const origin =
+          (typeof obsIn?.Sample?.Origin === 'string'
+            ? obsIn.Sample.Origin
+            : obsIn?.Sample?.Origin?.['#text']) ?? undefined;
+        if (typeof origin === 'string' && origin.length > 0) {
+          sawAnyOrigin = true;
+          const o = origin.toLowerCase();
+          if (o === 'germline' || o === 'de novo' || o === 'maternal' || o === 'paternal') {
+            sawGermline = true;
+          } else if (o === 'somatic') {
+            sawSomatic = true;
+          }
+        }
+      }
+    }
+    if (sawAnyOrigin) {
+      let statusInd: 'Germline' | 'Somatic' | 'UnknownSomaticStatus';
+      if (sawGermline && !sawSomatic) statusInd = 'Germline';
+      else if (sawSomatic && !sawGermline) statusInd = 'Somatic';
+      else statusInd = 'UnknownSomaticStatus';
+      const statusQuad = tripleRef(
+        variantIri,
+        GENOMICS_NS + 'somaticStatus',
+        GENOMICS_NS + statusInd,
+      );
+      quads.push(statusQuad);
+      out.record.quads.push(statusQuad);
+    }
+
     // ---- Aggregate Classifications block (citations, conditions, criteria) ----
     // The VariationArchive's <Classifications>/<GermlineClassification> at
     // the variant-level carries the curated aggregate (review status,
