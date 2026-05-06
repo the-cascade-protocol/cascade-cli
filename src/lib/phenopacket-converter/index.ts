@@ -38,6 +38,8 @@ import { parseSubject } from './subject.js';
 import { parsePhenotypicFeatures } from './phenotypic-features.js';
 import { parseInterpretations } from './interpretations.js';
 import { parsePedigree } from './pedigree.js';
+import { parseBiosample, buildRawFileRecord } from './biosamples.js';
+import { tripleRef, NS } from '../fhir-converter/types.js';
 
 export { detectPhenopacket, classifyPhenopacket } from './detect.js';
 export { phenopacketImporter } from './registry-entry.js';
@@ -240,8 +242,55 @@ export async function convertPhenopacket(
       }
     }
 
+    // ---- Biosamples → Specimen + RawFile (TASK-2B.7) ----
+    if (Array.isArray(unit.pp.biosamples)) {
+      for (const bs of unit.pp.biosamples) {
+        const out = parseBiosample(bs, unit.patientIri, ctx, ctxLabel);
+        records.push(...out.records);
+        quads.push(...out.quads);
+        warnings.push(...out.warnings);
+        vocabularyGaps.push(...out.gaps);
+        for (const rec of out.records) {
+          importedIdentifiers.push({
+            cascadeIri: rec.iri,
+            cascadeType: rec.cascadeType,
+            sourceType:
+              rec.cascadeType === 'genomics:RawFile'
+                ? 'Phenopacket.biosample.file'
+                : 'Phenopacket.biosample',
+            sourceId: rec.sourceId,
+          });
+        }
+      }
+    }
+
+    // ---- Top-level files[] (D-DIRECTORY) → RawFile linked to patient ----
+    if (Array.isArray(unit.pp.files)) {
+      for (const f of unit.pp.files) {
+        const rfOut = buildRawFileRecord(f, ctx, `${ctxLabel}.files`);
+        if (rfOut) {
+          records.push(rfOut.record);
+          quads.push(...rfOut.record.quads);
+          vocabularyGaps.push(...rfOut.gaps);
+          importedIdentifiers.push({
+            cascadeIri: rfOut.record.iri,
+            cascadeType: rfOut.record.cascadeType,
+            sourceType: 'Phenopacket.files',
+            sourceId: rfOut.record.sourceId,
+          });
+          // Patient → RawFile link
+          quads.push(tripleRef(unit.patientIri, NS.cascade + 'hasRawFile', rfOut.record.iri));
+          const patientRecord = records.find((r) => r.iri === unit.patientIri);
+          if (patientRecord) {
+            patientRecord.quads.push(
+              tripleRef(unit.patientIri, NS.cascade + 'hasRawFile', rfOut.record.iri),
+            );
+          }
+        }
+      }
+    }
+
     // Subsequent tasks add per-unit processing here:
-    //   - TASK-2B.7 biosamples         → Specimen records
     //   - TASK-2B.8 medicalActions     → recommendedActions text on the patient
   }
 
