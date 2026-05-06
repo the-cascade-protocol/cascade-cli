@@ -30,6 +30,12 @@ import type { ClinvarParsedRecord } from './types.js';
 import { parseClinvarXml } from './xml-parser.js';
 import { parseSimpleAllele } from './simple-allele.js';
 import { buildTraitSetIndex, parseRcvAccession } from './rcv-interpretation.js';
+import {
+  buildTraitMappingIndex,
+  parseClinicalAssertion,
+} from './scv-submitter-assertion.js';
+import { GENOMICS_NS } from './types.js';
+import { tripleRef } from '../fhir-converter/types.js';
 
 export { detectClinvar } from './detect.js';
 export { clinvarImporter } from './registry-entry.js';
@@ -136,6 +142,17 @@ export async function convertClinvarXml(
       ? [classified.RCVList.RCVAccession]
       : [];
 
+    // Track each Interpretation's matchable condition keys for SCV
+    // aggregation. A SubmitterAssertion's TraitMapping points at a
+    // MedGen CUI / MONDO ID; we use these to find the matching
+    // VariantInterpretation and emit `genomics:aggregatedFrom`.
+    const interpretationsByKey = new Map<string, string[]>();
+    const recordKey = (key: string, iri: string) => {
+      const existing = interpretationsByKey.get(key) ?? [];
+      existing.push(iri);
+      interpretationsByKey.set(key, existing);
+    };
+
     for (const rcv of rcvList) {
       const rcvOut = parseRcvAccession(
         vcvAccession,
@@ -144,7 +161,23 @@ export async function convertClinvarXml(
         traitSetIndex,
         ctx,
       );
-      for (const rec of rcvOut.records) {
+
+      // Pre-compute the per-condition keys for THIS RCV, paralleling the
+      // index expansion in parseRcvAccession. Each Interpretation
+      // corresponds to one condition entry; we want to index by every
+      // matchable identifier (MONDO ID, MedGen CUI, OMIM phenotype) so
+      // SCV TraitMapping cross-refs resolve regardless of which
+      // identifier the trait happened to carry.
+      const ccs: any[] = Array.isArray(rcv?.ClassifiedConditionList?.ClassifiedCondition)
+        ? rcv.ClassifiedConditionList.ClassifiedCondition
+        : rcv?.ClassifiedConditionList?.ClassifiedCondition
+        ? [rcv.ClassifiedConditionList.ClassifiedCondition]
+        : [];
+      const traitSetId: string | undefined = rcv?.ClassifiedConditionList?.['@_TraitSetID'];
+      const mondoFromTraitSet = traitSetId ? traitSetIndex.get(traitSetId) ?? [] : [];
+
+      for (let i = 0; i < rcvOut.records.length; i++) {
+        const rec = rcvOut.records[i];
         records.push(rec);
         quads.push(...rec.quads);
         importedIdentifiers.push({
@@ -153,9 +186,97 @@ export async function convertClinvarXml(
           sourceType: 'ClinVar.RCVAccession',
           sourceId: rec.sourceId,
         });
+
+        // Direct DB/ID on the ClassifiedCondition.
+        const cc = ccs[i];
+        const ccDb: string | undefined = cc?.['@_DB'];
+        const ccId: string | undefined = cc?.['@_ID'];
+        if (ccDb === 'MedGen' && ccId) {
+          recordKey(`medgen:${ccId}`, rec.iri);
+        }
+        if (ccDb === 'MONDO' && ccId) {
+          // Normalize 'MONDO:0011450' as the index key.
+          recordKey(`mondo:${ccId}`, rec.iri);
+        }
+        // Cross-reference resolutions from the Trait block (MONDO, MedGen).
+        const traitInfo = mondoFromTraitSet[i];
+        if (traitInfo?.mondoIri) {
+          // mondoIri is the OBO PURL; convert back to 'MONDO:00..' form
+          // for index keying.
+          const numeric = traitInfo.mondoIri.replace(
+            'http://purl.obolibrary.org/obo/MONDO_',
+            '',
+          );
+          recordKey(`mondo:MONDO:${numeric}`, rec.iri);
+        }
+        if (traitInfo?.medgenId) {
+          recordKey(`medgen:${traitInfo.medgenId}`, rec.iri);
+        }
+
+        // Also index by quads (covers any case the above missed).
+        for (const q of rec.quads) {
+          if (q.predicate.value === GENOMICS_NS + 'mondoId') {
+            recordKey(`mondo:${q.object.value}`, rec.iri);
+          } else if (q.predicate.value === GENOMICS_NS + 'condition') {
+            recordKey(`iri:${q.object.value}`, rec.iri);
+            const maybeMedgen = q.object.value.startsWith(
+              'https://www.ncbi.nlm.nih.gov/medgen/',
+            )
+              ? q.object.value.replace('https://www.ncbi.nlm.nih.gov/medgen/', '')
+              : undefined;
+            if (maybeMedgen) recordKey(`medgen:${maybeMedgen}`, rec.iri);
+          }
+        }
       }
       warnings.push(...rcvOut.warnings);
       vocabularyGaps.push(...rcvOut.gaps);
+    }
+
+    // ---- ClinicalAssertion → SubmitterAssertion ----
+    const traitMappingIndex = buildTraitMappingIndex(classified);
+    const caList: any[] = Array.isArray(classified?.ClinicalAssertionList?.ClinicalAssertion)
+      ? classified.ClinicalAssertionList.ClinicalAssertion
+      : classified?.ClinicalAssertionList?.ClinicalAssertion
+      ? [classified.ClinicalAssertionList.ClinicalAssertion]
+      : [];
+
+    for (const ca of caList) {
+      const scvOut = parseClinicalAssertion(vcvAccession, ca, traitMappingIndex, ctx);
+      if (!scvOut) {
+        skippedCount += 1;
+        continue;
+      }
+      records.push(scvOut.record);
+      quads.push(...scvOut.record.quads);
+      importedIdentifiers.push({
+        cascadeIri: scvOut.record.iri,
+        cascadeType: scvOut.record.cascadeType,
+        sourceType: 'ClinVar.ClinicalAssertion',
+        sourceId: scvOut.record.sourceId,
+      });
+      warnings.push(...scvOut.warnings);
+      vocabularyGaps.push(...scvOut.gaps);
+
+      // Resolve aggregation hints → genomics:aggregatedFrom triples on
+      // the matching VariantInterpretation(s). Try keys in priority
+      // order: MONDO > MedGen CUI. If none match, fall back to MedGen
+      // CUI direct (some RCVs reference conditions by CUI only).
+      const matchedInterpretations = new Set<string>();
+      for (const hint of scvOut.aggregationHints) {
+        const tryKeys: string[] = [];
+        if (hint.mondoId) tryKeys.push(`mondo:${hint.mondoId}`);
+        if (hint.medgenCui) tryKeys.push(`medgen:${hint.medgenCui}`);
+        for (const key of tryKeys) {
+          for (const iri of interpretationsByKey.get(key) ?? []) {
+            matchedInterpretations.add(iri);
+          }
+        }
+      }
+      for (const iri of matchedInterpretations) {
+        quads.push(
+          tripleRef(iri, GENOMICS_NS + 'aggregatedFrom', scvOut.record.iri),
+        );
+      }
     }
   }
 
