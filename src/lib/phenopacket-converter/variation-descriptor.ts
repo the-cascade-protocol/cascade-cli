@@ -20,12 +20,15 @@
  * D-QUALITY-TIER: phenopackets are research-context by default. We tag
  * every emitted Variant with `genomics:dataQualityTier = ResearchGrade`
  * unless the parent metaData carries CLIA/clinical signals (rare in this
- * corpus). If the concurrent vocab-evolution agent has merged the
- * `reportedRecord` / `refAllele` / `altAllele` / `genomicStartEnd` /
- * `somaticStatus` / `variantAlleleFrequency` properties into v1-draft.0.2,
- * USE them; if not, emit info-severity gap-warnings (caller must pass a
- * resolved `predicateInventory` flag — for now we conservatively assume
- * NOT merged and rely on the gap-warnings).
+ * corpus).
+ *
+ * v1-draft.0.2 wiring: refAllele / altAllele / genomicStartEnd are emitted
+ * from descriptor.vcfRecord (when present) and from the canonical VRS Allele
+ * form under descriptor.variation.allele.location/state (when present).
+ * refAllele cannot be recovered from canonical VRS Allele state alone — it
+ * would require a seqrepo lookup against the reference assembly (out of
+ * scope per D-Q6); emitted only when an explicit ref string is in the
+ * vcfRecord.
  *
  * Per the implementation plan, `extensions[].name = "mosaicism"` /
  * `"allele-frequency"` carry numeric percentage strings ("40.0%"). We
@@ -240,22 +243,98 @@ export function parseVariationDescriptor(
   }
 
   // ---- VCF record (chromosome, position, ref, alt, assembly) ----
+  // v1-draft.0.2: emit refAllele / altAllele / genomicStartEnd directly from
+  // the vcfRecord fields. Also retain the compact hgvsGDot string for
+  // human-readable display.
   if (descriptor.vcfRecord && typeof descriptor.vcfRecord === 'object') {
     const vcf = descriptor.vcfRecord;
     if (typeof vcf.genomeAssembly === 'string') {
       quads.push(tripleStr(iri, GENOMICS_NS + 'genomeAssembly', vcf.genomeAssembly));
     }
-    // chr/pos/ref/alt: v1-draft has no first-class chr/pos slot. The
-    // concurrent vocab-evolution agent is adding refAllele / altAllele /
-    // genomicStartEnd. Until merged, we capture the data via a coarse
-    // hgvsGDot-like string and emit gaps.
     if (vcf.chrom && vcf.pos && vcf.ref && vcf.alt) {
-      const compact = `${vcf.chrom}:g.${vcf.pos}${vcf.ref}>${vcf.alt}`;
+      const refStr = String(vcf.ref);
+      const altStr = String(vcf.alt);
+      const posNum = Number(vcf.pos);
+      const compact = `${vcf.chrom}:g.${vcf.pos}${refStr}>${altStr}`;
       quads.push(tripleStr(iri, GENOMICS_NS + 'hgvsGDot', compact));
+      quads.push(tripleStr(iri, GENOMICS_NS + 'refAllele', refStr));
+      quads.push(tripleStr(iri, GENOMICS_NS + 'altAllele', altStr));
+      if (Number.isFinite(posNum) && refStr.length > 0) {
+        const chromStr = String(vcf.chrom);
+        // RefSeq accessions (NC_000013.11) keep their identifier form;
+        // bare chromosome names get a "chr" prefix.
+        const isRefSeqLike =
+          chromStr.startsWith('chr') ||
+          /^N[CGT]_\d+/.test(chromStr) ||
+          /^[A-Z]{2,}\d+\.\d+/.test(chromStr);
+        const chrLabel = isRefSeqLike ? chromStr : `chr${chromStr}`;
+        const endPos = posNum + refStr.length - 1;
+        quads.push(
+          tripleStr(
+            iri,
+            GENOMICS_NS + 'genomicStartEnd',
+            `${chrLabel}:${posNum}-${endPos}`,
+          ),
+        );
+      }
+    }
+  }
+
+  // ---- VRS Allele location/state (v1-draft.0.2) ----
+  // Phenopacket v2 variationDescriptors with VRS Allele under
+  // descriptor.variation.allele carry:
+  //   - location.interval.start.value + end.value (1-based inclusive)
+  //   - location.sequenceId (RefSeq accession or chr name)
+  //   - state.sequence (the alternate allele)
+  // refAllele is NOT recoverable from canonical VRS Allele form — that
+  // would require a seqrepo lookup against the reference assembly, which
+  // is out of scope per D-Q6 (no external sequence-server dependencies).
+  // Surface a gap-info when state.sequence is present but refAllele can't
+  // be derived from explicit fields.
+  const allele = descriptor?.variation?.allele;
+  if (allele && typeof allele === 'object') {
+    const loc = allele.location;
+    const interval = loc?.interval ?? loc?.sequenceInterval;
+    const startVal =
+      typeof interval?.start?.value === 'number'
+        ? interval.start.value
+        : typeof interval?.start === 'number'
+        ? interval.start
+        : typeof interval?.startNumber?.value === 'string'
+        ? Number(interval.startNumber.value)
+        : undefined;
+    const endVal =
+      typeof interval?.end?.value === 'number'
+        ? interval.end.value
+        : typeof interval?.end === 'number'
+        ? interval.end
+        : typeof interval?.endNumber?.value === 'string'
+        ? Number(interval.endNumber.value)
+        : undefined;
+    const seqId = loc?.sequenceId ?? loc?.sequence_id;
+    if (
+      typeof seqId === 'string' &&
+      Number.isFinite(startVal) &&
+      Number.isFinite(endVal)
+    ) {
+      quads.push(
+        tripleStr(
+          iri,
+          GENOMICS_NS + 'genomicStartEnd',
+          `${seqId}:${startVal}-${endVal}`,
+        ),
+      );
+    }
+    const stateSeq = allele.state?.sequence ?? allele.state?.literalSequenceExpression?.sequence;
+    if (typeof stateSeq === 'string' && stateSeq.length > 0) {
+      quads.push(tripleStr(iri, GENOMICS_NS + 'altAllele', stateSeq));
+      // refAllele not preserved in canonical VRS Allele form (state.sequence
+      // is the ALT only). Recovering REF would require a seqrepo lookup
+      // against the reference assembly — out of scope per D-Q6.
       gaps.push({
-        sourceField: `${contextLabel}.variationDescriptor.vcfRecord`,
+        sourceField: `${contextLabel}.variationDescriptor.variation.allele.state`,
         reason:
-          'VCF record fields (chrom/pos/ref/alt) compacted into hgvsGDot string — v1-draft has no refAllele/altAllele/genomicStartEnd properties yet (vocab evolution in flight).',
+          'VRS Allele canonical form preserves only the alternate sequence; genomics:refAllele not emitted because deriving it would require a seqrepo lookup against the reference assembly (out of scope per D-Q6 — no external sequence-server dependencies).',
         severity: 'info',
         context: sourceId,
       });
