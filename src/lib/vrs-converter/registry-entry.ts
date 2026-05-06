@@ -75,4 +75,12 @@ export const vrsImporter: FormatImporter = {
       quads: conversion.quads,
     };
   },
+
+  cliOptions: [
+    {
+      flag: '--allow-vrs-hash-mismatch',
+      description:
+        'Accept a VRS Allele whose declared id does not match cascade-cli\'s simple canonical-form hash. Required for vrs-python-generated alleles (whose recursive-digest canonicalization the CLI does not reproduce). Default: false (strict reject).',
+    },
+  ],
 };
