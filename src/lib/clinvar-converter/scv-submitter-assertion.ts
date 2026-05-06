@@ -41,7 +41,7 @@
 
 import type { ImportContext, ImportWarning, VocabularyGap } from '../import-types.js';
 import type { ClinvarParsedRecord, Quad } from './types.js';
-import { GENOMICS_NS, ACMG_TEXT_TO_CLASS, SUBMITTER_CATEGORY_MAP } from './types.js';
+import { GENOMICS_NS, lookupAcmgClass, SUBMITTER_CATEGORY_MAP } from './types.js';
 import {
   NS,
   SCHEMA_VERSION,
@@ -224,19 +224,18 @@ export function parseClinicalAssertion(
   }
 
   // ---- Asserted classification ----
-  // Prefer GermlineClassification; fall back to SomaticClinicalImpact /
-  // OncogenicityClassification (these don't satisfy the 5-tier ACMG
-  // sh:in constraint — surface as a gap and skip the triple).
+  // SubmitterAssertionShape requires assertedClassification with one of
+  // the five canonical AcmgClass values. If we can't satisfy that
+  // constraint we skip the record entirely (surface a gap-warning) — a
+  // partial SubmitterAssertion that would fail SHACL is worse than no
+  // record at all.
+  let acmgClass: string | undefined;
   if (germlineClassText) {
-    const acmgClass = ACMG_TEXT_TO_CLASS[germlineClassText.trim()];
-    if (acmgClass) {
-      quads.push(
-        tripleRef(iri, GENOMICS_NS + 'assertedClassification', GENOMICS_NS + acmgClass),
-      );
-    } else {
+    acmgClass = lookupAcmgClass(germlineClassText);
+    if (!acmgClass) {
       gaps.push({
         sourceField: `ClinicalAssertion[${clinicalAssertionId}]/Classification/GermlineClassification`,
-        reason: `GermlineClassification "${germlineClassText}" is not one of the five canonical ACMG values; cannot emit genomics:assertedClassification. Common non-canonical strings: "Pathogenic, low penetrance", "established risk allele".`,
+        reason: `GermlineClassification "${germlineClassText}" is not one of the five canonical ACMG values; cannot emit a SubmitterAssertion (would violate SubmitterAssertionShape). Common non-canonical strings: "Pathogenic, low penetrance", "established risk allele", "drug response".`,
         severity: 'warning',
         context: scvAccession,
       });
@@ -245,7 +244,7 @@ export function parseClinicalAssertion(
     gaps.push({
       sourceField: `ClinicalAssertion[${clinicalAssertionId}]/Classification`,
       reason:
-        'ClinicalAssertion classifies somatic impact or oncogenicity, not germline ACMG; v1-draft.0.1 has no genomics:somaticStatus / oncogenicityClass — these are v1-draft.0.2 candidates.',
+        'ClinicalAssertion classifies somatic impact or oncogenicity, not germline ACMG; v1-draft.0.1 has no genomics:somaticStatus / oncogenicityClass — these are v1-draft.0.2 candidates. Skipping SubmitterAssertion emission.',
       severity: 'info',
       context: scvAccession,
     });
@@ -253,11 +252,19 @@ export function parseClinicalAssertion(
     gaps.push({
       sourceField: `ClinicalAssertion[${clinicalAssertionId}]/Classification`,
       reason:
-        'ClinicalAssertion has no germline / somatic / oncogenicity classification text; SubmitterAssertionShape requires genomics:assertedClassification cardinality 1.',
-      severity: 'warning',
+        'ClinicalAssertion has no germline / somatic / oncogenicity classification text (e.g., NoClassification=evidence_only); SubmitterAssertionShape requires genomics:assertedClassification cardinality 1. Skipping SubmitterAssertion emission.',
+      severity: 'info',
       context: scvAccession,
     });
   }
+  if (!acmgClass) {
+    // Skip the entire record — a partial SubmitterAssertion would fail
+    // the SHACL shape and pollute the validate step.
+    return null;
+  }
+  quads.push(
+    tripleRef(iri, GENOMICS_NS + 'assertedClassification', GENOMICS_NS + acmgClass),
+  );
 
   // ---- contributesToAggregate flag ----
   if (contributesAttr === 'true' || contributesAttr === 'false') {

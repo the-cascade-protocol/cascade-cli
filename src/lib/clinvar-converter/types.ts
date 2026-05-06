@@ -33,23 +33,40 @@ export const CLINVAR_REVIEW_STATUS_STRINGS = [
 
 /**
  * ClinVar germline-classification description strings → genomics:AcmgClass
- * named individuals.
+ * named individuals. Lookup is case-insensitive on the trimmed key.
  *
  * The set is intentionally restrictive: only the canonical 5-tier ACMG
  * values pass; modifiers like "Pathogenic, low penetrance" or compound
  * "Conflicting classifications of pathogenicity" surface as gap-warnings
- * (and the calling parser falls back to no acmgClassification triple).
+ * (and the calling parser skips the record rather than emit a partial
+ * SubmitterAssertion that would fail SHACL).
  */
-export const ACMG_TEXT_TO_CLASS: Record<string, string> = {
-  'Pathogenic': 'Pathogenic',
-  'Likely pathogenic': 'LikelyPathogenic',
-  'Likely Pathogenic': 'LikelyPathogenic',
-  'Uncertain significance': 'VUS',
-  'Uncertain Significance': 'VUS',
-  'Likely benign': 'LikelyBenign',
-  'Likely Benign': 'LikelyBenign',
-  'Benign': 'Benign',
+const ACMG_TABLE: Record<string, string> = {
+  pathogenic: 'Pathogenic',
+  'likely pathogenic': 'LikelyPathogenic',
+  'uncertain significance': 'VUS',
+  'likely benign': 'LikelyBenign',
+  benign: 'Benign',
 };
+
+/**
+ * Resolve a free-text ClinVar classification string to a
+ * genomics:AcmgClass local name (case-insensitive, whitespace-trim).
+ * Returns undefined for non-canonical phrasings — caller surfaces gap.
+ */
+export function lookupAcmgClass(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  return ACMG_TABLE[text.trim().toLowerCase()];
+}
+
+/**
+ * Backwards-compat alias retained while internal callers transition to
+ * lookupAcmgClass(). Deprecated direct property access.
+ *
+ * @deprecated use lookupAcmgClass(text) — the table is case-sensitive
+ * and incomplete; new code should always go through the helper.
+ */
+export const ACMG_TEXT_TO_CLASS: Record<string, string> = ACMG_TABLE;
 
 /** OrganizationCategory string → genomics:SubmitterCategory named individual. */
 export const SUBMITTER_CATEGORY_MAP: Record<string, string> = {

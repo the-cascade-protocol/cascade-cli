@@ -38,7 +38,7 @@
 
 import type { ImportContext, ImportWarning, VocabularyGap } from '../import-types.js';
 import type { ClinvarParsedRecord, Quad } from './types.js';
-import { GENOMICS_NS, ACMG_TEXT_TO_CLASS } from './types.js';
+import { GENOMICS_NS, lookupAcmgClass } from './types.js';
 import {
   NS,
   SCHEMA_VERSION,
@@ -244,6 +244,23 @@ export function parseRcvAccession(
     return { records, warnings, gaps };
   }
 
+  // Resolve the aggregate ACMG class up front. If the description text
+  // is non-canonical (e.g., "Conflicting classifications of pathogenicity"),
+  // the entire RCV is skipped — emitting an Interpretation without
+  // acmgClassification would fail VariantInterpretationShape.
+  const acmgClass = lookupAcmgClass(acmgText);
+  if (!acmgClass) {
+    if (acmgText) {
+      gaps.push({
+        sourceField: `RCVAccession[${rcvAccession}]/Description`,
+        reason: `Description "${acmgText}" is not one of the five canonical ACMG values; cannot emit a VariantInterpretation (would violate VariantInterpretationShape). Common non-canonical strings: "Conflicting classifications of pathogenicity", "Pathogenic, low penetrance", "drug response".`,
+        severity: 'warning',
+        context: rcvAccession,
+      });
+    }
+    return { records, warnings, gaps };
+  }
+
   // Per D-Q5: expand to one Interpretation per condition.
   for (let i = 0; i < classifiedConditions.length; i++) {
     const cc = classifiedConditions[i];
@@ -311,25 +328,10 @@ export function parseRcvAccession(
       );
     }
 
-    // ---- ACMG classification ----
-    if (acmgText) {
-      const acmgClass = ACMG_TEXT_TO_CLASS[acmgText.trim()];
-      if (acmgClass) {
-        quads.push(
-          tripleRef(iri, GENOMICS_NS + 'acmgClassification', GENOMICS_NS + acmgClass),
-        );
-      } else {
-        // ClinVar carries some non-canonical descriptions ("Pathogenic, low penetrance",
-        // "Conflicting classifications of pathogenicity", etc.). These don't
-        // satisfy the ACMG sh:in constraint; surface as a gap.
-        gaps.push({
-          sourceField: `RCVAccession[${rcvAccession}]/Description`,
-          reason: `Description text "${acmgText}" is not one of the five canonical ACMG values (Pathogenic, Likely pathogenic, Uncertain significance, Likely benign, Benign); cannot emit genomics:acmgClassification. v1-draft has no extended classification enum yet.`,
-          severity: 'warning',
-          context: rcvAccession,
-        });
-      }
-    }
+    // ---- ACMG classification (resolved up front; guaranteed valid) ----
+    quads.push(
+      tripleRef(iri, GENOMICS_NS + 'acmgClassification', GENOMICS_NS + acmgClass),
+    );
 
     // ---- Review status (TASK-2A.5 lookup table) ----
     if (reviewStatusStr) {
