@@ -594,11 +594,26 @@ cascade:AdvisoryApplicationActivityShape a sh:NodeShape ;
         sh:severity sh:Violation ;
         sh:name "Used (advisory + matched record)"@en ;
         sh:message "AdvisoryApplicationActivity must record both the advisory IRI and the matched record IRI via prov:used"@en
+    ] ;
+
+    # Optional but recommended: appliedTriplesCount stamps the application size
+    sh:property [
+        sh:path cascade:appliedTriplesCount ;
+        sh:datatype xsd:nonNegativeInteger ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Applied Triples Count"@en ;
+        sh:message "Recommended: stamp cascade:appliedTriplesCount with the number of triples inserted by this advisory application (≤64 per CAP C5)"@en
     ] .
 
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.4 (2026-05-06)
+# - Added cascade:appliedTriplesCount Info-severity property shape on
+#   AdvisoryApplicationActivityShape (recommended; auditable size of an
+#   advisory application — pairs with CAP profile constraint C5).
 #
 # Version 1.3 (2026-05-05)
 # - Added AIGenerationActivityShape for LLM-generated narrative provenance

@@ -12,7 +12,7 @@
 #   (Phase 1 evolution: reportedRecord, ref/alt allele, somaticStatus enum,
 #   variantAlleleFrequency). Per D-PATH, still no row added — drafts land in
 #   VOCAB_VERSIONS only at v1.0 graduation.
-core=3.1
+core=3.2
 health=2.4
 clinical=1.8
 coverage=1.3
