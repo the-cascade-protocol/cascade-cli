@@ -380,18 +380,41 @@ export function parseRecordLine(
       );
     }
 
-    // 10. Gene info (GENEINFO) — informational; held against
-    //     genomics:VariantSiteFunctionalAnnotation pending v1-draft.0.2.
+    // 10. Gene info (GENEINFO) → genomics:geneSymbol (HGNC approved
+    //     symbol). ClinVar's GENEINFO is "SYMBOL:ENTREZ_ID|SYMBOL:..." for
+    //     multi-gene sites; we take the first symbol. The full multi-gene
+    //     surface is held as a gap pending the consequence/cross-gene
+    //     model in v1-draft.0.2.
     const geneinfo = split.INFO.get('GENEINFO');
     if (typeof geneinfo === 'string' && geneinfo.length > 0) {
-      recordGap(
-        quads,
-        gaps,
-        variantIri,
-        'VCF.INFO.GENEINFO',
-        geneinfo,
-        'gene-symbol annotation preserved; mapping to genomics:Gene pending Phase 2 cross-record reconciler.',
-      );
+      const firstGenePair = geneinfo.split('|')[0];
+      const symbol = firstGenePair.split(':')[0];
+      if (symbol) {
+        quads.push(tripleStr(variantIri, GENOMICS_NS + 'geneSymbol', symbol));
+      }
+      if (geneinfo.includes('|')) {
+        // Multi-gene site (overlapping transcripts): preserve the full
+        // GENEINFO string so a downstream tool can reconstruct.
+        recordGap(
+          quads,
+          gaps,
+          variantIri,
+          'VCF.INFO.GENEINFO.multiGene',
+          geneinfo,
+          'multi-gene site: only the first GENEINFO symbol mapped to genomics:geneSymbol; full string preserved for reconciliation.',
+        );
+      }
+    } else {
+      // No GENEINFO at all — surface as a warning so SHACL geneSymbol
+      // violations are explicable to the user. Consumers SHOULD enrich
+      // from a downstream gene-overlap step (Phase 2 reconciler).
+      gaps.push({
+        sourceField: 'VCF.INFO.GENEINFO',
+        reason:
+          'VCF record carries no GENEINFO INFO field; genomics:geneSymbol cannot be set from this source. SHACL conformance requires geneSymbol — enrich downstream or accept the violation.',
+        severity: 'warning',
+        context: variantIri,
+      });
     }
 
     // 11. Per-sample FORMAT handling (multi-sample VCFs only).

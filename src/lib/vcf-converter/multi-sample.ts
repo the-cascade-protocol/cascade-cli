@@ -138,6 +138,28 @@ export function emitSequencingRun(
     });
   }
 
+  // Gap-info: SHACL on SequencingRun requires genomics:coverageDepth and
+  // genomics:sequencingTechnology. VCF carries neither directly — those
+  // come from the upstream sequencing pipeline / lab metadata, not the
+  // variant-call output. Surface as warnings so users know the resulting
+  // graph won't pass strict SHACL until the pipeline emits a separate
+  // SequencingRun annotation. The acceptance bar here per the v0.1
+  // implementation plan is "validates OR has documented gaps".
+  gaps.push({
+    sourceField: 'SequencingRun.coverageDepth',
+    reason:
+      'VCF format does not carry per-run coverage; SHACL requires genomics:coverageDepth on every SequencingRun. Enrich from FASTQ-step QC metadata downstream or accept the SHACL violation.',
+    severity: 'warning',
+    context: iri,
+  });
+  gaps.push({
+    sourceField: 'SequencingRun.sequencingTechnology',
+    reason:
+      'VCF format does not carry sequencing-technology metadata; SHACL requires genomics:sequencingTechnology on every SequencingRun. Enrich from upstream pipeline metadata (Illumina vs ONT vs PacBio) or accept the SHACL violation.',
+    severity: 'warning',
+    context: iri,
+  });
+
   return {
     iri,
     cascadeType: 'genomics:SequencingRun',
