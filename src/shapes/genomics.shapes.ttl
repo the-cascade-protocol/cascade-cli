@@ -125,18 +125,23 @@ genomics:VariantShape a sh:NodeShape ;
     rdfs:label "Variant Shape"@en ;
     rdfs:comment "Validation constraints for genomics:Variant. Enforces required gene-symbol identity, presence of at least one stable identifier across the four supported registries (CAid, VRS, ClinVar, dbSNP), and presence of a data-quality tier (used by the D-QUALITY-TIER safety constraint on downstream VariantInterpretations)."@en ;
 
-    # VIOLATION: geneSymbol required (HGNC approved). The variant must carry
-    # one and only one gene symbol; the gene context is what makes the variant
-    # interpretable.
+    # WARNING: geneSymbol recommended (HGNC approved). Most clinical-grade
+    # imports carry it, but a Variant remains valid via other identifiers
+    # (CAid, VRS, ClinVar VCV, dbSNP rs, or the refAllele+altAllele+
+    # genomicStartEnd coordinate triple). VRS preserve-only imports
+    # (D-Q6) and gene-less VCF records legitimately lack gene context;
+    # downgraded from Violation to Warning in v1-draft.0.3 per the
+    # 2026-05-06 VRS test-fixture tie-break (cascade-coordination/
+    # tie-breaks/2026-05-06-vrs-geneSymbol-shape.md). When present, the
+    # symbol must be exactly one non-empty string.
     sh:property [
         sh:path genomics:geneSymbol ;
         sh:datatype xsd:string ;
-        sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:minLength 1 ;
-        sh:severity sh:Violation ;
+        sh:severity sh:Warning ;
         sh:name "Gene Symbol"@en ;
-        sh:message "Variant must carry exactly one non-empty genomics:geneSymbol (HGNC approved symbol, e.g., 'BRCA2')"@en
+        sh:message "Recommended: genomics:geneSymbol (HGNC approved symbol, e.g., 'BRCA2'). Variant remains valid via stable identifiers (CAid/VRS/ClinVar/dbSNP) or VCF coordinates (refAllele+altAllele+genomicStartEnd) when source data lacks gene context."@en
     ] ;
 
     # VIOLATION: dataQualityTier required and must be one of the four
@@ -290,16 +295,24 @@ genomics:VariantInterpretationShape a sh:NodeShape ;
     rdfs:comment "Validation constraints for genomics:VariantInterpretation. Implements D-Q5 (each Interpretation is per-(variant, condition); cardinality 1..1 on both genomics:variantInterpreted and genomics:condition) and D-QUALITY-TIER (the safety constraint on Pathogenic / LikelyPathogenic classifications)."@en ;
 
     # ────────────────────────────────────────────────────────────────────
-    # D-Q5: variantInterpreted cardinality 1..1
+    # D-Q5: variantInterpreted cardinality 1..1.
+    # Range widened in v1-draft.0.3 from genomics:Variant alone to
+    # {Variant, CopyNumberVariant, Haplotype} via sh:or — clinical
+    # interpretations attach to all three molecular-record types
+    # (e.g., the retinoblastoma phenopacket interprets a chr13 CNV).
     # ────────────────────────────────────────────────────────────────────
     sh:property [
         sh:path genomics:variantInterpreted ;
-        sh:class genomics:Variant ;
+        sh:or (
+            [ sh:class genomics:Variant ]
+            [ sh:class genomics:CopyNumberVariant ]
+            [ sh:class genomics:Haplotype ]
+        ) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:severity sh:Violation ;
         sh:name "Variant Interpreted"@en ;
-        sh:message "VariantInterpretation must reference exactly one genomics:Variant via genomics:variantInterpreted (D-Q5 — cardinality 1..1; multi-variant cases produce multiple Interpretation instances)"@en
+        sh:message "VariantInterpretation must reference exactly one Variant / CopyNumberVariant / Haplotype via genomics:variantInterpreted (D-Q5 — cardinality 1..1; multi-variant cases produce multiple Interpretation instances)"@en
     ] ;
 
     # ────────────────────────────────────────────────────────────────────

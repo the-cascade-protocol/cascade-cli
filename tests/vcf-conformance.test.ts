@@ -30,7 +30,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,9 +48,17 @@ const DEFAULT_FIXTURES_DIR = path.resolve(
   __dirname,
   '../../conformance/fixtures/genomics/vcf',
 );
-const FIXTURES_DIR = process.env.CASCADE_CONFORMANCE_DIR
+const RAW_FIXTURES_DIR = process.env.CASCADE_CONFORMANCE_DIR
   ? path.resolve(process.env.CASCADE_CONFORMANCE_DIR, 'fixtures/genomics/vcf')
   : DEFAULT_FIXTURES_DIR;
+// Canonicalize via realpath: the VCF importer hashes ImportContext.inputPath
+// into derived IRIs (SequencingRun, prov:wasGeneratedBy back-references), so
+// the test must pass the same canonical path the oracle was authored against
+// regardless of which symlink chain the test process traversed (~/Development
+// is a symlink to ~/Documents/Development on dev machines).
+const FIXTURES_DIR = (() => {
+  try { return realpathSync(RAW_FIXTURES_DIR); } catch { return RAW_FIXTURES_DIR; }
+})();
 
 const FIXTURES = [
   {

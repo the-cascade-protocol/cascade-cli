@@ -12,6 +12,10 @@
 #   (Phase 1 evolution: reportedRecord, ref/alt allele, somaticStatus enum,
 #   variantAlleleFrequency). Per D-PATH, still no row added — drafts land in
 #   VOCAB_VERSIONS only at v1.0 graduation.
+# Updated 2026-05-06: synced genomics.shapes.ttl for genomics@v1-draft.0.3
+#   (shape relaxations only: geneSymbol Violation→Warning,
+#   variantInterpreted range widened to {Variant, CopyNumberVariant, Haplotype}).
+#   No vocabulary additions; no row change.
 core=3.2
 health=2.4
 clinical=1.8
