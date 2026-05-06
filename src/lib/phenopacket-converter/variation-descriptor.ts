@@ -80,14 +80,62 @@ function extensionPercentToFraction(value: unknown): number | undefined {
 /**
  * Mint a deterministic Cascade IRI for a Variant / CNV / Haplotype derived
  * from a phenopacket variationDescriptor.
+ *
+ * Identity preference (most-specific first):
+ *   1. descriptor.id — the source's own identifier
+ *   2. descriptor.label — semantically meaningful name
+ *   3. content hash of (expressions ∪ geneContext ∪ vcfRecord ∪ variation)
+ *      — covers anonymous descriptors that nonetheless carry distinguishing
+ *      structured content. This is what most v2 phenopackets land on.
+ *   4. fallback to a hash of the entire descriptor JSON — last resort,
+ *      but still deterministic for byte-equal regression. (Earlier v0.1
+ *      revisions used Math.random() here, which broke byte-equal contract
+ *      across re-imports of the same input — fixed 2026-05-06.)
  */
-function mintVariantIri(descriptor: any, ctx: ImportContext, kind: string): string {
+function mintVariantIri(descriptor: unknown, ctx: ImportContext, kind: string): string {
   const sys = ctx.sourceSystem ?? 'phenopacket';
+  const desc = (descriptor ?? {}) as Record<string, unknown>;
   const id =
-    (typeof descriptor?.id === 'string' && descriptor.id) ||
-    (typeof descriptor?.label === 'string' && descriptor.label) ||
-    `anon:${ctx.importedAt}:${Math.random()}`;
+    (typeof desc.id === 'string' && desc.id) ||
+    (typeof desc.label === 'string' && desc.label) ||
+    contentSeed(desc);
   return `urn:uuid:${deterministicUuid(`genomics:${kind}:${sys}:${id}`)}`;
+}
+
+/**
+ * Build a stable seed string from the structurally-distinguishing fields
+ * of a variationDescriptor. The fields are sorted before serialization
+ * so key ordering in the source JSON doesn't perturb the hash.
+ */
+function contentSeed(desc: Record<string, unknown>): string {
+  // Pick fields that meaningfully distinguish two anonymous variations.
+  // Order matters: keep this list sorted for stability.
+  const fields = ['expressions', 'extensions', 'geneContext', 'molecularAttributes', 'variation', 'vcfRecord'] as const;
+  const parts: string[] = ['anon'];
+  for (const k of fields) {
+    if (k in desc) {
+      parts.push(`${k}=${stableStringify(desc[k])}`);
+    }
+  }
+  if (parts.length === 1) {
+    // Truly bare descriptor — fall through to JSON of the whole thing.
+    parts.push(`raw=${stableStringify(desc)}`);
+  }
+  return parts.join('|');
+}
+
+/** JSON.stringify with sorted keys at every level. Stable across object key insertion order. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  const inner = keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',');
+  return `{${inner}}`;
 }
 
 /**

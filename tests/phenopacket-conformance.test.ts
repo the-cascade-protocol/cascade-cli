@@ -76,54 +76,19 @@ const CTX_BASE: ImportContext = {
 };
 
 /**
- * KNOWN IMPORTER NON-DETERMINISM — see the comment in
- * `src/lib/phenopacket-converter/variation-descriptor.ts::mintVariantIri()`:
- * when a variationDescriptor carries no `id` or `label` (i.e. the descriptor
- * is anonymous), the importer falls through to `Math.random()` for the IRI
- * seed. This breaks byte-equal round-trip for `v2-cohort` / `v2-family` /
- * `v2-phenopacket` (whose variants are anonymous) until that fallback is
- * replaced with a deterministic content hash (descriptor expressions /
- * geneContext / etc).
- *
- * Tie-break ticket raised: see STATUS.md "Test fixtures — Phenopacket".
- * Until the importer is fixed, this test normalizes anonymous-variant URNs
- * to a stable placeholder on BOTH sides of the byte-equal comparison so the
- * regression suite still catches every other class of drift.
- */
-function normalizeAnonVariantIris(turtle: string): string {
-  // Find any subject whose triples include `cascade:sourceFhirId "<anon>"`.
-  // Phenopacket-converter emits these for anonymous variant descriptors.
-  const anonRegex =
-    /(<urn:uuid:[0-9a-f-]+>)\s+[^.]*?<https:\/\/ns\.cascadeprotocol\.org\/core\/v1#sourceFhirId>\s+"<anon>"/g;
-  const anonIris = new Set<string>();
-  for (const m of turtle.matchAll(anonRegex)) {
-    anonIris.add(m[1]);
-  }
-  let out = turtle;
-  let i = 0;
-  for (const iri of [...anonIris].sort()) {
-    const placeholder = `<urn:uuid:00000000-0000-0000-0000-anonvariant${String(i).padStart(3, '0')}>`;
-    // Use split/join for literal replacement (safer than regex with special chars).
-    out = out.split(iri).join(placeholder);
-    i += 1;
-  }
-  return out;
-}
-
-/**
  * Canonicalize a Turtle string by:
  *   1. Writing it to a temp file
  *   2. Running `riot --output=nq` against it
- *   3. Normalizing anonymous-variant URNs (see comment above)
- *   4. Sorting the n-quads alphabetically
+ *   3. Sorting the n-quads alphabetically
  *
  * `riot` is part of Apache Jena, the canonical SHACL/RDF toolchain in the
  * workspace. Byte-equal n-quads is the only stable round-trip target since
  * Turtle prefixes / blank-node naming / triple ordering are parser-dependent.
  *
- * Anonymous-variant URN normalization runs AFTER riot so the regex matches
- * the fully-expanded IRI form (`<https://ns.cascadeprotocol.org/core/v1#sourceFhirId>`)
- * rather than the Turtle-prefixed form (`cascade:sourceFhirId`).
+ * Anonymous-variant IRI minting was previously non-deterministic
+ * (Math.random fallback in mintVariantIri); fixed 2026-05-06 to use a
+ * content hash over expressions/geneContext/vcfRecord. This test now
+ * relies on the determinism rather than masking it.
  */
 function canonicalizeTurtle(turtle: string): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'phenopacket-canon-'));
@@ -132,8 +97,7 @@ function canonicalizeTurtle(turtle: string): string {
   const nq = execFileSync('riot', ['--output=nq', file], {
     encoding: 'utf-8',
   });
-  const normalized = normalizeAnonVariantIris(nq);
-  return normalized.split('\n').filter((l) => l.length > 0).sort().join('\n') + '\n';
+  return nq.split('\n').filter((l) => l.length > 0).sort().join('\n') + '\n';
 }
 
 /**
