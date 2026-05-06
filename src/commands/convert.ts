@@ -29,10 +29,28 @@
  */
 
 import { Command } from 'commander';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { printResult, printError, printVerbose, type OutputOptions } from '../lib/output.js';
 import type { ImportContext, ImporterCliOption, OutputFormat } from '../lib/import-types.js';
 import { getImporter, listFormats, autoDetect, importers } from '../lib/import-registry.js';
+
+/**
+ * Canonicalize a file path for ImportContext. Importers that hash inputPath
+ * into derived IRIs (e.g., the VCF SequencingRun) must see the same string
+ * regardless of which symlinked path the user passes — otherwise byte-equal
+ * regression suites break when the same fixture is reached via different
+ * symlink chains. realpathSync resolves all symlinks down to the inode's
+ * canonical path. Falls back to the raw path if realpath fails (e.g., the
+ * file is missing — handled later by readInput).
+ */
+function canonicalizeInputPath(file: string | undefined): string {
+  if (!file) return '<stdin>';
+  try {
+    return realpathSync(file);
+  } catch {
+    return file;
+  }
+}
 
 /**
  * Read input from file or stdin.
@@ -202,7 +220,7 @@ export function registerConvertCommand(program: Command): void {
         if (key in options) sidecarBag[key] = options[key];
       }
       const ctx: ImportContext = {
-        inputPath: file ?? '<stdin>',
+        inputPath: canonicalizeInputPath(file),
         outputSerialization: options.format === 'jsonld' ? 'jsonld' : 'turtle',
         sourceSystem: options.sourceSystem,
         passthroughMinimal: options.passthrough === 'minimal',
