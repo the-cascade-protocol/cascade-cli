@@ -39,6 +39,7 @@ import { parsePhenotypicFeatures } from './phenotypic-features.js';
 import { parseInterpretations } from './interpretations.js';
 import { parsePedigree } from './pedigree.js';
 import { parseBiosample, buildRawFileRecord } from './biosamples.js';
+import { parseMedicalActions } from './medical-actions.js';
 import { tripleRef, NS } from '../fhir-converter/types.js';
 
 export { detectPhenopacket, classifyPhenopacket } from './detect.js';
@@ -290,8 +291,20 @@ export async function convertPhenopacket(
       }
     }
 
-    // Subsequent tasks add per-unit processing here:
-    //   - TASK-2B.8 medicalActions     → recommendedActions text on the patient
+    // ---- Medical actions → free-text recommendedActions on the patient (TASK-2B.8) ----
+    if (Array.isArray(unit.pp.medicalActions)) {
+      const out = parseMedicalActions(
+        unit.pp.medicalActions,
+        unit.patientIri,
+        ctx,
+        ctxLabel,
+      );
+      const patientRecord = records.find((r) => r.iri === unit.patientIri);
+      if (patientRecord) patientRecord.quads.push(...out.quads);
+      quads.push(...out.quads);
+      warnings.push(...out.warnings);
+      vocabularyGaps.push(...out.gaps);
+    }
   }
 
   return {
