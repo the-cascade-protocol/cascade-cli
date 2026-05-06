@@ -28,6 +28,7 @@ import type {
 } from '../import-types.js';
 import type { ClinvarParsedRecord } from './types.js';
 import { parseClinvarXml } from './xml-parser.js';
+import { parseSimpleAllele } from './simple-allele.js';
 
 export { detectClinvar } from './detect.js';
 export { clinvarImporter } from './registry-entry.js';
@@ -53,7 +54,7 @@ export interface ClinvarConversionResult {
  */
 export async function convertClinvarXml(
   xml: string,
-  _ctx: ImportContext,
+  ctx: ImportContext,
 ): Promise<ClinvarConversionResult> {
   const records: ClinvarParsedRecord[] = [];
   const quads: Quad[] = [];
@@ -82,9 +83,45 @@ export async function convertClinvarXml(
     });
   }
 
-  // TASK-2A.1: stub. Real per-archive walk lands in TASK-2A.2 → 2A.4.
-  for (const _archive of archives) {
-    skippedCount += 1;
+  // Per-archive walk: emit a Variant from the SimpleAllele block.
+  // RCV → VariantInterpretation and ClinicalAssertion → SubmitterAssertion
+  // are wired up in TASK-2A.3 / 2A.4.
+  for (const archive of archives) {
+    const vcvAccession: string =
+      archive?.['@_Accession'] ?? '<no-accession>';
+    const vcvVariationId: string | undefined = archive?.['@_VariationID'];
+
+    // ClinVar VariationArchive may carry either ClassifiedRecord (the
+    // common case) or IncludedRecord (rarer; haplotype/genotype rollups).
+    const classified = archive?.ClassifiedRecord ?? archive?.IncludedRecord;
+    const simpleAllele = classified?.SimpleAllele;
+
+    if (!simpleAllele) {
+      vocabularyGaps.push({
+        sourceField: `VariationArchive[${vcvAccession}]`,
+        reason:
+          'VariationArchive has no SimpleAllele block; only Haplotype / Genotype variants are present (deferred — no v1-draft Cascade representation for ClinVar haplotype-level records yet).',
+        severity: 'warning',
+        context: vcvAccession,
+      });
+      skippedCount += 1;
+      continue;
+    }
+
+    // ---- Variant ----
+    const out = parseSimpleAllele(vcvAccession, vcvVariationId, simpleAllele, ctx);
+    if (out) {
+      records.push(out.record);
+      quads.push(...out.record.quads);
+      warnings.push(...out.warnings);
+      vocabularyGaps.push(...out.gaps);
+      importedIdentifiers.push({
+        cascadeIri: out.record.iri,
+        cascadeType: out.record.cascadeType,
+        sourceType: 'ClinVar.VariationArchive',
+        sourceId: vcvAccession,
+      });
+    }
   }
 
   return {
