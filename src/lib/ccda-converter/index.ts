@@ -166,12 +166,18 @@ function convertSingleCcda(
 
   // Document ID for narrative linking
   const docIdEl = Array.isArray(ccdaDoc?.id) ? ccdaDoc.id[0] : ccdaDoc?.id;
+  // HL7 II semantics: root+extension when both present; root alone IS the
+  // globally unique document id when extension is absent. Only fall back to
+  // the import timestamp when the document carries no id at all (that
+  // fallback makes re-imports mint new URIs, i.e. duplicate documents).
   const documentId =
     docIdEl?.['@_extension']
       ? `${docIdEl['@_root'] ?? ''}:${docIdEl['@_extension']}`
       : docIdEl?.extension
         ? `${docIdEl.root ?? ''}:${docIdEl.extension}`
-        : `doc:${importedAt}`;
+        : (docIdEl?.['@_root'] ?? docIdEl?.root)
+          ? `${docIdEl['@_root'] ?? docIdEl.root}`
+          : `doc:${importedAt}`;
 
   const allQuads: any[] = [];
   let count = 0;

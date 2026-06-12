@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.10] - 2026-06-11
+
+### Fixed
+
+- **Reconciliation no longer drops non-reconcilable records.** `cascade pod import` reconciliation (multi-file or `--reconcile-existing`) silently discarded every subject outside the reconciler's known record types: `clinical:ClinicalDocument` narrative documents (with their `cascade:requiresLLMExtraction` flags), encounters, imaging studies, procedures, FHIR passthrough nodes, and untyped child nodes. Such subjects now pass through reconciliation verbatim, deduplicated by quad identity across inputs. The reconciliation report gains a `passthroughSubjects` count. (Found building the cascade-dmt demo; previously the only workaround was `--no-reconcile-existing`.)
+- **Deterministic ClinicalDocument URIs for root-only document ids.** A C-CDA `<id root="..."/>` without an `extension` fell through to the import-timestamp fallback, so every re-import minted a new document URI and duplicated the document. Per HL7 II semantics the root alone is the document id; the timestamp fallback now applies only when the document carries no id at all.
+
 ## [0.5.9] - 2026-04-10
 
 ### Added
