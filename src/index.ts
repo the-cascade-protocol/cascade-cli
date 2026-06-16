@@ -26,6 +26,7 @@ import { registerPodCommand } from './commands/pod/index.js';
 import { registerConformanceCommand } from './commands/conformance.js';
 import { registerServeCommand } from './commands/serve.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';
+import { registerAdvisoryCommand } from './commands/advisory.js';
 import { registerAgentCommand } from '@the-cascade-protocol/agent';
 import pkg from '../package.json' with { type: 'json' };
 
@@ -46,6 +47,7 @@ registerPodCommand(program);
 registerConformanceCommand(program);
 registerServeCommand(program);
 registerCapabilitiesCommand(program);
+registerAdvisoryCommand(program);
 registerAgentCommand(program);
 
 // Custom help text with examples
@@ -64,6 +66,9 @@ Examples:
   cascade agent serve
   cascade capabilities
   cascade capabilities --json
+  cascade advisory validate advisory.ldpatch
+  cascade advisory dry-run advisory.ldpatch --pod ./my-pod
+  cascade advisory feed pull https://issuer.example/feed.jsonld --pod ./my-pod
 `,
 );
 

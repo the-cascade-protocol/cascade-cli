@@ -2,17 +2,25 @@
  * cascade convert --from <format> --to <format> [file]
  *
  * Convert between health data formats.
- * Supports FHIR R4, Cascade Protocol Turtle, and JSON-LD.
  *
- * Options:
- *   --from <format>        Source format (fhir|cascade|c-cda)
- *   --to <format>          Target format (turtle|jsonld|fhir|cascade)
+ * Dispatch is registry-driven: src/lib/import-registry.ts holds the list
+ * of FormatImporter instances. Each importer declares the --from value it
+ * matches, the --to values it supports, optional sidecar CLI flags, and
+ * a postProcess hook for sidecar work (manifest writing, narrative
+ * extraction, etc.). New formats are added by registering an entry — no
+ * edits to this file are required.
+ *
+ * Common options:
+ *   --from <format>        Source format (registry-driven)
+ *   --to <format>          Target format (registry-driven; valid values depend on --from)
  *   --format <output>      Output serialization format (turtle|jsonld) [default: turtle]
  *   --passthrough <mode>   Passthrough mode for unmapped FHIR types (full|minimal) [default: full]
- *                          full: stores original FHIR JSON for lossless round-trip
- *                          minimal: omits fhirJson; smaller output, no round-trip support
+ *   --source-system <name> Tag all records with a source-system name
  *   --json                 Output results as JSON envelope (machine-readable)
  *   --verbose              Show detailed conversion information
+ *
+ * Per-importer sidecar options are declared by their entries in
+ * import-registry.ts and surfaced through --help.
  *
  * Supports stdin piping:
  *   cat patient.json | cascade convert --from fhir --to cascade
@@ -21,260 +29,278 @@
  */
 
 import { Command } from 'commander';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname, basename, join } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
 import { printResult, printError, printVerbose, type OutputOptions } from '../lib/output.js';
-import { convert, detectFormat, type InputFormat, type OutputFormat } from '../lib/fhir-converter/index.js';
-import { buildImportManifest } from '../lib/fhir-converter/import-manifest.js';
-import { EXCLUDED_TYPES } from '../lib/fhir-converter/converters-passthrough.js';
-import { parseCcdaXml } from '../lib/ccda-converter/parser.js';
-import { collectNarrativeBlocks, type NarrativeBlock } from '../lib/ccda-converter/narrative-extractor.js';
-import AdmZip from 'adm-zip';
+import type { ImportContext, ImporterCliOption, OutputFormat } from '../lib/import-types.js';
+import { getImporter, listFormats, autoDetect, importers } from '../lib/import-registry.js';
+
+/**
+ * Canonicalize a file path for ImportContext. Importers that hash inputPath
+ * into derived IRIs (e.g., the VCF SequencingRun) must see the same string
+ * regardless of which symlinked path the user passes — otherwise byte-equal
+ * regression suites break when the same fixture is reached via different
+ * symlink chains. realpathSync resolves all symlinks down to the inode's
+ * canonical path. Falls back to the raw path if realpath fails (e.g., the
+ * file is missing — handled later by readInput).
+ */
+function canonicalizeInputPath(file: string | undefined): string {
+  if (!file) return '<stdin>';
+  try {
+    return realpathSync(file);
+  } catch {
+    return file;
+  }
+}
 
 /**
  * Read input from file or stdin.
- * Returns a Buffer for ZIP files (to preserve binary content for IHE XDM bundles),
- * or a UTF-8 string for all other files and stdin.
+ * Returns a Buffer for binary inputs (ZIP) so callers can preserve binary content
+ * for IHE XDM bundles, or a UTF-8 string for everything else.
  */
-function readInput(file: string | undefined, asBinary = false): string | Buffer {
+function readInput(file: string | undefined, asBinary: boolean): string | Buffer {
   if (file) {
-    if (asBinary || file.toLowerCase().endsWith('.zip')) {
+    const lower = file.toLowerCase();
+    if (
+      asBinary ||
+      lower.endsWith('.zip') ||
+      lower.endsWith('.gz') ||
+      lower.endsWith('.bgz') ||
+      lower.endsWith('.vcf')
+    ) {
       return readFileSync(file);
     }
     return readFileSync(file, 'utf-8');
   }
-  // Read from stdin
+  // stdin: read as Buffer when the caller flagged binary (--from c-cda or --from vcf).
+  if (asBinary) return readFileSync(0);
   return readFileSync(0, 'utf-8');
 }
 
+/** Strip leading dashes and convert to camelCase to match Commander's option key. */
+function flagToOptionKey(flag: string): string {
+  // '--manifest [file]' → 'manifest'
+  // '--extract-narratives' → 'extractNarratives'
+  const long = flag.split(/\s+/)[0].replace(/^--/, '');
+  return long.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+}
+
+/**
+ * Aggregate every importer's cliOptions, error if two importers declare
+ * the same flag (the registration model would be silently broken in that case).
+ */
+function collectCliOptions(): ImporterCliOption[] {
+  const seen = new Set<string>();
+  const collected: ImporterCliOption[] = [];
+  for (const imp of importers) {
+    for (const opt of imp.cliOptions ?? []) {
+      const key = opt.flag.split(/\s+/)[0];
+      if (seen.has(key)) {
+        throw new Error(
+          `Duplicate CLI flag declared by importer '${imp.format}': ${opt.flag}. ` +
+            `Each --flag must be unique across the importer registry.`,
+        );
+      }
+      seen.add(key);
+      collected.push(opt);
+    }
+  }
+  return collected;
+}
+
 export function registerConvertCommand(program: Command): void {
-  program
+  const formats = listFormats();
+  const sidecarOptions = collectCliOptions();
+
+  const cmd = program
     .command('convert')
     .description('Convert between health data formats')
     .argument('[file]', 'Input file (reads from stdin if omitted)')
-    .requiredOption('--from <format>', 'Source format (fhir|cascade|c-cda)')
+    .requiredOption('--from <format>', `Source format (${formats.join('|')})`)
     .requiredOption('--to <format>', 'Target format (turtle|jsonld|fhir|cascade)')
     .option('--format <output>', 'Output serialization format (turtle|jsonld)', 'turtle')
-    .option('--source-system <name>', 'Tag all records with a source system name (adds cascade:sourceSystem for reconciliation)')
-    .option('--passthrough <mode>', 'Passthrough mode for unmapped FHIR types: full (store fhirJson, round-trip supported) or minimal (omit fhirJson, smaller output)', 'full')
-    .option('--manifest [file]', 'Write import manifest JSON alongside output (default: {input}-manifest.json). Only applies when --from fhir.')
-    .option('--extract-narratives', 'Extract narrative text blocks from C-CDA sections and write a JSON sidecar <file>.narratives.json. Only applies when --from c-cda.')
-    .action(
-      async (
-        file: string | undefined,
-        options: { from: string; to: string; format: string; sourceSystem?: string; passthrough: string; manifest?: string | boolean; extractNarratives?: boolean },
-      ) => {
-        const globalOpts = program.opts() as OutputOptions;
+    .option(
+      '--source-system <name>',
+      'Tag all records with a source system name (adds cascade:sourceSystem for reconciliation)',
+    )
+    .option(
+      '--passthrough <mode>',
+      'Passthrough mode for unmapped FHIR types: full (store fhirJson, round-trip supported) or minimal (omit fhirJson, smaller output)',
+      'full',
+    );
 
-        printVerbose(`Converting from ${options.from} to ${options.to}`, globalOpts);
-        if (file) {
-          printVerbose(`Input file: ${file}`, globalOpts);
-        } else {
-          printVerbose('Reading from stdin', globalOpts);
-        }
-        printVerbose(`Output format: ${options.format}`, globalOpts);
-        if (options.sourceSystem) {
-          printVerbose(`Source system: ${options.sourceSystem}`, globalOpts);
-        }
+  // Importer-contributed sidecar flags
+  for (const opt of sidecarOptions) {
+    if (opt.defaultValue !== undefined) {
+      cmd.option(opt.flag, opt.description, opt.defaultValue as string);
+    } else {
+      cmd.option(opt.flag, opt.description);
+    }
+  }
 
-        // 1. Read input
-        let input: string | Buffer;
-        try {
-          input = readInput(file, options.from === 'c-cda');
-        } catch (err: any) {
-          printError(`Failed to read input: ${err.message}`, globalOpts);
-          process.exitCode = 1;
-          return;
-        }
+  cmd.action(
+    async (
+      file: string | undefined,
+      options: {
+        from: string;
+        to: string;
+        format: string;
+        sourceSystem?: string;
+        passthrough: string;
+        // Sidecar options land here by Commander key; we shovel them all into ctx.options.
+        [key: string]: unknown;
+      },
+    ) => {
+      const globalOpts = program.opts() as OutputOptions;
 
-        if (Buffer.isBuffer(input) ? input.length === 0 : !input.trim()) {
-          printError('Empty input', globalOpts);
-          process.exitCode = 1;
-          return;
-        }
+      printVerbose(`Converting from ${options.from} to ${options.to}`, globalOpts);
+      if (file) {
+        printVerbose(`Input file: ${file}`, globalOpts);
+      } else {
+        printVerbose('Reading from stdin', globalOpts);
+      }
+      printVerbose(`Output format: ${options.format}`, globalOpts);
+      if (options.sourceSystem) {
+        printVerbose(`Source system: ${options.sourceSystem}`, globalOpts);
+      }
 
-        // 2. Validate source/target formats
-        const validInputFormats = ['fhir', 'cascade', 'c-cda'];
-        const validOutputFormats = ['turtle', 'jsonld', 'fhir', 'cascade'];
-
-        if (!validInputFormats.includes(options.from)) {
-          printError(`Invalid source format: ${options.from}. Valid: ${validInputFormats.join(', ')}`, globalOpts);
-          process.exitCode = 1;
-          return;
-        }
-
-        if (!validOutputFormats.includes(options.to)) {
-          printError(`Invalid target format: ${options.to}. Valid: ${validOutputFormats.join(', ')}`, globalOpts);
-          process.exitCode = 1;
-          return;
-        }
-
-        // 3. Auto-detect format if helpful (validate matches declared)
-        const detected = Buffer.isBuffer(input) ? null : detectFormat(input);
-        if (detected && detected !== options.from) {
-          printVerbose(
-            `Note: Input appears to be ${detected} but --from says ${options.from}. Proceeding with declared format.`,
-            globalOpts,
-          );
-        }
-
-        // 4. Run conversion
-        const outputSerialization = (options.format === 'jsonld' ? 'jsonld' : 'turtle') as 'turtle' | 'jsonld';
-        const passthroughMinimal = options.passthrough === 'minimal';
-        if (passthroughMinimal) {
-          printVerbose('Passthrough mode: minimal (cascade:fhirJson omitted, round-trip export disabled)', globalOpts);
-        }
-        const result = await convert(
-          input,
-          options.from as InputFormat,
-          options.to as OutputFormat,
-          outputSerialization,
-          options.sourceSystem,
-          passthroughMinimal,
+      // 1. Look up importer
+      const importer = getImporter(options.from);
+      if (!importer) {
+        printError(
+          `Invalid source format: ${options.from}. Valid: ${formats.join(', ')}`,
+          globalOpts,
         );
+        process.exitCode = 1;
+        return;
+      }
 
-        // 5. Output
-        if (!result.success) {
-          for (const err of result.errors) {
-            printError(err, globalOpts);
-          }
-          for (const warn of result.warnings) {
-            printVerbose(`Warning: ${warn}`, globalOpts);
-          }
-          process.exitCode = 1;
-          return;
+      // 2. Validate --to against this importer's supported outputs
+      if (!importer.supportedOutputs.includes(options.to as OutputFormat)) {
+        printError(
+          `Importer '${importer.format}' does not support --to ${options.to}. ` +
+            `Valid: ${importer.supportedOutputs.join(', ')}`,
+          globalOpts,
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      // 3. Read input
+      let input: string | Buffer;
+      try {
+        // C-CDA bundles can be ZIP (IHE XDM); VCF can be plain or gzipped/BGZF.
+        const wantsBinary = options.from === 'c-cda' || options.from === 'vcf';
+        input = readInput(file, wantsBinary);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        printError(`Failed to read input: ${msg}`, globalOpts);
+        process.exitCode = 1;
+        return;
+      }
+
+      if (Buffer.isBuffer(input) ? input.length === 0 : !input.trim()) {
+        printError('Empty input', globalOpts);
+        process.exitCode = 1;
+        return;
+      }
+
+      // 4. Auto-detect content vs declared --from; warn on mismatch
+      const detected = autoDetect(input);
+      if (detected && detected.format !== options.from) {
+        printVerbose(
+          `Note: Input appears to be ${detected.format} but --from says ${options.from}. Proceeding with declared format.`,
+          globalOpts,
+        );
+      }
+
+      // 5. Build context. Sidecar options land in ctx.options by Commander key.
+      const sidecarBag: Record<string, unknown> = {};
+      for (const opt of sidecarOptions) {
+        const key = flagToOptionKey(opt.flag);
+        if (key in options) sidecarBag[key] = options[key];
+      }
+      const ctx: ImportContext = {
+        inputPath: canonicalizeInputPath(file),
+        outputSerialization: options.format === 'jsonld' ? 'jsonld' : 'turtle',
+        sourceSystem: options.sourceSystem,
+        passthroughMinimal: options.passthrough === 'minimal',
+        importedAt: new Date().toISOString(),
+        options: sidecarBag,
+      };
+      if (ctx.passthroughMinimal) {
+        printVerbose(
+          'Passthrough mode: minimal (cascade:fhirJson omitted, round-trip export disabled)',
+          globalOpts,
+        );
+      }
+
+      // 6. Run conversion
+      const result = await importer.convert(input, options.to as OutputFormat, ctx);
+
+      // 7. Output / errors
+      if (!result.success) {
+        for (const err of result.errors) {
+          printError(err, globalOpts);
         }
-
-        // Print warnings in verbose mode
         for (const warn of result.warnings) {
-          printVerbose(`Warning: ${warn}`, globalOpts);
+          printVerbose(`Warning: ${warn.message}`, globalOpts);
         }
+        process.exitCode = 1;
+        return;
+      }
 
-        if (globalOpts.json) {
-          // JSON envelope for machine-readable output
-          printResult(
-            {
-              success: true,
-              from: options.from,
-              to: options.to,
-              format: result.format,
-              resourceCount: result.resourceCount,
-              skippedCount: result.skippedCount,
-              warnings: result.warnings,
-              output: result.output,
-              resources: result.results.map(r => ({
+      for (const warn of result.warnings) {
+        printVerbose(`Warning: ${warn.message}`, globalOpts);
+      }
+
+      if (globalOpts.json) {
+        printResult(
+          {
+            success: true,
+            from: options.from,
+            to: options.to,
+            format: result.format,
+            resourceCount: result.resourceCount,
+            skippedCount: result.skippedCount,
+            warnings: result.warnings.map((w) => w.message),
+            output: result.output,
+            resources:
+              result.records?.map((r) => ({
                 resourceType: r.resourceType,
                 cascadeType: r.cascadeType,
                 warnings: r.warnings,
-              })),
-            },
+              })) ?? [],
+          },
+          globalOpts,
+        );
+      } else {
+        console.log(result.output);
+        if (result.resourceCount > 0) {
+          console.error(
+            `Converted ${result.resourceCount} resource${result.resourceCount > 1 ? 's' : ''} ` +
+              `(${options.from} -> ${result.format})`,
+          );
+        }
+        if (result.skippedCount > 0) {
+          printVerbose(
+            `${result.skippedCount} resource type${result.skippedCount > 1 ? 's' : ''} skipped (CareTeam, CarePlan, SupplyDelivery — not patient health data)`,
             globalOpts,
           );
-        } else {
-          // Direct output (Turtle, JSON-LD, or FHIR JSON)
-          console.log(result.output);
-
-          // Print summary to stderr so it does not pollute piped output
-          if (result.resourceCount > 0) {
-            console.error(
-              `Converted ${result.resourceCount} resource${result.resourceCount > 1 ? 's' : ''} ` +
-              `(${options.from} -> ${result.format})`,
-            );
-          }
-          if (result.skippedCount > 0) {
-            printVerbose(`${result.skippedCount} resource type${result.skippedCount > 1 ? 's' : ''} skipped (CareTeam, CarePlan, SupplyDelivery — not patient health data)`, globalOpts);
-          }
-          if (result.warnings.length > 0) {
-            console.error(`${result.warnings.length} warning${result.warnings.length > 1 ? 's' : ''}`);
-          }
         }
-
-        // Write import manifest if requested (FHIR -> Cascade only)
-        if (options.manifest !== undefined && options.from === 'fhir' && result.success) {
-          // Count excluded types from the source bundle
-          const excludedCounts: Record<string, number> = {};
-          try {
-            const parsed = JSON.parse(Buffer.isBuffer(input) ? input.toString('utf-8') : input);
-            const resources: any[] =
-              parsed.resourceType === 'Bundle'
-                ? (parsed.entry ?? []).map((e: any) => e.resource).filter(Boolean)
-                : [parsed];
-            for (const res of resources) {
-              if (res?.resourceType && EXCLUDED_TYPES.has(res.resourceType)) {
-                excludedCounts[res.resourceType] = (excludedCounts[res.resourceType] ?? 0) + 1;
-              }
-            }
-          } catch {
-            // Input already validated as parseable JSON above; this should not fail
-          }
-
-          const manifest = buildImportManifest(
-            result,
-            file ?? '<stdin>',
-            options.sourceSystem ?? '',
-            excludedCounts,
-          );
-
-          let manifestPath: string;
-          if (typeof options.manifest === 'string') {
-            manifestPath = options.manifest;
-          } else if (file) {
-            manifestPath = join(dirname(file), `${basename(file, '.json')}-manifest.json`);
-          } else {
-            manifestPath = 'fhir-import-manifest.json';
-          }
-
-          writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-          console.error(`Import manifest written to: ${manifestPath}`);
+        if (result.warnings.length > 0) {
+          console.error(`${result.warnings.length} warning${result.warnings.length > 1 ? 's' : ''}`);
         }
+      }
 
-        // P5.1-C: --extract-narratives (c-cda only)
-        // Writes a JSON sidecar <file>.narratives.json with all narrative blocks.
-        // For IHE XDM ZIP inputs, extracts narrative blocks from each XML document.
-        // Stdout remains TTL-only per RC-6 stdout discipline — all status goes to stderr.
-        if (options.extractNarratives && options.from === 'c-cda' && result.success) {
-          try {
-            const allBlocks: NarrativeBlock[] = [];
-
-            // Detect ZIP input by magic bytes (PK signature: 0x50 0x4B)
-            const isZip = Buffer.isBuffer(input) && input[0] === 0x50 && input[1] === 0x4b;
-
-            if (isZip) {
-              // Extract all .XML files from the ZIP and parse each one
-              const zip = new AdmZip(input);
-              const xmlEntries = zip.getEntries()
-                .filter((e) => !e.isDirectory && e.entryName.toUpperCase().endsWith('.XML'));
-              for (const entry of xmlEntries) {
-                try {
-                  const xml = entry.getData().toString('utf-8');
-                  const parsedDoc = parseCcdaXml(xml);
-                  const blocks = collectNarrativeBlocks(parsedDoc);
-                  allBlocks.push(...blocks);
-                } catch {
-                  // Skip unparseable entries — partial results are still valuable
-                }
-              }
-            } else {
-              const xml = Buffer.isBuffer(input) ? input.toString('utf-8') : input;
-              const parsedDoc = parseCcdaXml(xml);
-              allBlocks.push(...collectNarrativeBlocks(parsedDoc));
-            }
-
-            let narrativesPath: string;
-            if (file) {
-              narrativesPath = join(dirname(file), `${basename(file)}.narratives.json`);
-            } else {
-              narrativesPath = 'ccda-narratives.json';
-            }
-
-            writeFileSync(narrativesPath, JSON.stringify(allBlocks, null, 2));
-            console.error(`Narrative blocks written to: ${narrativesPath} (${allBlocks.length} blocks)`);
-          } catch (err: any) {
-            console.error(`Warning: Failed to extract narratives: ${err.message}`);
-          }
-        } else if (options.extractNarratives && options.from !== 'c-cda') {
-          console.error('Warning: --extract-narratives is only supported for --from c-cda');
+      // 8. Sidecar post-processing
+      if (importer.postProcess) {
+        try {
+          await importer.postProcess(input, result, ctx);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`Warning: postProcess for ${importer.format} failed: ${msg}`);
         }
-      },
-    );
+      }
+    },
+  );
 }

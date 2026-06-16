@@ -1,0 +1,1083 @@
+@prefix sh:       <http://www.w3.org/ns/shacl#> .
+@prefix genomics: <https://ns.cascadeprotocol.org/genomics/v1#> .
+@prefix cascade:  <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix prov:     <http://www.w3.org/ns/prov#> .
+@prefix xsd:      <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs:     <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ============================================================================
+# Cascade Protocol — Genomics Vocabulary SHACL Validation Shapes
+# ============================================================================
+# Version: 1.0-draft (TASK-0.2, 2026-05-05; +v1-draft.0.2 additions, 2026-05-05)
+# Validates against: genomics.ttl v1.0-draft (genomics@v1-draft.0.2)
+#
+# Changelog:
+#   v1-draft.0.2 (2026-05-05): added VariantShape property shapes for the
+#     four new Variant-domain properties — genomics:refAllele, altAllele,
+#     genomicStartEnd (Info-severity datatype/maxCount checks),
+#     genomics:variantAlleleFrequency (Violation-severity 0.0–1.0 range),
+#     genomics:somaticStatus (Violation-severity sh:in over Germline /
+#     Somatic / UnknownSomaticStatus). All optional (no minCount). No
+#     NodeShape added for the new generic genomics:reportedRecord predicate
+#     — it is intentionally domain-broad on GeneticTest with no rdfs:range,
+#     so a SHACL constraint would fight the design intent. Existing fixtures
+#     never reference any of these new properties, so existing data passes
+#     unchanged.
+#   v1-draft.0.1 (2026-05-05): initial 12 NodeShapes (TASK-0.2).
+#
+# Shapes authored (12 sh:NodeShape):
+#   1.  genomics:VariantShape                — required identity, stable IDs,
+#                                               quality tier
+#   2.  genomics:VariantInterpretationShape  — D-Q5 cardinality, ACMG enum,
+#                                               D-QUALITY-TIER safety constraint
+#   3.  genomics:HaplotypeShape              — required star-allele identity
+#   4.  genomics:DiplotypeShape              — exactly two haplotypes (hapA+hapB)
+#   5.  genomics:CopyNumberVariantShape      — interval + copy number, VAF range
+#   6.  genomics:SubmitterAssertionShape     — submitter + asserted class
+#   7.  genomics:PedigreeShape               — proband + at least one member
+#   8.  genomics:PedigreeMemberShape         — required relationship role
+#   9.  genomics:GeneticTestShape            — required test type
+#   10. genomics:GeneticTestOrderShape       — required order status + date
+#   11. genomics:SequencingRunShape          — coverage, technology, reference
+#   12. genomics:RawFileShape                — format, hash, location, reference
+#
+# SEVERITY LEVELS (matching advisory.shapes.ttl / health.shapes.ttl)
+#   sh:Violation — Must fix; data is invalid or unsafe without it.
+#                  (Required-field absences and the D-QUALITY-TIER safety
+#                  constraint use this severity.)
+#   sh:Warning   — Should address; data is technically usable but missing
+#                  recommended completeness or audit fields.
+#   sh:Info      — Suggested enrichment; nice-to-have.
+#
+# ----------------------------------------------------------------------------
+# D-Q5 — Multi-condition VariantInterpretation cardinality
+# ----------------------------------------------------------------------------
+# Each VariantInterpretation is per-(variant, condition) pair: SHACL enforces
+# genomics:variantInterpreted minCount/maxCount = 1 and genomics:condition
+# minCount/maxCount = 1 on VariantInterpretationShape. Multi-condition cases
+# produce multiple Interpretation instances (one per condition); same-pair
+# reclassifications produce new Interpretation instances chained via
+# prov:wasRevisionOf.
+#
+# The reclassification-chain integrity rule (a revision MUST share both
+# variantInterpreted and condition with its predecessor) is NOT expressible
+# in pure SHACL Core without sh:sparql, because the constraint is across two
+# focus nodes (the revising and revised interpretations). This is documented
+# here as a cross-class invariant; the supplementing code-level check lives
+# in cascade-cli (TASK-4.x — applier validation step on incoming
+# VariantReclassification advisories). Adding a sh:sparql block here was
+# considered and rejected as making the shape harder to read for the
+# narrow benefit; the cascade-cli check is the authoritative enforcer.
+#
+# ----------------------------------------------------------------------------
+# D-QUALITY-TIER — Safety constraint on Pathogenic / LikelyPathogenic
+# ----------------------------------------------------------------------------
+# This is THE critical constraint of this shape file. For every
+# VariantInterpretation whose acmgClassification is Pathogenic or
+# LikelyPathogenic, EITHER:
+#   (a) the referenced genomics:Variant has
+#       genomics:dataQualityTier genomics:ClinicalGrade, OR
+#   (b) the Interpretation itself has genomics:requiresConfirmation true.
+#
+# Rationale: prevents consumer-grade pathogenic calls from masquerading as
+# clinical findings. Phase 2C (consumer-array imports — 23andMe, AncestryDNA,
+# MyHeritage, FTDNA) auto-tags every variant ConsumerGrade and would, without
+# this constraint, be able to push Pathogenic interpretations into the
+# advisory engine. The advisory engine MUST NOT auto-apply care
+# recommendations to confirmation-required interpretations regardless of
+# issuer trust.
+#
+# Expression: VariantInterpretationShape uses sh:xone (exactly-one of two
+# disjoint conditions): the qualifying-class predicate sh:not [sh:in
+# (Pathogenic LikelyPathogenic)] (i.e., classification is benign-leaning or
+# VUS — constraint trivially satisfied), OR a require-mitigation predicate
+# combining (variant.dataQualityTier = ClinicalGrade) with
+# (requiresConfirmation = true) using sh:or. Using sh:or at the inner level
+# is correct because either mitigation is sufficient. Using sh:xone at the
+# outer level is the readable way to encode "if-then" in pure SHACL Core
+# (one of: classification is non-pathogenic, or one of the mitigations
+# applies). The violation message names the affected interpretation IRI
+# and lists both remediation paths so callers know what to change.
+#
+# ----------------------------------------------------------------------------
+# Vocabulary gaps acknowledged in shape comments (not enforced)
+# ----------------------------------------------------------------------------
+#   - genomics:GeneticTest has no testDate property in v1-draft.0.1; only
+#     genomics:GeneticTestOrder has genomics:orderedAt. Test-result date is
+#     captured indirectly via prov:generatedAtTime on the GeneticTest
+#     instance. GeneticTestShape requires testType but not a test date;
+#     date enforcement deferred to v1-draft.0.2 if a property is added.
+#   - genomics:SubmitterAssertion has no assertionDate property and no
+#     forward reference to its parent VariantInterpretation; the inverse
+#     link is genomics:aggregatedFrom (from Interpretation to Assertion).
+#     SubmitterAssertionShape therefore requires submitter and asserted
+#     classification but cannot directly enforce a parent-interpretation
+#     reference. This is acceptable because Interpretation→Assertion is the
+#     authoritative direction in the model.
+# ============================================================================
+
+# ============================================================================
+# Shape 1: Variant
+# ============================================================================
+
+genomics:VariantShape a sh:NodeShape ;
+    sh:targetClass genomics:Variant ;
+    rdfs:label "Variant Shape"@en ;
+    rdfs:comment "Validation constraints for genomics:Variant. Enforces required gene-symbol identity, presence of at least one stable identifier across the four supported registries (CAid, VRS, ClinVar, dbSNP), and presence of a data-quality tier (used by the D-QUALITY-TIER safety constraint on downstream VariantInterpretations)."@en ;
+
+    # WARNING: geneSymbol recommended (HGNC approved). Most clinical-grade
+    # imports carry it, but a Variant remains valid via other identifiers
+    # (CAid, VRS, ClinVar VCV, dbSNP rs, or the refAllele+altAllele+
+    # genomicStartEnd coordinate triple). VRS preserve-only imports
+    # (D-Q6) and gene-less VCF records legitimately lack gene context;
+    # downgraded from Violation to Warning in v1-draft.0.3 per the
+    # 2026-05-06 VRS test-fixture tie-break (cascade-coordination/
+    # tie-breaks/2026-05-06-vrs-geneSymbol-shape.md). When present, the
+    # symbol must be exactly one non-empty string.
+    sh:property [
+        sh:path genomics:geneSymbol ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Gene Symbol"@en ;
+        sh:message "Recommended: genomics:geneSymbol (HGNC approved symbol, e.g., 'BRCA2'). Variant remains valid via stable identifiers (CAid/VRS/ClinVar/dbSNP) or VCF coordinates (refAllele+altAllele+genomicStartEnd) when source data lacks gene context."@en
+    ] ;
+
+    # VIOLATION: dataQualityTier required and must be one of the four
+    # published DataQualityTier named individuals. Required so the
+    # D-QUALITY-TIER safety constraint on VariantInterpretation can fire
+    # against a non-empty tier value.
+    sh:property [
+        sh:path genomics:dataQualityTier ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:ClinicalGrade
+            genomics:ResearchGrade
+            genomics:ConsumerGrade
+            genomics:UnknownQuality
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Data Quality Tier"@en ;
+        sh:message "Variant must declare genomics:dataQualityTier as one of the four published genomics:DataQualityTier named individuals (ClinicalGrade, ResearchGrade, ConsumerGrade, UnknownQuality). Required so the D-QUALITY-TIER safety constraint on downstream VariantInterpretations can be evaluated."@en
+    ] ;
+
+    # Stable-identifier datatype constraints (per-property). The cross-class
+    # 'at least one stable ID' constraint is enforced by sh:or at the
+    # NodeShape level below.
+    sh:property [
+        sh:path genomics:caId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "ClinGen Allele Registry CAid"@en
+    ] ;
+    sh:property [
+        sh:path genomics:vrsId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "GA4GH VRS Identifier"@en
+    ] ;
+    sh:property [
+        sh:path genomics:clinvarVariationId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "ClinVar Variation ID"@en
+    ] ;
+    sh:property [
+        sh:path genomics:dbsnpRsId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "dbSNP rsID"@en
+    ] ;
+
+    # VIOLATION: at least one stable identifier among caId / vrsId /
+    # clinvarVariationId / dbsnpRsId. HGVS strings are descriptive but
+    # normalization-fragile — a stable ID is what joins reliably across
+    # databases. sh:or evaluates each branch; at least one must report
+    # zero violations.
+    sh:or (
+        [ sh:path genomics:caId               ; sh:minCount 1 ]
+        [ sh:path genomics:vrsId              ; sh:minCount 1 ]
+        [ sh:path genomics:clinvarVariationId ; sh:minCount 1 ]
+        [ sh:path genomics:dbsnpRsId          ; sh:minCount 1 ]
+    ) ;
+
+    # WARNING: zygosity recommended for variant-level reasoning.
+    sh:property [
+        sh:path genomics:zygosity ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Zygosity"@en ;
+        sh:message "genomics:zygosity is recommended; absence forces downstream tools to assume Heterozygous"@en
+    ] ;
+
+    # WARNING: mosaicismFraction range check (0.0..1.0 inclusive) when present.
+    sh:property [
+        sh:path genomics:mosaicismFraction ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0.0 ;
+        sh:maxInclusive 1.0 ;
+        sh:severity sh:Violation ;
+        sh:name "Mosaicism Fraction (VAF)"@en ;
+        sh:message "genomics:mosaicismFraction, if present, must be an xsd:decimal between 0.0 and 1.0 inclusive (variant allele fraction)"@en
+    ] ;
+
+    # Added in v1-draft.0.2: VAF as a distinct property from mosaicismFraction.
+    # Range 0.0–1.0 inclusive. Optional — no minCount.
+    sh:property [
+        sh:path genomics:variantAlleleFrequency ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0.0 ;
+        sh:maxInclusive 1.0 ;
+        sh:severity sh:Violation ;
+        sh:name "Variant Allele Frequency"@en ;
+        sh:message "genomics:variantAlleleFrequency, if present, must be an xsd:decimal between 0.0 and 1.0 inclusive (fraction of reads supporting the alternate allele)"@en
+    ] ;
+
+    # Added in v1-draft.0.2: VCF-style coordinate properties. All optional.
+    sh:property [
+        sh:path genomics:refAllele ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Reference Allele"@en
+    ] ;
+    sh:property [
+        sh:path genomics:altAllele ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Alternate Allele"@en
+    ] ;
+    sh:property [
+        sh:path genomics:genomicStartEnd ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Genomic Start-End Coordinates"@en
+    ] ;
+
+    # Added in v1-draft.0.2: somatic status (germline / somatic / unknown).
+    # Optional but value must be one of three published named individuals.
+    sh:property [
+        sh:path genomics:somaticStatus ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:Germline
+            genomics:Somatic
+            genomics:UnknownSomaticStatus
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Somatic Status"@en ;
+        sh:message "genomics:somaticStatus, if present, must be one of the three published genomics:SomaticStatus named individuals (Germline, Somatic, UnknownSomaticStatus)"@en
+    ] .
+
+# Cross-class node-level violation message for the 'at least one stable ID'
+# constraint. SHACL Core sh:or does not directly produce a top-level message
+# tied to the parent shape, so we attach a message via sh:message on the
+# parent NodeShape — most engines surface it when the sh:or branch fails.
+genomics:VariantShape sh:message "Variant must carry at least one stable identifier among genomics:caId, genomics:vrsId, genomics:clinvarVariationId, or genomics:dbsnpRsId. HGVS strings alone are insufficient for reliable cross-database joins."@en .
+
+# ============================================================================
+# Shape 2: Variant Interpretation (D-Q5 + D-QUALITY-TIER)
+# ============================================================================
+
+genomics:VariantInterpretationShape a sh:NodeShape ;
+    sh:targetClass genomics:VariantInterpretation ;
+    rdfs:label "Variant Interpretation Shape"@en ;
+    rdfs:comment "Validation constraints for genomics:VariantInterpretation. Implements D-Q5 (each Interpretation is per-(variant, condition); cardinality 1..1 on both genomics:variantInterpreted and genomics:condition) and D-QUALITY-TIER (the safety constraint on Pathogenic / LikelyPathogenic classifications)."@en ;
+
+    # ────────────────────────────────────────────────────────────────────
+    # D-Q5: variantInterpreted cardinality 1..1.
+    # Range widened in v1-draft.0.3 from genomics:Variant alone to
+    # {Variant, CopyNumberVariant, Haplotype} via sh:or — clinical
+    # interpretations attach to all three molecular-record types
+    # (e.g., the retinoblastoma phenopacket interprets a chr13 CNV).
+    # ────────────────────────────────────────────────────────────────────
+    sh:property [
+        sh:path genomics:variantInterpreted ;
+        sh:or (
+            [ sh:class genomics:Variant ]
+            [ sh:class genomics:CopyNumberVariant ]
+            [ sh:class genomics:Haplotype ]
+        ) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Variant Interpreted"@en ;
+        sh:message "VariantInterpretation must reference exactly one Variant / CopyNumberVariant / Haplotype via genomics:variantInterpreted (D-Q5 — cardinality 1..1; multi-variant cases produce multiple Interpretation instances)"@en
+    ] ;
+
+    # ────────────────────────────────────────────────────────────────────
+    # D-Q5: condition cardinality 1..1
+    # ────────────────────────────────────────────────────────────────────
+    sh:property [
+        sh:path genomics:condition ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Associated Condition"@en ;
+        sh:message "VariantInterpretation must reference exactly one condition via genomics:condition (D-Q5 — cardinality 1..1; multi-condition cases produce multiple Interpretation instances, one per condition)"@en
+    ] ;
+
+    # ────────────────────────────────────────────────────────────────────
+    # ACMG classification — required, closed enumeration over the 5
+    # published AcmgClass named individuals.
+    # ────────────────────────────────────────────────────────────────────
+    sh:property [
+        sh:path genomics:acmgClassification ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:Pathogenic
+            genomics:LikelyPathogenic
+            genomics:VUS
+            genomics:LikelyBenign
+            genomics:Benign
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "ACMG Classification"@en ;
+        sh:message "VariantInterpretation must declare genomics:acmgClassification as one of the five published genomics:AcmgClass named individuals (Pathogenic, LikelyPathogenic, VUS, LikelyBenign, Benign)"@en
+    ] ;
+
+    # ────────────────────────────────────────────────────────────────────
+    # Review status — optional but, when present, must be one of the seven
+    # published ReviewStatus named individuals.
+    # ────────────────────────────────────────────────────────────────────
+    sh:property [
+        sh:path genomics:reviewStatus ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:NoAssertionProvided
+            genomics:CriteriaNotProvided
+            genomics:SingleSubmitter
+            genomics:ConflictingSubmissions
+            genomics:MultipleSubmittersNoConflict
+            genomics:ExpertPanelReviewed
+            genomics:PracticeGuideline
+        ) ;
+        sh:severity sh:Warning ;
+        sh:name "Review Status"@en ;
+        sh:message "genomics:reviewStatus, if present, must be one of the seven published genomics:ReviewStatus named individuals (NoAssertionProvided, CriteriaNotProvided, SingleSubmitter, ConflictingSubmissions, MultipleSubmittersNoConflict, ExpertPanelReviewed, PracticeGuideline). Recommended for advisory-engine trust weighting."@en
+    ] ;
+
+    # WARNING: requiresConfirmation must be xsd:boolean if present.
+    sh:property [
+        sh:path genomics:requiresConfirmation ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Requires Confirmation"@en ;
+        sh:message "genomics:requiresConfirmation, if present, must be a single xsd:boolean"@en
+    ] ;
+
+    # WARNING: interpretedDate recommended for chronology and reclassification chains.
+    sh:property [
+        sh:path genomics:interpretedDate ;
+        sh:datatype xsd:date ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Interpretation Date"@en ;
+        sh:message "genomics:interpretedDate (xsd:date) is recommended; needed for reclassification chronology"@en
+    ] ;
+
+    # ────────────────────────────────────────────────────────────────────
+    # D-QUALITY-TIER safety constraint
+    # ────────────────────────────────────────────────────────────────────
+    # If acmgClassification is Pathogenic or LikelyPathogenic, then EITHER
+    #   (a) the referenced Variant has dataQualityTier ClinicalGrade, OR
+    #   (b) requiresConfirmation is true on the Interpretation itself.
+    #
+    # Encoded as sh:xone (exactly one) of two disjoint conditions:
+    #   Branch X: classification is NOT in {Pathogenic, LikelyPathogenic}
+    #             (constraint trivially satisfied, no mitigation needed)
+    #   Branch Y: classification IS in {Pathogenic, LikelyPathogenic} AND
+    #             at least one mitigation applies (ClinicalGrade variant OR
+    #             requiresConfirmation true).
+    #
+    # sh:xone is used so that a malformed instance with an out-of-range
+    # acmgClassification is also caught — the acmgClassification property
+    # constraint above (sh:in) handles the enum check; the sh:xone here
+    # handles the conditional requirement.
+    sh:xone (
+        # Branch X: classification is non-pathogenic (or absent — trapped
+        # by the acmgClassification property constraint above).
+        [
+            sh:path genomics:acmgClassification ;
+            sh:not [
+                sh:in (
+                    genomics:Pathogenic
+                    genomics:LikelyPathogenic
+                )
+            ]
+        ]
+        # Branch Y: classification is pathogenic-leaning AND mitigation present.
+        [
+            sh:and (
+                # Y.1: classification IS in {Pathogenic, LikelyPathogenic}
+                [
+                    sh:path genomics:acmgClassification ;
+                    sh:in (
+                        genomics:Pathogenic
+                        genomics:LikelyPathogenic
+                    )
+                ]
+                # Y.2: at least one mitigation applies — either the linked
+                # variant is ClinicalGrade tier, OR the interpretation has
+                # requiresConfirmation true.
+                [
+                    sh:or (
+                        [
+                            sh:path ( genomics:variantInterpreted genomics:dataQualityTier ) ;
+                            sh:hasValue genomics:ClinicalGrade
+                        ]
+                        [
+                            sh:path genomics:requiresConfirmation ;
+                            sh:hasValue true
+                        ]
+                    )
+                ]
+            )
+        ]
+    ) ;
+    sh:severity sh:Violation ;
+    sh:message "D-QUALITY-TIER safety constraint violated: this VariantInterpretation declares acmgClassification Pathogenic or LikelyPathogenic, but the referenced genomics:Variant is NOT genomics:ClinicalGrade tier AND genomics:requiresConfirmation is not true on this Interpretation. To resolve: EITHER promote the variant's genomics:dataQualityTier to genomics:ClinicalGrade (only valid if the underlying sequencing is CLIA/CAP/ISO15189-certified, >=30x coverage or validated panel-equivalent, with raw files retained), OR set genomics:requiresConfirmation true on this Interpretation. Consumer-grade pathogenic calls MUST NOT auto-apply care recommendations regardless of issuer trust."@en .
+
+# ============================================================================
+# Shape 3: Haplotype
+# ============================================================================
+
+genomics:HaplotypeShape a sh:NodeShape ;
+    sh:targetClass genomics:Haplotype ;
+    rdfs:label "Haplotype Shape"@en ;
+    rdfs:comment "Validation constraints for genomics:Haplotype. The clinically actionable identifier in pharmacogenomics (PharmVar star alleles) and HLA typing is the star-allele symbol; this is required. Component variants are recommended for full provenance but optional in v1-draft.0.1."@en ;
+
+    # VIOLATION: starAlleleSymbol required — the clinically actionable PGx/HLA
+    # identifier (e.g., 'CYP2C19*2', 'HLA-DQB1*02:01').
+    sh:property [
+        sh:path genomics:starAlleleSymbol ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Star Allele Symbol"@en ;
+        sh:message "Haplotype must carry exactly one non-empty genomics:starAlleleSymbol (PharmVar/HLA nomenclature, e.g. 'CYP2C19*2')"@en
+    ] ;
+
+    # WARNING: hasComponent recommended for full provenance.
+    sh:property [
+        sh:path genomics:hasComponent ;
+        sh:class genomics:Variant ;
+        sh:severity sh:Warning ;
+        sh:name "Component Variants"@en ;
+        sh:message "genomics:hasComponent is recommended; absence prevents downstream tools from auditing which constituent variants define this star allele"@en
+    ] .
+
+# ============================================================================
+# Shape 4: Diplotype
+# ============================================================================
+
+genomics:DiplotypeShape a sh:NodeShape ;
+    sh:targetClass genomics:Diplotype ;
+    rdfs:label "Diplotype Shape"@en ;
+    rdfs:comment "Validation constraints for genomics:Diplotype. A diplotype is, by definition, a pair of haplotypes — the ontology models this with two distinct properties (genomics:hapA, genomics:hapB) rather than a single 2..2 cardinality property. Each must be present exactly once."@en ;
+
+    # VIOLATION: hapA required, exactly one Haplotype.
+    sh:property [
+        sh:path genomics:hapA ;
+        sh:class genomics:Haplotype ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Haplotype A"@en ;
+        sh:message "Diplotype must carry exactly one genomics:hapA referencing a genomics:Haplotype"@en
+    ] ;
+
+    # VIOLATION: hapB required, exactly one Haplotype.
+    sh:property [
+        sh:path genomics:hapB ;
+        sh:class genomics:Haplotype ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Haplotype B"@en ;
+        sh:message "Diplotype must carry exactly one genomics:hapB referencing a genomics:Haplotype (a diplotype is by definition a pair of haplotypes)"@en
+    ] ;
+
+    # WARNING: diplotypeNotation recommended for direct match against PGx
+    # guideline tables (CPIC, DPWG).
+    sh:property [
+        sh:path genomics:diplotypeNotation ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Diplotype Notation"@en ;
+        sh:message "genomics:diplotypeNotation (e.g., '*1/*2') is recommended for direct matching against CPIC/DPWG guideline tables"@en
+    ] .
+
+# ============================================================================
+# Shape 5: Copy Number Variant
+# ============================================================================
+# Note: CopyNumberVariant rdfs:subClassOf genomics:Variant in the ontology,
+# so VariantShape constraints apply transitively (geneSymbol, dataQualityTier,
+# at-least-one-stable-ID). This shape adds CNV-specific requirements.
+
+genomics:CopyNumberVariantShape a sh:NodeShape ;
+    sh:targetClass genomics:CopyNumberVariant ;
+    rdfs:label "Copy Number Variant Shape"@en ;
+    rdfs:comment "Validation constraints specific to genomics:CopyNumberVariant. Inherits VariantShape constraints (geneSymbol, dataQualityTier, at least one stable ID) via rdfs:subClassOf and adds the CNV-specific requirements: integer copy number, interval coordinates with reference."@en ;
+
+    # VIOLATION: copyNumber required, integer.
+    sh:property [
+        sh:path genomics:copyNumber ;
+        sh:datatype xsd:integer ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Violation ;
+        sh:name "Copy Number"@en ;
+        sh:message "CopyNumberVariant must carry exactly one genomics:copyNumber as a non-negative xsd:integer (0 = homozygous deletion, 1 = heterozygous deletion, 3+ = duplication/amplification)"@en
+    ] ;
+
+    # VIOLATION: cnvIntervalRef required — interval coordinates are
+    # uninterpretable without their reference contig.
+    sh:property [
+        sh:path genomics:cnvIntervalRef ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:name "CNV Interval Reference"@en ;
+        sh:message "CopyNumberVariant must carry exactly one genomics:cnvIntervalRef (reference contig name or accession, e.g., 'NC_000013.11')"@en
+    ] ;
+
+    # VIOLATION: cnvIntervalStart required, integer ≥ 1 (1-based inclusive).
+    sh:property [
+        sh:path genomics:cnvIntervalStart ;
+        sh:datatype xsd:integer ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 1 ;
+        sh:severity sh:Violation ;
+        sh:name "CNV Interval Start"@en ;
+        sh:message "CopyNumberVariant must carry exactly one genomics:cnvIntervalStart as a positive xsd:integer (1-based, inclusive)"@en
+    ] ;
+
+    # VIOLATION: cnvIntervalEnd required, integer ≥ 1.
+    sh:property [
+        sh:path genomics:cnvIntervalEnd ;
+        sh:datatype xsd:integer ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 1 ;
+        sh:severity sh:Violation ;
+        sh:name "CNV Interval End"@en ;
+        sh:message "CopyNumberVariant must carry exactly one genomics:cnvIntervalEnd as a positive xsd:integer (1-based, inclusive)"@en
+    ] .
+
+# ============================================================================
+# Shape 6: Submitter Assertion
+# ============================================================================
+
+genomics:SubmitterAssertionShape a sh:NodeShape ;
+    sh:targetClass genomics:SubmitterAssertion ;
+    rdfs:label "Submitter Assertion Shape"@en ;
+    rdfs:comment "Validation constraints for genomics:SubmitterAssertion (e.g., one ClinVar SCV record). Requires submitter identity and the asserted ACMG classification — these are what makes the assertion auditable. Note: the v1-draft.0.1 vocabulary does NOT define an assertionDate property nor a forward reference to the parent VariantInterpretation; the inverse link is genomics:aggregatedFrom (Interpretation→Assertion), which is the authoritative direction."@en ;
+
+    # VIOLATION: submitter required.
+    sh:property [
+        sh:path genomics:submitter ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Submitter"@en ;
+        sh:message "SubmitterAssertion must carry exactly one non-empty genomics:submitter (lab/consortium/expert-panel name, e.g., 'ENIGMA', 'Ambry Genetics')"@en
+    ] ;
+
+    # VIOLATION: assertedClassification required and must be one of the five
+    # published AcmgClass named individuals.
+    sh:property [
+        sh:path genomics:assertedClassification ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:Pathogenic
+            genomics:LikelyPathogenic
+            genomics:VUS
+            genomics:LikelyBenign
+            genomics:Benign
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Asserted ACMG Classification"@en ;
+        sh:message "SubmitterAssertion must declare genomics:assertedClassification as one of the five published genomics:AcmgClass named individuals"@en
+    ] ;
+
+    # WARNING: scvAccession recommended for ClinVar-sourced records.
+    sh:property [
+        sh:path genomics:scvAccession ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "SCV Accession"@en ;
+        sh:message "genomics:scvAccession is recommended for ClinVar-sourced submissions (audit trail to the original SCV record)"@en
+    ] ;
+
+    # INFO: submitterCategory recommended for review-status weighting.
+    sh:property [
+        sh:path genomics:submitterCategory ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Submitter Category"@en ;
+        sh:message "genomics:submitterCategory is suggested; drives review-status weighting in the aggregate"@en
+    ] .
+
+# ============================================================================
+# Shape 7: Pedigree
+# ============================================================================
+
+genomics:PedigreeShape a sh:NodeShape ;
+    sh:targetClass genomics:Pedigree ;
+    rdfs:label "Pedigree Shape"@en ;
+    rdfs:comment "Validation constraints for genomics:Pedigree. A pedigree must have exactly one proband (the index patient who brought the family to attention) and at least one member (the proband counts)."@en ;
+
+    # VIOLATION: proband required, exactly one PedigreeMember.
+    sh:property [
+        sh:path genomics:proband ;
+        sh:class genomics:PedigreeMember ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Proband"@en ;
+        sh:message "Pedigree must reference exactly one genomics:proband (the index patient who brought the family to clinical attention)"@en
+    ] ;
+
+    # VIOLATION: hasMember required, at least one PedigreeMember (the proband
+    # counts as a member).
+    sh:property [
+        sh:path genomics:hasMember ;
+        sh:class genomics:PedigreeMember ;
+        sh:minCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Pedigree Members"@en ;
+        sh:message "Pedigree must reference at least one genomics:hasMember (the proband should be included)"@en
+    ] .
+
+# ============================================================================
+# Shape 8: Pedigree Member
+# ============================================================================
+
+genomics:PedigreeMemberShape a sh:NodeShape ;
+    sh:targetClass genomics:PedigreeMember ;
+    rdfs:label "Pedigree Member Shape"@en ;
+    rdfs:comment "Validation constraints for genomics:PedigreeMember. The relationship-to-proband role is required and drawn from the closed HL7 v3 RoleCode-aligned named individuals declared in genomics.ttl."@en ;
+
+    # VIOLATION: relativeRole required and must be one of the published
+    # RelationshipRole named individuals (HL7 v3 RoleCode-aligned).
+    sh:property [
+        sh:path genomics:relativeRole ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:Proband
+            genomics:MTH
+            genomics:FTH
+            genomics:SIS
+            genomics:BRO
+            genomics:DAU
+            genomics:SON
+            genomics:MAUNT
+            genomics:MUNCLE
+            genomics:PAUNT
+            genomics:PUNCLE
+            genomics:MGRMTH
+            genomics:MGRFTH
+            genomics:PGRMTH
+            genomics:PGRFTH
+            genomics:MCOUSN
+            genomics:PCOUSN
+            genomics:NIECE
+            genomics:NEPHEW
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Relationship Role"@en ;
+        sh:message "PedigreeMember must declare genomics:relativeRole as one of the published HL7 v3 RoleCode-aligned RelationshipRole named individuals (Proband, MTH, FTH, SIS, BRO, DAU, SON, MAUNT, MUNCLE, PAUNT, PUNCLE, MGRMTH, MGRFTH, PGRMTH, PGRFTH, MCOUSN, PCOUSN, NIECE, NEPHEW)"@en
+    ] ;
+
+    # WARNING: relativeSex recommended for inheritance reasoning.
+    sh:property [
+        sh:path genomics:relativeSex ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("male" "female" "unknown") ;
+        sh:severity sh:Warning ;
+        sh:name "Biological Sex"@en ;
+        sh:message "genomics:relativeSex is recommended (one of 'male', 'female', 'unknown'); needed for X-linked / Y-linked inheritance reasoning"@en
+    ] ;
+
+    # WARNING: carrierStatus, when present, must be one of the published values.
+    sh:property [
+        sh:path genomics:carrierStatus ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:PositiveAffected
+            genomics:PositiveUnaffected
+            genomics:Negative
+            genomics:NotTested
+            genomics:Obligate
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Carrier Status"@en ;
+        sh:message "genomics:carrierStatus, if present, must be one of the five published genomics:CarrierStatus named individuals (PositiveAffected, PositiveUnaffected, Negative, NotTested, Obligate)"@en
+    ] .
+
+# ============================================================================
+# Shape 9: Genetic Test
+# ============================================================================
+# Note: v1-draft.0.1 does NOT declare a testDate property on GeneticTest.
+# Test-result date is captured indirectly via prov:generatedAtTime on the
+# instance. Date enforcement deferred to v1-draft.0.2 if/when a property is
+# added to the ontology.
+
+genomics:GeneticTestShape a sh:NodeShape ;
+    sh:targetClass genomics:GeneticTest ;
+    rdfs:label "Genetic Test Shape"@en ;
+    rdfs:comment "Validation constraints for genomics:GeneticTest (FHIR DiagnosticReport-aligned). Requires test type. Note: testDate is not yet a declared property in v1-draft.0.1; chronology comes from prov:generatedAtTime."@en ;
+
+    # VIOLATION: testType required and must be one of the published TestType
+    # named individuals.
+    sh:property [
+        sh:path genomics:testType ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:SingleGeneTest
+            genomics:GenePanelTest
+            genomics:ExomeSequencing
+            genomics:GenomeSequencing
+            genomics:ChromosomalMicroarray
+            genomics:KaryotypeAnalysis
+            genomics:MLPA
+            genomics:RepeatExpansionTest
+            genomics:MethylationStudy
+            genomics:RNASequencing
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Genetic Test Type"@en ;
+        sh:message "GeneticTest must declare genomics:testType as one of the ten published genomics:TestType named individuals (SingleGeneTest, GenePanelTest, ExomeSequencing, GenomeSequencing, ChromosomalMicroarray, KaryotypeAnalysis, MLPA, RepeatExpansionTest, MethylationStudy, RNASequencing)"@en
+    ] ;
+
+    # WARNING: genePanel recommended — distinguishes 'no variant in BRCA1/2'
+    # from 'no variant across a 47-gene panel'.
+    sh:property [
+        sh:path genomics:genePanel ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Gene Panel"@en ;
+        sh:message "genomics:genePanel is recommended; the analytical scope distinguishes a clinically meaningful negative result from absence-of-evidence"@en
+    ] ;
+
+    # WARNING: performingLab recommended for provenance.
+    sh:property [
+        sh:path genomics:performingLab ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Performing Laboratory"@en ;
+        sh:message "genomics:performingLab is recommended for provenance audit"@en
+    ] .
+
+# ============================================================================
+# Shape 10: Genetic Test Order
+# ============================================================================
+# Note on naming: the task spec referenced 'orderDate', but v1-draft.0.1 names
+# the property genomics:orderedAt (xsd:dateTime). This shape uses orderedAt.
+
+genomics:GeneticTestOrderShape a sh:NodeShape ;
+    sh:targetClass genomics:GeneticTestOrder ;
+    rdfs:label "Genetic Test Order Shape"@en ;
+    rdfs:comment "Validation constraints for genomics:GeneticTestOrder (FHIR ServiceRequest-aligned). Requires order status (closed enumeration over the four OrderStatus named individuals) and order timestamp (genomics:orderedAt)."@en ;
+
+    # VIOLATION: orderStatus required and must be one of the four published
+    # OrderStatus named individuals.
+    sh:property [
+        sh:path genomics:orderStatus ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:OrderPending
+            genomics:OrderInProgress
+            genomics:OrderResulted
+            genomics:OrderCancelled
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Order Status"@en ;
+        sh:message "GeneticTestOrder must declare genomics:orderStatus as one of the four published genomics:OrderStatus named individuals (OrderPending, OrderInProgress, OrderResulted, OrderCancelled)"@en
+    ] ;
+
+    # VIOLATION: orderedAt required.
+    sh:property [
+        sh:path genomics:orderedAt ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Ordered At"@en ;
+        sh:message "GeneticTestOrder must carry exactly one genomics:orderedAt xsd:dateTime"@en
+    ] ;
+
+    # WARNING: resultedIn — when status is OrderResulted, a fulfilled order
+    # should link to its result. Pure SHACL cannot express the conditional
+    # 'IF status=Resulted THEN resultedIn minCount 1' cleanly without sh:xone
+    # patterns; we only constrain the range here. Conditional check lives in
+    # the cascade-cli importer (TASK-1.x).
+    sh:property [
+        sh:path genomics:resultedIn ;
+        sh:class genomics:GeneticTest ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "Resulted In"@en ;
+        sh:message "genomics:resultedIn, if present, must reference exactly one genomics:GeneticTest. When orderStatus is OrderResulted, this link should be populated (conditional check lives in cascade-cli importer)."@en
+    ] .
+
+# ============================================================================
+# Shape 11: Sequencing Run
+# ============================================================================
+
+genomics:SequencingRunShape a sh:NodeShape ;
+    sh:targetClass genomics:SequencingRun ;
+    rdfs:label "Sequencing Run Shape"@en ;
+    rdfs:comment "Validation constraints for genomics:SequencingRun. Coverage depth, sequencing technology, and reference genome are required — these three drive the data-quality tier inference upstream of the D-QUALITY-TIER safety constraint. Laboratory certification is optional but, when present, must be one of the four published values."@en ;
+
+    # VIOLATION: coverageDepth required, decimal ≥ 0.
+    sh:property [
+        sh:path genomics:coverageDepth ;
+        sh:datatype xsd:decimal ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0.0 ;
+        sh:severity sh:Violation ;
+        sh:name "Coverage Depth"@en ;
+        sh:message "SequencingRun must carry exactly one genomics:coverageDepth as a non-negative xsd:decimal (e.g., 30.0 for typical clinical WGS). Required for ClinicalGrade tier inference (>=30x WGS or validated panel-equivalent)."@en
+    ] ;
+
+    # VIOLATION: sequencingTechnology required and must be one of the five
+    # published SequencingTechnology named individuals.
+    sh:property [
+        sh:path genomics:sequencingTechnology ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:ShortReadIllumina
+            genomics:LongReadONT
+            genomics:LongReadPacBio
+            genomics:Mixed
+            genomics:GenotypingArray
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Sequencing Technology"@en ;
+        sh:message "SequencingRun must declare genomics:sequencingTechnology as one of the five published genomics:SequencingTechnology named individuals (ShortReadIllumina, LongReadONT, LongReadPacBio, Mixed, GenotypingArray). GenotypingArray auto-tags ConsumerGrade in the importer."@en
+    ] ;
+
+    # VIOLATION: laboratoryCertification, when present, must be one of the
+    # four published LaboratoryCertification named individuals. Optional
+    # because some research/consumer runs legitimately have none.
+    sh:property [
+        sh:path genomics:laboratoryCertification ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:CLIA
+            genomics:CAP
+            genomics:ISO15189
+            genomics:Uncertified
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "Laboratory Certification"@en ;
+        sh:message "genomics:laboratoryCertification, if present, must be one of the four published genomics:LaboratoryCertification named individuals (CLIA, CAP, ISO15189, Uncertified)"@en
+    ] ;
+
+    # WARNING: variantCallerVersion recommended for reproducibility.
+    sh:property [
+        sh:path genomics:variantCallerVersion ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Variant Caller Version"@en ;
+        sh:message "genomics:variantCallerVersion is recommended (e.g., 'GATK 4.5.0', 'DeepVariant 1.6'); needed to distinguish caller-driven differences from biological ones"@en
+    ] ;
+
+    # WARNING: sequencingDate recommended.
+    sh:property [
+        sh:path genomics:sequencingDate ;
+        sh:datatype xsd:date ;
+        sh:maxCount 1 ;
+        sh:severity sh:Warning ;
+        sh:name "Sequencing Date"@en
+    ] .
+
+# ============================================================================
+# Shape 12: Raw File
+# ============================================================================
+# Note: Cascade pods do NOT ingest raw genomic file bytes. RawFile carries
+# pointer-and-hash metadata only (see Critical conventions #9 in the
+# Genomics & Advisory implementation plan).
+
+genomics:RawFileShape a sh:NodeShape ;
+    sh:targetClass genomics:RawFile ;
+    rdfs:label "Raw File Shape"@en ;
+    rdfs:comment "Validation constraints for genomics:RawFile pointer-and-hash records. Cascade does NOT ingest the bytes — only the manifest. Required: format (closed enum over seven FileFormat values), SHA-256 hash for integrity, opaque file location URI, and the reference genome the file is aligned against."@en ;
+
+    # VIOLATION: fileFormat required and must be one of the seven published
+    # FileFormat named individuals.
+    sh:property [
+        sh:path genomics:fileFormat ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in (
+            genomics:BAM
+            genomics:CRAM
+            genomics:FASTQ
+            genomics:gVCF
+            genomics:VCF
+            genomics:BCF
+            genomics:OtherFileFormat
+        ) ;
+        sh:severity sh:Violation ;
+        sh:name "File Format"@en ;
+        sh:message "RawFile must declare genomics:fileFormat as one of the seven published genomics:FileFormat named individuals (BAM, CRAM, FASTQ, gVCF, VCF, BCF, OtherFileFormat). Hot tier (in-pod, encrypted): VCF/gVCF/BCF. Cold tier (out-of-pod, referenced): BAM/CRAM/FASTQ."@en
+    ] ;
+
+    # VIOLATION: fileHashSHA256 required — integrity check.
+    sh:property [
+        sh:path genomics:fileHashSHA256 ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 64 ;
+        sh:maxLength 64 ;
+        sh:pattern "^[0-9a-f]{64}$" ;
+        sh:severity sh:Violation ;
+        sh:name "File SHA-256 Hash"@en ;
+        sh:message "RawFile must carry exactly one genomics:fileHashSHA256 as a 64-character lowercase hex SHA-256 digest. Required for byte-on-disk integrity verification."@en
+    ] ;
+
+    # VIOLATION: fileLocation required (opaque URI; Cascade does NOT validate
+    # or fetch this URI — only its presence and shape).
+    sh:property [
+        sh:path genomics:fileLocation ;
+        sh:datatype xsd:anyURI ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:severity sh:Violation ;
+        sh:name "File Location URI"@en ;
+        sh:message "RawFile must carry exactly one genomics:fileLocation xsd:anyURI (opaque pointer to where the bytes live: s3://, https://, file://, vendor-specific). Cascade does NOT validate or fetch this URI."@en
+    ] ;
+
+    # VIOLATION: referenceGenome required.
+    sh:property [
+        sh:path genomics:referenceGenome ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:severity sh:Violation ;
+        sh:name "Reference Genome"@en ;
+        sh:message "RawFile must carry exactly one non-empty genomics:referenceGenome (e.g., 'GRCh38', 'GRCh37', 'T2T-CHM13'). Required for any downstream coordinate-based analysis."@en
+    ] ;
+
+    # VIOLATION: fileSizeBytes, when present, must be xsd:long ≥ 0.
+    # xsd:long because BAM/CRAM/FASTQ files routinely exceed 2^31 bytes.
+    sh:property [
+        sh:path genomics:fileSizeBytes ;
+        sh:datatype xsd:long ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:severity sh:Violation ;
+        sh:name "File Size (Bytes)"@en ;
+        sh:message "genomics:fileSizeBytes, if present, must be a non-negative xsd:long (BAM/CRAM/FASTQ files routinely exceed 2^31 bytes)"@en
+    ] ;
+
+    # INFO: htsgetEndpoint optional convenience.
+    sh:property [
+        sh:path genomics:htsgetEndpoint ;
+        sh:datatype xsd:anyURI ;
+        sh:maxCount 1 ;
+        sh:severity sh:Info ;
+        sh:name "htsget Endpoint"@en ;
+        sh:message "genomics:htsgetEndpoint is optional; when present, enables GA4GH htsget streaming of BAM/CRAM regions on demand"@en
+    ] .
+
+# ============================================================================
+# Cross-vocabulary note
+# ============================================================================
+# - cascade:dataProvenance is declared in core/v1 and is not redeclared here.
+#   genomics:dataProvenance is the genomics-specific origin lane (consumer-
+#   array vs clinical-sequencing vs research-sequencing vs imported vs AI-
+#   extracted) used by the importer to drive quality-tier auto-tagging. The
+#   two are distinct and live in separate namespaces.
+# - checkup: terms (GeneticCounselingSummary, VariantNarrative) are out of
+#   scope for this file and authored separately in the checkup vocabulary.
+# - prov:wasRevisionOf chain integrity for VariantInterpretation
+#   reclassifications (the within-(variant, condition)-pair invariant) is a
+#   cross-class invariant not expressible cleanly in pure SHACL Core; the
+#   supplementing code-level check lives in cascade-cli (TASK-4.x advisory
+#   applier validation).
+
+# ============================================================================
+# Changelog
+# ============================================================================
+#
+# Version 1.0-draft (2026-05-05) — TASK-0.2
+# - Initial release of genomics vocabulary SHACL shapes.
+# - 12 sh:NodeShape covering Variant, VariantInterpretation, Haplotype,
+#   Diplotype, CopyNumberVariant, SubmitterAssertion, Pedigree,
+#   PedigreeMember, GeneticTest, GeneticTestOrder, SequencingRun, RawFile.
+# - D-Q5 enforced on VariantInterpretationShape: variantInterpreted and
+#   condition each minCount/maxCount=1 (per-(variant, condition) modeling).
+# - D-QUALITY-TIER safety constraint enforced via sh:xone on
+#   VariantInterpretationShape: classification non-pathogenic OR
+#   (classification pathogenic-leaning AND mitigation present), where
+#   mitigation = (variant.dataQualityTier=ClinicalGrade) OR
+#   (requiresConfirmation=true). Violation message names both remediation
+#   paths.
+# - Cross-class 'at least one stable identifier' on VariantShape via sh:or
+#   over (caId, vrsId, clinvarVariationId, dbsnpRsId).
+# - Closed enumerations via sh:in for AcmgClass, OrderStatus, FileFormat,
+#   SequencingTechnology, LaboratoryCertification, RelationshipRole,
+#   CarrierStatus, ReviewStatus, TestType, DataQualityTier.
+# - Range / pattern checks for fileHashSHA256 (lowercase hex, 64 chars),
+#   mosaicismFraction (decimal in [0.0, 1.0]), fileSizeBytes (xsd:long ≥ 0),
+#   coverageDepth (decimal ≥ 0), CNV interval coordinates (positive int).
+# - Acknowledged vocabulary gaps (not enforced as SHACL violations):
+#     * GeneticTest has no testDate property; chronology via
+#       prov:generatedAtTime instead.
+#     * SubmitterAssertion has no assertionDate property and no forward
+#       reference to its parent Interpretation; the inverse link
+#       (Interpretation→Assertion via genomics:aggregatedFrom) is
+#       authoritative.
+#     * Reclassification chain integrity (revising Interpretation MUST
+#       share both variantInterpreted and condition with the revised one)
+#       is a cross-focus-node invariant requiring sh:sparql; supplementing
+#       code-level check lives in cascade-cli TASK-4.x.
+#     * GeneticTestOrder.resultedIn conditional on orderStatus=Resulted is
+#       a conditional cardinality not cleanly expressible in pure SHACL;
+#       enforced by the importer.
+# - Out-of-scope (per TASK-0.2 scope): checkup: terms, advisory: cross-
+#   vocab joins, LDPatch syntax, cryptographic verification.
+
+# PhenotypicObservationShape (v1-draft.0.4)
+genomics:PhenotypicObservationShape a sh:NodeShape ;
+    sh:targetClass genomics:PhenotypicObservation ;
+    sh:property [ sh:path genomics:hpoTerm ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path genomics:phenotypePresence ; sh:minCount 1 ; sh:maxCount 1 ; sh:class genomics:PhenotypePresenceValue ] .

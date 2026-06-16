@@ -1,6 +1,6 @@
 {
   "name": "@the-cascade-protocol/cli",
-  "version": "0.5.9",
+  "version": "0.5.10",
   "description": "Cascade Protocol CLI - Validate, convert, and manage health data",
   "bin": {
     "cascade": "dist/index.js"
@@ -47,12 +47,16 @@
     "DOCKER.md"
   ],
   "dependencies": {
+    "@gmod/vcf": "^7.0.2",
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@noble/curves": "^2.2.0",
     "@the-cascade-protocol/agent": "^1.1.3",
     "adm-zip": "^0.5.16",
     "commander": "^13.0.0",
+    "did-resolver": "^5.0.1",
     "fast-xml-parser": "^5.5.9",
     "n3": "^1.17.0",
+    "pdfjs-dist": "^5.7.284",
     "rdf-validate-shacl": "^0.5.0"
   },
   "devDependencies": {

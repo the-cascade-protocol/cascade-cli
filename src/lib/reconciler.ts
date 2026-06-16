@@ -6,9 +6,10 @@
  */
 
 import { Parser, Writer, DataFactory } from 'n3';
+import type { Quad, Quad_Subject, Quad_Object } from 'n3';
 import { NS, TURTLE_PREFIXES } from './fhir-converter/types.js';
 
-const { namedNode, literal, quad: makeQuad } = DataFactory;
+const { namedNode, literal, blankNode, quad: makeQuad } = DataFactory;
 
 // ---------------------------------------------------------------------------
 // Public API types
@@ -35,6 +36,8 @@ export interface ReconcilerResult {
       conflictsResolved: number;
       conflictsUnresolved: number;
       finalRecordCount: number;
+      /** Subjects preserved verbatim because their type is not reconcilable. */
+      passthroughSubjects: number;
     };
     transformations: object[];
     unresolvedConflicts: object[];
@@ -123,6 +126,70 @@ export async function parseTurtle(turtle: string, defaultSystem: string): Promis
       bySubject.get(subj)!.push({ pred: quad.predicate.value, obj: rdfVal });
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Passthrough: subjects the reconciler does not understand
+// ---------------------------------------------------------------------------
+
+/**
+ * Collect the quads of every subject that is NOT a reconcilable record, i.e.
+ * whose rdf:type is outside KNOWN_TYPES or that has no rdf:type at all.
+ *
+ * The reconciler only understands the KNOWN_TYPES record families. Everything
+ * else (clinical:ClinicalDocument narrative documents and their
+ * requiresLLMExtraction flags, encounters, imaging studies, procedures, FHIR
+ * passthrough nodes, provenance activities, ...) must survive reconciliation
+ * verbatim. Before this existed, any reconciliation pass silently dropped
+ * those subjects from the merged output.
+ */
+async function collectPassthroughQuads(turtle: string): Promise<Quad[]> {
+  return new Promise((resolve, reject) => {
+    const parser = new Parser({ format: 'Turtle' });
+    const quadsBySubject = new Map<string, Quad[]>();
+
+    parser.parse(turtle, (error, quad) => {
+      if (error) { reject(error); return; }
+      if (!quad) {
+        const passthrough: Quad[] = [];
+        for (const quads of quadsBySubject.values()) {
+          const typeQuad = quads.find(q => q.predicate.value === NS.rdf + 'type');
+          if (typeQuad && KNOWN_TYPES[typeQuad.object.value]) continue; // reconciled elsewhere
+          passthrough.push(...quads);
+        }
+        resolve(passthrough);
+        return;
+      }
+      const subjKey = `${quad.subject.termType}:${quad.subject.value}`;
+      const bucket = quadsBySubject.get(subjKey);
+      if (bucket) bucket.push(quad);
+      else quadsBySubject.set(subjKey, [quad]);
+    });
+  });
+}
+
+/** Stable identity for cross-input deduplication of passthrough quads. */
+function quadKey(q: Quad): string {
+  const o = q.object;
+  const objKey = o.termType === 'Literal'
+    ? `L:${o.value}|${o.datatype?.value ?? ''}|${o.language ?? ''}`
+    : `${o.termType}:${o.value}`;
+  return `${q.subject.termType}:${q.subject.value}|${q.predicate.value}|${objKey}`;
+}
+
+/**
+ * Re-label blank nodes per input so labels from independent parses cannot
+ * collide. Named-node quads (the converters' normal output) pass unchanged.
+ */
+function relabelQuadBlankNodes(q: Quad, inputIndex: number): Quad {
+  if (q.subject.termType !== 'BlankNode' && q.object.termType !== 'BlankNode') return q;
+  const subj: Quad_Subject = q.subject.termType === 'BlankNode'
+    ? blankNode(`in${inputIndex}_${q.subject.value}`)
+    : q.subject;
+  const obj: Quad_Object = q.object.termType === 'BlankNode'
+    ? blankNode(`in${inputIndex}_${q.object.value}`)
+    : q.object;
+  return makeQuad(subj, q.predicate, obj);
 }
 
 // ---------------------------------------------------------------------------
@@ -426,9 +493,13 @@ function resolveGroup(g: Group, trustScores: Record<string, number>, defaultTrus
 async function serializeGroups(
   groups: Group[],
   resolutions: Resolution[],
+  passthroughQuads: Quad[] = [],
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const writer = new Writer({ prefixes: TURTLE_PREFIXES });
+
+    // Non-reconcilable subjects are preserved verbatim.
+    for (const q of passthroughQuads) writer.addQuad(q);
 
     for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
@@ -494,10 +565,26 @@ export async function runReconciliation(
   const allRecords: ParsedRecord[] = [];
   const sourceInfo: Array<{ system: string; count: number }> = [];
 
-  for (const input of inputs) {
+  // Subjects the reconciler cannot reconcile are carried through verbatim,
+  // deduplicated by full quad identity across inputs (so re-feeding existing
+  // pod content alongside a re-import of the same document does not grow).
+  const passthroughQuads: Quad[] = [];
+  const seenPassthrough = new Set<string>();
+  const passthroughSubjectKeys = new Set<string>();
+
+  for (let i = 0; i < inputs.length; i++) {
+    const input = inputs[i];
     const records = await parseTurtle(input.content, input.systemName);
     allRecords.push(...records);
     sourceInfo.push({ system: input.systemName, count: records.length });
+
+    for (const q of await collectPassthroughQuads(input.content)) {
+      const key = quadKey(q);
+      if (seenPassthrough.has(key)) continue;
+      seenPassthrough.add(key);
+      passthroughSubjectKeys.add(`${q.subject.termType}:${q.subject.value}`);
+      passthroughQuads.push(relabelQuadBlankNodes(q, i));
+    }
   }
 
   // Match and group
@@ -650,7 +737,7 @@ export async function runReconciliation(
   const resolutions = groups.map(g => resolveGroup(g, trustScores, defaultTrust));
 
   // Serialize
-  const turtle = await serializeGroups(groups, resolutions);
+  const turtle = await serializeGroups(groups, resolutions, passthroughQuads);
 
   // Build report
   let exactDups = 0, nearDups = 0, resolved = 0, unresolved = 0;
@@ -695,6 +782,7 @@ export async function runReconciliation(
         conflictsResolved: resolved,
         conflictsUnresolved: unresolved,
         finalRecordCount: groups.length,
+        passthroughSubjects: passthroughSubjectKeys.size,
       },
       transformations,
       unresolvedConflicts: unresolvedList,

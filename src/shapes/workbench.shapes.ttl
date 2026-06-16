@@ -1,0 +1,22 @@
+# Cascade Workbench Vocabulary — SHACL shapes (v1-draft)
+
+@prefix workbench: <https://ns.cascadeprotocol.org/workbench/v1#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<https://ns.cascadeprotocol.org/workbench/v1/shapes> a owl:Ontology ;
+    owl:imports <https://ns.cascadeprotocol.org/workbench/v1#> ;
+    rdfs:comment "SHACL shapes for the Cascade Workbench vocabulary (v1-draft)."@en .
+
+workbench:InvestigationShape a sh:NodeShape ;
+    sh:targetClass workbench:Investigation ;
+    sh:property [ sh:path workbench:investigationTitle ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path workbench:aboutPatient ; sh:minCount 1 ] ;
+    sh:property [ sh:path workbench:investigationStatus ; sh:minCount 1 ; sh:maxCount 1 ; sh:class workbench:InvestigationStatusValue ] .
+
+workbench:ImportedConversationShape a sh:NodeShape ;
+    sh:targetClass workbench:ImportedConversation ;
+    sh:property [ sh:path workbench:conversationSource ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path workbench:rawContentLocation ; sh:minCount 1 ; sh:datatype xsd:string ] .
