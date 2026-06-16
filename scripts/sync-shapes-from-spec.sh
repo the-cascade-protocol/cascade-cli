@@ -67,7 +67,7 @@ done
 # while drafts are still pre-stable.
 echo ""
 echo "=== Syncing draft shapes to src/shapes/ ==="
-DRAFT_VOCABS=(genomics advisory)
+DRAFT_VOCABS=(genomics advisory evidence workbench)
 for vocab in "${DRAFT_VOCABS[@]}"; do
   copy_file "$SPEC_ROOT/ontologies/$vocab/v1-draft/$vocab.shapes.ttl" \
             "$CLI_ROOT/src/shapes/$vocab.shapes.ttl"

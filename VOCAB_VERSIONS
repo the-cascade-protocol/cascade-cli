@@ -16,7 +16,7 @@
 #   (shape relaxations only: geneSymbol Violation→Warning,
 #   variantInterpreted range widened to {Variant, CopyNumberVariant, Haplotype}).
 #   No vocabulary additions; no row change.
-core=3.2
+core=3.3
 health=2.4
 clinical=1.8
 coverage=1.3

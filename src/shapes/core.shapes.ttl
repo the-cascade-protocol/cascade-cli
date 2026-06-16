@@ -648,3 +648,11 @@ cascade:AdvisoryApplicationActivityShape a sh:NodeShape ;
 # - AdvanceDirectivesShape: VIOLATION for hasLivingWill,
 #   hasPowerOfAttorney, hasDNR; INFO for advanceDirectiveNotes
 #
+
+# ProxyAgentShape (v3.3) — caregiver-proxy actor
+cascade:ProxyAgentShape a sh:NodeShape ;
+    sh:targetClass cascade:ProxyAgent ;
+    sh:property [ sh:path cascade:actsForPatient ; sh:minCount 1 ;
+                  sh:message "A ProxyAgent must declare the patient it acts for (cascade:actsForPatient)." ] ;
+    sh:property [ sh:path cascade:proxyRelationship ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path cascade:proxyGrantedAt ; sh:minCount 1 ; sh:datatype xsd:dateTime ] .

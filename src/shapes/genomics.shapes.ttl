@@ -1075,3 +1075,9 @@ genomics:RawFileShape a sh:NodeShape ;
 #       enforced by the importer.
 # - Out-of-scope (per TASK-0.2 scope): checkup: terms, advisory: cross-
 #   vocab joins, LDPatch syntax, cryptographic verification.
+
+# PhenotypicObservationShape (v1-draft.0.4)
+genomics:PhenotypicObservationShape a sh:NodeShape ;
+    sh:targetClass genomics:PhenotypicObservation ;
+    sh:property [ sh:path genomics:hpoTerm ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path genomics:phenotypePresence ; sh:minCount 1 ; sh:maxCount 1 ; sh:class genomics:PhenotypePresenceValue ] .

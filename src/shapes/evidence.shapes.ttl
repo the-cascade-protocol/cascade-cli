@@ -1,0 +1,50 @@
+# Cascade Evidence Vocabulary — SHACL shapes (v1-draft)
+#
+# The grounding invariant is expressed in SHACL CORE (sh:or / sh:not / sh:in),
+# NOT SHACL-SPARQL. This is deliberate: `cascade validate` uses
+# rdf-validate-shacl, which does not support SHACL-SPARQL constraints. A
+# sh:sparql formulation would parse but silently never fire. Keep this Core.
+
+@prefix evidence: <https://ns.cascadeprotocol.org/evidence/v1#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<https://ns.cascadeprotocol.org/evidence/v1/shapes> a owl:Ontology ;
+    owl:imports <https://ns.cascadeprotocol.org/evidence/v1#> ;
+    rdfs:comment "SHACL shapes for the Cascade Evidence vocabulary (v1-draft). SHACL Core only, so rdf-validate-shacl enforces every constraint including the grounding invariant."@en .
+
+evidence:AssertionShape a sh:NodeShape ;
+    sh:targetClass evidence:Assertion ;
+    sh:property [ sh:path evidence:assertionText ; sh:minCount 1 ; sh:datatype xsd:string ;
+                  sh:message "Every Assertion must carry assertionText." ] ;
+    sh:property [ sh:path evidence:verdict ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:in ( evidence:Supported evidence:Contradicted evidence:Unverifiable evidence:NeedsLiterature ) ;
+                  sh:message "Every Assertion must carry exactly one verdict (one of the four VerdictValue individuals)." ] ;
+    # Grounding invariant (SHACL Core). Reads: the verdict is NOT a grounded
+    # one (i.e. it is Unverifiable or NeedsLiterature) OR there is at least one
+    # evidence link. Equivalent to: Supported/Contradicted => >= 1 evidence link.
+    sh:or (
+        [ sh:property [ sh:path evidence:verdict ;
+                        sh:not [ sh:in ( evidence:Supported evidence:Contradicted ) ] ] ]
+        [ sh:property [ sh:path evidence:hasEvidenceLink ; sh:minCount 1 ] ]
+    ) ;
+    sh:message "Grounding invariant: an Assertion with verdict Supported or Contradicted must carry at least one evidence link (evidence:hasEvidenceLink)." .
+
+evidence:EvidenceLinkShape a sh:NodeShape ;
+    sh:targetClass evidence:EvidenceLink ;
+    sh:property [ sh:path evidence:evidenceStance ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:in ( evidence:Supports evidence:Contradicts evidence:Contextual ) ] ;
+    sh:or (
+        [ sh:property [ sh:path evidence:citesRecord ; sh:minCount 1 ] ]
+        [ sh:property [ sh:path evidence:citesSource ; sh:minCount 1 ] ]
+    ) .
+
+evidence:CitationShape a sh:NodeShape ;
+    sh:targetClass evidence:Citation ;
+    sh:property [ sh:path evidence:citationTitle ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:or (
+        [ sh:property [ sh:path evidence:doi  ; sh:minCount 1 ] ]
+        [ sh:property [ sh:path evidence:pmid ; sh:minCount 1 ] ]
+    ) .

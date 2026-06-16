@@ -17,8 +17,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-05-06"^^xsd:date ;
-    owl:versionInfo "3.2" ;
+    dct:modified "2026-06-16"^^xsd:date ;
+    owl:versionInfo "3.3" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -1078,3 +1078,63 @@ cascade:appliedTriplesCount a owl:DatatypeProperty ;
     rdfs:range xsd:nonNegativeInteger ;
     rdfs:comment "Total number of triples the advisory's CAP body inserted into the pod for this single match. Lets a downstream auditor verify CAP profile constraint C5 (≤ 64 inserted triples per match) at activity-record-read time without re-parsing the patch body. Recorded by the cascade-cli applier (Phase 4 TASK-4.5) on every successful application."@en ;
     owl:versionInfo "Added in core v3.2" .
+
+# ============================================================================
+# Cascade Workbench support (v3.3) — ungrounded-AI provenance + caregiver-proxy
+# ============================================================================
+
+# AIAsserted (v3.3) — provenance leaf for content surfaced by a general-purpose
+# AI assistant in a patient-directed conversation. NOT clinically generated.
+cascade:AIAsserted a owl:Class ;
+    rdfs:subClassOf cascade:ConsumerGenerated ;
+    rdfs:label "AI-Asserted"@en ;
+    rdfs:comment "Content surfaced by a general-purpose AI assistant in a patient-directed conversation (e.g. ChatGPT, Claude), NOT grounded in clinical sources. MUST be applied to evidence:Assertion instances imported from AI conversations so they can never be mistaken for clinically-extracted data (cascade:AIExtracted) or verified records (cascade:EHRVerified). Marks content that must be evidence-checked before any reliance."@en ;
+    owl:versionInfo "Added in core v3.3" .
+
+# ProxyAgent (v3.3) — a person operating a patient's Pod on the patient's behalf
+# (e.g. a parent for a minor child). Closes the caregiver-proxy gap.
+cascade:ProxyAgent a owl:Class ;
+    rdfs:subClassOf prov:Agent ;
+    rdfs:label "Proxy Agent"@en ;
+    rdfs:comment "A person operating a patient's Pod on the patient's behalf (e.g. a parent for a minor child, a caregiver for a dependent adult). Distinct from the patient (cascade:PatientProfile). Records who is acting and under what authority and scope."@en ;
+    owl:versionInfo "Added in core v3.3" .
+
+cascade:actsForPatient a owl:ObjectProperty ;
+    rdfs:subPropertyOf prov:actedOnBehalfOf ;
+    rdfs:label "Acts For Patient"@en ;
+    rdfs:comment "The patient (WebID) on whose behalf the proxy acts."@en ;
+    rdfs:domain cascade:ProxyAgent ;
+    rdfs:range rdfs:Resource ;
+    owl:versionInfo "Added in core v3.3" .
+
+cascade:proxyWebID a owl:ObjectProperty ;
+    rdfs:label "Proxy WebID"@en ;
+    rdfs:domain cascade:ProxyAgent ;
+    rdfs:range rdfs:Resource ;
+    owl:versionInfo "Added in core v3.3" .
+
+cascade:proxyRelationship a owl:DatatypeProperty ;
+    rdfs:label "Proxy Relationship"@en ;
+    rdfs:comment "Relationship of the proxy to the patient. Reuses the cascade:contactRelationship value space: parent, guardian, caregiver, spouse, child, other."@en ;
+    rdfs:domain cascade:ProxyAgent ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.3" .
+
+cascade:proxyScope a owl:DatatypeProperty ;
+    rdfs:label "Proxy Scope"@en ;
+    rdfs:comment "Authority scope, e.g. 'full', 'read-only', 'investigation-only'. Composable with cascade:consentScope (data-sensitivity), which it does not replace."@en ;
+    rdfs:domain cascade:ProxyAgent ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.3" .
+
+cascade:proxyGrantedAt a owl:DatatypeProperty ;
+    rdfs:label "Proxy Granted At"@en ;
+    rdfs:domain cascade:ProxyAgent ;
+    rdfs:range xsd:dateTime ;
+    owl:versionInfo "Added in core v3.3" .
+
+cascade:proxyRevokedAt a owl:DatatypeProperty ;
+    rdfs:label "Proxy Revoked At"@en ;
+    rdfs:domain cascade:ProxyAgent ;
+    rdfs:range xsd:dateTime ;
+    owl:versionInfo "Added in core v3.3" .
