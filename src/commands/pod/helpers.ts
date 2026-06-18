@@ -165,6 +165,18 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
     directory: 'clinical',
     filename: 'benefits.ttl',
   },
+  'social-history': {
+    label: 'Social History',
+    rdfTypes: [CASCADE_NAMESPACES.clinical + 'SocialHistoryRecord'],
+    directory: 'clinical',
+    filename: 'social-history.ttl',
+  },
+  'ai-extraction-activities': {
+    label: 'AI Extraction Activities',
+    rdfTypes: [CASCADE_NAMESPACES.cascade + 'AIExtractionActivity'],
+    directory: 'clinical',
+    filename: 'ai-extraction-activities.ttl',
+  },
   'fhir-passthrough': {
     label: 'FHIR Passthrough',
     rdfTypes: ['http://hl7.org/fhir/'],

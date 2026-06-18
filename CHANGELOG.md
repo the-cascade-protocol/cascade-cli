@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.11] - 2026-06-17
+
+### Added
+
+- **`cascade:AIExtractionActivity` now routes to `clinical/ai-extraction-activities.ttl`.** When `cascade pod import` ingests an AI-extraction Turtle batch (a clinical record plus the `cascade:AIExtractionActivity` it links to via `prov:wasGeneratedBy`), the activity node previously fell through to the `fhir-passthrough` bucket because it had no `DATA_TYPES` route. That mis-filed the activity as a FHIR resource and, as a side effect, wrote a `solid:forClass fhir:` registration into `settings/publicTypeIndex.ttl` using a `fhir:` prefix that file never declares, leaving the type index unparseable. The activity now has its own registry entry, so it lands in `clinical/ai-extraction-activities.ttl`, registers cleanly, and is queryable via `pod query --all`. (Needed by the Cascade Workbench document-extraction write path.)
+- **`clinical:SocialHistoryRecord` now routes to `clinical/social-history.ttl`.** Same class of bug: social-history records had no `DATA_TYPES` route and fell to `fhir-passthrough`. They now route to their own file and register cleanly.
+
+### Shapes
+
+- Synced clinical v1.9 from spec (`vocab/clinical-v1.9`): every `dataProvenance` `sh:in` enum now includes `cascade:AIExtracted`, so a clinical record carrying AI-extraction provenance validates. `VOCAB_VERSIONS` clinical 1.8 -> 1.9.
+
 ## [0.5.10] - 2026-06-11
 
 ### Fixed

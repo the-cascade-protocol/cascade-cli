@@ -316,6 +316,88 @@ describe('pod import', () => {
     expect(content).toContain('@prefix');
   });
 
+  // ─── Test 6b: AI extraction activity routes to its own file, not passthrough ─
+
+  it('should route cascade:AIExtractionActivity to clinical/ai-extraction-activities.ttl', async () => {
+    // An AI-extraction Turtle batch: a clinical:Medication record carrying
+    // AIExtracted provenance + an AIExtractionActivity it links to. The activity
+    // must NOT land in fhir-passthrough (a non-FHIR class that also poisons the
+    // publicTypeIndex with an undeclared `fhir:` prefix).
+    const ttl = `@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:cascade:ai-activity:batch-1> a cascade:AIExtractionActivity ;
+    cascade:extractionModel "qwen3.5-4b-q4_k_m" ;
+    cascade:extractionConfidence "0.92"^^xsd:decimal ;
+    cascade:sourceNarrativeSection "medications" ;
+    cascade:requiresUserReview false .
+
+<urn:cascade:ai:medications-1> a clinical:Medication ;
+    clinical:drugName "Metformin 500mg" ;
+    cascade:dataProvenance cascade:AIExtracted ;
+    cascade:schemaVersion "1.9" ;
+    prov:wasGeneratedBy <urn:cascade:ai-activity:batch-1> .
+`;
+    const ttlPath = path.join(tempDir, 'ai-extraction.ttl');
+    await fs.writeFile(ttlPath, ttl, 'utf-8');
+
+    runCli(`pod import ${podDir} ${ttlPath} --source-system workbench-ai`);
+
+    // The activity lands in its own file...
+    const activityFile = path.join(podDir, 'clinical', 'ai-extraction-activities.ttl');
+    expect(existsSync(activityFile)).toBe(true);
+    const activityContent = await fs.readFile(activityFile, 'utf-8');
+    expect(activityContent).toContain('AIExtractionActivity');
+    expect(activityContent).toContain('qwen3.5-4b-q4_k_m');
+
+    // ...and NOT in fhir-passthrough.
+    const passthroughFile = path.join(podDir, 'clinical', 'fhir-passthrough.ttl');
+    expect(existsSync(passthroughFile)).toBe(false);
+
+    // The medication record routes to medications.ttl, carrying AIExtracted.
+    const medFile = path.join(podDir, 'clinical', 'medications.ttl');
+    expect(existsSync(medFile)).toBe(true);
+    const medContent = await fs.readFile(medFile, 'utf-8');
+    expect(medContent).toContain('AIExtracted');
+    expect(medContent).toContain('wasGeneratedBy');
+
+    // The publicTypeIndex stays parseable (no undeclared `fhir:` prefix).
+    const publicIndex = await fs.readFile(
+      path.join(podDir, 'settings', 'publicTypeIndex.ttl'),
+      'utf-8',
+    );
+    expect(publicIndex).not.toContain('solid:forClass fhir:');
+    expect(publicIndex).toContain('ai-extraction-activities.ttl');
+  });
+
+  // ─── Test 6c: SocialHistoryRecord routes to its own file, not passthrough ───
+
+  it('should route clinical:SocialHistoryRecord to clinical/social-history.ttl', async () => {
+    const ttl = `@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+
+<urn:cascade:ai:socialHistory-1> a clinical:SocialHistoryRecord ;
+    clinical:socialHistoryCategory "smokingStatus" ;
+    cascade:dataProvenance cascade:AIExtracted ;
+    cascade:schemaVersion "1.9" .
+`;
+    const ttlPath = path.join(tempDir, 'social.ttl');
+    await fs.writeFile(ttlPath, ttl, 'utf-8');
+
+    runCli(`pod import ${podDir} ${ttlPath} --source-system workbench-ai`);
+
+    const socialFile = path.join(podDir, 'clinical', 'social-history.ttl');
+    expect(existsSync(socialFile)).toBe(true);
+    const content = await fs.readFile(socialFile, 'utf-8');
+    expect(content).toContain('SocialHistoryRecord');
+    expect(content).toContain('smokingStatus');
+
+    // Not misfiled as a FHIR passthrough resource.
+    expect(existsSync(path.join(podDir, 'clinical', 'fhir-passthrough.ttl'))).toBe(false);
+  });
+
   // ─── Test 7: index.ttl gets ldp:contains entries for new files ─────────────
 
   it('should append ldp:contains references to index.ttl', async () => {
