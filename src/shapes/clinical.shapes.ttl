@@ -12,6 +12,14 @@
 # Apple HealthKit. Shapes accept multiple provenance values to support
 # different data sources (EHR, device, patient-reported).
 #
+# Changelog:
+# v1.9 (2026-06-17): Add cascade:AIExtracted to every dataProvenance sh:in enum.
+#     AIExtracted (a ClinicalGenerated subclass, core v3.3) was defined and
+#     referenced by the v3.0 AI-extraction infrastructure, but the validation
+#     enums omitted it — so a record carrying the correct provenance for
+#     AI-extracted clinical data failed validation. Clinical records may now be
+#     AIExtracted (e.g. from the Workbench's document-extraction pipeline).
+#
 # ============================================================================
 
 # ============================================================================
@@ -112,7 +120,7 @@ clinical:ClinicalDocumentShape a sh:NodeShape ;
     # Required: provenance (accepts multiple valid sources)
     sh:property [
         sh:path cascade:dataProvenance ;
-        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Data Provenance"@en ;
@@ -367,7 +375,7 @@ clinical:MedicationShape a sh:NodeShape ;
     # Required: provenance (accepts multiple valid sources)
     sh:property [
         sh:path cascade:dataProvenance ;
-        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Data Provenance"@en ;
@@ -570,7 +578,7 @@ clinical:AllergyShape a sh:NodeShape ;
     # Required: provenance (accepts multiple valid sources)
     sh:property [
         sh:path cascade:dataProvenance ;
-        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Data Provenance"@en
@@ -648,7 +656,7 @@ clinical:LabResultShape a sh:NodeShape ;
     # Required: provenance (accepts multiple valid sources)
     sh:property [
         sh:path cascade:dataProvenance ;
-        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Data Provenance"@en
@@ -727,7 +735,7 @@ clinical:ConditionShape a sh:NodeShape ;
     # Required: provenance (accepts multiple valid sources)
     sh:property [
         sh:path cascade:dataProvenance ;
-        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Data Provenance"@en
@@ -814,7 +822,7 @@ clinical:ImmunizationShape a sh:NodeShape ;
     # Required: provenance (accepts multiple valid sources)
     sh:property [
         sh:path cascade:dataProvenance ;
-        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Data Provenance"@en
@@ -903,7 +911,7 @@ clinical:ProcedureShape a sh:NodeShape ;
     # Required: provenance (accepts multiple valid sources)
     sh:property [
         sh:path cascade:dataProvenance ;
-        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Data Provenance"@en
@@ -993,7 +1001,7 @@ clinical:VitalSignShape a sh:NodeShape ;
     # Required: provenance (accepts multiple valid sources)
     sh:property [
         sh:path cascade:dataProvenance ;
-        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Data Provenance"@en
@@ -1173,7 +1181,7 @@ clinical:MedicationUseEpisodeShape a sh:NodeShape ;
     # Required: provenance
     sh:property [
         sh:path cascade:dataProvenance ;
-        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:Reconciled) ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:Reconciled cascade:AIExtracted) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Data Provenance"@en ;
@@ -1311,7 +1319,7 @@ clinical:SupplementShape a sh:NodeShape ;
     # Required: provenance
     sh:property [
         sh:path cascade:dataProvenance ;
-        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Data Provenance"@en
