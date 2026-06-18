@@ -147,7 +147,8 @@ const EXTENDED_PROFILE_TTL = `@prefix foaf: <http://xmlns.com/foaf/0.1/> .
 # settings/preferences via rdfs:seeAlso.
 # =============================================================================
 
-<#me>
+# Uncomment <#me> and fill in to record your private profile:
+# <#me>
     # ── Demographics ──
     # cascade:dateOfBirth "1990-01-01"^^xsd:date ;
     # cascade:biologicalSex "M" ;
@@ -164,7 +165,7 @@ const EXTENDED_PROFILE_TTL = `@prefix foaf: <http://xmlns.com/foaf/0.1/> .
     #     cascade:addressPostalCode "98101" ;
     #     cascade:addressCountry "US" ;
     # ] ;
-    .
+#     .
 `;
 
 function indexTtl(dirName: string): string {
