@@ -23,6 +23,7 @@ export const CASCADE_NAMESPACES: Record<string, string> = {
   pots: 'https://ns.cascadeprotocol.org/pots/v1#',
   checkup: 'https://ns.cascadeprotocol.org/checkup/v1#',
   coverage: 'https://ns.cascadeprotocol.org/coverage/v1#',
+  workbench: 'https://ns.cascadeprotocol.org/workbench/v1#',
 } as const;
 
 /** Well-known non-Cascade namespaces for IRI shortening */

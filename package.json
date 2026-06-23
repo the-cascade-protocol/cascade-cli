@@ -1,6 +1,6 @@
 {
   "name": "@the-cascade-protocol/cli",
-  "version": "0.5.11",
+  "version": "0.6.0",
   "description": "Cascade Protocol CLI - Validate, convert, and manage health data",
   "bin": {
     "cascade": "dist/index.js"

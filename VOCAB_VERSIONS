@@ -16,6 +16,14 @@
 #   (shape relaxations only: geneSymbol Violation→Warning,
 #   variantInterpreted range widened to {Variant, CopyNumberVariant, Haplotype}).
 #   No vocabulary additions; no row change.
+# Updated 2026-06-22: synced workbench.shapes.ttl for workbench@v1-draft.0.2
+#   (append-only record-amendment overlays: Amendment, Annotation, Retraction,
+#   Tombstone, plus their shapes). Per D-PATH, drafts are NOT registered as a
+#   row until v1.0 graduation; no row change.
+# Updated 2026-06-23: synced workbench.shapes.ttl for workbench@v1-draft.0.3
+#   (content-free Tombstone — contentHash removed, erasureAction added; plus the
+#   verification axis: verificationStatus + VerificationStatusShape via sh:in).
+#   Per D-PATH, still draft; no row change.
 core=3.3
 health=2.4
 clinical=1.9
