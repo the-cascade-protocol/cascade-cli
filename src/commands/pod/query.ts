@@ -21,6 +21,24 @@ import {
 import { isPodEncrypted, resolveDek, PodDecryptError } from '../../lib/pod-encryption.js';
 import { obtainPassphrase } from '../../lib/passphrase.js';
 
+/**
+ * Classify an unregistered ("extra") TTL file discovered by `--all` into a
+ * stable, humanized bucket key, so the query never leaks raw filenames
+ * (`ai-extraction-<epoch>`, UUID-named bundles, conversation artifacts) as if
+ * they were record types. Files under `analysis/` and any `ai-extraction-*`
+ * output collapse into one `ai-extracted` bucket; every other unrecognized TTL
+ * collapses into `other`. Several files can map to the same bucket — their
+ * records are aggregated by the caller. The app-side display map turns these
+ * keys into labels/badges.
+ */
+function classifyExtraBucket(relPath: string, baseName: string): string {
+  const topDir = relPath.split(/[\\/]/)[0];
+  if (topDir === 'analysis' || baseName.startsWith('ai-extraction')) {
+    return 'ai-extracted';
+  }
+  return 'other';
+}
+
 export function registerQuerySubcommand(pod: Command, program: Command): void {
   pod
     .command('query')
@@ -200,21 +218,33 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             };
           }
 
-          // Process extra files found in --all mode
+          // Process extra files found in --all mode. Instead of leaking each
+          // file's raw basename as a record type, classify it into a stable,
+          // humanized bucket (ai-extracted / other) and AGGREGATE records, so
+          // the UI never shows `ai-extraction-<epoch>` or a UUID as a "type".
           for (const extraFile of extraFiles) {
             const relPath = path.relative(absDir, extraFile);
             const baseName = path.basename(extraFile, '.ttl');
 
             const { records, error } = await parseDataFile(extraFile, dek);
-            if (records.length > 0) {
-              queryResults[baseName] = {
+            if (records.length === 0) continue;
+
+            const bucketKey = classifyExtraBucket(relPath, baseName);
+            const mapped = records.map((r) => ({
+              id: r.id,
+              type: r.type,
+              properties: r.properties,
+            }));
+            const existing = queryResults[bucketKey];
+            if (existing) {
+              existing.count += records.length;
+              existing.records.push(...mapped);
+              if (error && !existing.error) existing.error = error;
+            } else {
+              queryResults[bucketKey] = {
                 count: records.length,
-                file: relPath,
-                records: records.map((r) => ({
-                  id: r.id,
-                  type: r.type,
-                  properties: r.properties,
-                })),
+                file: relPath, // representative source; bucket may aggregate many
+                records: mapped,
                 error,
               };
             }
