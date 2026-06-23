@@ -18,6 +18,8 @@ import {
   extractLabelFromProps,
   selectKeyProperties,
 } from './helpers.js';
+import { isPodEncrypted, resolveDek, PodDecryptError } from '../../lib/pod-encryption.js';
+import { obtainPassphrase } from '../../lib/passphrase.js';
 
 export function registerQuerySubcommand(pod: Command, program: Command): void {
   pod
@@ -79,6 +81,22 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           printError(`Pod directory not found: ${absDir}`, globalOpts);
           process.exitCode = 1;
           return;
+        }
+
+        // If the pod is encrypted, resolve the DEK so reads can decrypt.
+        let dek: Buffer | undefined;
+        if (isPodEncrypted(absDir)) {
+          try {
+            const passphrase = await obtainPassphrase();
+            dek = resolveDek(absDir, passphrase);
+            printVerbose('Pod is encrypted; decrypting resources for query.', globalOpts);
+          } catch (e: unknown) {
+            const msg =
+              e instanceof PodDecryptError ? e.message : e instanceof Error ? e.message : String(e);
+            printError(`Cannot read encrypted pod: ${msg}`, globalOpts);
+            process.exitCode = 1;
+            return;
+          }
         }
 
         try {
@@ -168,7 +186,7 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
               continue;
             }
 
-            const { records, error } = await parseDataFile(filePath);
+            const { records, error } = await parseDataFile(filePath, dek);
 
             queryResults[typeName] = {
               count: records.length,
@@ -187,7 +205,7 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             const relPath = path.relative(absDir, extraFile);
             const baseName = path.basename(extraFile, '.ttl');
 
-            const { records, error } = await parseDataFile(extraFile);
+            const { records, error } = await parseDataFile(extraFile, dek);
             if (records.length > 0) {
               queryResults[baseName] = {
                 count: records.length,

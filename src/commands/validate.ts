@@ -24,6 +24,8 @@ import {
   findTurtleFiles,
   type ValidationResult,
 } from '../lib/shacl-validator.js';
+import { isPodEncrypted, resolveDek, PodDecryptError } from '../lib/pod-encryption.js';
+import { obtainPassphrase } from '../lib/passphrase.js';
 
 /** ANSI color codes for terminal output */
 const colors = {
@@ -198,6 +200,27 @@ export function registerValidateCommand(program: Command): void {
         return;
       }
 
+      // If validating an encrypted pod directory, resolve the DEK up front so
+      // each file can be decrypted before SHACL parsing.
+      let dek: Buffer | undefined;
+      if (fs.statSync(targetPath).isDirectory() && isPodEncrypted(targetPath)) {
+        try {
+          const passphrase = await obtainPassphrase();
+          dek = resolveDek(targetPath, passphrase);
+          printVerbose('Pod is encrypted; decrypting resources for validation.', globalOpts);
+        } catch (e: unknown) {
+          const msg =
+            e instanceof PodDecryptError ? e.message : e instanceof Error ? e.message : String(e);
+          if (globalOpts.json) {
+            console.log(JSON.stringify({ error: `Cannot read encrypted pod: ${msg}` }, null, 2));
+          } else {
+            console.error(`${colors.red}ERROR${colors.reset}: Cannot read encrypted pod: ${msg}`);
+          }
+          process.exitCode = 2;
+          return;
+        }
+      }
+
       // Determine files to validate
       let filesToValidate: string[];
       const stat = fs.statSync(targetPath);
@@ -244,7 +267,7 @@ export function registerValidateCommand(program: Command): void {
         printVerbose(`Validating: ${file}`, globalOpts);
 
         try {
-          const result = validateFile(file, shapesStore, shapeFiles);
+          const result = validateFile(file, shapesStore, shapeFiles, dek);
           results.push(result);
 
           if (!result.valid) {

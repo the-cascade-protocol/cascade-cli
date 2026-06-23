@@ -10,6 +10,14 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
 import { resolvePodDir, fileExists } from './helpers.js';
+import {
+  generateDek,
+  buildPassphraseManifest,
+  writeEncryptionManifest,
+  writeResource,
+  MANIFEST_RELATIVE_PATH,
+} from '../../lib/pod-encryption.js';
+import { obtainNewPassphrase } from '../../lib/passphrase.js';
 
 // ─── Pod Init Templates ──────────────────────────────────────────────────────
 
@@ -257,7 +265,12 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
     .command('init')
     .description('Initialize a new Cascade Pod')
     .argument('<directory>', 'Directory to initialize as a Cascade Pod')
-    .action(async (directory: string) => {
+    .option(
+      '--encrypt',
+      'Encrypt pod resources at rest (AES-256-GCM, passphrase-wrapped). ' +
+        'Passphrase is read from CASCADE_POD_PASSPHRASE or a hidden prompt.',
+    )
+    .action(async (directory: string, options: { encrypt?: boolean }) => {
       const globalOpts = program.opts() as OutputOptions;
       const absDir = resolvePodDir(directory);
       const dirName = path.basename(absDir);
@@ -285,14 +298,27 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
           await fs.mkdir(dir, { recursive: true });
         }
 
-        // Write template files
-        await fs.writeFile(path.join(absDir, '.well-known', 'solid'), wellKnownSolid(absDir));
-        await fs.writeFile(path.join(absDir, 'profile', 'card.ttl'), PROFILE_CARD_TTL);
-        await fs.writeFile(path.join(absDir, 'profile', 'extended.ttl'), EXTENDED_PROFILE_TTL);
-        await fs.writeFile(path.join(absDir, 'settings', 'preferences'), PREFERENCES_TTL);
-        await fs.writeFile(path.join(absDir, 'settings', 'publicTypeIndex.ttl'), PUBLIC_TYPE_INDEX_TTL);
-        await fs.writeFile(path.join(absDir, 'settings', 'privateTypeIndex.ttl'), PRIVATE_TYPE_INDEX_TTL);
-        await fs.writeFile(path.join(absDir, 'index.ttl'), indexTtl(dirName));
+        // If --encrypt: generate a DEK, wrap it with a passphrase-derived KEK,
+        // and write the encryption manifest BEFORE writing template resources so
+        // every resource lands encrypted.
+        let dek: Buffer | undefined;
+        if (options.encrypt) {
+          const passphrase = await obtainNewPassphrase();
+          dek = generateDek();
+          const manifest = buildPassphraseManifest(dek, passphrase);
+          writeEncryptionManifest(absDir, manifest);
+          printVerbose(`Wrote encryption manifest: ${MANIFEST_RELATIVE_PATH}`, globalOpts);
+        }
+
+        // Write template files. Pod resources route through writeResource so they
+        // are encrypted when a DEK is present; README.md stays plaintext (docs).
+        writeResource(path.join(absDir, '.well-known', 'solid'), wellKnownSolid(absDir), dek);
+        writeResource(path.join(absDir, 'profile', 'card.ttl'), PROFILE_CARD_TTL, dek);
+        writeResource(path.join(absDir, 'profile', 'extended.ttl'), EXTENDED_PROFILE_TTL, dek);
+        writeResource(path.join(absDir, 'settings', 'preferences'), PREFERENCES_TTL, dek);
+        writeResource(path.join(absDir, 'settings', 'publicTypeIndex.ttl'), PUBLIC_TYPE_INDEX_TTL, dek);
+        writeResource(path.join(absDir, 'settings', 'privateTypeIndex.ttl'), PRIVATE_TYPE_INDEX_TTL, dek);
+        writeResource(path.join(absDir, 'index.ttl'), indexTtl(dirName), dek);
         await fs.writeFile(path.join(absDir, 'README.md'), README_MD);
 
         const filesCreated = [
@@ -307,12 +333,16 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
           'index.ttl',
           'README.md',
         ];
+        if (dek) {
+          filesCreated.push(MANIFEST_RELATIVE_PATH.split(path.sep).join('/'));
+        }
 
         if (globalOpts.json) {
           printResult(
             {
               status: 'created',
               directory: absDir,
+              encrypted: Boolean(dek),
               files: filesCreated,
               message: 'Cascade Pod initialized successfully.',
             },
@@ -320,6 +350,9 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
           );
         } else {
           console.log(`Cascade Pod initialized at: ${absDir}\n`);
+          if (dek) {
+            console.log('Encryption: enabled (AES-256-GCM, passphrase-wrapped DEK)\n');
+          }
           console.log('Created:');
           for (const f of filesCreated) {
             console.log(`  ${f}`);
