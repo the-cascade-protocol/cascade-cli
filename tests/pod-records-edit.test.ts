@@ -166,6 +166,10 @@ describe('plaintext pod: append-only record amendments', () => {
     const medsText = fs.readFileSync(medsPath, 'utf-8');
     expect(medsText).toContain('cascade:SelfReported');
     expect(medsText).toContain('Lisinopril');
+    // Source axis: a real attribution triple to the Pod patient WebID.
+    expect(medsText).toContain('prov:wasAttributedTo </profile/card.ttl#me>');
+    // Verification axis: self-entered data defaults to Unverified.
+    expect(medsText).toContain('workbench:verificationStatus workbench:Unverified');
 
     const q = await runCli(['--json', 'pod', 'query', dir, '--medications']);
     expect(q.exitCode).toBe(0);
@@ -259,7 +263,7 @@ describe('plaintext pod: append-only record amendments', () => {
     expect(v.exitCode).toBe(0);
   }, TEST_TIMEOUT_MS);
 
-  it('erase --confirm removes the subject from its bucket and writes a Tombstone with a contentHash', async () => {
+  it('erase --confirm removes the subject and writes a CONTENT-FREE Tombstone (no content hash)', async () => {
     const dir = path.join(mkTmpDir(), 'pod');
     const recordUri = await initPodWithMedication(dir);
 
@@ -274,18 +278,24 @@ describe('plaintext pod: append-only record amendments', () => {
     expect(res.erased).toBe(true);
     expect(res.recordUri).toBe(recordUri);
     expect(res.tombstoneUri).toMatch(/^urn:uuid:/);
-    expect(res.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    // The result records the action, not a content hash.
+    expect(res.action).toBe('hard-erase');
+    expect(res.contentHash).toBeUndefined();
 
     // The subject is gone from the bucket: query no longer returns it.
     const q = await runCli(['--json', 'pod', 'query', dir, '--medications']);
     const meds = lastJson(q.stdout).dataTypes.medications;
     expect((meds?.records ?? []).some((r: any) => r.id === recordUri)).toBe(false);
 
-    // A Tombstone overlay exists, carries the hash, and validates.
+    // The Tombstone is a content-free audit event: it names the erased id and
+    // the action, but carries NO sha-256 content hash of the erased record.
     const tombPath = path.join(dir, 'annotations', 'tombstones.ttl');
     const tomb = fs.readFileSync(tombPath, 'utf-8');
     expect(tomb).toContain('workbench:Tombstone');
-    expect(tomb).toContain(res.contentHash);
+    expect(tomb).toContain('workbench:erasureAction');
+    expect(tomb).toContain('hard-erase');
+    expect(tomb).not.toMatch(/[0-9a-f]{64}/); // no content hash residue
+    expect(tomb).not.toContain('contentHash');
     const v = await runCli(['validate', tombPath]);
     expect(v.exitCode).toBe(0);
   }, TEST_TIMEOUT_MS);

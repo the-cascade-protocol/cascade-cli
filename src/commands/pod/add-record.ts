@@ -3,9 +3,12 @@
  *
  * Add a NEW self-reported record (NOT an annotation overlay). The record is
  * routed to its canonical bucket file (clinical/<type>.ttl or wellness/...) via
- * the SAME type->file map import.ts uses, tagged cascade:dataProvenance
- * cascade:SelfReported plus an optional actor and dct:created, with a minted
- * urn:uuid: id.
+ * the SAME type->file map import.ts uses, tagged on two orthogonal axes:
+ *   - SOURCE: cascade:dataProvenance cascade:SelfReported + a real
+ *     prov:wasAttributedTo actor (the --by IRI, else the Pod patient WebID).
+ *   - VERIFICATION: workbench:verificationStatus workbench:Unverified (self-
+ *     entered data is unverified until corroborated; mirrors FHIR).
+ * Plus dct:created and a minted urn:uuid: id.
  *
  * <propsJson> is an object of { "<curie>": "<value>" }. It is read from the
  * --json arg, or from the CASCADE_RECORD_JSON environment variable when --json
@@ -46,10 +49,17 @@ const TURTLE_PREFIX_HEADER = `@prefix cascade: <https://ns.cascadeprotocol.org/c
 @prefix coverage: <https://ns.cascadeprotocol.org/coverage/v1#> .
 @prefix checkup: <https://ns.cascadeprotocol.org/checkup/v1#> .
 @prefix pots: <https://ns.cascadeprotocol.org/pots/v1#> .
+@prefix workbench: <https://ns.cascadeprotocol.org/workbench/v1#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix dct: <http://purl.org/dc/terms/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 `;
+
+// The Pod's canonical patient WebID (see `cascade pod init`), used as the
+// default prov:wasAttributedTo actor for a self-entered record when --by is
+// not supplied — so attribution is a real PROV-O triple that survives export,
+// not just a UI affordance.
+const PATIENT_WEBID = '/profile/card.ttl#me';
 
 /** Expand a CURIE (prefix:local) to a full IRI, or return it unchanged. */
 function expandCurie(curie: string): string | undefined {
@@ -156,10 +166,12 @@ export function registerAddRecordSubcommand(pod: Command, program: Command): voi
         }
         lines.push(`    ${curie} "${escapeTurtleString(String(value))}"`);
       }
+      // Source axis: who reported it (self) — and a real attribution triple.
       lines.push('    cascade:dataProvenance cascade:SelfReported');
-      if (options.by) {
-        lines.push(`    prov:wasAttributedTo <${options.by}>`);
-      }
+      lines.push(`    prov:wasAttributedTo <${options.by ?? PATIENT_WEBID}>`);
+      // Verification axis (orthogonal to source): self-entered data is unverified
+      // until corroborated. Mirrors FHIR verificationStatus.
+      lines.push('    workbench:verificationStatus workbench:Unverified');
       lines.push(`    dct:created "${escapeTurtleString(createdIso)}"^^xsd:dateTime`);
 
       const block = `<${recordUri}>\n${lines.join(' ;\n')} .\n`;

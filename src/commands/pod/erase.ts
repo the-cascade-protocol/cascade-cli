@@ -1,21 +1,28 @@
 /**
  * cascade pod erase <pod-dir> --record <uri> --confirm [--reason <r>] [--by <actorIri>]
  *
- * HARD delete: locate the record's subject in its bucket file, compute the
- * sha-256 of its serialized triples (the contentHash), remove that subject from
- * the bucket file (read-merge-write minus the subject, re-encrypting), and write
- * a workbench:Tombstone audit marker to annotations/.
+ * HARD delete: locate the record's subject in its bucket file, remove that
+ * subject from the bucket file (read-merge-write minus the subject,
+ * re-encrypting), and write a CONTENT-FREE workbench:Tombstone audit marker to
+ * annotations/.
+ *
+ * The Tombstone records only the EVENT — the erased record's opaque id, the
+ * action, the actor (prov:wasAttributedTo), and the timestamp (dct:created). It
+ * deliberately retains NO content hash: a SHA-256 of an erased record's triples
+ * is still pseudonymised personal data (EDPB Guidelines 01/2025; WP29 WP216),
+ * because health content is low-entropy and enumerable, so a hash is
+ * brute-forceable and would re-create the very erasure obligation this command
+ * discharges. The Tombstone is thus the content-free audit/provenance event.
  *
  * This is the ONLY records command that mutates a base bucket file (removal);
  * every other command is purely additive. `--confirm` is REQUIRED.
  *
  * --json result:
- *   { erased: true, tombstoneUri, recordUri, contentHash }
+ *   { erased: true, tombstoneUri, recordUri, action }
  */
 
 import type { Command } from 'commander';
 import * as path from 'node:path';
-import { createHash } from 'node:crypto';
 import { Parser, type Quad } from 'n3';
 import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
 import { resolvePodDir, fileExists, discoverTtlFiles } from './helpers.js';
@@ -32,21 +39,16 @@ import { quadsToTurtle } from '../../lib/fhir-converter/types.js';
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 
+/** The action this command records on its Tombstone. */
+const ERASE_ACTION = 'hard-erase';
+
+/** Default actor for the erasure audit event (the Pod patient WebID). */
+const PATIENT_WEBID = '/profile/card.ttl#me';
+
 /** Parse Turtle into a flat quad array. */
 function parseQuads(turtle: string): Quad[] {
   const parser = new Parser({ format: 'Turtle' });
   return parser.parse(turtle);
-}
-
-/**
- * Canonical hash of a subject's quads: sort the `predicate object` terms and
- * sha-256 the joined string. Stable regardless of statement order.
- */
-function hashSubject(quads: Quad[]): string {
-  const lines = quads
-    .map((q) => `${q.predicate.value} ${q.object.value}`)
-    .sort();
-  return createHash('sha256').update(lines.join('\n'), 'utf-8').digest('hex');
 }
 
 /** Shorten a known rdf:type IRI to a CURIE for the Tombstone audit marker. */
@@ -145,8 +147,9 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
         return;
       }
 
-      // Compute the content hash and capture the erased type (if present).
-      const contentHash = hashSubject(subjectQuads);
+      // Capture the erased type (category only, if present). We deliberately do
+      // NOT hash the erased content: a hash of low-entropy health triples is
+      // still pseudonymised personal data and would defeat the erasure.
       const typeQuad = subjectQuads.find((q) => q.predicate.value === RDF_TYPE);
       const erasedType = typeQuad ? shortenType(typeQuad.object.value) : undefined;
 
@@ -154,13 +157,13 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
       const newBucketTurtle = await quadsToTurtle(remainingQuads);
       writeResource(foundFile, newBucketTurtle, dek);
 
-      // Write the Tombstone overlay.
+      // Write the content-free Tombstone overlay (the erasure audit event).
       const tombstoneUri = mintUri();
       const createdIso = new Date().toISOString();
 
       const lines: OverlayLine[] = [
         { predicate: 'workbench:erasedRecord', object: iriRef(options.record) },
-        { predicate: 'workbench:contentHash', object: strLit(contentHash) },
+        { predicate: 'workbench:erasureAction', object: strLit(ERASE_ACTION) },
       ];
       if (erasedType) {
         lines.push({ predicate: 'workbench:erasedType', object: strLit(erasedType) });
@@ -177,7 +180,9 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
             subjectUri: tombstoneUri,
             rdfType: 'workbench:Tombstone',
             lines,
-            actorIri: options.by,
+            // Always attribute the erasure so the audit event records WHO; the
+            // tombstone is then id + actor + timestamp + action (content-free).
+            actorIri: options.by ?? PATIENT_WEBID,
             createdIso,
           },
           dek,
@@ -192,7 +197,7 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
         erased: true,
         tombstoneUri,
         recordUri: options.record,
-        contentHash,
+        action: ERASE_ACTION,
       };
 
       if (globalOpts.json) {
@@ -200,8 +205,8 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
       } else {
         printVerbose(`Removed ${options.record} from ${path.relative(podDir, foundFile)}`, globalOpts);
         console.log(`Record erased: ${options.record}`);
-        console.log(`  Content hash: ${contentHash}`);
-        console.log(`  Tombstone:    ${tombstoneUri}`);
+        console.log(`  Action:    ${ERASE_ACTION}`);
+        console.log(`  Tombstone: ${tombstoneUri}`);
       }
     });
 }
