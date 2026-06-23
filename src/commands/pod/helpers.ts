@@ -9,11 +9,13 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
   parseTurtleFile,
+  parseTurtle,
   getProperties,
   shortenIRI,
   extractLabel,
   CASCADE_NAMESPACES,
 } from '../../lib/turtle-parser.js';
+import { readResource } from '../../lib/pod-encryption.js';
 
 // ─── Data Type Registry ──────────────────────────────────────────────────────
 
@@ -248,8 +250,11 @@ export async function discoverTtlFiles(podDir: string): Promise<string[]> {
 
 /**
  * Parse a single TTL file and extract typed records.
+ *
+ * When `dek` is supplied, the on-disk resource is decrypted (combined
+ * AES-256-GCM layout) before parsing; otherwise it is read as plaintext.
  */
-export async function parseDataFile(filePath: string): Promise<{
+export async function parseDataFile(filePath: string, dek?: Buffer): Promise<{
   records: Array<{
     id: string;
     type: string;
@@ -259,7 +264,19 @@ export async function parseDataFile(filePath: string): Promise<{
   totalQuads: number;
   error?: string;
 }> {
-  const result = await parseTurtleFile(filePath);
+  let result;
+  if (dek) {
+    let content: string;
+    try {
+      content = readResource(filePath, dek);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { records: [], totalQuads: 0, error: message };
+    }
+    result = parseTurtle(content, `file://${filePath}`);
+  } else {
+    result = await parseTurtleFile(filePath);
+  }
   if (!result.success) {
     return { records: [], totalQuads: 0, error: result.errors.join('; ') };
   }

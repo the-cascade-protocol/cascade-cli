@@ -25,6 +25,7 @@ import { registerImportSubcommand } from './import.js';
 import { registerConflictsCommand } from './conflicts.js';
 import { registerResolveCommand } from './resolve.js';
 import { registerExtractSubcommand } from './extract.js';
+import { registerEncryptSubcommand } from './encrypt.js';
 
 export function registerPodCommand(program: Command): void {
   const pod = program.command('pod').description('Manage Cascade Pod structures');
@@ -37,4 +38,5 @@ export function registerPodCommand(program: Command): void {
   registerConflictsCommand(pod);
   registerResolveCommand(pod);
   registerExtractSubcommand(pod);
+  registerEncryptSubcommand(pod, program);
 }

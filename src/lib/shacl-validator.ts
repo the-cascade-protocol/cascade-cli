@@ -12,6 +12,7 @@ import { Parser, Store } from 'n3';
 import SHACLValidator from 'rdf-validate-shacl';
 import { parseTurtle, detectVocabularies, CASCADE_NAMESPACES } from './turtle-parser.js';
 import type { ParseResult } from './turtle-parser.js';
+import { readResource } from './pod-encryption.js';
 
 export interface ValidationResult {
   valid: boolean;
@@ -262,11 +263,15 @@ export function validateTurtle(
 
 /**
  * Validate a Turtle file against SHACL shapes.
+ *
+ * When `dek` is supplied, the file is decrypted (combined AES-256-GCM layout)
+ * before parsing; otherwise it is read as plaintext UTF-8.
  */
 export function validateFile(
   filePath: string,
   shapesStore: Store,
   shapeFiles: string[],
+  dek?: Buffer,
 ): ValidationResult {
   if (!fs.existsSync(filePath)) {
     return {
@@ -284,7 +289,9 @@ export function validateFile(
     };
   }
 
-  const content = fs.readFileSync(filePath, 'utf-8');
+  const content = dek
+    ? readResource(filePath, dek)
+    : fs.readFileSync(filePath, 'utf-8');
   return validateTurtle(content, shapesStore, shapeFiles, filePath);
 }
 
