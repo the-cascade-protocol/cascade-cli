@@ -20,3 +20,37 @@ workbench:ImportedConversationShape a sh:NodeShape ;
     sh:targetClass workbench:ImportedConversation ;
     sh:property [ sh:path workbench:conversationSource ; sh:minCount 1 ; sh:datatype xsd:string ] ;
     sh:property [ sh:path workbench:rawContentLocation ; sh:minCount 1 ; sh:datatype xsd:string ] .
+
+# ── Append-only record amendment overlays (v1-draft.0.2) ────────────────────
+
+workbench:AmendmentShape a sh:NodeShape ;
+    sh:targetClass workbench:Amendment ;
+    sh:property [ sh:path workbench:amendsRecord ; sh:minCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path workbench:amendsProperty ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path workbench:amendedValue ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path workbench:amendmentReason ; sh:datatype xsd:string ] .
+
+workbench:AnnotationShape a sh:NodeShape ;
+    sh:targetClass workbench:Annotation ;
+    sh:property [ sh:path workbench:annotatesRecord ; sh:minCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path workbench:annotationText ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path workbench:annotationProperty ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path workbench:annotationValue ; sh:datatype xsd:string ] ;
+    # Require at least one of annotationText / annotationValue.
+    sh:or (
+        [ sh:path workbench:annotationText ; sh:minCount 1 ]
+        [ sh:path workbench:annotationValue ; sh:minCount 1 ]
+    ) .
+
+workbench:RetractionShape a sh:NodeShape ;
+    sh:targetClass workbench:Retraction ;
+    sh:property [ sh:path workbench:retractsRecord ; sh:minCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path workbench:retractionReason ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path workbench:supersededBy ; sh:nodeKind sh:IRI ] .
+
+workbench:TombstoneShape a sh:NodeShape ;
+    sh:targetClass workbench:Tombstone ;
+    sh:property [ sh:path workbench:erasedRecord ; sh:minCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path workbench:erasedType ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path workbench:contentHash ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path workbench:erasureReason ; sh:datatype xsd:string ] .

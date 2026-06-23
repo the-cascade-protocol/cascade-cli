@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.6.0] - 2026-06-22
+
+### Added
+
+- **Append-only record-amendment commands.** Original Pod records are now never modified in place; every edit/delete is a new provenanced overlay resource written to a new `<pod>/annotations/` directory (one `.ttl` per kind) and auto-discovered by `pod query --all`. All writes route through the encryption chokepoint (ciphertext on disk when the pod is encrypted), mint `urn:uuid:` ids, stamp `dct:created`, tag `cascade:dataProvenance cascade:SelfReported`, and are SHACL-validated before they are written (a malformed overlay fails and nothing is persisted). New subcommands:
+  - `cascade pod amend <pod> --record <uri> --property <curie> --value <val> [--reason] [--by]` writes a `workbench:Amendment` (overrides one property value). Result: `{ amended, amendmentUri, recordUri, property, value }`.
+  - `cascade pod annotate <pod> --record <uri> [--text] [--property --value] [--by]` writes a `workbench:Annotation` (adds a note / extra attribute). Result: `{ annotated, annotationUri, recordUri }`.
+  - `cascade pod add-record <pod> --type <curie> --json '<propsJson>' [--by]` writes a NEW self-reported record into its canonical bucket (`clinical/...` or `wellness/...`) via the same type-to-file map `pod import` uses. `propsJson` is read from the argument or the `CASCADE_RECORD_JSON` env var. Result: `{ added, recordUri, type }`.
+  - `cascade pod retract <pod> --record <uri> [--reason] [--superseded-by <keptUri>] [--by]` writes a `workbench:Retraction` (soft-delete / supersede). Result: `{ retracted, retractionUri, recordUri, supersededBy }`.
+  - `cascade pod erase <pod> --record <uri> --confirm [--reason] [--by]` HARD-deletes: removes the subject from its bucket file, computes the sha-256 `contentHash` of its triples, and writes a `workbench:Tombstone` audit marker. Requires `--confirm`. The only records command that mutates a base bucket file. Result: `{ erased, tombstoneUri, recordUri, contentHash }`.
+- `workbench:` is now a recognized Cascade namespace for vocabulary detection, so `cascade validate` applies the workbench shapes to overlay resources.
+
+### Shapes
+
+- Synced `workbench.shapes.ttl` from spec (`workbench@v1-draft.0.2`): SHACL shapes for `workbench:Amendment` / `Annotation` / `Retraction` / `Tombstone`. Per D-PATH, the draft is not registered as a `VOCAB_VERSIONS` row until v1.0 graduation.
+
+---
+
 ## [0.5.11] - 2026-06-17
 
 ### Added
