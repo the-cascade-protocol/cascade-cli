@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execSync } from 'child_process';
 import * as fs from 'fs/promises';
+import * as os from 'os';
 import * as path from 'path';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
@@ -397,5 +398,52 @@ describe.skipIf(skipIfNoPod)('pod export', () => {
   it('should error for unknown export format', () => {
     const output = runCli(`pod export ${REFERENCE_POD} --format csv`);
     expect(output).toContain('Unknown export format');
+  });
+});
+
+describe('pod query --all: extra-file bucket humanization (R1 de-leak)', () => {
+  let podDir: string;
+
+  beforeEach(async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), 'cascade-deleak-'));
+    podDir = path.join(base, 'pod');
+    runCli(`pod init ${podDir}`);
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(path.dirname(podDir), { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  });
+
+  it('aggregates analysis/ + ai-extraction-* into ai-extracted, collapses other artifacts, and never leaks raw filenames', async () => {
+    await fs.mkdir(path.join(podDir, 'analysis'), { recursive: true });
+    await fs.writeFile(
+      path.join(podDir, 'analysis', 'ai-extraction-1782163693.ttl'),
+      '@prefix evidence: <https://ns.cascadeprotocol.org/evidence/v1#> .\n<urn:uuid:a1> a evidence:Assertion ; evidence:assertionText "x" .\n',
+    );
+    await fs.writeFile(
+      path.join(podDir, 'analysis', '2c9e05cb-06d6-4a21-a339-0d689bff3545.ttl'),
+      '@prefix evidence: <https://ns.cascadeprotocol.org/evidence/v1#> .\n<urn:uuid:b1> a evidence:Assertion ; evidence:assertionText "y" .\n',
+    );
+    await fs.writeFile(
+      path.join(podDir, 'gemini-1782163693.ttl'),
+      '@prefix workbench: <https://ns.cascadeprotocol.org/workbench/v1#> .\n<urn:uuid:c1> a workbench:ImportedConversation ; workbench:conversationSource "gemini" .\n',
+    );
+
+    const out = runCli(`--json pod query ${podDir} --all`);
+    const j = JSON.parse(out);
+    const keys = Object.keys(j.dataTypes);
+
+    // The two analysis files collapse into ONE ai-extracted bucket (2 records).
+    expect(j.dataTypes['ai-extracted']?.count).toBe(2);
+    // The conversation artifact collapses into `other`.
+    expect(j.dataTypes['other']?.count).toBe(1);
+    // No raw filename ever surfaces as a bucket key.
+    expect(keys.some((k) => k.includes('ai-extraction-'))).toBe(false);
+    expect(keys.some((k) => /[0-9a-f]{8}-[0-9a-f]{4}/.test(k))).toBe(false);
+    expect(keys.some((k) => k.startsWith('gemini'))).toBe(false);
   });
 });
