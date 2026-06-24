@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.6.1] - 2026-06-23
+
+### Fixed
+
+- `cascade pod resolve` now honors the global `--json` flag. It emits a single machine-readable result object (`{ resolved, conflictId, keep, resolution, keptRecordUri, discardedRecordUris, remainingConflicts }`) and JSON-shaped errors, instead of human-readable text. It was the only `pod` subcommand that ignored `--json`, which forced programmatic callers (the desktop apps) to parse a success string out of stdout. Human-readable output is unchanged when `--json` is not set.
+
+---
+
 ## [0.6.0] - 2026-06-22
 
 ### Added
