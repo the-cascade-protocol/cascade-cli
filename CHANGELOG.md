@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.7.0] - 2026-06-26
+
+### Added
+
+- **Folder and vendor-export import (source-adapter layer).** `cascade pod import` now accepts a directory, not just files. A new source-adapter registry detects the container shape and expands it into importable files: an **Apple Health export** folder imports its `clinical-records/` FHIR and skips the multi-GB device exports (`export.xml`, `export_cda.xml`) and ECG/workout-route folders with a clear reason; any other folder is walked recursively for supported files (FHIR JSON, Turtle, C-CDA XML/zip). This is the first slice of the streaming-ingestion architecture: the container layer above the per-file FormatImporters. Verified on a real Apple Health export (1,267 files in, 1,160 records imported, both device exports skipped).
+
+### Fixed
+
+- **Import is resilient to a single bad file.** A file the converter cannot handle is now skipped with a reason in the import report, instead of aborting the whole import. Essential for folder imports of hundreds of files.
+- **`contentHashedUri` coerces non-string content fields.** Real-world FHIR (an Apple Health Patient) could carry a non-string field where the URI derivation expected a string, throwing `v.trim is not a function`. Values are coerced with `String(v)`; the derived URI is unchanged for valid string inputs, so existing URIs are stable.
+- **Whole-file read guard.** A file over ~2 GiB (Node's `fs.readFile` cap) is skipped with a clear reason rather than failing with an opaque "Cannot read file." Streaming import will lift this.
+
+---
+
 ## [0.6.1] - 2026-06-23
 
 ### Fixed
