@@ -342,11 +342,14 @@ export function contentHashedUri(
   contentFields: Record<string, string | undefined>,
   fallbackId?: string,
 ): string {
-  // Filter out undefined/empty values and sort keys for stability
+  // Filter out undefined/empty values and sort keys for stability. Values are
+  // coerced to string before trimming: the type says string, but real-world
+  // FHIR (e.g. an Apple Health Patient) can slip a non-string field through, and
+  // String(s) === s for valid string inputs, so the derived URI is unchanged.
   const content = Object.entries(contentFields)
-    .filter(([, v]) => v != null && v.trim().length > 0)
+    .filter(([, v]) => v != null && String(v).trim().length > 0)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}=${v}`)
+    .map(([k, v]) => `${k}=${String(v)}`)
     .join('|');
 
   if (content.length > 0) {

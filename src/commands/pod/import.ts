@@ -25,6 +25,7 @@ import { printResult, printError, printVerbose, type OutputOptions } from '../..
 import { convert } from '../../lib/fhir-converter/index.js';
 import { quadsToTurtle } from '../../lib/fhir-converter/types.js';
 import { runReconciliation, type ReconcilerInput } from '../../lib/reconciler.js';
+import { detectSource } from '../../lib/source-adapters/registry.js';
 import {
   DATA_TYPES,
   resolvePodDir,
@@ -240,7 +241,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
     .command('import')
     .description('Import FHIR JSON or Cascade Turtle files into a pod')
     .argument('<pod-dir>', 'Path to the Cascade Pod directory')
-    .argument('<files...>', 'FHIR JSON or Cascade Turtle files to import')
+    .argument('<files...>', 'Files or folders to import (FHIR JSON, Cascade Turtle, C-CDA XML/zip, or a folder / Apple Health export)')
     .option('--source-system <name>', 'Tag all imported records with this system name')
     .option('--no-reconcile', 'Skip reconciliation even when importing multiple files')
     .option('--reconcile-existing', 'Include existing pod records in reconciliation pass (cross-batch dedup, on by default; disable with --no-reconcile-existing)', true)
@@ -306,13 +307,76 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         }
       }
 
+      // --- Step 1.5: Expand container inputs (folders, vendor exports) ---
+      // A directory argument is run through the source-adapter registry, which
+      // expands it into concrete importable files and records what it skipped
+      // (e.g. an Apple Health export -> its clinical-records FHIR, skipping the
+      // multi-GB device XMLs). Plain file arguments pass through unchanged.
+      const expandedFiles: string[] = [];
+      const sourceSkips: string[] = [];
+      for (const arg of files) {
+        const absArg = path.resolve(process.cwd(), arg);
+        let isDirectory = false;
+        try {
+          isDirectory = (await fs.stat(absArg)).isDirectory();
+        } catch {
+          // Not stat-able; leave it for the per-file read below to report.
+          expandedFiles.push(arg);
+          continue;
+        }
+        if (!isDirectory) {
+          expandedFiles.push(arg);
+          continue;
+        }
+        const adapter = detectSource(absArg);
+        if (!adapter) {
+          printError(`Don't know how to import the folder: ${arg}`, globalOpts);
+          process.exitCode = 1;
+          return;
+        }
+        const expanded = adapter.expand(absArg);
+        for (const s of expanded.skipped) {
+          sourceSkips.push(`Skipped ${path.basename(s.path)}: ${s.reason}`);
+        }
+        if (expanded.files.length === 0) {
+          printError(
+            `No importable files found in ${arg} (${expanded.sourceLabel}).` +
+              (expanded.skipped.length ? ` ${expanded.skipped.length} artifact(s) skipped.` : ''),
+            globalOpts,
+          );
+          process.exitCode = 1;
+          return;
+        }
+        printVerbose(
+          `${expanded.sourceLabel}: importing ${expanded.files.length} file(s)` +
+            (expanded.skipped.length ? `, skipping ${expanded.skipped.length}` : ''),
+          globalOpts,
+        );
+        expandedFiles.push(...expanded.files);
+      }
+
       // --- Step 2: Convert / collect inputs ---
       const reconcilerInputs: ReconcilerInput[] = [];
       const sourceReport: ImportReport['sources'] = [];
-      const allWarnings: string[] = [];
+      const allWarnings: string[] = [...sourceSkips];
 
-      for (const filePath of files) {
+      for (const filePath of expandedFiles) {
+        try {
         const absPath = path.resolve(process.cwd(), filePath);
+        // Guard the whole-file read limit: a file over ~2 GiB cannot be read
+        // whole (Node's fs.readFile cap). Skip it with a clear reason instead of
+        // aborting the entire import. Streaming import will lift this.
+        try {
+          const sizeBytes = (await fs.stat(absPath)).size;
+          if (sizeBytes > 2_000_000_000) {
+            allWarnings.push(
+              `Skipped ${path.basename(filePath)}: ${(sizeBytes / 1e9).toFixed(1)} GB exceeds the whole-file import limit (streaming import not yet supported)`,
+            );
+            continue;
+          }
+        } catch {
+          // stat failed; let the read below produce the precise error.
+        }
         const isZip = absPath.toLowerCase().endsWith('.zip') || absPath.toLowerCase().endsWith('.xml');
         let rawContent: string | Buffer;
         try {
@@ -376,6 +440,15 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
 
         reconcilerInputs.push({ content: turtleContent, systemName });
         sourceReport.push({ file: filePath, system: systemName, resourceCount, warnings });
+        } catch (e) {
+          // Resilience: a single malformed file becomes a skip-with-reason, not a
+          // crashed import. Essential when a folder yields hundreds of files and
+          // one carries a shape the converter cannot handle.
+          allWarnings.push(
+            `Skipped ${path.basename(filePath)}: conversion error (${e instanceof Error ? e.message : String(e)})`,
+          );
+          continue;
+        }
       }
 
       // --- Step 3: Reconcile or concatenate ---
