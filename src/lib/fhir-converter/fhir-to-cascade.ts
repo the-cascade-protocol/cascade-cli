@@ -49,11 +49,22 @@ import {
   EXCLUDED_TYPES,
 } from './converters-passthrough.js';
 
+import { appendProvenanceQuads } from './provenance.js';
+
 // ---------------------------------------------------------------------------
 // Main dispatcher: single FHIR resource -> Cascade
 // ---------------------------------------------------------------------------
 
 export function convertFhirResourceToQuads(fhirResource: any, passthroughMinimal = false): (ConversionResult & { _quads: Quad[] }) | null {
+  const result = dispatchFhirResource(fhirResource, passthroughMinimal);
+  // Recover the performing clinician + source EHR/organization that the per-type
+  // converters historically dropped for most types ("Cascade does not drop
+  // data"). Additive + idempotent; see provenance.ts.
+  if (result) appendProvenanceQuads(fhirResource, result._quads);
+  return result;
+}
+
+function dispatchFhirResource(fhirResource: any, passthroughMinimal: boolean): (ConversionResult & { _quads: Quad[] }) | null {
   const resourceType = fhirResource?.resourceType as string | undefined;
   if (!resourceType) return null;
 

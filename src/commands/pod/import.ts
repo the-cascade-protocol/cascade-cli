@@ -312,7 +312,12 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // expands it into concrete importable files and records what it skipped
       // (e.g. an Apple Health export -> its clinical-records FHIR, skipping the
       // multi-GB device XMLs). Plain file arguments pass through unchanged.
-      const expandedFiles: string[] = [];
+      // Each entry carries an optional `label`: a source adapter's `sourceLabel`
+      // (e.g. "Apple Health export") becomes the per-file source-system, so all
+      // records from one export share one honest source-batch name instead of
+      // each file's basename ("MedicationRequest-<id>"), which was the Source
+      // facet wall. A plain file argument has no label (falls back to basename).
+      const expandedFiles: { path: string; label?: string }[] = [];
       const sourceSkips: string[] = [];
       for (const arg of files) {
         const absArg = path.resolve(process.cwd(), arg);
@@ -321,11 +326,11 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           isDirectory = (await fs.stat(absArg)).isDirectory();
         } catch {
           // Not stat-able; leave it for the per-file read below to report.
-          expandedFiles.push(arg);
+          expandedFiles.push({ path: arg });
           continue;
         }
         if (!isDirectory) {
-          expandedFiles.push(arg);
+          expandedFiles.push({ path: arg });
           continue;
         }
         const adapter = detectSource(absArg);
@@ -352,7 +357,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             (expanded.skipped.length ? `, skipping ${expanded.skipped.length}` : ''),
           globalOpts,
         );
-        expandedFiles.push(...expanded.files);
+        expandedFiles.push(
+          ...expanded.files.map((f) => ({ path: f, label: expanded.sourceLabel })),
+        );
       }
 
       // --- Step 2: Convert / collect inputs ---
@@ -360,7 +367,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       const sourceReport: ImportReport['sources'] = [];
       const allWarnings: string[] = [...sourceSkips];
 
-      for (const filePath of expandedFiles) {
+      for (const entry of expandedFiles) {
+        const filePath = entry.path;
         try {
         const absPath = path.resolve(process.cwd(), filePath);
         // Guard the whole-file read limit: a file over ~2 GiB cannot be read
@@ -387,7 +395,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           return;
         }
 
-        const systemName = options.sourceSystem ?? path.basename(filePath, path.extname(filePath));
+        const systemName =
+          options.sourceSystem ?? entry.label ?? path.basename(filePath, path.extname(filePath));
         const warnings: string[] = [];
 
         let turtleContent: string;
