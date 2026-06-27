@@ -200,9 +200,19 @@ async function appendTypeRegistration(
   }
 
   const block = buildTypeRegistration(key, info);
+
+  // The block may reference the `fhir:` prefix (fhir-passthrough catch-all).
+  // Pods initialized before that prefix was added to the index header would
+  // otherwise fail to parse with "Undefined prefix fhir:". Self-heal by
+  // declaring the prefix once if the block needs it and the file lacks it.
+  let header = '';
+  if (block.includes('fhir:') && !/@prefix\s+fhir:/.test(content)) {
+    header = '@prefix fhir: <http://hl7.org/fhir/> .\n';
+  }
+
   if (!dryRun) {
     // Read-modify-write (encrypted resources cannot be appended to in place).
-    writeResource(indexPath, content + block, dek);
+    writeResource(indexPath, header + content + block, dek);
   }
   return true;
 }

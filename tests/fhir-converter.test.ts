@@ -551,7 +551,10 @@ describe('FHIR -> Cascade converters', () => {
       expect(findQuadValue(quads, NS.clinical + 'bloodPressureDiastolicUnit')).toBe('mm[Hg]');
     });
 
-    it('should still warn when component children have no known LOINC codes', () => {
+    it('should route an unmapped LOINC vital with components to a lab record (data preserved, valid type)', () => {
+      // LOINC 99999-9 is not in VITAL_LOINC_CODES, so no SHACL-valid clinical:vitalType
+      // can be assigned. Rather than emit an invalid VitalSign, route to the lab
+      // converter, which preserves the component answers without dropping data.
       const obs = {
         resourceType: 'Observation',
         id: 'panel-unknown-1',
@@ -559,16 +562,20 @@ describe('FHIR -> Cascade converters', () => {
         category: [{ coding: [{ code: 'vital-signs' }] }],
         component: [
           {
-            code: { coding: [{ system: 'http://loinc.org', code: '99998-8' }] },
+            code: { coding: [{ system: 'http://loinc.org', code: '99998-8' }], text: 'Some sub-measure' },
             valueQuantity: { value: 5, unit: 'unit' },
           },
         ],
       };
       const result = convertObservationVital(obs);
-      expect(result.warnings).toContain('No valueQuantity found in vital sign Observation');
+      // It is no longer a VitalSign; it is a lab/observation record.
+      expect(result.cascadeType).toBe('health:LabResultRecord');
+      expect(findQuadValue(result._quads, NS.health + 'resultValue')).toContain('5');
+      // No SHACL-invalid clinical:vitalType is emitted.
+      expect(findQuadValue(result._quads, NS.clinical + 'vitalType')).toBeUndefined();
     });
 
-    it('should fall back to display name slug silently for unmapped vital LOINC codes', () => {
+    it('should route an unmapped LOINC vital to a lab record with its value preserved', () => {
       const obs = {
         resourceType: 'Observation',
         id: 'novel-vital-1',
@@ -581,37 +588,118 @@ describe('FHIR -> Cascade converters', () => {
         effectiveDateTime: '2024-01-15T10:30:00Z',
       };
       const result = convertObservationVital(obs);
-      // Data preserved, no warning emitted
+      // No canonical clinical:vitalType exists, so this is captured as a lab record.
       expect(result.warnings).toHaveLength(0);
-      expect(findQuadValue(result._quads, NS.clinical + 'vitalType')).toBe('novel_vital_sign');
-      expect(findQuadValue(result._quads, NS.clinical + 'vitalTypeName')).toBe('Novel Vital Sign');
-      expect(findQuadValue(result._quads, NS.clinical + 'value')).toBe('42');
+      expect(result.cascadeType).toBe('health:LabResultRecord');
+      expect(findQuadValue(result._quads, NS.health + 'testName')).toBe('Novel Vital Sign');
+      expect(findQuadValue(result._quads, NS.health + 'resultValue')).toBe('42');
+      // No SHACL-invalid clinical:vitalType slug is emitted.
+      expect(findQuadValue(result._quads, NS.clinical + 'vitalType')).toBeUndefined();
     });
 
-    it('should map newly added vital LOINC codes (pain, IOP, pediatric)', () => {
+    it('should route non-canonical LOINC vitals (pain, IOP) to lab records with value preserved', () => {
+      // painSeverity and intraocularPressure* are in VITAL_LOINC_CODES but are NOT
+      // in the VitalSignShape sh:in enum, so they must not be emitted as VitalSign.
       const painObs = {
         resourceType: 'Observation',
         id: 'pain-1',
-        code: { coding: [{ system: 'http://loinc.org', code: '72514-3' }] },
+        code: { coding: [{ system: 'http://loinc.org', code: '72514-3' }], text: 'Pain Severity' },
         category: [{ coding: [{ code: 'vital-signs' }] }],
         valueQuantity: { value: 4, unit: '{score}' },
         effectiveDateTime: '2024-01-15T10:30:00Z',
       };
       const painResult = convertObservationVital(painObs);
-      expect(painResult.warnings).toHaveLength(0);
-      expect(findQuadValue(painResult._quads, NS.clinical + 'vitalType')).toBe('painSeverity');
+      expect(painResult.cascadeType).toBe('health:LabResultRecord');
+      expect(findQuadValue(painResult._quads, NS.health + 'resultValue')).toBe('4');
+      expect(findQuadValue(painResult._quads, NS.clinical + 'vitalType')).toBeUndefined();
 
       const iopObs = {
         resourceType: 'Observation',
         id: 'iop-1',
-        code: { coding: [{ system: 'http://loinc.org', code: '79893-4' }] },
+        code: { coding: [{ system: 'http://loinc.org', code: '79893-4' }], text: 'Intraocular Pressure (Right Eye)' },
         category: [{ coding: [{ code: 'vital-signs' }] }],
         valueQuantity: { value: 16, unit: 'mm[Hg]' },
         effectiveDateTime: '2024-01-15T10:30:00Z',
       };
       const iopResult = convertObservationVital(iopObs);
-      expect(iopResult.warnings).toHaveLength(0);
-      expect(findQuadValue(iopResult._quads, NS.clinical + 'vitalType')).toBe('intraocularPressureRightEye');
+      expect(iopResult.cascadeType).toBe('health:LabResultRecord');
+      expect(findQuadValue(iopResult._quads, NS.health + 'resultValue')).toBe('16');
+      expect(findQuadValue(iopResult._quads, NS.clinical + 'vitalType')).toBeUndefined();
+    });
+
+    it('should map canonical vital types to the SHACL-valid clinical:vitalType enum', () => {
+      // Regression for the importer bug where VITAL_LOINC_CODES types (e.g.
+      // bloodPressurePanel, bodyTemperature) were emitted verbatim and rejected by
+      // the VitalSignShape sh:in enum. The converter must emit the enum value.
+      const bpPanel = {
+        resourceType: 'Observation',
+        id: 'bp-panel-shacl',
+        code: { coding: [{ system: 'http://loinc.org', code: '55284-4' }], text: 'Blood Pressure' },
+        category: [{ coding: [{ code: 'vital-signs' }] }],
+        component: [
+          { code: { coding: [{ system: 'http://loinc.org', code: '8480-6' }] }, valueQuantity: { value: 120, unit: 'mm[Hg]' } },
+          { code: { coding: [{ system: 'http://loinc.org', code: '8462-4' }] }, valueQuantity: { value: 80, unit: 'mm[Hg]' } },
+        ],
+      };
+      const bpResult = convertObservationVital(bpPanel);
+      expect(bpResult.cascadeType).toBe('clinical:VitalSign');
+      // bloodPressurePanel is not a valid enum value; bloodPressure is.
+      expect(findQuadValue(bpResult._quads, NS.clinical + 'vitalType')).toBe('bloodPressure');
+
+      const tempObs = {
+        resourceType: 'Observation',
+        id: 'temp-shacl',
+        code: { coding: [{ system: 'http://loinc.org', code: '8310-5' }], text: 'Body Temperature' },
+        category: [{ coding: [{ code: 'vital-signs' }] }],
+        valueQuantity: { value: 37.0, unit: 'Cel' },
+      };
+      const tempResult = convertObservationVital(tempObs);
+      expect(tempResult.cascadeType).toBe('clinical:VitalSign');
+      // bodyTemperature is not a valid enum value; temperature is.
+      expect(findQuadValue(tempResult._quads, NS.clinical + 'vitalType')).toBe('temperature');
+    });
+
+    it('should capture a vital sign carrying valueCodeableConcept rather than dropping it', () => {
+      // A heart-rate-coded observation whose value is a coded concept: the value
+      // must be preserved under clinical:value, not silently dropped.
+      const obs = {
+        resourceType: 'Observation',
+        id: 'hr-coded',
+        code: { coding: [{ system: 'http://loinc.org', code: '8867-4' }], text: 'Heart Rate' },
+        category: [{ coding: [{ code: 'vital-signs' }] }],
+        valueCodeableConcept: { text: 'Regular' },
+      };
+      const result = convertObservationVital(obs);
+      expect(result.cascadeType).toBe('clinical:VitalSign');
+      expect(findQuadValue(result._quads, NS.clinical + 'value')).toBe('Regular');
+      expect(result.warnings).toHaveLength(0);
+    });
+  });
+
+  describe('DocumentReference -> ClinicalDocument', () => {
+    const sampleDocRef = {
+      resourceType: 'DocumentReference',
+      id: 'doc-ref-1',
+      type: { text: 'Progress Note' },
+      date: '2024-02-01T09:00:00Z',
+      content: [{ attachment: { contentType: 'text/plain', url: 'Binary/abc', title: 'Note' } }],
+    };
+
+    it('should emit the FHIR resource id and type the ClinicalDocumentShape requires', () => {
+      // Regression: the shape requires clinical:fhirResourceId + clinical:fhirResourceType.
+      // The converter previously emitted only clinical:sourceRecordId and no type.
+      const result = convertClinicalDocument(sampleDocRef);
+      expect(result.cascadeType).toBe('clinical:ClinicalDocument');
+      expect(findQuadValue(result._quads, NS.clinical + 'fhirResourceId')).toBe('doc-ref-1');
+      expect(findQuadValue(result._quads, NS.clinical + 'fhirResourceType')).toBe('DocumentReference');
+      // sourceRecordId is kept additively for other consumers.
+      expect(findQuadValue(result._quads, NS.clinical + 'sourceRecordId')).toBe('doc-ref-1');
+    });
+
+    it('should still emit fhirResourceType when the resource id is absent', () => {
+      const noId = { ...sampleDocRef, id: undefined };
+      const result = convertClinicalDocument(noId);
+      expect(findQuadValue(result._quads, NS.clinical + 'fhirResourceType')).toBe('DocumentReference');
     });
   });
 

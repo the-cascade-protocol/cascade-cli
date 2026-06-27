@@ -11,6 +11,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { Parser } from 'n3';
 
 const CLI_PATH = resolve(__dirname, '../dist/index.js');
 
@@ -314,6 +315,19 @@ describe('pod import', () => {
 
     const content = await fs.readFile(passthroughFile, 'utf-8');
     expect(content).toContain('@prefix');
+
+    // Regression: the fhir-passthrough registration uses the `fhir:` CURIE, which
+    // previously was emitted into publicTypeIndex.ttl without the prefix being
+    // declared, producing an "Undefined prefix fhir:" parse error. The index must
+    // declare the prefix and parse cleanly.
+    const publicIndex = await fs.readFile(
+      path.join(podDir, 'settings', 'publicTypeIndex.ttl'),
+      'utf-8',
+    );
+    expect(publicIndex).toContain('solid:forClass fhir:');
+    expect(publicIndex).toMatch(/@prefix\s+fhir:\s+<http:\/\/hl7\.org\/fhir\/>\s*\./);
+    // The whole file must parse without throwing (no undefined-prefix error).
+    expect(() => new Parser().parse(publicIndex)).not.toThrow();
   });
 
   // ─── Test 6b: AI extraction activity routes to its own file, not passthrough ─

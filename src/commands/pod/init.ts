@@ -75,6 +75,7 @@ const PUBLIC_TYPE_INDEX_TTL = `@prefix solid: <http://www.w3.org/ns/solid/terms#
 @prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
 @prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
 @prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix fhir: <http://hl7.org/fhir/> .
 
 # =============================================================================
 # Public Type Index
