@@ -57,6 +57,7 @@ const { namedNode, literal, quad: makeQuad } = DataFactory;
 import { convertFhirResourceToQuads } from './fhir-to-cascade.js';
 import { convertCascadeToFhir } from './cascade-to-fhir.js';
 import { EXCLUDED_TYPES } from './converters-passthrough.js';
+import { SOURCE_EHR_UNKNOWN } from './provenance.js';
 
 // Re-export public types
 export type { InputFormat, OutputFormat, ConversionResult, BatchConversionResult };
@@ -177,9 +178,12 @@ export async function convert(
     }
     // Document subtypes require clinical:sourceEHR (SHACL). The per-resource
     // provenance pass may already have captured the REAL source org/EHR from the
-    // resource; only fall back to the import label for subjects that still lack
-    // one, so a real "swedish.org" / "Kaiser Permanente Washington" is never
-    // overwritten by the import-batch name.
+    // resource; only fill the gap for subjects that still lack one. The gap is
+    // filled with the ratified data-absent-reason token "unknown", NEVER the
+    // import-batch label: that label (cascade:sourceSystem, e.g. "Apple Health
+    // export") is how the data entered the Pod, not the EHR it came from, so
+    // writing it into sourceEHR misattributes provenance. An honest "unknown" lets
+    // the user re-file the record under the right EHR later.
     const subjectsWithSourceEhr = new Set(
       allQuads
         .filter((q) => q.predicate.value === NS.clinical + 'sourceEHR')
@@ -190,9 +194,9 @@ export async function convert(
         makeQuad(namedNode(subjectUri), namedNode(NS.clinical + 'importedAt'),
           literal(conversionTimestamp, namedNode(NS.xsd + 'dateTime'))),
       );
-      if (sourceSystem && !subjectsWithSourceEhr.has(subjectUri)) {
+      if (!subjectsWithSourceEhr.has(subjectUri)) {
         allQuads.push(
-          makeQuad(namedNode(subjectUri), namedNode(NS.clinical + 'sourceEHR'), literal(sourceSystem)),
+          makeQuad(namedNode(subjectUri), namedNode(NS.clinical + 'sourceEHR'), literal(SOURCE_EHR_UNKNOWN)),
         );
       }
     }

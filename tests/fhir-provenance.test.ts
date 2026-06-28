@@ -15,10 +15,54 @@ import {
   extractProviderName,
   extractSourceEhr,
   appendProvenanceQuads,
+  SOURCE_EHR_UNKNOWN,
 } from '../src/lib/fhir-converter/provenance.js';
 import { NS, tripleType, tripleStr } from '../src/lib/fhir-converter/types.js';
+import { convert } from '../src/lib/fhir-converter/index.js';
 
 const { namedNode } = DataFactory;
+
+describe('source EHR fallback (D1: never the import-batch label)', () => {
+  it('a document-subtype record with no derivable EHR gets the unknown token, not the import label', async () => {
+    // A DiagnosticReport (-> clinical:LaboratoryReport, a ClinicalDocument subtype
+    // the SHACL shape requires sourceEHR on) with only relative refs and a
+    // placeholder org performer: nothing to derive a real EHR from.
+    const report = {
+      resourceType: 'DiagnosticReport',
+      id: 'r1',
+      status: 'final',
+      code: { text: 'Basic Metabolic Panel' },
+      subject: { reference: 'Patient/abc' },
+      performer: [{ type: 'Organization', display: 'EXTERNAL LAB' }],
+    };
+    const res = await convert(
+      JSON.stringify(report), 'fhir', 'cascade', 'turtle', 'Apple Health export',
+    );
+    expect(res.success).toBe(true);
+    // SHACL is satisfied by the ratified "unknown" token...
+    expect(res.output).toContain(`clinical:sourceEHR "${SOURCE_EHR_UNKNOWN}"`);
+    // ...NOT by the import-batch label (the user's reported bug).
+    expect(res.output).not.toContain('clinical:sourceEHR "Apple Health export"');
+    // ...which stays on the separate ingestion axis.
+    expect(res.output).toContain('cascade:sourceSystem "Apple Health export"');
+  });
+
+  it('keeps a real derived EHR (endpoint host) over the unknown token', async () => {
+    const report = {
+      resourceType: 'DiagnosticReport',
+      id: 'r2',
+      status: 'final',
+      code: { text: 'CBC' },
+      subject: { reference: 'https://haiku.swedish.org/fhir/Patient/x' },
+      performer: [{ display: 'Dr X', reference: 'https://haiku.swedish.org/fhir/Practitioner/y' }],
+    };
+    const res = await convert(
+      JSON.stringify(report), 'fhir', 'cascade', 'turtle', 'Apple Health export',
+    );
+    expect(res.output).toContain('clinical:sourceEHR "swedish.org"');
+    expect(res.output).not.toContain(`clinical:sourceEHR "${SOURCE_EHR_UNKNOWN}"`);
+  });
+});
 
 describe('extractProviderName', () => {
   it('reads requester.display (MedicationRequest)', () => {

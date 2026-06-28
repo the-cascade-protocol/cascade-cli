@@ -31,6 +31,17 @@ import type { Quad } from 'n3';
 
 import { NS, tripleStr } from './types.js';
 
+/**
+ * The ratified "value is expected but not known" token, from the FHIR/HL7
+ * Data Absent Reason code system. Written into `clinical:sourceEHR` when the
+ * record's EHR of origin cannot be determined, instead of fabricating a value
+ * (e.g. copying the import-batch label, which is how the data got in, not where
+ * it came from). Deferring to the ratified vocabulary keeps "unknown" honest and
+ * machine-detectable downstream.
+ * @see http://terminology.hl7.org/CodeSystem/data-absent-reason (code "unknown")
+ */
+export const SOURCE_EHR_UNKNOWN = 'unknown';
+
 /** Resource fields, in priority order, that name the performing/ordering agent. */
 const PROVIDER_FIELDS = [
   'performer',
