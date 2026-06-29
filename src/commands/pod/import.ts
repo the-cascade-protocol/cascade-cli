@@ -25,7 +25,7 @@ import { printResult, printError, printVerbose, type OutputOptions } from '../..
 import { convert } from '../../lib/fhir-converter/index.js';
 import { quadsToTurtle } from '../../lib/fhir-converter/types.js';
 import { runReconciliation, type ReconcilerInput } from '../../lib/reconciler.js';
-import { detectSource } from '../../lib/source-adapters/registry.js';
+import { detectSource, type FileSourceMeta } from '../../lib/source-adapters/registry.js';
 import {
   DATA_TYPES,
   resolvePodDir,
@@ -327,7 +327,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // records from one export share one honest source-batch name instead of
       // each file's basename ("MedicationRequest-<id>"), which was the Source
       // facet wall. A plain file argument has no label (falls back to basename).
-      const expandedFiles: { path: string; label?: string }[] = [];
+      const expandedFiles: { path: string; label?: string; source?: FileSourceMeta }[] = [];
       const sourceSkips: string[] = [];
       for (const arg of files) {
         const absArg = path.resolve(process.cwd(), arg);
@@ -368,7 +368,11 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           globalOpts,
         );
         expandedFiles.push(
-          ...expanded.files.map((f) => ({ path: f, label: expanded.sourceLabel })),
+          ...expanded.files.map((f) => ({
+            path: f,
+            label: expanded.sourceLabel,
+            source: expanded.fileSources?.[f],
+          })),
         );
       }
 
@@ -433,7 +437,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
           // FHIR JSON
           printVerbose(`Converting FHIR JSON: ${filePath}`, globalOpts);
-          const result = await convert(content, 'fhir', 'cascade', 'turtle', systemName, passthroughMinimal);
+          const result = await convert(content, 'fhir', 'cascade', 'turtle', systemName, passthroughMinimal, entry.source?.sourceEhr);
           if (!result.success) {
             printError(`Failed to convert ${filePath}: ${result.errors.join(', ')}`, globalOpts);
             process.exitCode = 1;

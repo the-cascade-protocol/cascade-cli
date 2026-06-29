@@ -76,6 +76,13 @@ export { convertCascadeToFhir } from './cascade-to-fhir.js';
  * @param passthroughMinimal  If true, omits cascade:fhirJson from passthrough records.
  *                            Round-trip export is not supported in minimal mode.
  *                            Produces smaller output for display-only scenarios.
+ * @param sourceEhrOverride   Authoritative EHR/account of origin for EVERY record
+ *                            in this input, supplied by a container adapter that
+ *                            knows the source the FHIR payload omits (e.g. Apple
+ *                            Health's export.xml `<ClinicalRecord sourceName>`).
+ *                            When set it REPLACES any host-derived clinical:sourceEHR
+ *                            and pre-empts the data-absent "unknown" fallback, so
+ *                            all records from one account share one honest source.
  */
 export async function convert(
   input: string | Buffer,
@@ -84,6 +91,7 @@ export async function convert(
   outputSerialization: 'turtle' | 'jsonld' = 'turtle',
   sourceSystem?: string,
   passthroughMinimal = false,
+  sourceEhrOverride?: string,
 ): Promise<BatchConversionResult> {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -172,6 +180,35 @@ export async function convert(
             namedNode(subjectUri),
             namedNode(NS.cascade + 'sourceSystem'),
             literal(sourceSystem),
+          ),
+        );
+      }
+    }
+    // Authoritative per-record source override (e.g. the Apple Health export.xml
+    // <ClinicalRecord sourceName> the container adapter recovered). The container
+    // knows the EHR/account of origin even when the FHIR payload does not (Epic
+    // records carry only relative references + OID identifiers, no absolute org
+    // host), so this label is authoritative for EVERY record from the input: it is
+    // what the user sees in the Health app and it is consistent across the account.
+    // It REPLACES any host-derived sourceEHR (so one account groups under one name
+    // instead of splitting "Swedish" vs "swedish.org") and pre-empts the "unknown"
+    // fallback below. The import-batch tag stays separately on cascade:sourceSystem.
+    if (sourceEhrOverride) {
+      for (let i = allQuads.length - 1; i >= 0; i--) {
+        const q = allQuads[i];
+        if (
+          q.predicate.value === NS.clinical + 'sourceEHR' &&
+          recordSubjects.has(q.subject.value)
+        ) {
+          allQuads.splice(i, 1);
+        }
+      }
+      for (const subjectUri of recordSubjects) {
+        allQuads.push(
+          makeQuad(
+            namedNode(subjectUri),
+            namedNode(NS.clinical + 'sourceEHR'),
+            literal(sourceEhrOverride),
           ),
         );
       }

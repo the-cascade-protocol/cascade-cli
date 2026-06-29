@@ -64,6 +64,52 @@ describe('source EHR fallback (D1: never the import-batch label)', () => {
   });
 });
 
+describe('authoritative sourceEHR override (Apple Health export.xml sourceName)', () => {
+  it('writes the container-supplied account, not the import-batch label or unknown', async () => {
+    // An Epic record with only relative refs + a placeholder org: the per-resource
+    // derivation cannot find an EHR (would be "unknown"), but the Apple wrapper
+    // knew the account. The override carries it through.
+    const report = {
+      resourceType: 'DiagnosticReport',
+      id: 'r3',
+      status: 'final',
+      code: { text: 'BMP' },
+      subject: { reference: 'Patient/abc' },
+      performer: [{ type: 'Organization', display: 'EXTERNAL LAB' }],
+    };
+    const res = await convert(
+      JSON.stringify(report), 'fhir', 'cascade', 'turtle', 'Apple Health export', false,
+      'Providence Health & Services',
+    );
+    expect(res.success).toBe(true);
+    expect(res.output).toContain('clinical:sourceEHR "Providence Health & Services"');
+    expect(res.output).not.toContain(`clinical:sourceEHR "${SOURCE_EHR_UNKNOWN}"`);
+    expect(res.output).not.toContain('clinical:sourceEHR "Apple Health export"');
+    // The import batch stays on the separate ingestion axis.
+    expect(res.output).toContain('cascade:sourceSystem "Apple Health export"');
+  });
+
+  it('REPLACES a host-derived sourceEHR so one account groups under one name', async () => {
+    // This record WOULD derive "swedish.org" from its host, but Apple labels the
+    // account "Swedish". The authoritative label wins and there is exactly one
+    // sourceEHR value (no split between "Swedish" and "swedish.org").
+    const report = {
+      resourceType: 'DiagnosticReport',
+      id: 'r4',
+      status: 'final',
+      code: { text: 'CBC' },
+      subject: { reference: 'https://haiku.swedish.org/fhir/Patient/x' },
+      performer: [{ display: 'Dr X', reference: 'https://haiku.swedish.org/fhir/Practitioner/y' }],
+    };
+    const res = await convert(
+      JSON.stringify(report), 'fhir', 'cascade', 'turtle', 'Apple Health export', false, 'Swedish',
+    );
+    expect(res.output).toContain('clinical:sourceEHR "Swedish"');
+    expect(res.output).not.toContain('clinical:sourceEHR "swedish.org"');
+    expect((res.output.match(/clinical:sourceEHR/g) ?? []).length).toBe(1);
+  });
+});
+
 describe('extractProviderName', () => {
   it('reads requester.display (MedicationRequest)', () => {
     expect(

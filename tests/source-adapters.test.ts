@@ -16,6 +16,7 @@ import { detectSource } from '../src/lib/source-adapters/registry.js';
 
 let root: string;
 let appleDir: string;
+let appleSrcDir: string;
 let plainDir: string;
 
 beforeAll(() => {
@@ -29,6 +30,30 @@ beforeAll(() => {
   fs.writeFileSync(path.join(appleDir, 'export.xml'), '<HealthData/>');
   fs.writeFileSync(path.join(appleDir, 'export_cda.xml'), '<ClinicalDocument/>');
   fs.mkdirSync(path.join(appleDir, 'workout-routes'));
+
+  // A second Apple-shaped export whose export.xml carries <ClinicalRecord>
+  // wrappers (the authoritative per-record source labels) at the END of the
+  // file, after the device <Record> firehose — exactly Apple's real layout. One
+  // clinical file has no wrapper (to prove partial coverage degrades gracefully),
+  // and one sourceName carries an XML entity (to prove it is decoded).
+  appleSrcDir = path.join(root, 'apple_health_export_sourced');
+  fs.mkdirSync(path.join(appleSrcDir, 'clinical-records'), { recursive: true });
+  for (const f of ['AllergyIntolerance-1.json', 'Condition-2.json', 'Observation-3.json']) {
+    fs.writeFileSync(path.join(appleSrcDir, 'clinical-records', f), '{"resourceType":"Condition"}');
+  }
+  const filler = '  <Record type="HKQuantityTypeIdentifierHeartRate" value="72"/>\n'.repeat(50);
+  const exportXml =
+    '<?xml version="1.0" encoding="UTF-8"?>\n<HealthData locale="en_US">\n' +
+    '  <ExportDate value="2026-06-22 16:15:00 -0700"/>\n' +
+    filler +
+    '  <ClinicalRecord type="AllergyIntolerance" identifier="a1" sourceName="Swedish" ' +
+    'sourceURL="https://haiku.swedish.org/fhir/AllergyIntolerance/a1" fhirVersion="1.0.2" ' +
+    'receivedDate="2019-11-18 22:16:15 -0700" resourceFilePath="/clinical-records/AllergyIntolerance-1.json"/>\n' +
+    '  <ClinicalRecord type="Condition" identifier="c2" sourceName="Providence Health &amp; Services" ' +
+    'sourceURL="https://api.providence.org/fhir/Condition/c2" fhirVersion="4.0.1" ' +
+    'receivedDate="2025-11-14 00:11:20 -0700" resourceFilePath="/clinical-records/Condition-2.json"/>\n' +
+    '</HealthData>\n';
+  fs.writeFileSync(path.join(appleSrcDir, 'export.xml'), exportXml);
 
   // A plain folder of mixed files, including a nested dir, an unsupported file,
   // and a dotfile.
@@ -65,6 +90,35 @@ describe('appleHealthAdapter', () => {
     const skippedNames = out.skipped.map((s) => path.basename(s.path)).sort();
     expect(skippedNames).toEqual(['export.xml', 'export_cda.xml', 'workout-routes']);
     expect(out.skipped.every((s) => s.reason.length > 0)).toBe(true);
+  });
+
+  it('recovers per-record source (sourceName) from export.xml <ClinicalRecord> wrappers', () => {
+    const out = appleHealthAdapter.expand(appleSrcDir);
+    expect(out.fileSources).toBeDefined();
+    const fs2 = out.fileSources!;
+
+    const allergyPath = path.join(appleSrcDir, 'clinical-records', 'AllergyIntolerance-1.json');
+    const conditionPath = path.join(appleSrcDir, 'clinical-records', 'Condition-2.json');
+    const observationPath = path.join(appleSrcDir, 'clinical-records', 'Observation-3.json');
+
+    // sourceName becomes the authoritative EHR/account label, keyed by abs path.
+    expect(fs2[allergyPath]?.sourceEhr).toBe('Swedish');
+    expect(fs2[allergyPath]?.sourceUrl).toBe('https://haiku.swedish.org/fhir/AllergyIntolerance/a1');
+    expect(fs2[allergyPath]?.receivedDate).toBe('2019-11-18 22:16:15 -0700');
+
+    // XML entities in sourceName are decoded (&amp; -> &).
+    expect(fs2[conditionPath]?.sourceEhr).toBe('Providence Health & Services');
+
+    // A clinical file with no wrapper is simply absent (falls back to derivation).
+    expect(fs2[observationPath]).toBeUndefined();
+
+    // The device export is still skipped despite being read for its tail block.
+    expect(out.skipped.map((s) => path.basename(s.path))).toContain('export.xml');
+  });
+
+  it('yields no fileSources when export.xml has no clinical wrappers', () => {
+    const out = appleHealthAdapter.expand(appleDir);
+    expect(out.fileSources && Object.keys(out.fileSources).length).toBeFalsy();
   });
 });
 

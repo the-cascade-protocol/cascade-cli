@@ -24,6 +24,29 @@ export interface SkippedArtifact {
   reason: string;
 }
 
+/**
+ * Per-file source provenance an adapter recovered from a container's manifest,
+ * keyed (in ExpandedSource.fileSources) by the absolute path of the file it
+ * describes.
+ *
+ * The motivating case: an Apple Health export wraps every clinical record in an
+ * `<ClinicalRecord sourceName="..." sourceURL="..." receivedDate="...">` element
+ * in export.xml. `sourceName` is the EHR/account of origin exactly as the Health
+ * app shows it ("Providence Health & Services", "Swedish", "Kaiser Permanente"),
+ * and it is AUTHORITATIVE — present even for records whose FHIR payload omits an
+ * absolute organization host (Epic relative references), which is precisely the
+ * data the per-resource derivation cannot recover. The container knew the source
+ * all along; this carries it through to conversion instead of discarding it.
+ */
+export interface FileSourceMeta {
+  /** The EHR / account of origin as the container labels it (authoritative). */
+  sourceEhr?: string;
+  /** The source FHIR endpoint URL this record was synced from. */
+  sourceUrl?: string;
+  /** When the container received this record from the source (as written). */
+  receivedDate?: string;
+}
+
 /** The result of expanding a container into importable inputs. */
 export interface ExpandedSource {
   /** Absolute paths of the concrete files to feed the per-file import path. */
@@ -32,6 +55,14 @@ export interface ExpandedSource {
   skipped: SkippedArtifact[];
   /** What the adapter recognized, for the import report / verbose log. */
   sourceLabel: string;
+  /**
+   * Optional per-file source provenance recovered from the container manifest,
+   * keyed by the absolute file path (matching entries in `files`). The Apple
+   * Health adapter populates this from export.xml's `<ClinicalRecord>` wrappers;
+   * a plain directory import leaves it undefined. Files absent from the map (or
+   * the whole map being undefined) simply fall back to per-resource derivation.
+   */
+  fileSources?: Record<string, FileSourceMeta>;
 }
 
 /**
