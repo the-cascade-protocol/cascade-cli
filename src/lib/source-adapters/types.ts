@@ -47,6 +47,24 @@ export interface FileSourceMeta {
   receivedDate?: string;
 }
 
+/**
+ * A "did we recover everything this container offers?" check, surfaced in the
+ * pre-import plan so a successful-but-incomplete import is visible BEFORE writing.
+ * Example: an Apple Health export where source account labels were recovered for
+ * `recovered` of `total` clinical records (a shortfall means some records will
+ * import without an EHR-of-origin).
+ */
+export interface CompletenessCheck {
+  /** What was being recovered, e.g. "Source account labels". */
+  label: string;
+  /** How many of `total` were recovered. */
+  recovered: number;
+  /** The denominator (e.g. clinical records found). */
+  total: number;
+  /** Optional human note shown when `recovered < total`. */
+  note?: string;
+}
+
 /** The result of expanding a container into importable inputs. */
 export interface ExpandedSource {
   /** Absolute paths of the concrete files to feed the per-file import path. */
@@ -63,6 +81,11 @@ export interface ExpandedSource {
    * the whole map being undefined) simply fall back to per-resource derivation.
    */
   fileSources?: Record<string, FileSourceMeta>;
+  /**
+   * Optional "do we have everything we need?" checks for the pre-import plan.
+   * The Apple Health adapter reports how many records got a source account label.
+   */
+  completeness?: CompletenessCheck[];
 }
 
 /**

@@ -18,7 +18,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ExpandedSource, FileSourceMeta, SkippedArtifact, SourceAdapter } from './types.js';
+import type { CompletenessCheck, ExpandedSource, FileSourceMeta, SkippedArtifact, SourceAdapter } from './types.js';
 
 const CLINICAL_DIR = 'clinical-records';
 /** The primary device export Apple writes at the export root (the firehose). */
@@ -161,6 +161,7 @@ export const appleHealthAdapter: SourceAdapter = {
     // Recover the authoritative per-record source (the Apple account) from
     // export.xml's <ClinicalRecord> wrappers and attach it by absolute path. The
     // device firehose itself is still skipped below; we only read its tail block.
+    let labeled = 0;
     const exportXmlPath = path.join(targetPath, PRIMARY_EXPORT);
     if (clinicalNames.length > 0 && fs.existsSync(exportXmlPath)) {
       const byFilename = readClinicalRecordSources(exportXmlPath, clinicalNames.length);
@@ -168,8 +169,25 @@ export const appleHealthAdapter: SourceAdapter = {
         const meta = byFilename.get(name);
         if (meta && (meta.sourceEhr || meta.sourceUrl || meta.receivedDate)) {
           fileSources[path.join(clinicalDir, name)] = meta;
+          if (meta.sourceEhr) labeled += 1;
         }
       }
+    }
+
+    // Completeness: did every clinical record get a source account label? A
+    // shortfall means some records will import with no EHR of origin (e.g. a
+    // record with no <ClinicalRecord> wrapper, or export.xml absent entirely).
+    const completeness: CompletenessCheck[] = [];
+    if (clinicalNames.length > 0) {
+      completeness.push({
+        label: 'Source account labels',
+        recovered: labeled,
+        total: clinicalNames.length,
+        note:
+          labeled < clinicalNames.length
+            ? `${clinicalNames.length - labeled} record(s) had no source label in export.xml and will import without an EHR of origin`
+            : undefined,
+      });
     }
 
     for (const f of DEVICE_EXPORTS) {
@@ -188,6 +206,6 @@ export const appleHealthAdapter: SourceAdapter = {
       }
     }
 
-    return { files, skipped, sourceLabel: 'Apple Health export', fileSources };
+    return { files, skipped, sourceLabel: 'Apple Health export', fileSources, completeness };
   },
 };
