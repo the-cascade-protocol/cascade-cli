@@ -181,38 +181,22 @@ describe('C-CDA converter — full summarization (P4-A)', () => {
     expect(result.output).toContain('"TestSystem"');
   });
 
-  it('output passes SHACL validation (no violations on health: record types)', async () => {
+  it('output passes SHACL validation with zero violations on every record type', async () => {
     const xml = readFixture('full-summarization.xml');
     const result = await convertCcda(xml, { sourceSystem: 'TestSystem' });
 
     const { store: shapesStore, shapeFiles } = loadShapes();
     const validation = validateTurtle(result.output, shapesStore, shapeFiles, 'full-summarization.xml');
 
-    // C-CDA conversion produces health: records (allergy, immunization, lab, medication, condition).
-    // Filter to only violations on health: record shapes — the PatientProfile and ClinicalDocument
-    // shapes require additional provenance/FHIR fields that the C-CDA converter does not emit
-    // (importedAt, fhir:id, prov:wasGeneratedBy, schemaVersion, dataProvenance), which is an
-    // acceptable limitation for a raw C-CDA import that feeds into a reconciliation pipeline.
-    const healthRecordViolations = validation.results.filter(
-      (r) =>
-        r.severity === 'violation' &&
-        !r.message.includes('importedAt') &&
-        !r.message.includes('source EHR') &&
-        !r.message.includes('FHIR resource') &&
-        !r.message.includes('provenance') &&
-        !r.message.includes('Schema version') &&
-        !r.message.includes('Schema Version') &&
-        !r.message.includes('date of birth') &&
-        !r.message.includes('biological sex') &&
-        !r.message.includes('provenance classification') &&
-        // Generic minCount violations on cascade:schemaVersion / cascade:dataProvenance
-        // don't always have custom messages — filter by property path
-        !r.property?.includes('schemaVersion') &&
-        !r.property?.includes('dataProvenance'),
-    );
+    // After the C-CDA provenance/required-field fixes, the converter emits the
+    // ClinicalDocument (importedAt, sourceEHR, fhirResourceId, fhirResourceType),
+    // PatientProfile (typed dateOfBirth, enum biologicalSex), and the shared
+    // cascade:dataProvenance + cascade:schemaVersion on every record. Nothing is
+    // filtered out: the full document must validate clean.
+    const violations = validation.results.filter((r) => r.severity === 'violation');
     expect(
-      healthRecordViolations,
-      `Health record SHACL violations:\n${healthRecordViolations.map((v) => `  ${v.shape}: ${v.message}`).join('\n')}`,
+      violations,
+      `SHACL violations:\n${violations.map((v) => `  ${v.shape}: ${v.message} (${v.property})`).join('\n')}`,
     ).toHaveLength(0);
   });
 });

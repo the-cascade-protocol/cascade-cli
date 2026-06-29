@@ -22,6 +22,7 @@ export function extractNarrativeQuads(
   sourceSystem: string,
   importedAt: string,
   requiresLLMExtraction: boolean = false,
+  sourceEhr: string = '',
 ): Quad[] {
   if (!sectionText && !requiresLLMExtraction) return [];
 
@@ -44,7 +45,19 @@ export function extractNarrativeQuads(
     makeQuad(subj, namedNode(NS.cascade + 'sectionCode'), literal(sectionLoincCode)),
     makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(sourceSystem)),
     makeQuad(subj, namedNode(NS.prov + 'generatedAtTime'), literal(importedAt, namedNode(NS.xsd + 'dateTime'))),
+    // ClinicalDocumentShape required fields. A CDA section document is the CDA
+    // analog of a FHIR DocumentReference.
+    makeQuad(subj, namedNode(NS.clinical + 'importedAt'), literal(importedAt, namedNode(NS.xsd + 'dateTime'))),
+    makeQuad(subj, namedNode(NS.clinical + 'fhirResourceId'), literal(uri.replace(/^urn:uuid:/, ''))),
+    makeQuad(subj, namedNode(NS.clinical + 'fhirResourceType'), literal('DocumentReference')),
   ];
+
+  // Required: sourceEHR (custodian organization). Bounded to the shape's 100-char
+  // maxLength; falls back to the source-system label only if no EHR was derived.
+  const ehr = (sourceEhr || sourceSystem || '').slice(0, 100);
+  if (ehr) {
+    quads.push(makeQuad(subj, namedNode(NS.clinical + 'sourceEHR'), literal(ehr, namedNode(NS.xsd + 'string'))));
+  }
 
   // P5.1-A: emit cascade:narrativeText as plain text (LLM-ready)
   if (narrativeStr.trim()) {

@@ -518,15 +518,16 @@ describe('P5.7-A-5: detectVendor — epic-summarization.xml behaviour', () => {
 // =============================================================================
 
 // ---------------------------------------------------------------------------
-// Helper: strip prov:generatedAtTime lines before comparing outputs.
-// The converter stamps each ClinicalDocument section with the wall-clock time
-// at conversion, so two calls to convertCcda will differ by milliseconds.
-// Structural idempotency is tested by comparing everything except those lines.
+// Helper: strip wall-clock timestamp lines before comparing outputs.
+// The converter stamps each ClinicalDocument section with the conversion time
+// under both prov:generatedAtTime and clinical:importedAt, so two calls to
+// convertCcda will differ by milliseconds. Structural idempotency is tested by
+// comparing everything except those lines.
 // ---------------------------------------------------------------------------
 function stripTimestamps(ttl: string): string {
   return ttl
     .split('\n')
-    .filter((line) => !line.includes('generatedAtTime'))
+    .filter((line) => !line.includes('generatedAtTime') && !line.includes('importedAt'))
     .join('\n');
 }
 

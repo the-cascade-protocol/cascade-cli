@@ -8,6 +8,28 @@ import type { Quad } from 'n3';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
+/**
+ * Map an HL7 AdministrativeGender code (CDA administrativeGenderCode/@code) to the
+ * cascade:biologicalSex enum the PatientProfileShape accepts ("male", "female",
+ * "intersex"). Returns undefined for unknown / data-absent codes (UN, nullFlavor)
+ * so we omit the property rather than emit an out-of-enum value.
+ * @see http://terminology.hl7.org/CodeSystem/v3-AdministrativeGender
+ */
+function mapBiologicalSex(code: string): string | undefined {
+  switch ((code ?? '').trim().toUpperCase()) {
+    case 'M':
+      return 'male';
+    case 'F':
+      return 'female';
+    // HL7 v3 has no "intersex"; map common intersex/indeterminate codes through.
+    case 'I':       // Intersex (some EHR local extensions)
+    case 'IN':
+      return 'intersex';
+    default:
+      return undefined; // UN (Undifferentiated) / unknown -> omit
+  }
+}
+
 export function extractPatientQuads(
   recordTarget: any,
   sourceSystem: string,
@@ -77,11 +99,15 @@ export function extractPatientQuads(
 
   if (givenStr) quads.push(makeQuad(subj, namedNode(NS.cascade + 'givenName'), literal(givenStr)));
   if (familyStr) quads.push(makeQuad(subj, namedNode(NS.cascade + 'familyName'), literal(familyStr)));
-  if (dob) {
-    const dobFormatted = dob.length >= 8 ? `${dob.slice(0, 4)}-${dob.slice(4, 6)}-${dob.slice(6, 8)}` : dob;
-    quads.push(makeQuad(subj, namedNode(NS.cascade + 'dateOfBirth'), literal(dobFormatted)));
+  if (dob && dob.length >= 8) {
+    // PatientProfileShape requires cascade:dateOfBirth as xsd:date (YYYY-MM-DD).
+    const dobFormatted = `${dob.slice(0, 4)}-${dob.slice(4, 6)}-${dob.slice(6, 8)}`;
+    quads.push(makeQuad(subj, namedNode(NS.cascade + 'dateOfBirth'), literal(dobFormatted, namedNode(NS.xsd + 'date'))));
   }
-  if (sex) quads.push(makeQuad(subj, namedNode(NS.cascade + 'biologicalSex'), literal(sex)));
+  // PatientProfileShape requires cascade:biologicalSex in ("male" "female"
+  // "intersex"). Map the HL7 AdministrativeGender code (M/F/...) to the enum.
+  const mappedSex = mapBiologicalSex(sex);
+  if (mappedSex) quads.push(makeQuad(subj, namedNode(NS.cascade + 'biologicalSex'), literal(mappedSex, namedNode(NS.xsd + 'string'))));
   // Flat address predicates (blank node structure is built when writing profile/extended.ttl)
   if (street) quads.push(makeQuad(subj, namedNode(NS.cascade + 'addressLine'), literal(street)));
   if (city) quads.push(makeQuad(subj, namedNode(NS.cascade + 'addressCity'), literal(city)));
