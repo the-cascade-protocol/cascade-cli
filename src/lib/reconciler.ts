@@ -8,6 +8,12 @@
 import { Parser, Writer, DataFactory } from 'n3';
 import type { Quad, Quad_Subject, Quad_Object } from 'n3';
 import { NS, TURTLE_PREFIXES } from './fhir-converter/types.js';
+import { normalizeMedName, normalizeDose, normalizeFrequency } from './medication-normalize.js';
+
+// Re-export so existing consumers of the reconciler's normalizeMedName keep
+// working. The canonical definition now lives in ./medication-normalize.ts
+// (shared, byte-identical to sdk-typescript).
+export { normalizeMedName };
 
 const { namedNode, literal, blankNode, quad: makeQuad } = DataFactory;
 
@@ -196,13 +202,6 @@ function relabelQuadBlankNodes(q: Quad, inputIndex: number): Quad {
 // Matching helpers
 // ---------------------------------------------------------------------------
 
-export function normalizeMedName(name: string): string {
-  return name.toLowerCase()
-    .replace(/\d+(\.\d+)?\s*(mg|mcg|g|ml|%|iu|units?|meq)\b/gi, '')
-    .replace(/\b(oral|tablet|capsule|solution|injection|extended|release|er|xr|cr|sr|hr)\b/gi, '')
-    .replace(/\s+/g, ' ').trim();
-}
-
 function normalizeConditionName(name: string): string {
   return name.toLowerCase().replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
 }
@@ -216,6 +215,54 @@ function codeFromUri(uri: string): string {
 }
 
 function dateOnly(dt: string): string { return dt.split('T')[0] ?? dt; }
+
+// ---------------------------------------------------------------------------
+// Medication divergence helpers (Phase 2: dose/frequency/status conflicts)
+// ---------------------------------------------------------------------------
+
+/**
+ * FHIR/Cascade medication status values that mean the medication is NOT active.
+ * Everything else (including `active`, `on-hold`, `draft`, `unknown`, or an
+ * absent status) is treated as active. Used for the status-split so an active
+ * record and a discontinued record of the same drug never collapse silently.
+ */
+const INACTIVE_MED_STATUSES = new Set([
+  'stopped', 'discontinued', 'inactive', 'cancelled', 'canceled',
+  'completed', 'entered-in-error',
+]);
+
+/** Coarse active/inactive classification of a medication's status string. */
+function medicationActivity(status: string | undefined): 'active' | 'inactive' {
+  if (!status) return 'active';
+  return INACTIVE_MED_STATUSES.has(status.toLowerCase().trim()) ? 'inactive' : 'active';
+}
+
+/**
+ * True when both values are present and differ after normalization.
+ *
+ * A value present on only one side is intentionally NOT a conflict: it is a
+ * fill-in handled as a near-duplicate merge (resolveGroup copies the missing
+ * field), not a user-actionable disagreement. This tightens Checkup's raw
+ * nil-safe predicate (`a != b && (a != nil || b != nil)`) for the CLI, where a
+ * conflict is a blocking gate (`cascade pod conflicts` exits 1) and drives a
+ * keep-A / keep-B decision: only a genuine disagreement (e.g. 10 mg vs 20 mg)
+ * warrants that, never "one source recorded a dose and the other didn't."
+ */
+function bothPresentAndDiffer(
+  a: string | undefined,
+  b: string | undefined,
+  norm: (s: string) => string,
+): boolean {
+  if (a == null || b == null || a === '' || b === '') return false;
+  return norm(a) !== norm(b);
+}
+
+/** True when exactly one of the two values is present (a mergeable fill-in). */
+function onlyOneSide(a: string | undefined, b: string | undefined): boolean {
+  const pa = a != null && a !== '';
+  const pb = b != null && b !== '';
+  return pa !== pb;
+}
 
 type MatchResult = { match: boolean; confidence: number; matchedOn: string };
 
@@ -405,9 +452,52 @@ function classifyGroup(
     }
   }
   if (a.type === 'clinical:Medication') {
+    // (1) Status split: an active record and a stopped/discontinued record of
+    // the same drug is a clinically significant divergence, never a silent
+    // merge. (Reference: Checkup SimplifiedImportProcessor splits active vs
+    // stopped before dedup.)
+    const actA = medicationActivity(getProp(a, NS.clinical + 'status'));
+    const actB = medicationActivity(getProp(b, NS.clinical + 'status'));
+    if (actA !== actB) {
+      return {
+        matchType: 'status_conflict',
+        conflictField: 'clinical:status',
+        conflictValues: {
+          [a.sourceSystem]: getProp(a, NS.clinical + 'status') ?? '(none)',
+          [b.sourceSystem]: getProp(b, NS.clinical + 'status') ?? '(none)',
+        },
+      };
+    }
+
+    // (2) Dose / frequency disagreement: the flagship conflict the Reconcile tab
+    // exists for (e.g. "Lisinopril 10 mg" vs "20 mg"). Compared on the shared
+    // normalized form so "10 mg" / "10mg" / "10 milligrams" do NOT conflict.
+    const doseA = getProp(a, NS.clinical + 'dosage');
+    const doseB = getProp(b, NS.clinical + 'dosage');
+    if (bothPresentAndDiffer(doseA, doseB, normalizeDose)) {
+      return {
+        matchType: 'value_conflict',
+        conflictField: 'clinical:dosage',
+        conflictValues: { [a.sourceSystem]: doseA as string, [b.sourceSystem]: doseB as string },
+      };
+    }
+    const freqA = getProp(a, NS.clinical + 'frequency') ?? getProp(a, NS.health + 'frequency');
+    const freqB = getProp(b, NS.clinical + 'frequency') ?? getProp(b, NS.health + 'frequency');
+    if (bothPresentAndDiffer(freqA, freqB, normalizeFrequency)) {
+      return {
+        matchType: 'value_conflict',
+        conflictField: 'clinical:frequency',
+        conflictValues: { [a.sourceSystem]: freqA as string, [b.sourceSystem]: freqB as string },
+      };
+    }
+
+    // (3) No divergence. Mergeable differences (a different normalized name, or
+    // a dose/frequency present on only one side) are near-duplicates so
+    // resolveGroup fills in the missing fields; otherwise an exact duplicate.
     const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '');
     const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '');
-    if (nA !== nB) return { matchType: 'near_duplicate' };
+    const mergeable = nA !== nB || onlyOneSide(doseA, doseB) || onlyOneSide(freqA, freqB);
+    return { matchType: mergeable ? 'near_duplicate' : 'exact_duplicate' };
   }
   return { matchType: 'exact_duplicate' };
 }
@@ -457,11 +547,27 @@ function resolveGroup(g: Group, trustScores: Record<string, number>, defaultTrus
   let strategy = 'trust_priority';
   let resolved = true;
 
+  const isMedication = g.records[0].type === 'clinical:Medication';
+
   if (g.matchType === 'near_duplicate') {
     strategy = 'merge_values';
   } else if (g.matchType === 'status_conflict') {
-    const diff = Math.abs(trust(ranked[0].sourceSystem) - trust(ranked[1].sourceSystem));
-    if (diff < 0.05) { strategy = 'flag_unresolved'; resolved = false; }
+    if (isMedication) {
+      // Active vs stopped of the same drug is a clinical divergence: always
+      // user-resolved, never auto-merged by trust (the silent-merge danger).
+      strategy = 'flag_unresolved';
+      resolved = false;
+    } else {
+      // Conditions: auto-resolve by trust unless the two sources are near-equal.
+      const diff = Math.abs(trust(ranked[0].sourceSystem) - trust(ranked[1].sourceSystem));
+      if (diff < 0.05) { strategy = 'flag_unresolved'; resolved = false; }
+    }
+  } else if (g.matchType === 'value_conflict' && isMedication) {
+    // Dose/frequency disagreement on the same medication: always user-resolved
+    // so it reaches settings/pending-conflicts.ttl and the Reconcile tab,
+    // rather than being silently collapsed by trust priority.
+    strategy = 'flag_unresolved';
+    resolved = false;
   }
 
   // Merge missing fields from lower-trust sources
