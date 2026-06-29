@@ -25,7 +25,7 @@ import { printResult, printError, printVerbose, type OutputOptions } from '../..
 import { convert } from '../../lib/fhir-converter/index.js';
 import { quadsToTurtle } from '../../lib/fhir-converter/types.js';
 import { runReconciliation, type ReconcilerInput } from '../../lib/reconciler.js';
-import { detectSource } from '../../lib/source-adapters/registry.js';
+import { detectSource, type FileSourceMeta, type CompletenessCheck } from '../../lib/source-adapters/registry.js';
 import {
   DATA_TYPES,
   resolvePodDir,
@@ -62,6 +62,10 @@ interface ImportReport {
   };
   filesWritten: Array<{ path: string; recordsAdded: number; type: string }>;
   typeCounts: Record<string, number>;
+  /** Record counts grouped by EHR of origin (clinical:sourceEHR), for the plan. */
+  sourceBreakdown: Record<string, number>;
+  /** "Do we have everything?" checks from container adapters (e.g. source labels). */
+  completeness: CompletenessCheck[];
   totalRecordsImported: number;
   warnings: string[];
   dryRun: boolean;
@@ -200,9 +204,19 @@ async function appendTypeRegistration(
   }
 
   const block = buildTypeRegistration(key, info);
+
+  // The block may reference the `fhir:` prefix (fhir-passthrough catch-all).
+  // Pods initialized before that prefix was added to the index header would
+  // otherwise fail to parse with "Undefined prefix fhir:". Self-heal by
+  // declaring the prefix once if the block needs it and the file lacks it.
+  let header = '';
+  if (block.includes('fhir:') && !/@prefix\s+fhir:/.test(content)) {
+    header = '@prefix fhir: <http://hl7.org/fhir/> .\n';
+  }
+
   if (!dryRun) {
     // Read-modify-write (encrypted resources cannot be appended to in place).
-    writeResource(indexPath, content + block, dek);
+    writeResource(indexPath, header + content + block, dek);
   }
   return true;
 }
@@ -312,8 +326,14 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // expands it into concrete importable files and records what it skipped
       // (e.g. an Apple Health export -> its clinical-records FHIR, skipping the
       // multi-GB device XMLs). Plain file arguments pass through unchanged.
-      const expandedFiles: string[] = [];
+      // Each entry carries an optional `label`: a source adapter's `sourceLabel`
+      // (e.g. "Apple Health export") becomes the per-file source-system, so all
+      // records from one export share one honest source-batch name instead of
+      // each file's basename ("MedicationRequest-<id>"), which was the Source
+      // facet wall. A plain file argument has no label (falls back to basename).
+      const expandedFiles: { path: string; label?: string; source?: FileSourceMeta }[] = [];
       const sourceSkips: string[] = [];
+      const completeness: CompletenessCheck[] = [];
       for (const arg of files) {
         const absArg = path.resolve(process.cwd(), arg);
         let isDirectory = false;
@@ -321,11 +341,11 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           isDirectory = (await fs.stat(absArg)).isDirectory();
         } catch {
           // Not stat-able; leave it for the per-file read below to report.
-          expandedFiles.push(arg);
+          expandedFiles.push({ path: arg });
           continue;
         }
         if (!isDirectory) {
-          expandedFiles.push(arg);
+          expandedFiles.push({ path: arg });
           continue;
         }
         const adapter = detectSource(absArg);
@@ -338,10 +358,13 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         for (const s of expanded.skipped) {
           sourceSkips.push(`Skipped ${path.basename(s.path)}: ${s.reason}`);
         }
+        if (expanded.completeness) completeness.push(...expanded.completeness);
         if (expanded.files.length === 0) {
+          const why = expanded.skipped.length
+            ? ` ${expanded.skipped.map((s) => s.reason).join('; ')}`
+            : '';
           printError(
-            `No importable files found in ${arg} (${expanded.sourceLabel}).` +
-              (expanded.skipped.length ? ` ${expanded.skipped.length} artifact(s) skipped.` : ''),
+            `No importable records found in ${arg} (${expanded.sourceLabel}).${why}`,
             globalOpts,
           );
           process.exitCode = 1;
@@ -352,7 +375,13 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             (expanded.skipped.length ? `, skipping ${expanded.skipped.length}` : ''),
           globalOpts,
         );
-        expandedFiles.push(...expanded.files);
+        expandedFiles.push(
+          ...expanded.files.map((f) => ({
+            path: f,
+            label: expanded.sourceLabel,
+            source: expanded.fileSources?.[f],
+          })),
+        );
       }
 
       // --- Step 2: Convert / collect inputs ---
@@ -360,7 +389,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       const sourceReport: ImportReport['sources'] = [];
       const allWarnings: string[] = [...sourceSkips];
 
-      for (const filePath of expandedFiles) {
+      for (const entry of expandedFiles) {
+        const filePath = entry.path;
         try {
         const absPath = path.resolve(process.cwd(), filePath);
         // Guard the whole-file read limit: a file over ~2 GiB cannot be read
@@ -387,7 +417,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           return;
         }
 
-        const systemName = options.sourceSystem ?? path.basename(filePath, path.extname(filePath));
+        const systemName =
+          options.sourceSystem ?? entry.label ?? path.basename(filePath, path.extname(filePath));
         const warnings: string[] = [];
 
         let turtleContent: string;
@@ -399,9 +430,13 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           printVerbose(`Converting C-CDA: ${filePath}`, globalOpts);
           const result = await convert(rawContent, 'c-cda', 'cascade', 'turtle', systemName, passthroughMinimal);
           if (!result.success) {
-            printError(`Failed to convert ${filePath}: ${result.errors.join(', ')}`, globalOpts);
-            process.exitCode = 1;
-            return;
+            // Skip an unconvertible file with a reason rather than aborting the
+            // whole batch: in a folder import (e.g. an IHE XDM export's manifest,
+            // or one malformed document among many) the other files must still
+            // import. The outer catch turns this into a skip-with-reason warning.
+            throw new Error(
+              result.errors.join(', ') || 'conversion produced no output',
+            );
           }
           turtleContent = result.output;
           resourceCount = result.resourceCount;
@@ -414,11 +449,15 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
           // FHIR JSON
           printVerbose(`Converting FHIR JSON: ${filePath}`, globalOpts);
-          const result = await convert(content, 'fhir', 'cascade', 'turtle', systemName, passthroughMinimal);
+          const result = await convert(content, 'fhir', 'cascade', 'turtle', systemName, passthroughMinimal, entry.source?.sourceEhr);
           if (!result.success) {
-            printError(`Failed to convert ${filePath}: ${result.errors.join(', ')}`, globalOpts);
-            process.exitCode = 1;
-            return;
+            // Skip an unconvertible file with a reason rather than aborting the
+            // whole batch: in a folder import (e.g. an IHE XDM export's manifest,
+            // or one malformed document among many) the other files must still
+            // import. The outer catch turns this into a skip-with-reason warning.
+            throw new Error(
+              result.errors.join(', ') || 'conversion produced no output',
+            );
           }
           turtleContent = result.output;
           resourceCount = result.resourceCount;
@@ -515,6 +554,18 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         printError(`Failed to parse merged Turtle: ${msg}`, globalOpts);
         process.exitCode = 1;
         return;
+      }
+
+      // Source breakdown by EHR of origin (clinical:sourceEHR), for the pre-import
+      // plan: exactly what the source-organized Records view will show, computed
+      // from the merged/deduped quads so a --dry-run preview matches the real run.
+      const sourceBreakdown: Record<string, number> = {};
+      const SRC_EHR_IRI = 'https://ns.cascadeprotocol.org/clinical/v1#sourceEHR';
+      for (const [, quads] of subjectQuads) {
+        const ehr = quads.find((q) => q.predicate.value === SRC_EHR_IRI);
+        if (ehr) {
+          sourceBreakdown[ehr.object.value] = (sourceBreakdown[ehr.object.value] ?? 0) + 1;
+        }
       }
 
       // --- Step 5: Route subjects to DATA_TYPES buckets ---
@@ -736,6 +787,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           : { enabled: false },
         filesWritten,
         typeCounts,
+        sourceBreakdown,
+        completeness,
         totalRecordsImported,
         warnings: allWarnings,
         dryRun,
@@ -757,6 +810,19 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         console.log(`  Sources:          ${sourceReport.length} file(s)`);
         console.log(`  Records imported: ${totalRecordsImported}`);
         console.log(`  Files written:    ${filesWritten.length}`);
+        const bySource = Object.entries(sourceBreakdown).sort((a, b) => b[1] - a[1]);
+        if (bySource.length > 0) {
+          console.log(`  By source (EHR of origin):`);
+          for (const [src, count] of bySource) console.log(`    - ${src}: ${count}`);
+        }
+        if (completeness.length > 0) {
+          console.log(`  Completeness:`);
+          for (const c of completeness) {
+            const ok = c.recovered >= c.total ? 'OK' : 'partial';
+            console.log(`    - ${c.label}: ${c.recovered}/${c.total} (${ok})`);
+            if (c.note) console.log(`        ${c.note}`);
+          }
+        }
         if (allWarnings.length > 0) {
           console.log(`  Warnings:         ${allWarnings.length}`);
           for (const w of allWarnings) {

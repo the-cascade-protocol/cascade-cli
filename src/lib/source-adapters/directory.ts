@@ -24,11 +24,38 @@ import type { ExpandedSource, SkippedArtifact, SourceAdapter } from './types.js'
 const SUPPORTED_EXT = new Set(['.json', '.ttl', '.xml', '.zip']);
 
 /**
+ * Directory names that never hold clinical records but commonly hold thousands
+ * of JSON/XML files (build output, package caches, IDE metadata). Descending into
+ * them when a user accidentally picks a project or home folder turns a quick
+ * import into a long grind, so the walk skips them. Dotfile dirs (.git, .cache,
+ * .venv, ...) are already skipped by the leading-dot rule below.
+ */
+const IGNORED_DIRS = new Set([
+  'node_modules', 'bower_components', 'vendor', 'Pods', 'DerivedData',
+  'dist', 'build', 'out', 'target', 'bin', 'obj',
+  'venv', '__pycache__', 'site-packages',
+  'Library', 'AppData',
+]);
+
+/**
  * Whole-file read ceiling. Node's fs.readFile throws above 2 GiB
  * (2,147,483,647 bytes); we stay just under to skip gracefully instead of
  * failing. Streaming import will lift this.
  */
 const MAX_WHOLE_FILE_BYTES = 2_000_000_000;
+
+/**
+ * Aggregate guards for the whole folder. The importer reads every collected file
+ * into memory and holds all converted quads at once (no streaming yet), so an
+ * accidentally-picked parent/home folder used to walk thousands of files and
+ * gigabytes until Node's heap OOM-ed. Past these limits a folder is almost
+ * certainly NOT a deliberate record export, so the adapter refuses it (returns no
+ * files) with guidance, instead of grinding into an out-of-memory crash. A real
+ * Apple Health clinical-records export (~1.3k small JSON) or a MyChart download
+ * (a few MB) is far under both.
+ */
+const MAX_TOTAL_FILES = 20_000;
+const MAX_TOTAL_BYTES = 1_000_000_000; // ~1 GB of source across the folder
 
 function isDir(p: string): boolean {
   try {
@@ -49,8 +76,11 @@ export const directoryAdapter: SourceAdapter = {
   expand(targetPath: string): ExpandedSource {
     const files: string[] = [];
     const skipped: SkippedArtifact[] = [];
+    let totalBytes = 0;
+    let overLimit = false;
 
     const walk = (dir: string): void => {
+      if (overLimit) return;
       let entries: fs.Dirent[];
       try {
         entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -58,9 +88,11 @@ export const directoryAdapter: SourceAdapter = {
         return;
       }
       for (const ent of entries) {
+        if (overLimit) return;
         if (ent.name.startsWith('.')) continue; // skip dotfiles / .DS_Store
         const full = path.join(dir, ent.name);
         if (ent.isDirectory()) {
+          if (IGNORED_DIRS.has(ent.name)) continue; // build/cache/IDE junk, never records
           walk(full);
           continue;
         }
@@ -79,9 +111,34 @@ export const directoryAdapter: SourceAdapter = {
           continue;
         }
         files.push(full);
+        totalBytes += size;
+        if (files.length > MAX_TOTAL_FILES || totalBytes > MAX_TOTAL_BYTES) {
+          overLimit = true;
+          return;
+        }
       }
     };
     walk(targetPath);
+
+    if (overLimit) {
+      // Too big to be a deliberate record export — refuse rather than read
+      // gigabytes into memory and OOM. Return no files so the import reports the
+      // reason and stops fast.
+      return {
+        files: [],
+        skipped: [
+          {
+            path: targetPath,
+            reason:
+              `this folder is larger than a record export (over ${MAX_TOTAL_FILES.toLocaleString()} files or ` +
+              `${(MAX_TOTAL_BYTES / 1e9).toFixed(0)} GB) — choose the specific export folder ` +
+              `(the Apple Health export, or the MyChart download), not a parent like Downloads or your home folder`,
+          },
+          ...skipped,
+        ],
+        sourceLabel: 'folder',
+      };
+    }
 
     return { files, skipped, sourceLabel: 'folder' };
   },

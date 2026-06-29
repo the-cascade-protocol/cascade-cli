@@ -12,12 +12,14 @@
  */
 
 import { appleHealthAdapter } from './apple-health.js';
+import { iheXdmAdapter } from './ihe-xdm.js';
 import { directoryAdapter } from './directory.js';
 import type { SourceAdapter } from './types.js';
 
 /** Registered source adapters, most specific first. */
 export const sourceAdapters: ReadonlyArray<SourceAdapter> = [
   appleHealthAdapter,
+  iheXdmAdapter, // unzipped MyChart/Cerner "Download My Record" XDM folder
   directoryAdapter, // catch-all: any other folder
 ];
 
@@ -32,4 +34,4 @@ export function detectSource(targetPath: string): SourceAdapter | undefined {
   });
 }
 
-export type { SourceAdapter, ExpandedSource, SkippedArtifact } from './types.js';
+export type { SourceAdapter, ExpandedSource, SkippedArtifact, FileSourceMeta, CompletenessCheck } from './types.js';

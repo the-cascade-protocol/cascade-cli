@@ -440,35 +440,64 @@ export function convertObservationLab(resource: any): ConversionResult & { _quad
 // Observation (vital sign) converter
 // ---------------------------------------------------------------------------
 
+/**
+ * Maps the converter's internal vital `type` (from VITAL_LOINC_CODES) to a
+ * clinical:vitalType value the VitalSignShape's sh:in enum actually accepts.
+ * The enum is intentionally narrow (the canonical clinical vital signs), so any
+ * VITAL_LOINC_CODES type not listed here (e.g. body surface area, mean blood
+ * pressure, head circumference, percentiles, intraocular pressure) is NOT a
+ * VitalSign per the shape and is routed to the lab/observation converter so its
+ * value is still preserved ("Cascade does not drop data").
+ */
+const VITAL_TYPE_TO_SHACL: Record<string, string> = {
+  heartRate: 'heartRate',
+  bloodPressurePanel: 'bloodPressure',
+  bloodPressureSystolic: 'bloodPressureSystolic',
+  bloodPressureDiastolic: 'bloodPressureDiastolic',
+  respiratoryRate: 'respiratoryRate',
+  bodyTemperature: 'temperature',
+  bodyTemperatureOral: 'temperature',
+  oxygenSaturation: 'oxygenSaturation',
+  bodyWeight: 'bodyWeight',
+  bodyHeight: 'bodyHeight',
+  bmi: 'bodyMassIndex',
+};
+
 export function convertObservationVital(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const subjectUri = mintSubjectUri(resource);
   const quads: Quad[] = [];
 
-  quads.push(tripleType(subjectUri, NS.clinical + 'VitalSign'));
-  quads.push(...commonTriples(subjectUri));
-
   const codings = extractCodings(resource.code);
   let vitalInfo: { type: string; name: string; unit: string; snomedCode: string } | undefined;
+  let loincCode: string | undefined;
   for (const c of codings) {
     if (isLoincSystem(c.system) && VITAL_LOINC_CODES[c.code]) {
       vitalInfo = VITAL_LOINC_CODES[c.code];
-      quads.push(tripleRef(subjectUri, NS.clinical + 'loincCode', NS.loinc + c.code));
+      loincCode = c.code;
       break;
     }
   }
 
-  if (vitalInfo) {
-    quads.push(tripleStr(subjectUri, NS.clinical + 'vitalType', vitalInfo.type));
-    quads.push(tripleStr(subjectUri, NS.clinical + 'vitalTypeName', vitalInfo.name));
-    quads.push(tripleRef(subjectUri, NS.clinical + 'snomedCode', NS.sct + vitalInfo.snomedCode));
-  } else {
-    // No LOINC match in the map — fall back to a slug derived from the display name.
-    // Data is fully preserved (value + unit + name); we just lack a canonical vitalType enum.
-    const name = codeableConceptText(resource.code) ?? 'Unknown Vital';
-    quads.push(tripleStr(subjectUri, NS.clinical + 'vitalType', name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')));
-    quads.push(tripleStr(subjectUri, NS.clinical + 'vitalTypeName', name));
+  // Resolve a clinical:vitalType the VitalSignShape enum accepts. If we cannot
+  // (no LOINC match, or a LOINC vital type outside the shape's canonical enum
+  // such as body surface area / mean BP / percentiles), this is not a VitalSign
+  // per the shape: route it to the lab/observation converter, which preserves
+  // every value form (valueQuantity, valueString, valueCodeableConcept,
+  // components) without dropping data.
+  const shaclVitalType = vitalInfo ? VITAL_TYPE_TO_SHACL[vitalInfo.type] : undefined;
+  if (!shaclVitalType) {
+    return convertObservationLab(resource);
   }
+
+  quads.push(tripleType(subjectUri, NS.clinical + 'VitalSign'));
+  quads.push(...commonTriples(subjectUri));
+  if (loincCode) {
+    quads.push(tripleRef(subjectUri, NS.clinical + 'loincCode', NS.loinc + loincCode));
+  }
+  quads.push(tripleStr(subjectUri, NS.clinical + 'vitalType', shaclVitalType));
+  quads.push(tripleStr(subjectUri, NS.clinical + 'vitalTypeName', vitalInfo!.name));
+  quads.push(tripleRef(subjectUri, NS.clinical + 'snomedCode', NS.sct + vitalInfo!.snomedCode));
 
   if (resource.valueQuantity) {
     quads.push(tripleDouble(subjectUri, NS.clinical + 'value', resource.valueQuantity.value));
@@ -497,8 +526,21 @@ export function convertObservationVital(resource: any): ConversionResult & { _qu
     if (emittedCount === 0) {
       warnings.push('No valueQuantity found in vital sign Observation');
     }
+  } else if (typeof resource.valueString === 'string') {
+    // Some vitals carry a non-quantity value (e.g. a textual reading). Capture it
+    // rather than drop it. clinical:value is untyped in the shape, so a string is fine.
+    quads.push(tripleStr(subjectUri, NS.clinical + 'value', resource.valueString));
+  } else if (resource.valueCodeableConcept) {
+    const valText = codeableConceptText(resource.valueCodeableConcept);
+    if (valText) {
+      quads.push(tripleStr(subjectUri, NS.clinical + 'value', valText));
+    } else {
+      warnings.push('No value found in vital sign Observation');
+    }
+  } else if (typeof resource.valueInteger === 'number') {
+    quads.push(tripleDouble(subjectUri, NS.clinical + 'value', resource.valueInteger));
   } else {
-    warnings.push('No valueQuantity found in vital sign Observation');
+    warnings.push('No value found in vital sign Observation');
   }
 
   const effectiveDate = resource.effectiveDateTime ?? resource.effectivePeriod?.start;
@@ -631,9 +673,16 @@ export function convertClinicalDocument(resource: any): ConversionResult & { _qu
     }
   }
 
+  // The ClinicalDocumentShape requires clinical:fhirResourceId and
+  // clinical:fhirResourceType (not clinical:sourceRecordId). Emit the exact
+  // predicates the shape requires from the FHIR resource. Keep sourceRecordId
+  // too (used by reconciliation / other consumers); it is additive, not a
+  // substitute.
   if (resource.id) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'fhirResourceId', resource.id));
     quads.push(tripleStr(subjectUri, NS.clinical + 'sourceRecordId', resource.id));
   }
+  quads.push(tripleStr(subjectUri, NS.clinical + 'fhirResourceType', resource.resourceType ?? 'DocumentReference'));
 
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
 

@@ -38,11 +38,12 @@ import { extractFamilyHistoryQuads, FAMILY_HISTORY_TEMPLATE_ID } from './section
 import { extractDeviceQuads, DEVICES_TEMPLATE_ID } from './sections/devices.js';
 import { extractSocialHistoryQuads, SOCIAL_HISTORY_TEMPLATE_ID } from './sections/social-history.js';
 import { extractNarrativeQuads } from './narrative.js';
+import { deriveSourceEhr, ensureProvenanceQuads, ensureSourceEhrQuads } from './provenance.js';
 
 // Map templateId → extractor function and LOINC code
 const SECTION_HANDLERS: Record<string, {
   loinc: string;
-  extract: (entries: any[], patientUri: string, sourceSystem: string) => any[];
+  extract: (entries: any[], patientUri: string, sourceSystem: string, sectionText?: any) => any[];
 }> = {
   [IMMUNIZATIONS_TEMPLATE_ID]:  { loinc: '11369-6', extract: extractImmunizationQuads },
   [LABS_TEMPLATE_ID]:           { loinc: '30954-2', extract: extractLabQuads },
@@ -163,6 +164,9 @@ function convertSingleCcda(
   const ccdaDoc = normalizedDoc?.ClinicalDocument ?? normalizedDoc;
   const sourceSystem = options.sourceSystem ?? getSourceSystemName(normalizedDoc);
   const documentType = detectDocumentType(normalizedDoc);
+  // The EHR of origin is the document's custodian organization (ratified CDA
+  // signal), independent of the import-batch label that drives `sourceSystem`.
+  const sourceEhr = deriveSourceEhr(ccdaDoc);
 
   // Document ID for narrative linking
   const docIdEl = Array.isArray(ccdaDoc?.id) ? ccdaDoc.id[0] : ccdaDoc?.id;
@@ -240,7 +244,7 @@ function convertSingleCcda(
         sectionCode || (matchedTemplateId ? (SECTION_HANDLERS[matchedTemplateId]?.loinc ?? '') : '');
       const narrativeQuads = extractNarrativeQuads(
         sectionText, effectiveLoinc, documentType, documentId, sourceSystem, importedAt,
-        requiresLLMExtraction,
+        requiresLLMExtraction, sourceEhr,
       );
       allQuads.push(...narrativeQuads);
     }
@@ -248,7 +252,7 @@ function convertSingleCcda(
     // Extract structured entries
     if (matchedTemplateId && SECTION_HANDLERS[matchedTemplateId]) {
       const handler = SECTION_HANDLERS[matchedTemplateId];
-      const quads = handler.extract(entries, patientUri, sourceSystem);
+      const quads = handler.extract(entries, patientUri, sourceSystem, sectionText);
 
       // Tag each structured record from a summarization document so the
       // reconciler can apply a lower confidence threshold for deduplication.
@@ -281,6 +285,15 @@ function convertSingleCcda(
       }
     }
   }
+
+  // Shared post-passes over every record subject (every subject with an rdf:type):
+  //  - stamp cascade:dataProvenance + cascade:schemaVersion if absent (mirrors the
+  //    FHIR converter's commonTriples), and
+  //  - stamp clinical:sourceEHR (the custodian organization) so structured records
+  //    are attributed to their EHR of origin in the source-organized Records view.
+  // Both are additive + idempotent: they never overwrite a value a handler set.
+  ensureProvenanceQuads(allQuads);
+  ensureSourceEhrQuads(allQuads, sourceEhr);
 
   return { quads: allQuads, count };
 }

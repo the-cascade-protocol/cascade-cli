@@ -11,11 +11,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { appleHealthAdapter } from '../src/lib/source-adapters/apple-health.js';
+import { iheXdmAdapter } from '../src/lib/source-adapters/ihe-xdm.js';
 import { directoryAdapter } from '../src/lib/source-adapters/directory.js';
 import { detectSource } from '../src/lib/source-adapters/registry.js';
 
 let root: string;
 let appleDir: string;
+let appleSrcDir: string;
+let xdmDir: string;
 let plainDir: string;
 
 beforeAll(() => {
@@ -30,15 +33,62 @@ beforeAll(() => {
   fs.writeFileSync(path.join(appleDir, 'export_cda.xml'), '<ClinicalDocument/>');
   fs.mkdirSync(path.join(appleDir, 'workout-routes'));
 
+  // A second Apple-shaped export whose export.xml carries <ClinicalRecord>
+  // wrappers (the authoritative per-record source labels) at the END of the
+  // file, after the device <Record> firehose — exactly Apple's real layout. One
+  // clinical file has no wrapper (to prove partial coverage degrades gracefully),
+  // and one sourceName carries an XML entity (to prove it is decoded).
+  appleSrcDir = path.join(root, 'apple_health_export_sourced');
+  fs.mkdirSync(path.join(appleSrcDir, 'clinical-records'), { recursive: true });
+  for (const f of ['AllergyIntolerance-1.json', 'Condition-2.json', 'Observation-3.json']) {
+    fs.writeFileSync(path.join(appleSrcDir, 'clinical-records', f), '{"resourceType":"Condition"}');
+  }
+  const filler = '  <Record type="HKQuantityTypeIdentifierHeartRate" value="72"/>\n'.repeat(50);
+  const exportXml =
+    '<?xml version="1.0" encoding="UTF-8"?>\n<HealthData locale="en_US">\n' +
+    '  <ExportDate value="2026-06-22 16:15:00 -0700"/>\n' +
+    filler +
+    '  <ClinicalRecord type="AllergyIntolerance" identifier="a1" sourceName="Swedish" ' +
+    'sourceURL="https://haiku.swedish.org/fhir/AllergyIntolerance/a1" fhirVersion="1.0.2" ' +
+    'receivedDate="2019-11-18 22:16:15 -0700" resourceFilePath="/clinical-records/AllergyIntolerance-1.json"/>\n' +
+    '  <ClinicalRecord type="Condition" identifier="c2" sourceName="Providence Health &amp; Services" ' +
+    'sourceURL="https://api.providence.org/fhir/Condition/c2" fhirVersion="4.0.1" ' +
+    'receivedDate="2025-11-14 00:11:20 -0700" resourceFilePath="/clinical-records/Condition-2.json"/>\n' +
+    '</HealthData>\n';
+  fs.writeFileSync(path.join(appleSrcDir, 'export.xml'), exportXml);
+
+  // An unzipped IHE XDM "Download My Record" export (MyChart shape): an IHE_XDM/
+  // submission set with the ebXML manifest + a C-CDA document + a stylesheet,
+  // plus root-level rendered HTML / PDF that are not clinical data.
+  xdmDir = path.join(root, 'mychart_export');
+  const sub = path.join(xdmDir, 'IHE_XDM', 'Jed1');
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(
+    path.join(sub, 'METADATA.XML'),
+    '<?xml version="1.0"?>\n<SubmitObjectsRequest xmlns="urn:oasis:names:tc:ebxml-regrep:xsd:lcm:3.0"><RegistryObjectList/></SubmitObjectsRequest>',
+  );
+  fs.writeFileSync(
+    path.join(sub, 'DOC0001.XML'),
+    "<?xml version=\"1.0\"?><?xml-stylesheet type='text/xsl' href='STYLE.XSL'?><ClinicalDocument xmlns=\"urn:hl7-org:v3\"><title>CCD</title></ClinicalDocument>",
+  );
+  fs.writeFileSync(path.join(sub, 'STYLE.XSL'), '<xsl:stylesheet/>');
+  fs.writeFileSync(path.join(xdmDir, 'INDEX.HTM'), '<html></html>');
+  fs.writeFileSync(path.join(xdmDir, 'README.TXT'), 'Open for instructions');
+  fs.writeFileSync(path.join(xdmDir, '1 of 1 - Summary.PDF'), '%PDF-1.4');
+
   // A plain folder of mixed files, including a nested dir, an unsupported file,
   // and a dotfile.
   plainDir = path.join(root, 'records');
   fs.mkdirSync(path.join(plainDir, 'sub'), { recursive: true });
+  fs.mkdirSync(path.join(plainDir, 'node_modules', 'pkg'), { recursive: true });
   fs.writeFileSync(path.join(plainDir, 'a.json'), '{}');
   fs.writeFileSync(path.join(plainDir, 'b.ttl'), '');
   fs.writeFileSync(path.join(plainDir, 'sub', 'c.xml'), '<x/>');
   fs.writeFileSync(path.join(plainDir, 'notes.txt'), 'not importable');
   fs.writeFileSync(path.join(plainDir, '.DS_Store'), '');
+  // Build/cache junk that must NOT be walked (prevents the OOM on an accidentally
+  // huge folder pick): a JSON inside node_modules.
+  fs.writeFileSync(path.join(plainDir, 'node_modules', 'pkg', 'package.json'), '{"x":1}');
 });
 
 afterAll(() => {
@@ -66,6 +116,74 @@ describe('appleHealthAdapter', () => {
     expect(skippedNames).toEqual(['export.xml', 'export_cda.xml', 'workout-routes']);
     expect(out.skipped.every((s) => s.reason.length > 0)).toBe(true);
   });
+
+  it('recovers per-record source (sourceName) from export.xml <ClinicalRecord> wrappers', () => {
+    const out = appleHealthAdapter.expand(appleSrcDir);
+    expect(out.fileSources).toBeDefined();
+    const fs2 = out.fileSources!;
+
+    const allergyPath = path.join(appleSrcDir, 'clinical-records', 'AllergyIntolerance-1.json');
+    const conditionPath = path.join(appleSrcDir, 'clinical-records', 'Condition-2.json');
+    const observationPath = path.join(appleSrcDir, 'clinical-records', 'Observation-3.json');
+
+    // sourceName becomes the authoritative EHR/account label, keyed by abs path.
+    expect(fs2[allergyPath]?.sourceEhr).toBe('Swedish');
+    expect(fs2[allergyPath]?.sourceUrl).toBe('https://haiku.swedish.org/fhir/AllergyIntolerance/a1');
+    expect(fs2[allergyPath]?.receivedDate).toBe('2019-11-18 22:16:15 -0700');
+
+    // XML entities in sourceName are decoded (&amp; -> &).
+    expect(fs2[conditionPath]?.sourceEhr).toBe('Providence Health & Services');
+
+    // A clinical file with no wrapper is simply absent (falls back to derivation).
+    expect(fs2[observationPath]).toBeUndefined();
+
+    // The device export is still skipped despite being read for its tail block.
+    expect(out.skipped.map((s) => path.basename(s.path))).toContain('export.xml');
+  });
+
+  it('reports source-label completeness (recovered vs total) for the pre-import plan', () => {
+    // appleSrcDir: 3 clinical files, 2 with <ClinicalRecord> wrappers.
+    const partial = appleHealthAdapter.expand(appleSrcDir).completeness ?? [];
+    const labels = partial.find((c) => c.label === 'Source account labels');
+    expect(labels).toEqual(
+      expect.objectContaining({ recovered: 2, total: 3 }),
+    );
+    expect(labels?.note).toMatch(/1 record/); // the unwrapped Observation-3
+
+    // appleDir: export.xml is bare (<HealthData/>), so 0 of 2 get labels.
+    const none = appleHealthAdapter.expand(appleDir).completeness ?? [];
+    expect(none.find((c) => c.label === 'Source account labels')).toEqual(
+      expect.objectContaining({ recovered: 0, total: 2 }),
+    );
+  });
+
+  it('yields no fileSources when export.xml has no clinical wrappers', () => {
+    const out = appleHealthAdapter.expand(appleDir);
+    expect(out.fileSources && Object.keys(out.fileSources).length).toBeFalsy();
+  });
+});
+
+describe('iheXdmAdapter', () => {
+  it('detects an unzipped IHE XDM export (IHE_XDM folder, or a submission set with METADATA.XML)', () => {
+    expect(iheXdmAdapter.detect(xdmDir)).toBe(true); // top folder has IHE_XDM/
+    expect(iheXdmAdapter.detect(path.join(xdmDir, 'IHE_XDM', 'Jed1'))).toBe(true); // has METADATA.XML
+    expect(iheXdmAdapter.detect(plainDir)).toBe(false);
+  });
+
+  it('yields the C-CDA document(s) and skips the manifest + non-clinical files', () => {
+    const out = iheXdmAdapter.expand(xdmDir);
+    expect(out.files.map((f) => path.basename(f))).toEqual(['DOC0001.XML']);
+    // The ebXML manifest is skipped by CONTENT, with a clear reason.
+    const manifestSkip = out.skipped.find((s) => s.path.endsWith('METADATA.XML'));
+    expect(manifestSkip?.reason).toMatch(/manifest/i);
+    // The rendered HTML / PDF / stylesheet are reported as non-clinical, not imported.
+    expect(out.skipped.some((s) => /non-clinical/i.test(s.reason))).toBe(true);
+    expect(out.files.some((f) => /METADATA|\.PDF|\.HTM|STYLE/i.test(f))).toBe(false);
+  });
+
+  it('the registry routes an XDM folder to ihe-xdm, ahead of the generic directory adapter', () => {
+    expect(detectSource(xdmDir)?.id).toBe('ihe-xdm');
+  });
 });
 
 describe('directoryAdapter', () => {
@@ -74,10 +192,13 @@ describe('directoryAdapter', () => {
     expect(directoryAdapter.detect(path.join(plainDir, 'a.json'))).toBe(false);
   });
 
-  it('recursively collects supported files; skips unsupported + dotfiles', () => {
+  it('recursively collects supported files; skips unsupported + dotfiles + build/cache dirs', () => {
     const out = directoryAdapter.expand(plainDir);
     const names = out.files.map((f) => path.basename(f)).sort();
-    expect(names).toEqual(['a.json', 'b.ttl', 'c.xml']); // recursed into sub/, dropped notes.txt + .DS_Store
+    // recursed into sub/, dropped notes.txt + .DS_Store, and did NOT descend into
+    // node_modules (so the package.json there is absent).
+    expect(names).toEqual(['a.json', 'b.ttl', 'c.xml']);
+    expect(out.files.some((f) => f.includes('node_modules'))).toBe(false);
   });
 });
 
