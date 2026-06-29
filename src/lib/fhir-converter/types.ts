@@ -55,6 +55,8 @@ export const NS = {
   sct: 'http://snomed.info/sct/',
   loinc: 'http://loinc.org/rdf#',
   rxnorm: 'http://www.nlm.nih.gov/research/umls/rxnorm/',
+  ndc: 'http://hl7.org/fhir/sid/ndc/',
+  atc: 'http://www.whocc.no/atc/',
   icd10: 'http://hl7.org/fhir/sid/icd-10-cm/',
   xsd: 'http://www.w3.org/2001/XMLSchema#',
   prov: 'http://www.w3.org/ns/prov#',
@@ -85,6 +87,11 @@ export const CODING_SYSTEM_MAP: Record<string, string> = {
   'http://www.nlm.nih.gov/research/umls/rxnorm': NS.rxnorm,
   'urn:oid:2.16.840.1.113883.6.88': NS.rxnorm,
   'http://snomed.info/sct': NS.sct,
+  'urn:oid:2.16.840.1.113883.6.96': NS.sct,      // SNOMED CT OID (C-CDA)
+  'http://hl7.org/fhir/sid/ndc': NS.ndc,
+  'urn:oid:2.16.840.1.113883.6.69': NS.ndc,      // NDC OID (C-CDA / HL7)
+  'http://www.whocc.no/atc': NS.atc,
+  'urn:oid:2.16.840.1.113883.6.73': NS.atc,      // WHO ATC OID
   'http://loinc.org': NS.loinc,
   'https://loinc.org': NS.loinc,
   'http://loinc.org/': NS.loinc,

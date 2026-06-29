@@ -9,6 +9,7 @@ import { Parser, Writer, DataFactory } from 'n3';
 import type { Quad, Quad_Subject, Quad_Object } from 'n3';
 import { NS, TURTLE_PREFIXES } from './fhir-converter/types.js';
 import { normalizeMedName, normalizeDose, normalizeFrequency } from './medication-normalize.js';
+import { medicationCodeKeys, sharedMedicationCodeKey } from './code-keys.js';
 
 // Re-export so existing consumers of the reconciler's normalizeMedName keep
 // working. The canonical definition now lives in ./medication-normalize.ts
@@ -266,15 +267,38 @@ function onlyOneSide(a: string | undefined, b: string | undefined): boolean {
 
 type MatchResult = { match: boolean; confidence: number; matchedOn: string };
 
-function matchMedications(a: ParsedRecord, b: ParsedRecord): MatchResult {
-  const rxA = (a.properties.get(NS.clinical + 'rxNormCode') ?? []).map(v => codeFromUri(v.value));
-  const rxB = (b.properties.get(NS.clinical + 'rxNormCode') ?? []).map(v => codeFromUri(v.value));
-  const shared = rxA.find(c => c && rxB.includes(c));
-  if (shared) return { match: true, confidence: 1.0, matchedOn: `rxnorm:${shared}` };
+/** All drug code URIs a record carries: clinical:rxNormCode + clinical:drugCode[]. */
+function medCodeUris(r: ParsedRecord): string[] {
+  const rx = (r.properties.get(NS.clinical + 'rxNormCode') ?? []).map(v => v.value);
+  const codes = (r.properties.get(NS.clinical + 'drugCode') ?? []).map(v => v.value);
+  return [...rx, ...codes];
+}
 
+/** Confidence per code-ladder tier at which two medications share an identity. */
+const MED_TIER_CONFIDENCE: Record<string, number> = {
+  rxnorm: 1.0,
+  snomed: 0.95,
+  ndc: 0.92,
+  atc: 0.85,
+  name: 0.85,
+};
+
+function matchMedications(a: ParsedRecord, b: ParsedRecord): MatchResult {
+  // Walk the weighted code ladder (RxNorm > SNOMED > NDC > ATC > normalized
+  // name) via the shared SDK primitive, so an NDC-only or SNOMED-only pair still
+  // matches without an RxNorm code, instead of over-relying on the name match.
   const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '');
   const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '');
-  if (nA && nB && nA === nB) return { match: true, confidence: 0.85, matchedOn: `name:"${nA}"` };
+  const keysA = medicationCodeKeys(medCodeUris(a), nA || undefined);
+  const keysB = medicationCodeKeys(medCodeUris(b), nB || undefined);
+  const shared = sharedMedicationCodeKey(keysA, keysB);
+  if (shared) {
+    const confidence = MED_TIER_CONFIDENCE[shared.system] ?? 0.80;
+    const matchedOn = shared.system === 'name' ? `name:"${shared.value}"` : `${shared.system}:${shared.value}`;
+    return { match: true, confidence, matchedOn };
+  }
+
+  // Partial-name fallback (substring containment), unchanged from the prior matcher.
   if (nA && nB && (nA.includes(nB) || nB.includes(nA))) return { match: true, confidence: 0.70, matchedOn: `partial-name` };
   return { match: false, confidence: 0, matchedOn: '' };
 }
