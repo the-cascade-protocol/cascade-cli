@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "copy-shapes": "rm -rf dist/shapes && mkdir -p dist/shapes && cp -r src/shapes/* dist/shapes/",
-    "copy-data": "mkdir -p dist/data && (cp src/data/rxnorm-names.json dist/data/rxnorm-names.json 2>/dev/null || echo '{}' > dist/data/rxnorm-names.json)",
+    "copy-data": "mkdir -p dist/data && (cp src/data/rxnorm-names.json dist/data/rxnorm-names.json 2>/dev/null || echo '{}' > dist/data/rxnorm-names.json) && cp src/data/cascade-terminology.json dist/data/cascade-terminology.json",
     "build": "tsc && npm run copy-shapes && npm run copy-data",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",

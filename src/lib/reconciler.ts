@@ -8,8 +8,9 @@
 import { Parser, Writer, DataFactory } from 'n3';
 import type { Quad, Quad_Subject, Quad_Object } from 'n3';
 import { NS, TURTLE_PREFIXES } from './fhir-converter/types.js';
-import { normalizeMedName, normalizeDose, normalizeFrequency } from './medication-normalize.js';
+import { normalizeMedName, normalizeDose, normalizeFrequency, type DrugNameNormalizer } from './medication-normalize.js';
 import { medicationCodeKeys, sharedMedicationCodeKey } from './code-keys.js';
+import { cascadeTerminologyResolver } from './terminology.js';
 
 // Re-export so existing consumers of the reconciler's normalizeMedName keep
 // working. The canonical definition now lives in ./medication-normalize.ts
@@ -25,6 +26,13 @@ const { namedNode, literal, blankNode, quad: makeQuad } = DataFactory;
 export interface ReconcilerOptions {
   trustScores?: Record<string, number>;
   labTolerance?: number;
+  /**
+   * Brand-to-generic resolver applied during medication name normalization, so
+   * a brand and its generic (Zyrtec / cetirizine) dedupe without a shared code.
+   * Defaults to the bundled Cascade terminology asset; pass
+   * `identityTerminologyResolver` to disable (asset-free behaviour).
+   */
+  terminologyResolver?: DrugNameNormalizer;
 }
 
 export interface ReconcilerInput {
@@ -283,12 +291,13 @@ const MED_TIER_CONFIDENCE: Record<string, number> = {
   name: 0.85,
 };
 
-function matchMedications(a: ParsedRecord, b: ParsedRecord): MatchResult {
+function matchMedications(a: ParsedRecord, b: ParsedRecord, resolver?: DrugNameNormalizer): MatchResult {
   // Walk the weighted code ladder (RxNorm > SNOMED > NDC > ATC > normalized
   // name) via the shared SDK primitive, so an NDC-only or SNOMED-only pair still
   // matches without an RxNorm code, instead of over-relying on the name match.
-  const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '');
-  const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '');
+  // The resolver maps brand to generic so e.g. Zyrtec and cetirizine match.
+  const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '', resolver);
+  const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '', resolver);
   const keysA = medicationCodeKeys(medCodeUris(a), nA || undefined);
   const keysB = medicationCodeKeys(medCodeUris(b), nB || undefined);
   const shared = sharedMedicationCodeKey(keysA, keysB);
@@ -427,10 +436,10 @@ function getMatchThreshold(a: ParsedRecord, b: ParsedRecord): number {
   return 0.65;
 }
 
-function doRecordsMatch(a: ParsedRecord, b: ParsedRecord, tol: number): MatchResult {
+function doRecordsMatch(a: ParsedRecord, b: ParsedRecord, tol: number, resolver?: DrugNameNormalizer): MatchResult {
   if (a.type !== b.type) return { match: false, confidence: 0, matchedOn: '' };
   switch (a.type) {
-    case 'clinical:Medication':        return matchMedications(a, b);
+    case 'clinical:Medication':        return matchMedications(a, b, resolver);
     case 'health:ConditionRecord':    return matchConditions(a, b);
     case 'health:AllergyRecord':      return matchAllergies(a, b);
     case 'health:LabResultRecord':    return matchLabs(a, b, tol);
@@ -450,6 +459,7 @@ type MatchType = 'exact_duplicate' | 'near_duplicate' | 'status_conflict' | 'val
 function classifyGroup(
   records: ParsedRecord[],
   tol: number,
+  resolver?: DrugNameNormalizer,
 ): { matchType: MatchType; conflictField?: string; conflictValues?: Record<string, string> } {
   if (records.length < 2) return { matchType: 'pass_through' };
   const [a, b] = records;
@@ -518,8 +528,8 @@ function classifyGroup(
     // (3) No divergence. Mergeable differences (a different normalized name, or
     // a dose/frequency present on only one side) are near-duplicates so
     // resolveGroup fills in the missing fields; otherwise an exact duplicate.
-    const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '');
-    const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '');
+    const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '', resolver);
+    const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '', resolver);
     const mergeable = nA !== nB || onlyOneSide(doseA, doseB) || onlyOneSide(freqA, freqB);
     return { matchType: mergeable ? 'near_duplicate' : 'exact_duplicate' };
   }
@@ -690,6 +700,10 @@ export async function runReconciliation(
   };
   const defaultTrust = 0.80;
   const labTol = options?.labTolerance ?? 0.05;
+  // Brand-to-generic resolver for medication name matching. Defaults to the
+  // bundled Cascade terminology asset so Zyrtec/cetirizine dedupe out of the box;
+  // callers pass identityTerminologyResolver for asset-free behaviour.
+  const resolver = options?.terminologyResolver ?? cascadeTerminologyResolver();
 
   // Parse all inputs
   const allRecords: ParsedRecord[] = [];
@@ -755,7 +769,7 @@ export async function runReconciliation(
       const candidates = existingIndex.get(a.type) ?? [];
       for (const b of candidates) {
         if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
-        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
+        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
           matched.push(b);
@@ -768,7 +782,7 @@ export async function runReconciliation(
       if (matched.length === 1) {
         groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
       } else {
-        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol);
+        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol, resolver);
         groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
       }
     }
@@ -790,7 +804,7 @@ export async function runReconciliation(
       for (let j = i + 1; j < newRecords.length; j++) {
         const b = newRecords[j];
         if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
-        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
+        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
           matched.push(b);
@@ -803,7 +817,7 @@ export async function runReconciliation(
       if (matched.length === 1) {
         groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
       } else {
-        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol);
+        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol, resolver);
         groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
       }
     }
@@ -844,7 +858,7 @@ export async function runReconciliation(
       const candidates = typeIndex.get(a.type) ?? [];
       for (const b of candidates) {
         if (b === a || assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
-        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
+        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
           matched.push(b);
@@ -857,7 +871,7 @@ export async function runReconciliation(
       if (matched.length === 1) {
         groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
       } else {
-        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol);
+        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol, resolver);
         groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
       }
     }

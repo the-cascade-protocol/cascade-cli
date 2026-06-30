@@ -17,6 +17,16 @@
  */
 
 /**
+ * The minimal brand-to-generic capability {@link normalizeMedName} consumes — a
+ * structural subset of TerminologyResolver, so the normalizer stays
+ * dependency-free. Degrades to identity when absent.
+ */
+export interface DrugNameNormalizer {
+  /** Canonical generic name for a brand/surface form, else undefined. */
+  toGeneric(surfaceForm: string): string | undefined;
+}
+
+/**
  * Canonicalize a medication name for identity matching.
  *
  * Lowercases, strips embedded dose/unit and form/route tokens, and collapses
@@ -24,12 +34,17 @@
  * are intentionally stripped so "Lisinopril 10 mg" and "Lisinopril 20 mg" share
  * an identity; the dose difference is compared separately (see normalizeDose)
  * and surfaced as a conflict, not treated as a different drug.
+ *
+ * When a `resolver` is injected, the stripped name is mapped brand-to-generic
+ * ("Zyrtec 10 mg" -> "zyrtec" -> "cetirizine"). WITHOUT a resolver the behaviour
+ * is unchanged (asset-free baseline).
  */
-export function normalizeMedName(name: string): string {
-  return name.toLowerCase()
+export function normalizeMedName(name: string, resolver?: DrugNameNormalizer): string {
+  const base = name.toLowerCase()
     .replace(/\d+(\.\d+)?\s*(mg|mcg|g|ml|%|iu|units?|meq)\b/gi, '')
     .replace(/\b(oral|tablet|capsule|solution|injection|extended|release|er|xr|cr|sr|hr)\b/gi, '')
     .replace(/\s+/g, ' ').trim();
+  return resolver?.toGeneric(base) ?? base;
 }
 
 /**
