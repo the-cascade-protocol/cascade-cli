@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { contentHashedUri, mintSubjectUri } from '../src/lib/fhir-converter/types.js';
+import { contentHashedUri, mintSubjectUri, medicationUri } from '../src/lib/fhir-converter/types.js';
 
 describe('deterministicUuid cross-SDK contract', () => {
   it('SHA-1("hello") produces the canonical UUID', () => {
@@ -62,5 +62,26 @@ describe('deterministicUuid cross-SDK contract', () => {
     const uri2 = mintSubjectUri({ resourceType: 'Condition', id: 'epic-12345' });
     expect(uri1).toBe(uri2);
     expect(uri1).toMatch(/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
+  it('medicationUri matches the cross-port conformance vector (and normalizes the name)', () => {
+    // Vector `medication-lisinopril-rxnorm`:
+    //   MedicationRequest::normalizedName=lisinopril|patient=urn:uuid:patient-smith|rxNormCode=29046|startDate=2020-04-01
+    //   -> urn:uuid:f181c773-4c66-5cd3-96d7-5ff69c472fea
+    // The raw name "Lisinopril 10 mg" must normalize to "lisinopril" so dose
+    // variants share one identity (dose is NOT part of the URI).
+    const uri = medicationUri({
+      rxNormCode: '29046',
+      medicationName: 'Lisinopril 10 mg',
+      startDate: '2020-04-01',
+      patient: 'urn:uuid:patient-smith',
+    });
+    expect(uri).toBe('urn:uuid:f181c773-4c66-5cd3-96d7-5ff69c472fea');
+  });
+
+  it('medicationUri excludes dose: 10 mg and 20 mg of the same drug share a URI', () => {
+    const base = { rxNormCode: '29046', startDate: '2020-04-01', patient: 'urn:uuid:p1' };
+    expect(medicationUri({ ...base, medicationName: 'Lisinopril 10 mg' }))
+      .toBe(medicationUri({ ...base, medicationName: 'Lisinopril 20 mg' }));
   });
 });

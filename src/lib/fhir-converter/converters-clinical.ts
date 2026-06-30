@@ -27,6 +27,7 @@ import {
   isLoincSystem,
   extractCodings,
   codeableConceptText,
+  medicationUri,
   tripleStr,
   tripleDouble,
   tripleRef,
@@ -46,9 +47,16 @@ import {
 export function convertMedicationStatement(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const patientRef = resource.subject?.reference ?? resource.patient?.reference ?? '';
-  const subjectUri = contentHashedUri('MedicationRequest', {
+
+  // Medication name (needed for the identity URI, which keys on the normalized name).
+  const medName = codeableConceptText(resource.medicationCodeableConcept)
+    ?? resource.medicationReference?.display
+    ?? 'Unknown Medication';
+
+  const subjectUri = medicationUri({
     patient: patientRef,
     rxNormCode: resource.medicationCodeableConcept?.coding?.find((c: any) => c.system?.includes('rxnorm'))?.code,
+    medicationName: medName,
     startDate: (resource.authoredOn ?? resource.effectivePeriod?.start)?.split('T')[0],
   }, resource.id);
   const quads: Quad[] = [];
@@ -56,10 +64,6 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
   quads.push(tripleType(subjectUri, NS.clinical + 'Medication'));
   quads.push(...commonTriples(subjectUri));
 
-  // Medication name
-  const medName = codeableConceptText(resource.medicationCodeableConcept)
-    ?? resource.medicationReference?.display
-    ?? 'Unknown Medication';
   quads.push(tripleStr(subjectUri, NS.clinical + 'drugName', medName));
 
   // Status from FHIR status field

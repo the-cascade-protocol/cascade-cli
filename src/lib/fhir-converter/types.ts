@@ -6,6 +6,7 @@
 
 import { DataFactory, Writer, type Quad } from 'n3';
 import { randomUUID, createHash } from 'node:crypto';
+import { normalizeMedName } from '../medication-normalize.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -366,6 +367,35 @@ export function contentHashedUri(
     return `urn:uuid:${deterministicUuid(`${resourceType}:${fallbackId}`)}`;
   }
   return `urn:uuid:${randomUUID()}`;  // true last resort
+}
+
+/**
+ * Deterministic URI for a medication record. The single medication-identity
+ * field set, shared by every importer (FHIR, C-CDA) and aligned with
+ * sdk-typescript's `medicationUri` and the conformance vector
+ * (`medication-lisinopril-rxnorm`): RxNorm + normalized drug name + start date
+ * + patient, under the `MedicationRequest` resource type.
+ *
+ * The raw drug name is run through the shared `normalizeMedName` so brand/dose/
+ * form variants collapse to one identity. Dose is intentionally excluded (a dose
+ * change is a conflict on the same identity, surfaced by the reconciler, not a
+ * new record). `startDate` is part of the identity; the matcher and retrieval
+ * index deliberately key on code/name only.
+ */
+export function medicationUri(
+  fields: { rxNormCode?: string; medicationName?: string; startDate?: string; patient?: string },
+  fallbackId?: string,
+): string {
+  return contentHashedUri(
+    'MedicationRequest',
+    {
+      rxNormCode: fields.rxNormCode,
+      normalizedName: fields.medicationName ? normalizeMedName(fields.medicationName) : undefined,
+      startDate: fields.startDate,
+      patient: fields.patient,
+    },
+    fallbackId,
+  );
 }
 
 /** Common triples every Cascade resource gets */
