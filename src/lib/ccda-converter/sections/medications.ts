@@ -2,7 +2,7 @@
  * Extract medications from C-CDA section (templateId 2.16.840.1.113883.10.20.22.2.1.1)
  */
 
-import { NS, contentHashedUri } from '../../fhir-converter/types.js';
+import { NS, medicationUri } from '../../fhir-converter/types.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { lookupRxNormName } from '../rxnorm-lookup.js';
 import { DataFactory } from 'n3';
@@ -132,10 +132,10 @@ export function extractMedicationQuads(
 
     if (!displayName && !code) continue;
 
-    const uri = contentHashedUri('Medication', {
+    const uri = medicationUri({
       patient: patientUri,
       rxNormCode: isRxNorm ? code : undefined,
-      medicationName: displayName ? displayName.toLowerCase() : undefined,
+      medicationName: displayName || undefined,
       startDate: startDate || undefined,
     }, sourceId || undefined);
 

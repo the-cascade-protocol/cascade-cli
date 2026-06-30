@@ -6,6 +6,7 @@
 
 import { DataFactory, Writer, type Quad } from 'n3';
 import { randomUUID, createHash } from 'node:crypto';
+import { normalizeMedName } from '../medication-normalize.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -55,6 +56,8 @@ export const NS = {
   sct: 'http://snomed.info/sct/',
   loinc: 'http://loinc.org/rdf#',
   rxnorm: 'http://www.nlm.nih.gov/research/umls/rxnorm/',
+  ndc: 'http://hl7.org/fhir/sid/ndc/',
+  atc: 'http://www.whocc.no/atc/',
   icd10: 'http://hl7.org/fhir/sid/icd-10-cm/',
   xsd: 'http://www.w3.org/2001/XMLSchema#',
   prov: 'http://www.w3.org/ns/prov#',
@@ -85,6 +88,11 @@ export const CODING_SYSTEM_MAP: Record<string, string> = {
   'http://www.nlm.nih.gov/research/umls/rxnorm': NS.rxnorm,
   'urn:oid:2.16.840.1.113883.6.88': NS.rxnorm,
   'http://snomed.info/sct': NS.sct,
+  'urn:oid:2.16.840.1.113883.6.96': NS.sct,      // SNOMED CT OID (C-CDA)
+  'http://hl7.org/fhir/sid/ndc': NS.ndc,
+  'urn:oid:2.16.840.1.113883.6.69': NS.ndc,      // NDC OID (C-CDA / HL7)
+  'http://www.whocc.no/atc': NS.atc,
+  'urn:oid:2.16.840.1.113883.6.73': NS.atc,      // WHO ATC OID
   'http://loinc.org': NS.loinc,
   'https://loinc.org': NS.loinc,
   'http://loinc.org/': NS.loinc,
@@ -359,6 +367,35 @@ export function contentHashedUri(
     return `urn:uuid:${deterministicUuid(`${resourceType}:${fallbackId}`)}`;
   }
   return `urn:uuid:${randomUUID()}`;  // true last resort
+}
+
+/**
+ * Deterministic URI for a medication record. The single medication-identity
+ * field set, shared by every importer (FHIR, C-CDA) and aligned with
+ * sdk-typescript's `medicationUri` and the conformance vector
+ * (`medication-lisinopril-rxnorm`): RxNorm + normalized drug name + start date
+ * + patient, under the `MedicationRequest` resource type.
+ *
+ * The raw drug name is run through the shared `normalizeMedName` so brand/dose/
+ * form variants collapse to one identity. Dose is intentionally excluded (a dose
+ * change is a conflict on the same identity, surfaced by the reconciler, not a
+ * new record). `startDate` is part of the identity; the matcher and retrieval
+ * index deliberately key on code/name only.
+ */
+export function medicationUri(
+  fields: { rxNormCode?: string; medicationName?: string; startDate?: string; patient?: string },
+  fallbackId?: string,
+): string {
+  return contentHashedUri(
+    'MedicationRequest',
+    {
+      rxNormCode: fields.rxNormCode,
+      normalizedName: fields.medicationName ? normalizeMedName(fields.medicationName) : undefined,
+      startDate: fields.startDate,
+      patient: fields.patient,
+    },
+    fallbackId,
+  );
 }
 
 /** Common triples every Cascade resource gets */

@@ -8,6 +8,14 @@
 import { Parser, Writer, DataFactory } from 'n3';
 import type { Quad, Quad_Subject, Quad_Object } from 'n3';
 import { NS, TURTLE_PREFIXES } from './fhir-converter/types.js';
+import { normalizeMedName, normalizeDose, normalizeFrequency, type DrugNameNormalizer } from './medication-normalize.js';
+import { medicationCodeKeys, sharedMedicationCodeKey } from './code-keys.js';
+import { cascadeTerminologyResolver } from './terminology.js';
+
+// Re-export so existing consumers of the reconciler's normalizeMedName keep
+// working. The canonical definition now lives in ./medication-normalize.ts
+// (shared, byte-identical to sdk-typescript).
+export { normalizeMedName };
 
 const { namedNode, literal, blankNode, quad: makeQuad } = DataFactory;
 
@@ -18,6 +26,21 @@ const { namedNode, literal, blankNode, quad: makeQuad } = DataFactory;
 export interface ReconcilerOptions {
   trustScores?: Record<string, number>;
   labTolerance?: number;
+  /**
+   * Brand-to-generic resolver applied during medication name normalization, so
+   * a brand and its generic (Zyrtec / cetirizine) dedupe without a shared code.
+   * Defaults to the bundled Cascade terminology asset; pass
+   * `identityTerminologyResolver` to disable (asset-free behaviour).
+   */
+  terminologyResolver?: DrugNameNormalizer;
+  /**
+   * When `false` (the opt-in guard, Checkup parity), matched records that come
+   * from different provenance classes (`clinical:provenanceClass`) are flagged
+   * for review instead of auto-merged. Defaults to `true` (merge allowed), since
+   * cross-source dedup is the primary goal; set `false` for the conservative
+   * stance that never silently merges across provenance.
+   */
+  allowCrossProvenanceMerge?: boolean;
 }
 
 export interface ReconcilerInput {
@@ -196,13 +219,6 @@ function relabelQuadBlankNodes(q: Quad, inputIndex: number): Quad {
 // Matching helpers
 // ---------------------------------------------------------------------------
 
-export function normalizeMedName(name: string): string {
-  return name.toLowerCase()
-    .replace(/\d+(\.\d+)?\s*(mg|mcg|g|ml|%|iu|units?|meq)\b/gi, '')
-    .replace(/\b(oral|tablet|capsule|solution|injection|extended|release|er|xr|cr|sr|hr)\b/gi, '')
-    .replace(/\s+/g, ' ').trim();
-}
-
 function normalizeConditionName(name: string): string {
   return name.toLowerCase().replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
 }
@@ -217,17 +233,89 @@ function codeFromUri(uri: string): string {
 
 function dateOnly(dt: string): string { return dt.split('T')[0] ?? dt; }
 
+// ---------------------------------------------------------------------------
+// Medication divergence helpers (Phase 2: dose/frequency/status conflicts)
+// ---------------------------------------------------------------------------
+
+/**
+ * FHIR/Cascade medication status values that mean the medication is NOT active.
+ * Everything else (including `active`, `on-hold`, `draft`, `unknown`, or an
+ * absent status) is treated as active. Used for the status-split so an active
+ * record and a discontinued record of the same drug never collapse silently.
+ */
+const INACTIVE_MED_STATUSES = new Set([
+  'stopped', 'discontinued', 'inactive', 'cancelled', 'canceled',
+  'completed', 'entered-in-error',
+]);
+
+/** Coarse active/inactive classification of a medication's status string. */
+function medicationActivity(status: string | undefined): 'active' | 'inactive' {
+  if (!status) return 'active';
+  return INACTIVE_MED_STATUSES.has(status.toLowerCase().trim()) ? 'inactive' : 'active';
+}
+
+/**
+ * True when both values are present and differ after normalization.
+ *
+ * A value present on only one side is intentionally NOT a conflict: it is a
+ * fill-in handled as a near-duplicate merge (resolveGroup copies the missing
+ * field), not a user-actionable disagreement. This tightens Checkup's raw
+ * nil-safe predicate (`a != b && (a != nil || b != nil)`) for the CLI, where a
+ * conflict is a blocking gate (`cascade pod conflicts` exits 1) and drives a
+ * keep-A / keep-B decision: only a genuine disagreement (e.g. 10 mg vs 20 mg)
+ * warrants that, never "one source recorded a dose and the other didn't."
+ */
+function bothPresentAndDiffer(
+  a: string | undefined,
+  b: string | undefined,
+  norm: (s: string) => string,
+): boolean {
+  if (a == null || b == null || a === '' || b === '') return false;
+  return norm(a) !== norm(b);
+}
+
+/** True when exactly one of the two values is present (a mergeable fill-in). */
+function onlyOneSide(a: string | undefined, b: string | undefined): boolean {
+  const pa = a != null && a !== '';
+  const pb = b != null && b !== '';
+  return pa !== pb;
+}
+
 type MatchResult = { match: boolean; confidence: number; matchedOn: string };
 
-function matchMedications(a: ParsedRecord, b: ParsedRecord): MatchResult {
-  const rxA = (a.properties.get(NS.clinical + 'rxNormCode') ?? []).map(v => codeFromUri(v.value));
-  const rxB = (b.properties.get(NS.clinical + 'rxNormCode') ?? []).map(v => codeFromUri(v.value));
-  const shared = rxA.find(c => c && rxB.includes(c));
-  if (shared) return { match: true, confidence: 1.0, matchedOn: `rxnorm:${shared}` };
+/** All drug code URIs a record carries: clinical:rxNormCode + clinical:drugCode[]. */
+function medCodeUris(r: ParsedRecord): string[] {
+  const rx = (r.properties.get(NS.clinical + 'rxNormCode') ?? []).map(v => v.value);
+  const codes = (r.properties.get(NS.clinical + 'drugCode') ?? []).map(v => v.value);
+  return [...rx, ...codes];
+}
 
-  const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '');
-  const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '');
-  if (nA && nB && nA === nB) return { match: true, confidence: 0.85, matchedOn: `name:"${nA}"` };
+/** Confidence per code-ladder tier at which two medications share an identity. */
+const MED_TIER_CONFIDENCE: Record<string, number> = {
+  rxnorm: 1.0,
+  snomed: 0.95,
+  ndc: 0.92,
+  atc: 0.85,
+  name: 0.85,
+};
+
+function matchMedications(a: ParsedRecord, b: ParsedRecord, resolver?: DrugNameNormalizer): MatchResult {
+  // Walk the weighted code ladder (RxNorm > SNOMED > NDC > ATC > normalized
+  // name) via the shared SDK primitive, so an NDC-only or SNOMED-only pair still
+  // matches without an RxNorm code, instead of over-relying on the name match.
+  // The resolver maps brand to generic so e.g. Zyrtec and cetirizine match.
+  const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '', resolver);
+  const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '', resolver);
+  const keysA = medicationCodeKeys(medCodeUris(a), nA || undefined);
+  const keysB = medicationCodeKeys(medCodeUris(b), nB || undefined);
+  const shared = sharedMedicationCodeKey(keysA, keysB);
+  if (shared) {
+    const confidence = MED_TIER_CONFIDENCE[shared.system] ?? 0.80;
+    const matchedOn = shared.system === 'name' ? `name:"${shared.value}"` : `${shared.system}:${shared.value}`;
+    return { match: true, confidence, matchedOn };
+  }
+
+  // Partial-name fallback (substring containment), unchanged from the prior matcher.
   if (nA && nB && (nA.includes(nB) || nB.includes(nA))) return { match: true, confidence: 0.70, matchedOn: `partial-name` };
   return { match: false, confidence: 0, matchedOn: '' };
 }
@@ -356,10 +444,10 @@ function getMatchThreshold(a: ParsedRecord, b: ParsedRecord): number {
   return 0.65;
 }
 
-function doRecordsMatch(a: ParsedRecord, b: ParsedRecord, tol: number): MatchResult {
+function doRecordsMatch(a: ParsedRecord, b: ParsedRecord, tol: number, resolver?: DrugNameNormalizer): MatchResult {
   if (a.type !== b.type) return { match: false, confidence: 0, matchedOn: '' };
   switch (a.type) {
-    case 'clinical:Medication':        return matchMedications(a, b);
+    case 'clinical:Medication':        return matchMedications(a, b, resolver);
     case 'health:ConditionRecord':    return matchConditions(a, b);
     case 'health:AllergyRecord':      return matchAllergies(a, b);
     case 'health:LabResultRecord':    return matchLabs(a, b, tol);
@@ -379,6 +467,7 @@ type MatchType = 'exact_duplicate' | 'near_duplicate' | 'status_conflict' | 'val
 function classifyGroup(
   records: ParsedRecord[],
   tol: number,
+  resolver?: DrugNameNormalizer,
 ): { matchType: MatchType; conflictField?: string; conflictValues?: Record<string, string> } {
   if (records.length < 2) return { matchType: 'pass_through' };
   const [a, b] = records;
@@ -405,9 +494,52 @@ function classifyGroup(
     }
   }
   if (a.type === 'clinical:Medication') {
-    const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '');
-    const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '');
-    if (nA !== nB) return { matchType: 'near_duplicate' };
+    // (1) Status split: an active record and a stopped/discontinued record of
+    // the same drug is a clinically significant divergence, never a silent
+    // merge. (Reference: Checkup SimplifiedImportProcessor splits active vs
+    // stopped before dedup.)
+    const actA = medicationActivity(getProp(a, NS.clinical + 'status'));
+    const actB = medicationActivity(getProp(b, NS.clinical + 'status'));
+    if (actA !== actB) {
+      return {
+        matchType: 'status_conflict',
+        conflictField: 'clinical:status',
+        conflictValues: {
+          [a.sourceSystem]: getProp(a, NS.clinical + 'status') ?? '(none)',
+          [b.sourceSystem]: getProp(b, NS.clinical + 'status') ?? '(none)',
+        },
+      };
+    }
+
+    // (2) Dose / frequency disagreement: the flagship conflict the Reconcile tab
+    // exists for (e.g. "Lisinopril 10 mg" vs "20 mg"). Compared on the shared
+    // normalized form so "10 mg" / "10mg" / "10 milligrams" do NOT conflict.
+    const doseA = getProp(a, NS.clinical + 'dosage');
+    const doseB = getProp(b, NS.clinical + 'dosage');
+    if (bothPresentAndDiffer(doseA, doseB, normalizeDose)) {
+      return {
+        matchType: 'value_conflict',
+        conflictField: 'clinical:dosage',
+        conflictValues: { [a.sourceSystem]: doseA as string, [b.sourceSystem]: doseB as string },
+      };
+    }
+    const freqA = getProp(a, NS.clinical + 'frequency') ?? getProp(a, NS.health + 'frequency');
+    const freqB = getProp(b, NS.clinical + 'frequency') ?? getProp(b, NS.health + 'frequency');
+    if (bothPresentAndDiffer(freqA, freqB, normalizeFrequency)) {
+      return {
+        matchType: 'value_conflict',
+        conflictField: 'clinical:frequency',
+        conflictValues: { [a.sourceSystem]: freqA as string, [b.sourceSystem]: freqB as string },
+      };
+    }
+
+    // (3) No divergence. Mergeable differences (a different normalized name, or
+    // a dose/frequency present on only one side) are near-duplicates so
+    // resolveGroup fills in the missing fields; otherwise an exact duplicate.
+    const nA = normalizeMedName(getProp(a, NS.clinical + 'drugName') ?? '', resolver);
+    const nB = normalizeMedName(getProp(b, NS.clinical + 'drugName') ?? '', resolver);
+    const mergeable = nA !== nB || onlyOneSide(doseA, doseB) || onlyOneSide(freqA, freqB);
+    return { matchType: mergeable ? 'near_duplicate' : 'exact_duplicate' };
   }
   return { matchType: 'exact_duplicate' };
 }
@@ -440,16 +572,42 @@ function completeness(r: ParsedRecord): number {
   return n;
 }
 
-function resolveGroup(g: Group, trustScores: Record<string, number>, defaultTrust: number): Resolution {
+/**
+ * Provenance-class boost added to a record's trust when selecting a merge
+ * winner, mapping Checkup's evidence weighting (MedicationReconciler
+ * `evidenceWeight`: +30/+20/+10/+5) onto the 0-1 trust scale. A high-provenance
+ * record (e.g. HealthKit FHIR) can outrank a higher-trust source carrying weaker
+ * provenance. Records without a `clinical:provenanceClass` get no boost.
+ */
+const PROVENANCE_BOOST: Record<string, number> = {
+  healthKitFHIR: 0.30,
+  pharmacyClaim: 0.20,
+  userTracked: 0.10,
+  imported: 0.05,
+};
+
+function provenanceBoost(r: ParsedRecord): number {
+  const pc = getProp(r, NS.clinical + 'provenanceClass');
+  return pc ? (PROVENANCE_BOOST[pc] ?? 0) : 0;
+}
+
+function resolveGroup(
+  g: Group,
+  trustScores: Record<string, number>,
+  defaultTrust: number,
+  allowCrossProvenanceMerge = true,
+): Resolution {
   const trust = (sys: string) => trustScores[sys] ?? defaultTrust;
+  // Effective winner score: source trust plus a provenance-class boost.
+  const score = (r: ParsedRecord) => trust(r.sourceSystem) + provenanceBoost(r);
 
   if (g.records.length === 1) {
     return { canonical: g.records[0], mergedUris: [g.records[0].uri], mergedSystems: [g.records[0].sourceSystem], strategy: 'pass_through', resolved: true };
   }
 
   const ranked = [...g.records].sort((a, b) => {
-    const td = trust(b.sourceSystem) - trust(a.sourceSystem);
-    return td !== 0 ? td : completeness(b) - completeness(a);
+    const sd = score(b) - score(a);
+    return sd !== 0 ? sd : completeness(b) - completeness(a);
   });
 
   const winner = ranked[0];
@@ -457,11 +615,41 @@ function resolveGroup(g: Group, trustScores: Record<string, number>, defaultTrus
   let strategy = 'trust_priority';
   let resolved = true;
 
+  const isMedication = g.records[0].type === 'clinical:Medication';
+
   if (g.matchType === 'near_duplicate') {
     strategy = 'merge_values';
   } else if (g.matchType === 'status_conflict') {
-    const diff = Math.abs(trust(ranked[0].sourceSystem) - trust(ranked[1].sourceSystem));
-    if (diff < 0.05) { strategy = 'flag_unresolved'; resolved = false; }
+    if (isMedication) {
+      // Active vs stopped of the same drug is a clinical divergence: always
+      // user-resolved, never auto-merged by trust (the silent-merge danger).
+      strategy = 'flag_unresolved';
+      resolved = false;
+    } else {
+      // Conditions: auto-resolve by trust unless the two sources are near-equal.
+      const diff = Math.abs(trust(ranked[0].sourceSystem) - trust(ranked[1].sourceSystem));
+      if (diff < 0.05) { strategy = 'flag_unresolved'; resolved = false; }
+    }
+  } else if (g.matchType === 'value_conflict' && isMedication) {
+    // Dose/frequency disagreement on the same medication: always user-resolved
+    // so it reaches settings/pending-conflicts.ttl and the Reconcile tab,
+    // rather than being silently collapsed by trust priority.
+    strategy = 'flag_unresolved';
+    resolved = false;
+  }
+
+  // Opt-in cross-provenance guard (Checkup parity): when a would-be merge spans
+  // more than one provenance class, flag for review instead of silently merging
+  // across provenance. Only affects the merge match types; existing conflicts
+  // already flag.
+  if (!allowCrossProvenanceMerge && (g.matchType === 'near_duplicate' || g.matchType === 'exact_duplicate')) {
+    const provenanceClasses = new Set(
+      g.records.map(r => getProp(r, NS.clinical + 'provenanceClass')).filter((v): v is string => !!v),
+    );
+    if (provenanceClasses.size > 1) {
+      strategy = 'flag_cross_provenance';
+      resolved = false;
+    }
   }
 
   // Merge missing fields from lower-trust sources
@@ -560,6 +748,10 @@ export async function runReconciliation(
   };
   const defaultTrust = 0.80;
   const labTol = options?.labTolerance ?? 0.05;
+  // Brand-to-generic resolver for medication name matching. Defaults to the
+  // bundled Cascade terminology asset so Zyrtec/cetirizine dedupe out of the box;
+  // callers pass identityTerminologyResolver for asset-free behaviour.
+  const resolver = options?.terminologyResolver ?? cascadeTerminologyResolver();
 
   // Parse all inputs
   const allRecords: ParsedRecord[] = [];
@@ -625,7 +817,7 @@ export async function runReconciliation(
       const candidates = existingIndex.get(a.type) ?? [];
       for (const b of candidates) {
         if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
-        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
+        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
           matched.push(b);
@@ -638,7 +830,7 @@ export async function runReconciliation(
       if (matched.length === 1) {
         groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
       } else {
-        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol);
+        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol, resolver);
         groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
       }
     }
@@ -660,7 +852,7 @@ export async function runReconciliation(
       for (let j = i + 1; j < newRecords.length; j++) {
         const b = newRecords[j];
         if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
-        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
+        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
           matched.push(b);
@@ -673,7 +865,7 @@ export async function runReconciliation(
       if (matched.length === 1) {
         groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
       } else {
-        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol);
+        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol, resolver);
         groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
       }
     }
@@ -714,7 +906,7 @@ export async function runReconciliation(
       const candidates = typeIndex.get(a.type) ?? [];
       for (const b of candidates) {
         if (b === a || assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
-        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol);
+        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
           matched.push(b);
@@ -727,14 +919,15 @@ export async function runReconciliation(
       if (matched.length === 1) {
         groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
       } else {
-        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol);
+        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol, resolver);
         groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
       }
     }
   }
 
   // Resolve
-  const resolutions = groups.map(g => resolveGroup(g, trustScores, defaultTrust));
+  const allowCrossProvenanceMerge = options?.allowCrossProvenanceMerge ?? true;
+  const resolutions = groups.map(g => resolveGroup(g, trustScores, defaultTrust, allowCrossProvenanceMerge));
 
   // Serialize
   const turtle = await serializeGroups(groups, resolutions, passthroughQuads);
@@ -760,11 +953,17 @@ export async function runReconciliation(
       documentType: getProp(g.records[0], NS.cascade + 'documentType'),
     };
 
-    switch (g.matchType) {
-      case 'exact_duplicate': exactDups++; break;
-      case 'near_duplicate':  nearDups++; break;
-      case 'status_conflict':
-      case 'value_conflict':  res.resolved ? resolved++ : unresolved++; break;
+    if (!res.resolved && (g.matchType === 'exact_duplicate' || g.matchType === 'near_duplicate')) {
+      // A would-be merge that the cross-provenance guard flagged: count it as an
+      // unresolved conflict, not as a silently-applied merge.
+      unresolved++;
+    } else {
+      switch (g.matchType) {
+        case 'exact_duplicate': exactDups++; break;
+        case 'near_duplicate':  nearDups++; break;
+        case 'status_conflict':
+        case 'value_conflict':  res.resolved ? resolved++ : unresolved++; break;
+      }
     }
 
     if (g.matchType !== 'pass_through') transformations.push(t);
