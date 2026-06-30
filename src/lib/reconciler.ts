@@ -33,6 +33,14 @@ export interface ReconcilerOptions {
    * `identityTerminologyResolver` to disable (asset-free behaviour).
    */
   terminologyResolver?: DrugNameNormalizer;
+  /**
+   * When `false` (the opt-in guard, Checkup parity), matched records that come
+   * from different provenance classes (`clinical:provenanceClass`) are flagged
+   * for review instead of auto-merged. Defaults to `true` (merge allowed), since
+   * cross-source dedup is the primary goal; set `false` for the conservative
+   * stance that never silently merges across provenance.
+   */
+  allowCrossProvenanceMerge?: boolean;
 }
 
 export interface ReconcilerInput {
@@ -564,16 +572,42 @@ function completeness(r: ParsedRecord): number {
   return n;
 }
 
-function resolveGroup(g: Group, trustScores: Record<string, number>, defaultTrust: number): Resolution {
+/**
+ * Provenance-class boost added to a record's trust when selecting a merge
+ * winner, mapping Checkup's evidence weighting (MedicationReconciler
+ * `evidenceWeight`: +30/+20/+10/+5) onto the 0-1 trust scale. A high-provenance
+ * record (e.g. HealthKit FHIR) can outrank a higher-trust source carrying weaker
+ * provenance. Records without a `clinical:provenanceClass` get no boost.
+ */
+const PROVENANCE_BOOST: Record<string, number> = {
+  healthKitFHIR: 0.30,
+  pharmacyClaim: 0.20,
+  userTracked: 0.10,
+  imported: 0.05,
+};
+
+function provenanceBoost(r: ParsedRecord): number {
+  const pc = getProp(r, NS.clinical + 'provenanceClass');
+  return pc ? (PROVENANCE_BOOST[pc] ?? 0) : 0;
+}
+
+function resolveGroup(
+  g: Group,
+  trustScores: Record<string, number>,
+  defaultTrust: number,
+  allowCrossProvenanceMerge = true,
+): Resolution {
   const trust = (sys: string) => trustScores[sys] ?? defaultTrust;
+  // Effective winner score: source trust plus a provenance-class boost.
+  const score = (r: ParsedRecord) => trust(r.sourceSystem) + provenanceBoost(r);
 
   if (g.records.length === 1) {
     return { canonical: g.records[0], mergedUris: [g.records[0].uri], mergedSystems: [g.records[0].sourceSystem], strategy: 'pass_through', resolved: true };
   }
 
   const ranked = [...g.records].sort((a, b) => {
-    const td = trust(b.sourceSystem) - trust(a.sourceSystem);
-    return td !== 0 ? td : completeness(b) - completeness(a);
+    const sd = score(b) - score(a);
+    return sd !== 0 ? sd : completeness(b) - completeness(a);
   });
 
   const winner = ranked[0];
@@ -602,6 +636,20 @@ function resolveGroup(g: Group, trustScores: Record<string, number>, defaultTrus
     // rather than being silently collapsed by trust priority.
     strategy = 'flag_unresolved';
     resolved = false;
+  }
+
+  // Opt-in cross-provenance guard (Checkup parity): when a would-be merge spans
+  // more than one provenance class, flag for review instead of silently merging
+  // across provenance. Only affects the merge match types; existing conflicts
+  // already flag.
+  if (!allowCrossProvenanceMerge && (g.matchType === 'near_duplicate' || g.matchType === 'exact_duplicate')) {
+    const provenanceClasses = new Set(
+      g.records.map(r => getProp(r, NS.clinical + 'provenanceClass')).filter((v): v is string => !!v),
+    );
+    if (provenanceClasses.size > 1) {
+      strategy = 'flag_cross_provenance';
+      resolved = false;
+    }
   }
 
   // Merge missing fields from lower-trust sources
@@ -878,7 +926,8 @@ export async function runReconciliation(
   }
 
   // Resolve
-  const resolutions = groups.map(g => resolveGroup(g, trustScores, defaultTrust));
+  const allowCrossProvenanceMerge = options?.allowCrossProvenanceMerge ?? true;
+  const resolutions = groups.map(g => resolveGroup(g, trustScores, defaultTrust, allowCrossProvenanceMerge));
 
   // Serialize
   const turtle = await serializeGroups(groups, resolutions, passthroughQuads);
@@ -904,11 +953,17 @@ export async function runReconciliation(
       documentType: getProp(g.records[0], NS.cascade + 'documentType'),
     };
 
-    switch (g.matchType) {
-      case 'exact_duplicate': exactDups++; break;
-      case 'near_duplicate':  nearDups++; break;
-      case 'status_conflict':
-      case 'value_conflict':  res.resolved ? resolved++ : unresolved++; break;
+    if (!res.resolved && (g.matchType === 'exact_duplicate' || g.matchType === 'near_duplicate')) {
+      // A would-be merge that the cross-provenance guard flagged: count it as an
+      // unresolved conflict, not as a silently-applied merge.
+      unresolved++;
+    } else {
+      switch (g.matchType) {
+        case 'exact_duplicate': exactDups++; break;
+        case 'near_duplicate':  nearDups++; break;
+        case 'status_conflict':
+        case 'value_conflict':  res.resolved ? resolved++ : unresolved++; break;
+      }
     }
 
     if (g.matchType !== 'pass_through') transformations.push(t);
