@@ -283,8 +283,12 @@ async function waitForAgent(agentUrl: string, timeoutMs: number): Promise<boolea
     try {
       const res = await fetch(`${agentUrl}/health`, { signal: AbortSignal.timeout(2000) });
       if (!res.ok) continue;
-      const body = await res.json() as { modelAvailable?: boolean };
-      if (body.modelAvailable) return true;
+      const body = await res.json() as { modelAvailable?: boolean; modelPresent?: boolean };
+      // Ready to extract when a model is loaded OR resolvable on disk / behind an
+      // attached llama-server: cascade-agent loads the model lazily on the first
+      // /extract (2026-07-03 consolidation), so a present-but-not-yet-loaded model
+      // is still serviceable — the first request warms it within its own timeout.
+      if (body.modelAvailable || body.modelPresent) return true;
     } catch { /* not ready yet */ }
   }
   return false;
@@ -378,9 +382,14 @@ export function registerExtractSubcommand(pod: Command): void {
         try {
           const res = await fetch(`${agentUrl}/health`, { signal: AbortSignal.timeout(3000) });
           if (!res.ok) return 'unreachable';
-          const body = await res.json() as { modelAvailable?: boolean; modelId?: string };
+          const body = await res.json() as { modelAvailable?: boolean; modelPresent?: boolean; modelId?: string };
           if (globalOpts.verbose) console.error(`[extract] Agent: ${agentUrl}  model: ${body.modelId}`);
-          return body.modelAvailable ? 'ready' : 'no-model';
+          // cascade-agent loads the model lazily on the first /extract, so a model
+          // that is present-on-disk / behind an attached llama-server is ready to
+          // serve even before it reports modelAvailable. 'no-model' is reserved for
+          // when there is genuinely nothing to load.
+          if (body.modelAvailable || body.modelPresent) return 'ready';
+          return 'no-model';
         } catch {
           return 'unreachable';
         }
@@ -389,8 +398,9 @@ export function registerExtractSubcommand(pod: Command): void {
       let agentStatus = await checkAgent();
 
       if (agentStatus === 'no-model') {
-        console.error('cascade-agent is running but no extraction model is loaded.');
-        console.error('  Restart with: cascade agent serve   (will prompt to download the model)');
+        console.error('cascade-agent is running but no extraction model is available.');
+        console.error('  Download one with: cascade agent login --provider local');
+        console.error('  Or set CASCADE_LLAMA_URL to attach to a running llama-server.');
         process.exitCode = 1;
         return;
       }
