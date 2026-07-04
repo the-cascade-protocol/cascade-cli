@@ -9,20 +9,55 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      # cascade-cli goes in a subdirectory so the conformance fixtures repo can
+      # sit next to it. The C-CDA and genomics test suites read fixtures from a
+      # sibling checkout via `../../conformance` (matching the local dev layout),
+      # so both repos must live side by side inside the workspace.
+      - name: Checkout cascade-cli
         uses: actions/checkout@v4
+        with:
+          path: cascade-cli
+
+      - name: Checkout conformance fixtures
+        uses: actions/checkout@v4
+        with:
+          repository: the-cascade-protocol/conformance
+          path: conformance
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
+          cache-dependency-path: cascade-cli/package-lock.json
+
+      # The five *-conformance suites canonicalize Turtle through Apache Jena's
+      # `riot` (execFileSync) for byte-equal comparison, so it must be on PATH.
+      - name: Set up Java (Apache Jena runtime)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Apache Jena (riot)
+        run: |
+          set -euo pipefail
+          JENA_VERSION=5.6.0
+          curl -fsSL "https://archive.apache.org/dist/jena/binaries/apache-jena-${JENA_VERSION}.tar.gz" -o "${RUNNER_TEMP}/jena.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/jena.tar.gz" -C "${RUNNER_TEMP}"
+          echo "${RUNNER_TEMP}/apache-jena-${JENA_VERSION}/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify riot is available
+        run: riot --version
 
       - name: Install dependencies
+        working-directory: cascade-cli
         run: npm ci
 
       - name: Build
+        working-directory: cascade-cli
         run: npm run build
 
       - name: Test
+        working-directory: cascade-cli
         run: npm test
