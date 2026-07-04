@@ -28,6 +28,16 @@ const EXAMPLES_DIR = path.resolve(
   'Development/cascadeprotocol.org/drafts/advisory-v1',
 );
 
+// The example advisory patches (*.ldpatch) referenced below live in the
+// cascadeprotocol.org sibling repo (~/Development/cascadeprotocol.org/drafts/
+// advisory-v1). That repo is private and its drafts/ fixtures are not committed,
+// so they cannot be provisioned in CI. Quarantine the fixture-dependent blocks
+// when the files are absent; they still run locally when the sibling is checked
+// out. Re-enable in CI once the fixtures are moved in-repo or provisioned.
+const FIXTURES_AVAILABLE =
+  fs.existsSync(path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch')) &&
+  fs.existsSync(path.join(EXAMPLES_DIR, 'example-cpic-cyp2c19-warfarin.ldpatch'));
+
 const CLI_BIN = path.resolve(__dirname, '..', 'src', 'index.ts');
 const TSX = path.resolve(__dirname, '..', 'node_modules', '.bin', 'tsx');
 
@@ -62,7 +72,7 @@ describe('cascade advisory --help', () => {
   });
 });
 
-describe('cascade advisory validate', () => {
+describe.skipIf(!FIXTURES_AVAILABLE)('cascade advisory validate', () => {
   it('passes on the BRCA2 reclassification example', () => {
     const target = path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch');
     const { stdout, exitCode } = runCli(['advisory', 'validate', target]);
@@ -88,7 +98,7 @@ describe('cascade advisory validate', () => {
   });
 });
 
-describe('cascade advisory dry-run + apply (BRCA2 end-to-end)', () => {
+describe.skipIf(!FIXTURES_AVAILABLE)('cascade advisory dry-run + apply (BRCA2 end-to-end)', () => {
   let podDir: string;
 
   beforeEach(() => {

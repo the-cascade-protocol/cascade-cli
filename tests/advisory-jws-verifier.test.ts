@@ -29,6 +29,16 @@ const EXAMPLES_DIR = path.resolve(
   'Development/cascadeprotocol.org/drafts/advisory-v1',
 );
 
+// The example advisory patches (*.ldpatch) referenced below live in the
+// cascadeprotocol.org sibling repo (~/Development/cascadeprotocol.org/drafts/
+// advisory-v1). That repo is private and its drafts/ fixtures are not committed,
+// so they cannot be provisioned in CI. Quarantine the fixture-dependent blocks
+// when the files are absent; they still run locally when the sibling is checked
+// out. Re-enable in CI once the fixtures are moved in-repo or provisioned.
+const FIXTURES_AVAILABLE =
+  fs.existsSync(path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch')) &&
+  fs.existsSync(path.join(EXAMPLES_DIR, 'example-cpic-cyp2c19-warfarin.ldpatch'));
+
 /** Sign `body` with `secretKey` under a given header; returns {header, signature} b64url strings. */
 function signDetached(
   body: string,
@@ -52,7 +62,7 @@ function signDetached(
   return { header: headerB64, signature: sigB64, publicKey };
 }
 
-describe('CAP detached JWS verifier — happy path', () => {
+describe.skipIf(!FIXTURES_AVAILABLE)('CAP detached JWS verifier — happy path', () => {
   it('verifies a valid detached JWS over the BRCA2 reclassification example', () => {
     const body = fs.readFileSync(
       path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch'),
