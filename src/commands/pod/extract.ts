@@ -57,6 +57,9 @@ const ENTITY_TYPE_MAP: Record<string, string> = {
   medication:    'clinical:Medication',
   condition:     'clinical:Condition',
   allergy:       'clinical:Allergy',
+  // The /extract entity type for a lab result is 'lab' (see the agent's
+  // ExtractedEntity.type union); 'labresult' is kept as a defensive alias.
+  lab:           'clinical:LabResult',
   labresult:     'clinical:LabResult',
   immunization:  'clinical:Immunization',
   vitalsign:     'clinical:VitalSign',
@@ -67,7 +70,7 @@ const ENTITY_TYPE_MAP: Record<string, string> = {
   supplement:    'clinical:Supplement',
 };
 
-function entityRdfType(typeString: string): string {
+export function entityRdfType(typeString: string): string {
   return ENTITY_TYPE_MAP[typeString.toLowerCase()] ?? 'clinical:Condition';
 }
 
