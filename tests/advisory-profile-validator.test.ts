@@ -22,6 +22,16 @@ const EXAMPLES_DIR = path.resolve(
   'Development/cascadeprotocol.org/drafts/advisory-v1',
 );
 
+// The example advisory patches (*.ldpatch) referenced below live in the
+// cascadeprotocol.org sibling repo (~/Development/cascadeprotocol.org/drafts/
+// advisory-v1). That repo is private and its drafts/ fixtures are not committed,
+// so they cannot be provisioned in CI. Quarantine the fixture-dependent blocks
+// when the files are absent; they still run locally when the sibling is checked
+// out. Re-enable in CI once the fixtures are moved in-repo or provisioned.
+const FIXTURES_AVAILABLE =
+  fs.existsSync(path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch')) &&
+  fs.existsSync(path.join(EXAMPLES_DIR, 'example-cpic-cyp2c19-warfarin.ldpatch'));
+
 function parse(src: string): CapAst {
   const r = parseCap(src);
   if (!r.ast) {
@@ -45,7 +55,7 @@ const ENVELOPE = `@prefix advisory: <https://ns.cascadeprotocol.org/advisory/v1#
    advisory:humanSummary   "Stub summary." .
 `;
 
-describe('CAP profile validator — example files', () => {
+describe.skipIf(!FIXTURES_AVAILABLE)('CAP profile validator — example files', () => {
   it('validates example-brca2-reclassification.ldpatch with zero violations', () => {
     const src = fs.readFileSync(
       path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch'),

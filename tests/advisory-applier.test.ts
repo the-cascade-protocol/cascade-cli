@@ -27,6 +27,16 @@ const EXAMPLES_DIR = path.resolve(
   'Development/cascadeprotocol.org/drafts/advisory-v1',
 );
 
+// The example advisory patches (*.ldpatch) referenced below live in the
+// cascadeprotocol.org sibling repo (~/Development/cascadeprotocol.org/drafts/
+// advisory-v1). That repo is private and its drafts/ fixtures are not committed,
+// so they cannot be provisioned in CI. Quarantine the fixture-dependent blocks
+// when the files are absent; they still run locally when the sibling is checked
+// out. Re-enable in CI once the fixtures are moved in-repo or provisioned.
+const FIXTURES_AVAILABLE =
+  fs.existsSync(path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch')) &&
+  fs.existsSync(path.join(EXAMPLES_DIR, 'example-cpic-cyp2c19-warfarin.ldpatch'));
+
 const CA_ID = 'https://ns.cascadeprotocol.org/genomics/v1#caId';
 const HGNC_ID = 'https://ns.cascadeprotocol.org/genomics/v1#hgncId';
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
@@ -41,7 +51,7 @@ const ADVISORY_APPLICATION_ACTIVITY =
 const APPLIED_TRIPLES_COUNT =
   'https://ns.cascadeprotocol.org/core/v1#appliedTriplesCount';
 
-describe('CAP applier — happy path', () => {
+describe.skipIf(!FIXTURES_AVAILABLE)('CAP applier — happy path', () => {
   it('applies the BRCA2 reclassification advisory and creates one activity per match', () => {
     const src = fs.readFileSync(
       path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch'),
@@ -151,7 +161,7 @@ describe('CAP applier — happy path', () => {
   });
 });
 
-describe('CAP applier — multiple bindings', () => {
+describe.skipIf(!FIXTURES_AVAILABLE)('CAP applier — multiple bindings', () => {
   it('creates one activity per binding when the selector matches multiple records', () => {
     const src = fs.readFileSync(
       path.join(EXAMPLES_DIR, 'example-cpic-cyp2c19-warfarin.ldpatch'),
@@ -243,7 +253,7 @@ Add {
   });
 });
 
-describe('CAP applier — generated-by linkage', () => {
+describe.skipIf(!FIXTURES_AVAILABLE)('CAP applier — generated-by linkage', () => {
   it('adds prov:wasGeneratedBy from new root subjects to the activity', () => {
     const src = fs.readFileSync(
       path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch'),
@@ -291,7 +301,7 @@ describe('CAP applier — generated-by linkage', () => {
   });
 });
 
-describe('CAP applier — empty bindings', () => {
+describe.skipIf(!FIXTURES_AVAILABLE)('CAP applier — empty bindings', () => {
   it('makes no changes when there are zero bindings', () => {
     const src = fs.readFileSync(
       path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch'),
