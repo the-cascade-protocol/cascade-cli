@@ -53,13 +53,20 @@ const LOINC_TO_SECTION: Record<string, string> = {
 // clinical:Condition (the most semantically neutral clinical class) for
 // unknown types so the triple is always valid against the ontology.
 
-const ENTITY_TYPE_MAP: Record<string, string> = {
+export const ENTITY_TYPE_MAP: Record<string, string> = {
   medication:    'clinical:Medication',
   condition:     'clinical:Condition',
   allergy:       'clinical:Allergy',
+  // The agent's /extract ExtractedEntity.type union emits 'lab', 'vital' and
+  // 'socialHistory' (not 'labresult'/'vitalsign'). Map each to its real
+  // clinical class so none falls through to the clinical:Condition default;
+  // the '*result'/'*sign' spellings are kept as defensive aliases.
+  lab:           'clinical:LabResult',
   labresult:     'clinical:LabResult',
-  immunization:  'clinical:Immunization',
+  vital:         'clinical:VitalSign',
   vitalsign:     'clinical:VitalSign',
+  socialhistory: 'clinical:SocialHistoryRecord',
+  immunization:  'clinical:Immunization',
   procedure:     'clinical:Procedure',
   encounter:     'clinical:Encounter',
   device:        'clinical:ImplantedDevice',
@@ -67,7 +74,7 @@ const ENTITY_TYPE_MAP: Record<string, string> = {
   supplement:    'clinical:Supplement',
 };
 
-function entityRdfType(typeString: string): string {
+export function entityRdfType(typeString: string): string {
   return ENTITY_TYPE_MAP[typeString.toLowerCase()] ?? 'clinical:Condition';
 }
 
