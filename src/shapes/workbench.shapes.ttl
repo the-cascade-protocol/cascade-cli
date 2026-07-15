@@ -5,6 +5,9 @@
 @prefix owl:  <http://www.w3.org/2002/07/owl#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix oa:   <http://www.w3.org/ns/oa#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix ical: <http://www.w3.org/2002/12/cal/ical#> .
 
 <https://ns.cascadeprotocol.org/workbench/v1/shapes> a owl:Ontology ;
     owl:imports <https://ns.cascadeprotocol.org/workbench/v1#> ;
@@ -63,3 +66,40 @@ workbench:TombstoneShape a sh:NodeShape ;
 workbench:VerificationStatusShape a sh:NodeShape ;
     sh:targetObjectsOf workbench:verificationStatus ;
     sh:in ( workbench:Unverified workbench:Confirmed workbench:Refuted ) .
+
+# ── Notes / flags / follow-ups — the Web Annotation substrate (v1-draft.0.5) ─
+# Targets every oa:Annotation in the Pod (they live under notes/). SHACL Core
+# only, like the evidence grounding invariant, so `cascade validate` actually
+# enforces it. The conditional constraints use the sh:or( sh:not(...) ... )
+# pattern: "NOT motivated-by-X, OR carries the fields X requires".
+
+workbench:WebAnnotationShape a sh:NodeShape ;
+    sh:targetClass oa:Annotation ;
+    # At least one target: a note floats on nothing.
+    sh:property [ sh:path oa:hasTarget ; sh:minCount 1 ;
+                  sh:nodeKind sh:BlankNodeOrIRI ] ;
+    # Exactly which kind of note this is.
+    sh:property [ sh:path oa:motivatedBy ; sh:minCount 1 ; sh:nodeKind sh:IRI ] ;
+    # Attribution is load-bearing (caregiver vs patient vs agent): required.
+    sh:property [ sh:path prov:wasAttributedTo ; sh:minCount 1 ] ;
+    sh:property [ sh:path prov:generatedAtTime ; sh:minCount 1 ; sh:maxCount 1 ;
+                  sh:datatype xsd:dateTime ] .
+
+# A commenting note must actually say something: motivatedBy oa:commenting
+# requires a body.
+workbench:CommentingBodyShape a sh:NodeShape ;
+    sh:targetClass oa:Annotation ;
+    sh:or (
+        [ sh:not [ sh:property [ sh:path oa:motivatedBy ; sh:hasValue oa:commenting ] ] ]
+        [ sh:property [ sh:path oa:hasBody ; sh:minCount 1 ] ]
+    ) .
+
+# A follow-up is a to-do: motivatedBy workbench:followUp requires the RFC 5545
+# VTODO status (reused ical:status, closed enum); ical:due stays optional.
+workbench:FollowUpShape a sh:NodeShape ;
+    sh:targetClass oa:Annotation ;
+    sh:or (
+        [ sh:not [ sh:property [ sh:path oa:motivatedBy ; sh:hasValue workbench:followUp ] ] ]
+        [ sh:property [ sh:path ical:status ; sh:minCount 1 ; sh:maxCount 1 ;
+                        sh:in ( "NEEDS-ACTION" "IN-PROCESS" "COMPLETED" "CANCELLED" ) ] ]
+    ) .
