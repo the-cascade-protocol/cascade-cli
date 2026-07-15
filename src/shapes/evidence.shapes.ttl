@@ -4,6 +4,22 @@
 # NOT SHACL-SPARQL. This is deliberate: `cascade validate` uses
 # rdf-validate-shacl, which does not support SHACL-SPARQL constraints. A
 # sh:sparql formulation would parse but silently never fire. Keep this Core.
+#
+# CHANGELOG
+# v1-draft.0.2 (2026-07-01) — Verdict taxonomy v2: AssertionShape moves to the
+#   facet model. The generalized grounding invariant: a grounded result
+#   (settled Settled, direction Supports/Contradicts/Mixed, basis not None) of
+#   EITHER basis requires >= 1 evidence link. Facet-consistency constraints:
+#   NeedsEvidence must not carry a grounded direction; a grounded direction
+#   must not carry basis None. The legacy evidence:verdict branch is retained
+#   (deprecated) so draft-period data still validates; every assertion must
+#   carry settled OR the legacy verdict. Removal of the legacy branch at v1.0.
+#
+# SHACL Core subtlety this file leans on: a property shape with sh:in
+# constrains only EXISTING values, so it is vacuously satisfied when the
+# property is absent. Each sh:or branch below reads as "the property is absent
+# or has only the listed values"; absence therefore never triggers the
+# grounded-direction constraints, which keeps legacy (facet-less) data valid.
 
 @prefix evidence: <https://ns.cascadeprotocol.org/evidence/v1#> .
 @prefix sh:   <http://www.w3.org/ns/shacl#> .
@@ -19,18 +35,72 @@ evidence:AssertionShape a sh:NodeShape ;
     sh:targetClass evidence:Assertion ;
     sh:property [ sh:path evidence:assertionText ; sh:minCount 1 ; sh:datatype xsd:string ;
                   sh:message "Every Assertion must carry assertionText." ] ;
-    sh:property [ sh:path evidence:verdict ; sh:minCount 1 ; sh:maxCount 1 ;
+
+    # ── Facet enumerations (canonical form, v1-draft.0.2) ────────────────────
+    sh:property [ sh:path evidence:direction ; sh:maxCount 1 ;
+                  sh:in ( evidence:Supports evidence:Contradicts evidence:Mixed evidence:None ) ;
+                  sh:message "direction must be one of the DirectionValue individuals (Supports | Contradicts | Mixed | None)." ] ;
+    sh:property [ sh:path evidence:basis ; sh:maxCount 1 ;
+                  sh:in ( evidence:Record evidence:Literature evidence:RecordAndLiterature evidence:None ) ;
+                  sh:message "basis must be one of the BasisValue individuals (Record | Literature | RecordAndLiterature | None)." ] ;
+    sh:property [ sh:path evidence:strength ; sh:maxCount 1 ;
+                  sh:in ( evidence:Strong evidence:Moderate evidence:Weak ) ;
+                  sh:message "strength must be one of the StrengthValue individuals (Strong | Moderate | Weak)." ] ;
+    sh:property [ sh:path evidence:settled ; sh:maxCount 1 ;
+                  sh:in ( evidence:Settled evidence:NeedsEvidence ) ;
+                  sh:message "settled must be one of the SettledValue individuals (Settled | NeedsEvidence)." ] ;
+    sh:property [ sh:path evidence:reason ; sh:maxCount 1 ;
+                  sh:in ( evidence:NoRecord evidence:NeedsLiterature evidence:NotCheckableByNature ) ;
+                  sh:message "reason must be one of the NeedsEvidenceReasonValue individuals (NoRecord | NeedsLiterature | NotCheckableByNature)." ] ;
+    sh:property [ sh:path evidence:confidence ; sh:maxCount 1 ; sh:datatype xsd:decimal ;
+                  sh:minInclusive 0.0 ; sh:maxInclusive 1.0 ;
+                  sh:message "confidence must be an xsd:decimal in [0.0, 1.0]." ] ;
+
+    # ── Legacy verdict (deprecated; one-release transition) ──────────────────
+    sh:property [ sh:path evidence:verdict ; sh:maxCount 1 ;
                   sh:in ( evidence:Supported evidence:Contradicted evidence:Unverifiable evidence:NeedsLiterature ) ;
-                  sh:message "Every Assertion must carry exactly one verdict (one of the four VerdictValue individuals)." ] ;
-    # Grounding invariant (SHACL Core). Reads: the verdict is NOT a grounded
-    # one (i.e. it is Unverifiable or NeedsLiterature) OR there is at least one
-    # evidence link. Equivalent to: Supported/Contradicted => >= 1 evidence link.
+                  sh:message "verdict (deprecated) must be one of the four VerdictValue individuals when present." ] ;
+
+    # Every assertion is graded: it carries the facet form (settled) or, for
+    # draft-period data, the deprecated flat verdict.
+    sh:or (
+        [ sh:property [ sh:path evidence:settled ; sh:minCount 1 ] ]
+        [ sh:property [ sh:path evidence:verdict ; sh:minCount 1 ] ]
+    ) ;
+
+    # ── Grounding invariant, generalized (SHACL Core) ────────────────────────
+    # A grounded result — settled Settled AND direction Supports/Contradicts/
+    # Mixed AND basis not None — of EITHER basis requires >= 1 evidence link.
+    # Reads: not settled, or direction None, or basis None, or >= 1 link.
+    sh:or (
+        [ sh:property [ sh:path evidence:settled ; sh:in ( evidence:NeedsEvidence ) ] ]
+        [ sh:property [ sh:path evidence:direction ; sh:in ( evidence:None ) ] ]
+        [ sh:property [ sh:path evidence:basis ; sh:in ( evidence:None ) ] ]
+        [ sh:property [ sh:path evidence:hasEvidenceLink ; sh:minCount 1 ] ]
+    ) ;
+
+    # ── Facet consistency: NeedsEvidence must not carry a grounded direction.
+    # Reads: settled is Settled (or absent), or direction is None (or absent).
+    sh:or (
+        [ sh:property [ sh:path evidence:settled ; sh:in ( evidence:Settled ) ] ]
+        [ sh:property [ sh:path evidence:direction ; sh:in ( evidence:None ) ] ]
+    ) ;
+
+    # ── Facet consistency: a grounded direction requires a real basis.
+    # Reads: direction is None (or absent), or basis is not None.
+    sh:or (
+        [ sh:property [ sh:path evidence:direction ; sh:in ( evidence:None ) ] ]
+        [ sh:property [ sh:path evidence:basis ; sh:not [ sh:in ( evidence:None ) ] ] ]
+    ) ;
+
+    # ── Legacy grounding invariant (deprecated branch; removal at v1.0):
+    # Supported/Contradicted => >= 1 evidence link.
     sh:or (
         [ sh:property [ sh:path evidence:verdict ;
                         sh:not [ sh:in ( evidence:Supported evidence:Contradicted ) ] ] ]
         [ sh:property [ sh:path evidence:hasEvidenceLink ; sh:minCount 1 ] ]
     ) ;
-    sh:message "Grounding invariant: an Assertion with verdict Supported or Contradicted must carry at least one evidence link (evidence:hasEvidenceLink)." .
+    sh:message "Grounding invariant: a grounded Assertion (settled Settled with direction Supports/Contradicts/Mixed and basis not None, or legacy verdict Supported/Contradicted) must carry at least one evidence link (evidence:hasEvidenceLink), and its facets must be mutually consistent." .
 
 evidence:EvidenceLinkShape a sh:NodeShape ;
     sh:targetClass evidence:EvidenceLink ;

@@ -24,6 +24,12 @@
 #   (content-free Tombstone — contentHash removed, erasureAction added; plus the
 #   verification axis: verificationStatus + VerificationStatusShape via sh:in).
 #   Per D-PATH, still draft; no row change.
+# Updated 2026-07-15: batched draft sync (spec PENDING_DOWNSTREAM_SYNC rows 2+3):
+#   evidence.shapes.ttl for evidence@v1-draft.0.2 (verdict facet model +
+#   generalized SHACL-Core grounding invariant) and workbench.shapes.ttl for
+#   workbench@v1-draft.0.5 (Web Annotation note shapes: WebAnnotationShape /
+#   CommentingBodyShape / FollowUpShape). Per D-PATH, drafts stay unrowed
+#   until v1.0 graduation; no row change.
 core=3.3
 health=2.4
 clinical=1.9

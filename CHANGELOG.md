@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Draft shapes synced from spec** (`sync-shapes-from-spec.sh`; batched per `spec/PENDING_DOWNSTREAM_SYNC.md`): `evidence.shapes.ttl` now carries the verdict-taxonomy v2 facet model (spec evidence v1-draft.0.2 — facet-consistency constraints + the generalized SHACL-Core grounding invariant), and `workbench.shapes.ttl` gains the Web Annotation note shapes (spec workbench v1-draft.0.5 — `WebAnnotationShape` / `CommentingBodyShape` / `FollowUpShape`, so `cascade validate` enforces target + motivation + PROV attribution on `oa:Annotation` notes, a body on commenting notes, and the RFC 5545 `ical:status` enum on follow-ups by default). Verified: full suite green (992 passed); positive/negative note fixtures pass/fail as intended against the embedded shapes.
+
+---
+
 ## [0.7.0] - 2026-06-26
 
 ### Added
