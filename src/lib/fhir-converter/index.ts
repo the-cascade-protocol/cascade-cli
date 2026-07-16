@@ -58,6 +58,7 @@ import { convertFhirResourceToQuads } from './fhir-to-cascade.js';
 import { convertCascadeToFhir } from './cascade-to-fhir.js';
 import { EXCLUDED_TYPES } from './converters-passthrough.js';
 import { SOURCE_EHR_UNKNOWN } from './provenance.js';
+import { resolveReferenceEdges, type ConvertedResourceRef } from './reference-resolution.js';
 
 // Re-export public types
 export type { InputFormat, OutputFormat, ConversionResult, BatchConversionResult };
@@ -127,6 +128,13 @@ export async function convert(
     }
 
     const allQuads: Quad[] = [];
+    // Index of every converted resource's source (resourceType, id) -> the
+    // subject IRI its record was minted under, built here where the whole bundle
+    // is visible. End-of-batch reference resolution joins on it. The minted
+    // subject is the subject of the record's rdf:type quad (each converter pushes
+    // that first), which captures the real content-hashed / deterministic IRI
+    // regardless of how it was derived.
+    const convertedResources: ConvertedResourceRef[] = [];
     for (const res of fhirResources) {
       if (EXCLUDED_TYPES.has(res.resourceType)) {
         skippedCount++;
@@ -135,6 +143,12 @@ export async function convert(
       const result = convertFhirResourceToQuads(res, passthroughMinimal);
       if (result) {
         allQuads.push(...result._quads);
+        const subject = result._quads.find(
+          (q) => q.predicate.value === NS.rdf + 'type',
+        )?.subject.value;
+        if (subject && res.resourceType) {
+          convertedResources.push({ resourceType: res.resourceType, id: res.id, subject });
+        }
         results.push({
           turtle: '', // will be filled with combined output
           jsonld: result.jsonld,
@@ -238,13 +252,22 @@ export async function convert(
       }
     }
 
+    // Resolve cross-record reference edges against the in-batch subject index:
+    // each placeholder object is rewritten to the referenced record's real
+    // subject IRI, or the edge is dropped and counted if the target is absent.
+    // Runs over the full quad set so every edge family goes through one path.
+    const { quads: resolvedQuads, stats: edgeResolution } = resolveReferenceEdges(
+      allQuads,
+      convertedResources,
+    );
+
     // Determine output format
     let output: string;
     if (outputSerialization === 'jsonld' || to === 'jsonld') {
-      const jsonLd = quadsToJsonLd(allQuads, results[0]?.cascadeType ?? '');
+      const jsonLd = quadsToJsonLd(resolvedQuads, results[0]?.cascadeType ?? '');
       output = JSON.stringify(jsonLd, null, 2);
     } else {
-      output = await quadsToTurtle(allQuads);
+      output = await quadsToTurtle(resolvedQuads);
     }
 
     return {
@@ -256,6 +279,7 @@ export async function convert(
       warnings,
       errors,
       results,
+      edgeResolution,
     };
   } else if (from === 'cascade' && to === 'fhir') {
     // Cascade -> FHIR

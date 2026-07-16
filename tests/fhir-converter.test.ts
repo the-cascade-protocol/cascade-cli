@@ -46,6 +46,10 @@ import {
   buildImportManifest,
 } from '../src/lib/fhir-converter/import-manifest.js';
 import {
+  isReferencePlaceholder,
+  decodeReferencePlaceholder,
+} from '../src/lib/fhir-converter/reference-resolution.js';
+import {
   NS,
   ensureDateTimeWithTz,
   extractCodings,
@@ -1467,12 +1471,17 @@ describe('DiagnosticReport -> clinical:LaboratoryReport', () => {
     expect(findQuadValue(quads, NS.clinical + 'sourceRecordId')).toBe('dr-1');
   });
 
-  it('should link hasLabResult to constituent observations', () => {
+  it('should emit hasLabResult as resolvable placeholders carrying the raw references', () => {
+    // The converter no longer mints a subject IRI directly (that only dangled);
+    // it emits a placeholder that the batch loop resolves to the Observation's
+    // real subject. Here, pre-resolution, we assert the raw references survive.
     const result = convertLaboratoryReport(sampleDiagnosticReport);
     const labResults = findAllQuadValues(result._quads, NS.clinical + 'hasLabResult');
     expect(labResults).toHaveLength(2);
-    expect(labResults).toContain('urn:uuid:obs-wbc-1');
-    expect(labResults).toContain('urn:uuid:obs-rbc-1');
+    for (const v of labResults) expect(isReferencePlaceholder(v)).toBe(true);
+    const decoded = labResults.map(decodeReferencePlaceholder);
+    expect(decoded).toContain('Observation/obs-wbc-1');
+    expect(decoded).toContain('Observation/obs-rbc-1');
   });
 
   it('should extract LOINC code', () => {
@@ -1622,11 +1631,14 @@ describe('ExplanationOfBenefit -> coverage:BenefitStatement', () => {
     expect(findQuadValue(quads, NS.coverage + 'patientResponsibility')).toBe('450');
   });
 
-  it('should link relatedClaim', () => {
+  it('should emit relatedClaim as a resolvable placeholder carrying the raw reference', () => {
+    // Pre-resolution: the placeholder carries the raw "Claim/claim-1" reference;
+    // the batch loop rewrites it to the ClaimRecord's real subject (or drops it).
     const result = convertExplanationOfBenefit(sampleEOB);
     const relatedClaim = findQuadValue(result._quads, NS.coverage + 'relatedClaim');
     expect(relatedClaim).toBeTruthy();
-    expect(relatedClaim).toContain('claim-1');
+    expect(isReferencePlaceholder(relatedClaim!)).toBe(true);
+    expect(decodeReferencePlaceholder(relatedClaim!)).toBe('Claim/claim-1');
   });
 
   it('should be annotated FullyMapped', () => {

@@ -39,6 +39,7 @@ import {
   mintSubjectUri,
   contentHashedUri,
 } from './types.js';
+import { referencePlaceholder } from './reference-resolution.js';
 
 // ---------------------------------------------------------------------------
 // Medication converter
@@ -829,19 +830,17 @@ export function convertLaboratoryReport(resource: any): ConversionResult & { _qu
     }
   }
 
-  // Link to constituent LabResult Observations via hasLabResult
+  // Link to constituent LabResult Observations via hasLabResult. The reference
+  // is emitted as a resolvable placeholder carrying the raw FHIR reference; the
+  // batch loop (index.ts resolveReferenceEdges) rewrites it to the Observation's
+  // real content-hashed subject IRI, or drops the edge if that Observation is
+  // not in the bundle. The Observation subject is never the raw id, so no id
+  // arithmetic here can produce a resolvable edge.
   if (Array.isArray(resource.result)) {
     for (const ref of resource.result) {
-      // Extract ID from reference like "Observation/uuid-here"
-      const refStr = ref.reference as string | undefined;
+      const refStr = ref?.reference as string | undefined;
       if (refStr) {
-        const parts = refStr.split('/');
-        const obsId = parts[parts.length - 1];
-        if (obsId) {
-          // Mint deterministic URI for the referenced Observation
-          const obsUri = `urn:uuid:${obsId}`;
-          quads.push(tripleRef(subjectUri, NS.clinical + 'hasLabResult', obsUri));
-        }
+        quads.push(tripleRef(subjectUri, NS.clinical + 'hasLabResult', referencePlaceholder(refStr)));
       }
     }
   }

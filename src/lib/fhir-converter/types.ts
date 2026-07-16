@@ -25,6 +25,19 @@ export interface ConversionResult {
   cascadeType: string;
 }
 
+/**
+ * Cross-record edge resolution tally for one conversion batch: how many
+ * reference edges (clinical:hasLabResult, coverage:relatedClaim, ...) were
+ * rewritten to a real subject IRI vs dropped because the target was not in the
+ * batch. `byPredicate` is keyed by the compacted predicate (e.g.
+ * "clinical:hasLabResult"). Surfaced in the import summary.
+ */
+export interface EdgeResolutionSummary {
+  resolved: number;
+  unresolved: number;
+  byPredicate: Record<string, { resolved: number; unresolved: number }>;
+}
+
 export interface BatchConversionResult {
   success: boolean;
   output: string;
@@ -34,6 +47,8 @@ export interface BatchConversionResult {
   warnings: string[];
   errors: string[];
   results: ConversionResult[];
+  /** Present for FHIR -> Cascade conversions; tallies cross-record edges. */
+  edgeResolution?: EdgeResolutionSummary;
 }
 
 // ---------------------------------------------------------------------------
