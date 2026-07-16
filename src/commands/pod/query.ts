@@ -20,6 +20,8 @@ import {
 } from './helpers.js';
 import { isPodEncrypted, resolveDek, PodDecryptError } from '../../lib/pod-encryption.js';
 import { obtainPassphrase } from '../../lib/passphrase.js';
+import { expandCurie } from '../../lib/turtle-parser.js';
+import { loadPodGraph, recordEdges, neighborhood } from './graph.js';
 
 /**
  * Classify an unregistered ("extra") TTL file discovered by `--all` into a
@@ -63,6 +65,21 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
     .option('--benefits', 'Query explanation of benefits')
     .option('--fhir-passthrough', 'Query FHIR passthrough records (unmapped types)')
     .option('--all', 'Query all data')
+    .option(
+      '--neighbors <iri>',
+      'Return the typed neighborhood of a record (traverses stored edges both directions)',
+    )
+    .option('--hops <n>', 'Traversal depth for --neighbors (default 1, capped at 3)')
+    .option(
+      '--edge <predicate>',
+      'Restrict --neighbors traversal to this edge predicate (repeatable; full IRI or prefix:local CURIE)',
+      (val: string, acc: string[]) => {
+        acc.push(val);
+        return acc;
+      },
+      [] as string[],
+    )
+    .option('--edges', 'With --all, add a record-to-record edge projection to the output')
     .action(
       async (
         podDir: string,
@@ -86,6 +103,10 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           benefits?: boolean;
           fhirPassthrough?: boolean;
           all?: boolean;
+          neighbors?: string;
+          hops?: string;
+          edge?: string[];
+          edges?: boolean;
         },
       ) => {
         const globalOpts = program.opts() as OutputOptions;
@@ -118,6 +139,19 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
         }
 
         try {
+          // ─── Graph traversal: --neighbors <iri> ──────────────────────────
+          if (options.neighbors !== undefined) {
+            await runNeighborsQuery(absDir, podDir, options, globalOpts, dek);
+            return;
+          }
+
+          // --edges is an additive projection on --all; it needs the full graph.
+          if (options.edges && !options.all) {
+            printError('--edges requires --all.', globalOpts);
+            process.exitCode = 1;
+            return;
+          }
+
           // Determine which data types to query
           let requestedTypes: string[];
 
@@ -250,15 +284,27 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             }
           }
 
+          // With --all --edges, compute the record-to-record edge projection.
+          // This is strictly additive: without --edges the output object is
+          // built exactly as before, so existing consumers see no change.
+          let edges: ReturnType<typeof recordEdges> | undefined;
+          if (options.all && options.edges) {
+            const graph = await loadPodGraph(absDir, dek);
+            edges = recordEdges(graph);
+          }
+
           // Output results
           if (globalOpts.json) {
-            printResult(
-              {
-                pod: podDir,
-                dataTypes: queryResults,
-              },
-              globalOpts,
-            );
+            const payload: {
+              pod: string;
+              dataTypes: typeof queryResults;
+              edges?: ReturnType<typeof recordEdges>;
+            } = {
+              pod: podDir,
+              dataTypes: queryResults,
+            };
+            if (edges !== undefined) payload.edges = edges;
+            printResult(payload, globalOpts);
           } else {
             // Human-readable output
             const typeKeys = Object.keys(queryResults);
@@ -294,6 +340,15 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
                 console.log('');
               }
             }
+
+            if (edges !== undefined) {
+              console.log(`\n=== Edges (${edges.length} record-to-record) ===\n`);
+              for (const e of edges) {
+                console.log(`  ${e.subject}`);
+                console.log(`    --${e.predicate}--> ${e.object}`);
+              }
+              console.log('');
+            }
           }
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
@@ -302,4 +357,84 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
         }
       },
     );
+}
+
+/**
+ * Handle `pod query --neighbors <iri> [--hops N] [--edge <pred>...]`.
+ *
+ * Loads the pod graph, validates the flags, traverses the seed's neighborhood,
+ * and prints the result (JSON contract or a human summary). Sets
+ * `process.exitCode = 1` on any clean error (bad flag, unknown seed).
+ */
+async function runNeighborsQuery(
+  absDir: string,
+  podDir: string,
+  options: { neighbors?: string; hops?: string; edge?: string[] },
+  globalOpts: OutputOptions,
+  dek: Buffer | undefined,
+): Promise<void> {
+  const seedIri = options.neighbors as string;
+
+  // --hops: default 1, capped at 3, reject non-positive-integers cleanly.
+  let hops = 1;
+  if (options.hops !== undefined) {
+    const parsed = Number(options.hops);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      printError(`Invalid --hops value "${options.hops}": expected a positive integer.`, globalOpts);
+      process.exitCode = 1;
+      return;
+    }
+    hops = Math.min(parsed, 3);
+  }
+
+  // --edge: expand each CURIE / IRI; a value with an unknown prefix errors.
+  const edgeFilters: string[] = [];
+  const badEdges: string[] = [];
+  for (const raw of options.edge ?? []) {
+    const expanded = expandCurie(raw);
+    if (expanded === null) badEdges.push(raw);
+    else edgeFilters.push(expanded);
+  }
+  if (badEdges.length > 0) {
+    printError(
+      `Unknown edge predicate${badEdges.length > 1 ? 's' : ''}: ${badEdges.join(', ')}. ` +
+        `Use a full IRI or a known prefix:local CURIE (e.g. clinical:hasLabResult).`,
+      globalOpts,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const graph = await loadPodGraph(absDir, dek);
+  const result = neighborhood(graph, seedIri, { hops, edgeFilters });
+
+  if (result === null) {
+    printError(`No record found with IRI: ${seedIri}`, globalOpts);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (globalOpts.json) {
+    printResult({ pod: podDir, ...result }, globalOpts);
+    return;
+  }
+
+  // Human-readable summary.
+  console.log(`\nSeed: ${result.seed.iri}`);
+  console.log(`  type: ${result.seed.type}`);
+  if (result.seed.label) console.log(`  label: ${result.seed.label}`);
+
+  const filterNote = result.edgeFilters.length ? `, edges: ${result.edgeFilters.join(', ')}` : '';
+  console.log(
+    `\n=== Neighbors (${result.neighbors.length}) within ${result.hops} hop(s)${filterNote} ===\n`,
+  );
+  if (result.neighbors.length === 0) {
+    console.log('  (none)\n');
+    return;
+  }
+  for (const n of result.neighbors) {
+    const arrow = n.direction === 'out' ? `--${n.edge}-->` : `<--${n.edge}--`;
+    console.log(`  [hop ${n.hop}] ${arrow} ${n.iri} (${n.type})`);
+  }
+  console.log('');
 }

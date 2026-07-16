@@ -249,6 +249,38 @@ export function shortenIRI(iri: string, prefixes?: Record<string, string>): stri
 }
 
 /**
+ * Expand a `prefix:local` CURIE to a full IRI using the same prefix table
+ * `shortenIRI` uses (Cascade namespaces plus the well-known ones). A value that
+ * already carries an IRI scheme (`http`, `https`, `urn`, `file`) is returned
+ * unchanged. Returns `null` for an unknown prefix or a value that is neither an
+ * IRI nor a CURIE, so callers can surface a clean error instead of guessing.
+ *
+ * Used by the graph query surface to accept `--edge clinical:hasLabResult`
+ * (or the full IRI form) as an edge-predicate filter.
+ */
+export function expandCurie(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  // Already a full IRI: a CURIE prefix is a short NCName, so any of these
+  // schemes means the caller passed an absolute IRI, not a CURIE.
+  if (/^(https?|urn|file):/i.test(trimmed)) return trimmed;
+
+  const colon = trimmed.indexOf(':');
+  if (colon === -1) return null;
+
+  const prefix = trimmed.slice(0, colon);
+  const local = trimmed.slice(colon + 1);
+  const allPrefixes: Record<string, string> = {
+    ...CASCADE_NAMESPACES,
+    ...WELL_KNOWN_NAMESPACES,
+  };
+  const namespace = allPrefixes[prefix];
+  if (namespace === undefined) return null;
+  return namespace + local;
+}
+
+/**
  * Extract a human-readable label for a record from its properties.
  * Tries common name predicates in order of preference.
  */
