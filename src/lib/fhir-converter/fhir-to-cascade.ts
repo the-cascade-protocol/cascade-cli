@@ -15,7 +15,8 @@
 
 import type { Quad } from 'n3';
 
-import { type ConversionResult, quadsToTurtle } from './types.js';
+import { type ConversionResult, NS, quadsToTurtle } from './types.js';
+import { resolveReferenceEdges } from './reference-resolution.js';
 
 import {
   convertMedicationStatement,
@@ -128,7 +129,18 @@ export async function convertFhirToCascade(fhirResource: any, passthroughMinimal
     };
   }
 
-  const turtle = await quadsToTurtle(result._quads);
+  // Resolve reference edges so no unresolved placeholder ever leaks into single
+  // -resource output. A lone resource has no in-scope targets, so its cross-record
+  // references (e.g. a DiagnosticReport's hasLabResult) correctly drop rather than
+  // dangle. The batch converter (convert() in index.ts) is where a full bundle's
+  // references actually resolve against sibling records.
+  const subject = result._quads.find((q) => q.predicate.value === NS.rdf + 'type')?.subject.value;
+  const resources = subject && fhirResource?.resourceType
+    ? [{ resourceType: fhirResource.resourceType as string, id: fhirResource.id as string | undefined, subject }]
+    : [];
+  const { quads } = resolveReferenceEdges(result._quads, resources);
+
+  const turtle = await quadsToTurtle(quads);
   return {
     turtle,
     jsonld: result.jsonld,

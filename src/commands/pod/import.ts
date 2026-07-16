@@ -67,6 +67,17 @@ interface ImportReport {
   /** "Do we have everything?" checks from container adapters (e.g. source labels). */
   completeness: CompletenessCheck[];
   totalRecordsImported: number;
+  /**
+   * Cross-record edge resolution tally across all converted inputs: how many
+   * reference edges (clinical:hasLabResult, coverage:relatedClaim) were written
+   * as resolved subject IRIs vs dropped because the referenced record was not in
+   * the batch. The fuller {new, duplicate, conflict} record report is root 1.5.
+   */
+  edgeResolution: {
+    resolved: number;
+    unresolved: number;
+    byPredicate: Record<string, { resolved: number; unresolved: number }>;
+  };
   warnings: string[];
   dryRun: boolean;
 }
@@ -406,6 +417,12 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       const reconcilerInputs: ReconcilerInput[] = [];
       const sourceReport: ImportReport['sources'] = [];
       const allWarnings: string[] = [...sourceSkips];
+      // Accumulate cross-record edge resolution across every converted FHIR input.
+      const edgeResolution: ImportReport['edgeResolution'] = {
+        resolved: 0,
+        unresolved: 0,
+        byPredicate: {},
+      };
 
       for (const entry of expandedFiles) {
         const filePath = entry.path;
@@ -481,6 +498,15 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           resourceCount = result.resourceCount;
           warnings.push(...result.warnings);
           allWarnings.push(...result.warnings.map(w => `${filePath}: ${w}`));
+          if (result.edgeResolution) {
+            edgeResolution.resolved += result.edgeResolution.resolved;
+            edgeResolution.unresolved += result.edgeResolution.unresolved;
+            for (const [pred, c] of Object.entries(result.edgeResolution.byPredicate)) {
+              const acc = (edgeResolution.byPredicate[pred] ??= { resolved: 0, unresolved: 0 });
+              acc.resolved += c.resolved;
+              acc.unresolved += c.unresolved;
+            }
+          }
         } else {
           // Assume Turtle
           printVerbose(`Reading Turtle: ${filePath}`, globalOpts);
@@ -808,6 +834,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         sourceBreakdown,
         completeness,
         totalRecordsImported,
+        edgeResolution,
         warnings: allWarnings,
         dryRun,
       };
@@ -839,6 +866,14 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             const ok = c.recovered >= c.total ? 'OK' : 'partial';
             console.log(`    - ${c.label}: ${c.recovered}/${c.total} (${ok})`);
             if (c.note) console.log(`        ${c.note}`);
+          }
+        }
+        const edgeTotal = edgeResolution.resolved + edgeResolution.unresolved;
+        if (edgeTotal > 0) {
+          console.log(`  Record-to-record edges: ${edgeResolution.resolved} resolved` +
+            (edgeResolution.unresolved > 0 ? `, ${edgeResolution.unresolved} dropped (reference target not in import)` : ''));
+          for (const [pred, c] of Object.entries(edgeResolution.byPredicate)) {
+            console.log(`    - ${pred}: ${c.resolved} resolved` + (c.unresolved > 0 ? `, ${c.unresolved} dropped` : ''));
           }
         }
         if (allWarnings.length > 0) {

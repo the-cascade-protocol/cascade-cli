@@ -22,6 +22,7 @@ import {
   quadsToJsonLd,
   mintSubjectUri,
 } from './types.js';
+import { referencePlaceholder } from './reference-resolution.js';
 
 // ---------------------------------------------------------------------------
 // Claim converter (B3)
@@ -153,14 +154,13 @@ export function convertExplanationOfBenefit(resource: any): ConversionResult & {
     }
   }
 
-  // Related claim via claim reference
+  // Related claim via claim reference. Emitted as a resolvable placeholder and
+  // rewritten to the ClaimRecord's real minted subject at end of batch (see
+  // index.ts resolveReferenceEdges); dropped and counted if the Claim is absent.
+  // The ClaimRecord subject comes from mintSubjectUri (a deterministic hash of
+  // "Claim:<id>", not urn:uuid:<id>), so the old raw-id mint never matched.
   if (resource.claim?.reference) {
-    const parts = (resource.claim.reference as string).split('/');
-    const claimId = parts[parts.length - 1];
-    if (claimId) {
-      // Mint deterministic URI matching what convertClaim would produce for that id
-      quads.push(tripleRef(subjectUri, NS.coverage + 'relatedClaim', `urn:uuid:${claimId}`));
-    }
+    quads.push(tripleRef(subjectUri, NS.coverage + 'relatedClaim', referencePlaceholder(resource.claim.reference as string)));
   }
 
   if (resource.id) {
