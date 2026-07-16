@@ -168,6 +168,27 @@ function shortenForTurtle(iri: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Self-heal: declare any PREFIX_MAP prefix the appended block uses but the file
+// lacks. A type registration's `solid:forClass` CURIE can name any PREFIX_MAP
+// prefix (clinical:, health:, coverage:, cascade:, fhir:). Pods initialized
+// before a given prefix was added to the index header would otherwise produce an
+// unparseable index (e.g. "Undefined prefix coverage:" after a Claim import).
+// Returns the "@prefix ..." lines to prepend (empty string when none needed).
+// ---------------------------------------------------------------------------
+
+export function missingPrefixHeader(block: string, existingContent: string): string {
+  const lines: string[] = [];
+  for (const [ns, prefix] of Object.entries(PREFIX_MAP)) {
+    const usedInBlock = block.includes(`${prefix}:`);
+    const alreadyDeclared = new RegExp(`@prefix\\s+${prefix}:`).test(existingContent);
+    if (usedInBlock && !alreadyDeclared) {
+      lines.push(`@prefix ${prefix}: <${ns}> .`);
+    }
+  }
+  return lines.length > 0 ? lines.join('\n') + '\n' : '';
+}
+
+// ---------------------------------------------------------------------------
 // Build a TypeRegistration block
 // ---------------------------------------------------------------------------
 
@@ -189,7 +210,7 @@ function typeIndexForInfo(info: typeof DATA_TYPES[string]): 'publicTypeIndex.ttl
 // Append to type index file (string manipulation to preserve comments)
 // ---------------------------------------------------------------------------
 
-async function appendTypeRegistration(
+export async function appendTypeRegistration(
   indexPath: string,
   key: string,
   info: typeof DATA_TYPES[string],
@@ -205,14 +226,11 @@ async function appendTypeRegistration(
 
   const block = buildTypeRegistration(key, info);
 
-  // The block may reference the `fhir:` prefix (fhir-passthrough catch-all).
-  // Pods initialized before that prefix was added to the index header would
-  // otherwise fail to parse with "Undefined prefix fhir:". Self-heal by
-  // declaring the prefix once if the block needs it and the file lacks it.
-  let header = '';
-  if (block.includes('fhir:') && !/@prefix\s+fhir:/.test(content)) {
-    header = '@prefix fhir: <http://hl7.org/fhir/> .\n';
-  }
+  // Declare any prefix the appended block uses that the file does not yet
+  // declare (e.g. coverage: for a Claim/ExplanationOfBenefit registration, or
+  // fhir: for the passthrough catch-all). Without this, a strict-Turtle consumer
+  // of the type index breaks with "Undefined prefix ...".
+  const header = missingPrefixHeader(block, content);
 
   if (!dryRun) {
     // Read-modify-write (encrypted resources cannot be appended to in place).

@@ -71,10 +71,11 @@ const PROFILE_CARD_TTL = `@prefix foaf: <http://xmlns.com/foaf/0.1/> .
     cascade:schemaVersion "1.3" .
 `;
 
-const PUBLIC_TYPE_INDEX_TTL = `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+export const PUBLIC_TYPE_INDEX_TTL = `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
 @prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
 @prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix coverage: <https://ns.cascadeprotocol.org/coverage/v1#> .
 @prefix fhir: <http://hl7.org/fhir/> .
 
 # =============================================================================
@@ -100,9 +101,10 @@ const PUBLIC_TYPE_INDEX_TTL = `@prefix solid: <http://www.w3.org/ns/solid/terms#
 #     solid:instance </clinical/conditions.ttl> .
 `;
 
-const PRIVATE_TYPE_INDEX_TTL = `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+export const PRIVATE_TYPE_INDEX_TTL = `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
 @prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix fhir: <http://hl7.org/fhir/> .
 
 # =============================================================================
 # Private Type Index

@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Type index is valid Turtle after a claims import** (root backlog 1.6). When `cascade pod import` appended a `solid:TypeRegistration` block, it self-healed only the `fhir:` prefix, so registering a coverage class (Claim / ExplanationOfBenefit) wrote `coverage:...` into a file with no `@prefix coverage:` declaration. The result was an unparseable `settings/publicTypeIndex.ttl` (`Undefined prefix "coverage:"`) on every fresh pod that touched claims data, which broke any strict-Turtle consumer (validators, other Cascade apps, the coming graph-query surface). The self-heal now declares any Cascade prefix the appended block uses and the file lacks, and `pod init` seeds the index templates with `coverage:` (public) and `fhir:` (private) so new pods start complete. Verified: fresh Synthea import's `publicTypeIndex.ttl` parses under n3 strict mode (it failed on line 46 before).
+
 ### Changed
 
 - **Draft shapes synced from spec** (`sync-shapes-from-spec.sh`; batched per `spec/PENDING_DOWNSTREAM_SYNC.md`): `evidence.shapes.ttl` now carries the verdict-taxonomy v2 facet model (spec evidence v1-draft.0.2 — facet-consistency constraints + the generalized SHACL-Core grounding invariant), and `workbench.shapes.ttl` gains the Web Annotation note shapes (spec workbench v1-draft.0.5 — `WebAnnotationShape` / `CommentingBodyShape` / `FollowUpShape`, so `cascade validate` enforces target + motivation + PROV attribution on `oa:Annotation` notes, a body on commenting notes, and the RFC 5545 `ical:status` enum on follow-ups by default). Verified: full suite green (992 passed); positive/negative note fixtures pass/fail as intended against the embedded shapes.
