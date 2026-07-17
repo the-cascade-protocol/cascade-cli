@@ -223,6 +223,65 @@ function relabelQuadBlankNodes(q: Quad, inputIndex: number): Quad {
 }
 
 // ---------------------------------------------------------------------------
+// Single-cardinality passthrough repair (root backlog 1.5, symptom 3)
+// ---------------------------------------------------------------------------
+//
+// Passthrough subjects (clinical:ClinicalDocument, clinical:LaboratoryReport,
+// ...) are carried verbatim and deduplicated by full quad identity, which
+// collapses a re-imported quad only when its OBJECT is byte-identical. A few
+// single-cardinality predicates carry a value that legitimately changes every
+// import run: `clinical:importedAt` is stamped `new Date().toISOString()` at
+// conversion time while the subject is content-hash-stable (the timestamp is
+// deliberately excluded from the identity hash). So a monthly re-import gives
+// the same document a SECOND importedAt and it fails SHACL `sh:maxCount 1`
+// ("Clinical document must have exactly one importedAt timestamp"). Collapse
+// each such predicate to a single value per subject.
+//
+// Scope is deliberately importedAt-only. The sibling predicates that CAN hit the
+// same trap (`prov:generatedAtTime`, `clinical:sourceEHR` on a cross-source
+// re-import, and the genomics `GeneticTest.generatedAtTime`) are catalogued in
+// `docs/2026-07-16-single-cardinality-passthrough-survey.md` and deferred, so
+// this fix stays minimal; adding a sibling here is a one-line change once its
+// intended-value semantics are decided.
+const SINGLE_CARDINALITY_PASSTHROUGH_PREDICATES: ReadonlySet<string> = new Set<string>([
+  NS.clinical + 'importedAt',
+]);
+
+/**
+ * Keep exactly one object per (subject, single-cardinality predicate) in a
+ * passthrough quad list, choosing the lexicographically smallest value. For the
+ * ISO-8601 UTC timestamps this targets, that is the EARLIEST time, i.e. when the
+ * record first entered the pod, which stays stable across any number of later
+ * re-imports (deterministic, no churn). Every other quad passes through
+ * untouched and in its original order; returns the input array unchanged when no
+ * single-cardinality predicate is present.
+ */
+function collapseSingleCardinalityPassthrough(quads: Quad[]): Quad[] {
+  const keep = new Map<string, string>(); // `${subjectKey} ${predicate}` -> winning object value
+  const subjectKey = (q: Quad) => `${q.subject.termType}:${q.subject.value}`;
+  for (const q of quads) {
+    if (!SINGLE_CARDINALITY_PASSTHROUGH_PREDICATES.has(q.predicate.value)) continue;
+    const key = `${subjectKey(q)} ${q.predicate.value}`;
+    const cur = keep.get(key);
+    if (cur === undefined || q.object.value < cur) keep.set(key, q.object.value);
+  }
+  if (keep.size === 0) return quads;
+
+  const emitted = new Set<string>();
+  const out: Quad[] = [];
+  for (const q of quads) {
+    if (SINGLE_CARDINALITY_PASSTHROUGH_PREDICATES.has(q.predicate.value)) {
+      const key = `${subjectKey(q)} ${q.predicate.value}`;
+      if (q.object.value !== keep.get(key)) continue; // drop a later run's duplicate value
+      if (emitted.has(key)) continue;                 // keep exactly one winning quad
+      emitted.add(key);
+    }
+    out.push(q);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Matching helpers
 // ---------------------------------------------------------------------------
 
@@ -881,6 +940,12 @@ export async function runReconciliation(
     }
   }
 
+  // A re-import stamps a fresh clinical:importedAt while the subject is
+  // content-hash-stable, so quad-identity dedup keeps every run's value and the
+  // record fails SHACL maxCount 1. Collapse single-cardinality passthrough
+  // predicates to one value per subject (root backlog 1.5, symptom 3).
+  const dedupedPassthroughQuads = collapseSingleCardinalityPassthrough(passthroughQuads);
+
   // Match and group
   const groups: Group[] = [];
   const assigned = new Set<string>();
@@ -1037,7 +1102,7 @@ export async function runReconciliation(
 
   // Serialize
   const { turtle, edgeObjectsRewritten } = await serializeGroups(
-    groups, resolutions, passthroughQuads, discardedToCanonical,
+    groups, resolutions, dedupedPassthroughQuads, discardedToCanonical,
   );
 
   // Build report
