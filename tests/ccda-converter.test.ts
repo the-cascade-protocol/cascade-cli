@@ -448,3 +448,89 @@ describe('C-CDA converter — lab panel materialization (R2, root 3.11a)', () =>
     expect(ia).toEqual(ib);
   });
 });
+
+// =============================================================================
+// R3: C-CDA encounter extraction + panel-to-visit edges (root backlog 3.11 c/d)
+// =============================================================================
+
+describe('C-CDA converter — encounter extraction and hasEncounter edges (R3, root 3.11c/d)', () => {
+  const readLocal = () => fs.readFileSync(path.join(LOCAL_FIXTURES_DIR, 'ccda-encounter-panel.xml'), 'utf-8');
+
+  it('mints one populated clinical:Encounter per distinct visit, deduped across member observations', async () => {
+    const result = await convertCcda(readLocal(), { sourceSystem: 'TestSystem' });
+    expect(result.errors, `errors: ${result.errors.join(', ')}`).toHaveLength(0);
+
+    const quads = new Parser({ format: 'Turtle' }).parse(result.output);
+    const encounters = quads.filter(
+      (q) => q.predicate.value === RDF_TYPE && q.object.value === CLINICAL + 'Encounter',
+    );
+    // Both member observations cite the SAME encounter id, so it dedupes to one
+    // record (the old array-bug extractor would have produced a bare, collapsed
+    // record with no fields).
+    expect(encounters).toHaveLength(1);
+    const encounter = encounters[0].subject.value;
+
+    const encValue = (pred: string) =>
+      quads.find((q) => q.subject.value === encounter && q.predicate.value === pred)?.object.value;
+
+    // Real fields come through: type (from @_displayName), date (from
+    // effectiveTime/low), and the source id (root:extension).
+    expect(encValue(CASCADE + 'encounterType')).toBe('Office Visit');
+    expect(encValue(HEALTH + 'effectiveDate')).toBe('2025-03-10');
+    expect(encValue(CASCADE + 'sourceRecordId')).toBe(
+      '1.2.840.114350.1.13.999.2.7.3.111.8:VISIT-778899',
+    );
+  });
+
+  it('links the lab panel to its visit with a single resolving hasEncounter edge', async () => {
+    const result = await convertCcda(readLocal(), { sourceSystem: 'TestSystem' });
+    const quads = new Parser({ format: 'Turtle' }).parse(result.output);
+
+    const panel = quads.find(
+      (q) => q.predicate.value === RDF_TYPE && q.object.value === CLINICAL + 'LaboratoryReport',
+    )?.subject.value;
+    const encounter = quads.find(
+      (q) => q.predicate.value === RDF_TYPE && q.object.value === CLINICAL + 'Encounter',
+    )?.subject.value;
+    expect(panel).toBeTruthy();
+    expect(encounter).toBeTruthy();
+
+    const encEdges = quads.filter((q) => q.predicate.value === CLINICAL + 'hasEncounter');
+    // One edge (deduped even though two members cite the visit), panel -> visit.
+    expect(encEdges).toHaveLength(1);
+    expect(encEdges[0].subject.value).toBe(panel);
+    expect(encEdges[0].object.value).toBe(encounter);
+
+    // The census counts both C-CDA edge families, all resolving.
+    expect(result.edgeResolution).toEqual({
+      resolved: 3,
+      unresolved: 0,
+      byPredicate: {
+        'clinical:hasLabResult': { resolved: 2, unresolved: 0 },
+        'clinical:hasEncounter': { resolved: 1, unresolved: 0 },
+      },
+    });
+  });
+
+  it('produces deterministic encounter subjects and edges across two conversions', async () => {
+    const a = await convertCcda(readLocal(), { sourceSystem: 'TestSystem' });
+    const b = await convertCcda(readLocal(), { sourceSystem: 'TestSystem' });
+
+    const identity = (ttl: string) => {
+      const quads = new Parser({ format: 'Turtle' }).parse(ttl);
+      const encounter = quads.find(
+        (q) => q.predicate.value === RDF_TYPE && q.object.value === CLINICAL + 'Encounter',
+      )?.subject.value;
+      const edges = quads
+        .filter((q) => q.predicate.value === CLINICAL + 'hasEncounter')
+        .map((q) => `${q.subject.value} -> ${q.object.value}`)
+        .sort();
+      return { encounter, edges };
+    };
+
+    const ia = identity(a.output);
+    expect(ia.encounter).toBeTruthy();
+    expect(ia.edges).toHaveLength(1);
+    expect(ia).toEqual(identity(b.output));
+  });
+});

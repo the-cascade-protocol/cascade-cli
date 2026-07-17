@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic C-CDA results section for the R3 C-CDA encounter-extraction test
+  (root backlog 3.11 c/d). One BATTERY organizer (a metabolic panel) with two
+  member observations, EACH carrying the visit it was collected in as a nested
+  <entryRelationship><encounter> (classCode ENC) — the shape real Epic exports
+  use, where the encounter is buried inside the member observation rather than
+  in a top-level Encounters section. Both members cite the SAME encounter id, so
+  the extractor must dedupe to one clinical:Encounter record and one
+  hasEncounter edge from the panel. All values are synthetic and PHI-free.
+-->
+<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <realmCode code="US"/>
+  <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>
+  <templateId root="2.16.840.1.113883.10.20.22.1.1"/>
+  <id root="2.16.840.1.113883.3.88.11.32.1" extension="ENC-PANEL-FIXTURE-001"/>
+  <code code="34133-9" displayName="Summarization of Episode Note" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+  <title>Encounter Panel Fixture</title>
+  <effectiveTime value="20250315120000+0000"/>
+  <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>
+  <languageCode code="en-US"/>
+  <custodian>
+    <assignedCustodian>
+      <representedCustodianOrganization>
+        <name>Synthetic Health System</name>
+      </representedCustodianOrganization>
+    </assignedCustodian>
+  </custodian>
+  <recordTarget>
+    <patientRole>
+      <id root="2.16.840.1.113883.4.1" extension="000-00-0000"/>
+      <patient>
+        <name use="L"><given>Jane</given><family>Doe</family></name>
+        <administrativeGenderCode code="F" codeSystem="2.16.840.1.113883.5.1"/>
+        <birthTime value="19650101"/>
+      </patient>
+    </patientRole>
+  </recordTarget>
+  <component>
+    <structuredBody>
+      <component>
+        <section>
+          <templateId root="2.16.840.1.113883.10.20.22.2.3.1"/>
+          <code code="30954-2" displayName="Relevant Diagnostic Tests and/or Laboratory Data" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+          <title>Results</title>
+          <text>Metabolic panel collected during an office visit.</text>
+
+          <entry typeCode="DRIV">
+            <organizer classCode="BATTERY" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.1"/>
+              <id root="2.16.840.1.113883.3.88.11.32.1" extension="PANEL-BMP-1"/>
+              <code code="24323-8" displayName="Comprehensive metabolic 2000 panel - Serum or Plasma" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+              <statusCode code="completed"/>
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.3.88.11.32.1" extension="LAB-GLU-1"/>
+                  <code code="2345-7" displayName="Glucose [Mass/volume] in Serum or Plasma" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250310"/>
+                  <value xsi:type="PQ" value="92" unit="mg/dL"/>
+                  <entryRelationship typeCode="COMP">
+                    <encounter classCode="ENC" moodCode="EVN">
+                      <id root="1.2.840.114350.1.13.999.2.7.3.111.8" extension="VISIT-778899"/>
+                      <code code="101" displayName="Office Visit" codeSystem="1.2.840.114350.1.13.999.2.7.4.111.30" codeSystemName="Epic.EncounterType"/>
+                      <effectiveTime>
+                        <low value="20250310083000-0700"/>
+                        <high value="20250310090000-0700"/>
+                      </effectiveTime>
+                    </encounter>
+                  </entryRelationship>
+                </observation>
+              </component>
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.3.88.11.32.1" extension="LAB-CREAT-2"/>
+                  <code code="2160-0" displayName="Creatinine [Mass/volume] in Serum or Plasma" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250310"/>
+                  <value xsi:type="PQ" value="0.9" unit="mg/dL"/>
+                  <entryRelationship typeCode="COMP">
+                    <encounter classCode="ENC" moodCode="EVN">
+                      <id root="1.2.840.114350.1.13.999.2.7.3.111.8" extension="VISIT-778899"/>
+                      <code code="101" displayName="Office Visit" codeSystem="1.2.840.114350.1.13.999.2.7.4.111.30" codeSystemName="Epic.EncounterType"/>
+                      <effectiveTime>
+                        <low value="20250310083000-0700"/>
+                        <high value="20250310090000-0700"/>
+                      </effectiveTime>
+                    </encounter>
+                  </entryRelationship>
+                </observation>
+              </component>
+            </organizer>
+          </entry>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
+</ClinicalDocument>
