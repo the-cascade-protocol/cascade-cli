@@ -30,9 +30,14 @@
 #   workbench@v1-draft.0.5 (Web Annotation note shapes: WebAnnotationShape /
 #   CommentingBodyShape / FollowUpShape). Per D-PATH, drafts stay unrowed
 #   until v1.0 graduation; no row change.
+# Updated 2026-07-16: synced clinical.ttl + clinical.shapes.ttl for clinical v1.10
+#   (graph edge vocabulary: hasEncounter, indicationReference, linkedCondition +
+#   linkedConditionIds deprecation; hasLabResult range fix clinical:LabResult ->
+#   health:LabResultRecord; three open-world sh:targetSubjectsOf edge shapes).
+#   spec PR the-cascade-protocol/spec#9, tag vocab/clinical-v1.10.
 core=3.3
 health=2.4
-clinical=1.9
+clinical=1.10
 coverage=1.3
 checkup=3.2
 pots=1.4

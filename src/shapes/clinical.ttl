@@ -9,6 +9,7 @@
 @prefix sct: <http://snomed.info/sct/> .
 @prefix loinc: <http://loinc.org/rdf#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
 
 # ============================================================================
 # Ontology Metadata
@@ -20,8 +21,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-06-17"^^xsd:date ;
-    owl:versionInfo "1.9" ;
+    dct:modified "2026-07-16"^^xsd:date ;
+    owl:versionInfo "1.10" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -752,9 +753,11 @@ clinical:icd10Code a owl:DatatypeProperty ;
 
 clinical:linkedConditionIds a owl:DatatypeProperty ;
     rdfs:label "Linked Condition IDs"@en ;
-    rdfs:comment "Space-separated UUIDs of related ConditionSummary records (e.g., linking a complication to its root condition). Enables graph traversal between related diagnoses."@en ;
+    rdfs:comment "DEPRECATED (v1.10): use the clinical:linkedCondition ObjectProperty instead, which links to related conditions by IRI and is traversable RDF. This property encoded links as space-separated UUIDs in a single literal, which no graph query can follow. Retained for backward compatibility with existing Checkup data that may carry it; not emitted for new data."@en ;
     rdfs:domain clinical:Condition ;
-    rdfs:range xsd:string .
+    rdfs:range xsd:string ;
+    owl:deprecated "true"^^xsd:boolean ;
+    rdfs:seeAlso clinical:linkedCondition .
 
 # ============================================================================
 # Data Properties - Immunization
@@ -1298,6 +1301,37 @@ clinical:isActive a owl:DatatypeProperty ;
 # Changelog
 # ============================================================================
 #
+# Version 1.10 (2026-07-16)
+# - Added clinical:hasEncounter ObjectProperty (range clinical:Encounter). The
+#   record-to-encounter edge for grouping clinical events by visit context.
+#   FHIR alignment: the .encounter Reference(Encounter) element on Observation,
+#   MedicationRequest, Condition, Procedure, DiagnosticReport, DocumentReference.
+#   Domain left broad (comment + SHACL, no restrictive rdfs:domain union).
+# - Added clinical:indicationReference ObjectProperty (range rdfs:Resource). The
+#   medication-to-condition indication edge alongside the retained free-text
+#   clinical:indication / clinical:reasonForUse literals. FHIR alignment:
+#   MedicationRequest.reasonReference (R4; reason CodeableReference in R5).
+#   Range left open because FHIR allows Condition or Observation; the importer
+#   materializes clinical:Condition.
+# - Added clinical:linkedCondition ObjectProperty (Condition to Condition) and
+#   deprecated clinical:linkedConditionIds (owl:deprecated true). The old
+#   property packed related-condition UUIDs into one space-separated literal
+#   that no graph query can traverse; linkedCondition is the real RDF edge.
+#   linkedConditionIds is retained (not removed) for backward compatibility
+#   with existing Checkup data; data migration off it is tracked in the Checkup
+#   backlog.
+# - Fixed clinical:hasLabResult rdfs:range: was clinical:LabResult, now
+#   health:LabResultRecord. Reasoning: both importer paths (FHIR and C-CDA) type
+#   panel members health:LabResultRecord, never clinical:LabResult, so the
+#   declared range described a class the data never uses. This was internally
+#   inconsistent (an OWL reasoner would have inferred members are
+#   clinical:LabResult) though non-breaking (no SHACL shape constrains the edge
+#   target). Corrected to match the serialized data. Note: health:LabResultRecord
+#   is emitted by the importer but not yet defined as a class in the health
+#   vocabulary; that gap is filed as a follow-up (health vocab), and the
+#   range here follows the same reference-an-external-class style this file
+#   already uses for fhir:/sct:/loinc: classes.
+#
 # Version 1.9 (2026-06-17)
 # - SHACL: added cascade:AIExtracted to every dataProvenance sh:in enum in
 #   clinical.shapes.ttl. AIExtracted (ClinicalGenerated subclass, core v3.3)
@@ -1568,9 +1602,9 @@ clinical:retrieveUrl a owl:DatatypeProperty ;
 
 clinical:hasLabResult a owl:ObjectProperty ;
     rdfs:label "Has Lab Result"@en ;
-    rdfs:comment "Links a LaboratoryReport panel to its constituent clinical:LabResult observations. Enables grouping of lab values (e.g., CBC components) under the ordering panel. FHIR alignment: fhir:DiagnosticReport.result."@en ;
+    rdfs:comment "Links a LaboratoryReport panel to its constituent lab-result observations. Enables grouping of lab values (e.g., CBC components) under the ordering panel. FHIR alignment: fhir:DiagnosticReport.result. Range is health:LabResultRecord (v1.10): both importer paths (FHIR and C-CDA) type panel members health:LabResultRecord, so the range is corrected to match the serialized data rather than the never-emitted clinical:LabResult class. See the v1.10 changelog for the reasoning."@en ;
     rdfs:domain clinical:LaboratoryReport ;
-    rdfs:range clinical:LabResult .
+    rdfs:range health:LabResultRecord .
 
 clinical:panelName a owl:DatatypeProperty ;
     rdfs:domain clinical:LaboratoryReport ;
@@ -1617,3 +1651,26 @@ clinical:occupationTitle a owl:DatatypeProperty ;
     rdfs:domain clinical:SocialHistoryRecord ;
     rdfs:range xsd:string ;
     rdfs:comment "Patient-reported occupation title from EHR social history section."@en .
+
+# ============================================================================
+# Graph Edge Object Properties (v1.10)
+# Traversable RDF edges the importer (R3) will materialize: encounter grouping,
+# medication indication, and condition-to-condition links. Each is FHIR-aligned.
+# ============================================================================
+
+clinical:hasEncounter a owl:ObjectProperty ;
+    rdfs:label "Has Encounter"@en ;
+    rdfs:comment "Links a clinical record to the clinical:Encounter (visit context) it occurred within. FHIR alignment: the .encounter element (Reference(Encounter)) carried by Observation, MedicationRequest, Condition, Procedure, DiagnosticReport, and DocumentReference. The domain is intentionally broad (any encounter-scoped clinical record), so it is left unrestricted here and constrained by SHACL rather than a restrictive rdfs:domain union, matching the style of other cross-class properties in this vocabulary."@en ;
+    rdfs:range clinical:Encounter .
+
+clinical:indicationReference a owl:ObjectProperty ;
+    rdfs:label "Indication Reference"@en ;
+    rdfs:comment "Links a medication record to the condition (or observation) that is the clinical reason for it: the traversable edge alongside the free-text clinical:indication and clinical:reasonForUse literals, which are retained. FHIR alignment: MedicationRequest.reasonReference (R4), folded into MedicationRequest.reason as a CodeableReference in R5. The range is left open (rdfs:Resource) because FHIR permits either a Condition or an Observation as the reason; the common case, and what the importer materializes, is a clinical:Condition. SHACL constrains the object to an IRI without committing the class."@en ;
+    rdfs:domain clinical:Medication ;
+    rdfs:range rdfs:Resource .
+
+clinical:linkedCondition a owl:ObjectProperty ;
+    rdfs:label "Linked Condition"@en ;
+    rdfs:comment "Links a condition to a related condition by IRI (e.g. a complication to its root condition). The traversable RDF replacement for the deprecated clinical:linkedConditionIds literal. FHIR R4 core has no first-class condition-to-condition reference; the closest precedents are the condition-dueTo and condition-occurredFollowing extensions (http://hl7.org/fhir/StructureDefinition/condition-dueTo). This property keeps the generic linked semantics of its predecessor; a more specific relation can be added later if a use case needs it."@en ;
+    rdfs:domain clinical:Condition ;
+    rdfs:range clinical:Condition .
