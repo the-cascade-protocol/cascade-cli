@@ -13,6 +13,12 @@
 # different data sources (EHR, device, patient-reported).
 #
 # Changelog:
+# v1.10 (2026-07-16): Add open-world PropertyShapes for the three record-to-record
+#     edges introduced in clinical v1.10 (hasEncounter, indicationReference,
+#     linkedCondition). Each targets the subjects that use the predicate, checks
+#     only that the object is an IRI (plus its class where the range is
+#     committed), asserts no minCount, and reports at sh:Warning severity so no
+#     pod, current or future, fails validation on account of these edges.
 # v1.9 (2026-06-17): Add cascade:AIExtracted to every dataProvenance sh:in enum.
 #     AIExtracted (a ClinicalGenerated subclass, core v3.3) was defined and
 #     referenced by the v3.0 AI-extraction infrastructure, but the validation
@@ -1385,8 +1391,52 @@ clinical:SocialHistoryRecordShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Graph Edge Property Shapes (v1.10)
+# Open-world, non-required constraints for the record-to-record edges added in
+# clinical v1.10. Each targets the subjects that USE the predicate (so nothing
+# fires unless the edge is present) and checks only that the object is an IRI
+# (plus its class where the range is committed). Nothing is sh:closed, no
+# minCount is asserted, and severity is sh:Warning, so existing pods that carry
+# none of these predicates validate exactly as before, and future pods that do
+# carry them never fail validation (e.g. when an edge target lives in a sibling
+# file and sh:class cannot resolve during per-file validation).
+# ============================================================================
+
+clinical:HasEncounterEdgeShape a sh:PropertyShape ;
+    sh:targetSubjectsOf clinical:hasEncounter ;
+    sh:path clinical:hasEncounter ;
+    sh:nodeKind sh:IRI ;
+    sh:class clinical:Encounter ;
+    sh:severity sh:Warning ;
+    sh:message "clinical:hasEncounter should reference a clinical:Encounter by IRI"@en ;
+    sh:name "Has Encounter Edge"@en .
+
+clinical:IndicationReferenceEdgeShape a sh:PropertyShape ;
+    sh:targetSubjectsOf clinical:indicationReference ;
+    sh:path clinical:indicationReference ;
+    sh:nodeKind sh:IRI ;
+    sh:severity sh:Warning ;
+    sh:message "clinical:indicationReference should reference the reason record (a Condition or Observation) by IRI"@en ;
+    sh:name "Indication Reference Edge"@en .
+
+clinical:LinkedConditionEdgeShape a sh:PropertyShape ;
+    sh:targetSubjectsOf clinical:linkedCondition ;
+    sh:path clinical:linkedCondition ;
+    sh:nodeKind sh:IRI ;
+    sh:class clinical:Condition ;
+    sh:severity sh:Warning ;
+    sh:message "clinical:linkedCondition should reference a clinical:Condition by IRI"@en ;
+    sh:name "Linked Condition Edge"@en .
+
+# ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.10 (2026-07-16)
+# - Added HasEncounterEdgeShape, IndicationReferenceEdgeShape, and
+#   LinkedConditionEdgeShape: open-world PropertyShapes (sh:targetSubjectsOf)
+#   for the v1.10 record-to-record edges. IRI nodeKind, class where committed,
+#   no minCount, sh:Warning severity. Purely additive.
 #
 # Version 1.8 (2026-03-28)
 # - Added SocialHistoryRecordShape for EHR-extracted social history records
