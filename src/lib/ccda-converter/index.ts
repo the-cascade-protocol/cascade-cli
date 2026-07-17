@@ -149,11 +149,12 @@ export async function convertCcda(
     warnings,
     errors,
     results: [],
-    // Tally the record-to-record edges the C-CDA path materializes (currently
-    // clinical:hasLabResult from BATTERY lab panels). Every such edge is built
-    // from a member subject computed in the same walk, so all resolve; the census
-    // below verifies that against the final record set and surfaces the count in
-    // the import summary, matching the FHIR path's accounting.
+    // Tally the record-to-record edges the C-CDA path materializes:
+    // clinical:hasLabResult from BATTERY lab panels and clinical:hasEncounter
+    // from each panel to the visit it was collected in. Every such edge is built
+    // from a subject computed in the same walk, so all resolve; the census below
+    // verifies that against the final record set and surfaces the count in the
+    // import summary, matching the FHIR path's accounting.
     edgeResolution: censusForwardEdges(uniqueQuads),
   };
 }
@@ -164,6 +165,7 @@ export async function convertCcda(
  */
 const CCDA_FORWARD_EDGES: Record<string, string> = {
   [NS.clinical + 'hasLabResult']: 'clinical:hasLabResult',
+  [NS.clinical + 'hasEncounter']: 'clinical:hasEncounter',
 };
 
 /**
