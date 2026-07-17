@@ -18,7 +18,7 @@
 
 import AdmZip from 'adm-zip';
 import { Writer, DataFactory } from 'n3';
-import { NS, TURTLE_PREFIXES, type BatchConversionResult } from '../fhir-converter/types.js';
+import { NS, TURTLE_PREFIXES, type BatchConversionResult, type EdgeResolutionSummary } from '../fhir-converter/types.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 import { parseCcdaXml } from './parser.js';
@@ -43,7 +43,13 @@ import { deriveSourceEhr, ensureProvenanceQuads, ensureSourceEhrQuads } from './
 // Map templateId → extractor function and LOINC code
 const SECTION_HANDLERS: Record<string, {
   loinc: string;
-  extract: (entries: any[], patientUri: string, sourceSystem: string, sectionText?: any) => any[];
+  extract: (
+    entries: any[],
+    patientUri: string,
+    sourceSystem: string,
+    sectionText?: any,
+    importedAt?: string,
+  ) => any[];
 }> = {
   [IMMUNIZATIONS_TEMPLATE_ID]:  { loinc: '11369-6', extract: extractImmunizationQuads },
   [LABS_TEMPLATE_ID]:           { loinc: '30954-2', extract: extractLabQuads },
@@ -143,7 +149,44 @@ export async function convertCcda(
     warnings,
     errors,
     results: [],
+    // Tally the record-to-record edges the C-CDA path materializes (currently
+    // clinical:hasLabResult from BATTERY lab panels). Every such edge is built
+    // from a member subject computed in the same walk, so all resolve; the census
+    // below verifies that against the final record set and surfaces the count in
+    // the import summary, matching the FHIR path's accounting.
+    edgeResolution: censusForwardEdges(uniqueQuads),
   };
+}
+
+/**
+ * Forward record-to-record edge predicates the C-CDA path writes, mapped to the
+ * compacted label the import summary reports (matches the FHIR path's keys).
+ */
+const CCDA_FORWARD_EDGES: Record<string, string> = {
+  [NS.clinical + 'hasLabResult']: 'clinical:hasLabResult',
+};
+
+/**
+ * Census the C-CDA edge families over a final quad set: an edge counts as
+ * resolved when its object is a real record subject (carries an rdf:type) in the
+ * same batch, unresolved otherwise. C-CDA edges resolve by construction, but the
+ * census keeps the invariant "no edge is written that does not resolve" honest.
+ */
+function censusForwardEdges(quads: any[]): EdgeResolutionSummary {
+  const subjects = new Set<string>();
+  for (const q of quads) {
+    if (q.predicate.value === NS.rdf + 'type') subjects.add(q.subject.value);
+  }
+  const stats: EdgeResolutionSummary = { resolved: 0, unresolved: 0, byPredicate: {} };
+  for (const q of quads) {
+    const label = CCDA_FORWARD_EDGES[q.predicate.value];
+    if (!label) continue;
+    const key =
+      q.object.termType === 'NamedNode' && subjects.has(q.object.value) ? 'resolved' : 'unresolved';
+    (stats.byPredicate[label] ??= { resolved: 0, unresolved: 0 })[key]++;
+    stats[key]++;
+  }
+  return stats;
 }
 
 function convertSingleCcda(
@@ -252,7 +295,7 @@ function convertSingleCcda(
     // Extract structured entries
     if (matchedTemplateId && SECTION_HANDLERS[matchedTemplateId]) {
       const handler = SECTION_HANDLERS[matchedTemplateId];
-      const quads = handler.extract(entries, patientUri, sourceSystem, sectionText);
+      const quads = handler.extract(entries, patientUri, sourceSystem, sectionText, importedAt);
 
       // Tag each structured record from a summarization document so the
       // reconciler can apply a lower confidence threshold for deduplication.

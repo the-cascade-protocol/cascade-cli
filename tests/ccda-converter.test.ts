@@ -24,6 +24,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Parser } from 'n3';
 import { convertCcda } from '../src/lib/ccda-converter/index.js';
 import { loadShapes, validateTurtle } from '../src/lib/shacl-validator.js';
 
@@ -32,6 +33,9 @@ const __dirname = path.dirname(__filename);
 
 // Fixtures live in the conformance repo, two levels up from cascade-cli/tests/
 const FIXTURES_DIR = path.resolve(__dirname, '../../conformance/fixtures/ccda');
+
+// This repo's own synthetic fixtures (co-located, committed here).
+const LOCAL_FIXTURES_DIR = path.resolve(__dirname, '../test-fixtures');
 
 function readFixture(name: string): string {
   return fs.readFileSync(path.join(FIXTURES_DIR, name), 'utf-8');
@@ -311,5 +315,136 @@ describe('C-CDA converter — narrative-only section (P4-F)', () => {
       (w) => w.includes('2.16.840.1.113883.10.20.22.2.10'),
     );
     expect(pocWarning).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// R2: BATTERY lab panel materialization + membership edges (root backlog 3.11a)
+// =============================================================================
+
+const CLINICAL = 'https://ns.cascadeprotocol.org/clinical/v1#';
+const HEALTH = 'https://ns.cascadeprotocol.org/health/v1#';
+const CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+const LOINC = 'http://loinc.org/rdf#';
+
+describe('C-CDA converter — lab panel materialization (R2, root 3.11a)', () => {
+  const readLocal = () => fs.readFileSync(path.join(LOCAL_FIXTURES_DIR, 'ccda-lab-panel.xml'), 'utf-8');
+
+  it('materializes exactly one LaboratoryReport per BATTERY organizer with the expected panel fields', async () => {
+    const result = await convertCcda(readLocal(), { sourceSystem: 'TestSystem' });
+    expect(result.errors, `errors: ${result.errors.join(', ')}`).toHaveLength(0);
+
+    const quads = new Parser({ format: 'Turtle' }).parse(result.output);
+    const panels = quads.filter(
+      (q) => q.predicate.value === RDF_TYPE && q.object.value === CLINICAL + 'LaboratoryReport',
+    );
+    expect(panels).toHaveLength(1);
+    const panel = panels[0].subject.value;
+
+    const panelValue = (pred: string) =>
+      quads.find((q) => q.subject.value === panel && q.predicate.value === pred)?.object.value;
+
+    // Panel name and LOINC code come from the organizer's own <code>.
+    expect(panelValue(CLINICAL + 'panelName')).toBe(
+      'Complete blood count (hemogram) panel - Blood by Automated count',
+    );
+    expect(panelValue(CLINICAL + 'loincCode')).toBe(LOINC + '58410-2');
+    // The organizer has no effectiveTime, so documentDate falls back to the
+    // earliest member result date (2025-03-10).
+    expect(panelValue(CLINICAL + 'documentDate')).toBe('2025-03-10T00:00:00Z');
+    // Shape-compatibility with the FHIR panel converter.
+    expect(panelValue(CLINICAL + 'fhirResourceType')).toBe('DiagnosticReport');
+    expect(panelValue(CLINICAL + 'importedAt')).toBeTruthy();
+    expect(panelValue(CASCADE + 'sourceRecordId')).toBe(
+      '2.16.840.1.113883.3.88.11.32.1:PANEL-CBC-1',
+    );
+  });
+
+  it('links the panel to exactly its members with hasLabResult edges that resolve to real LabResultRecord subjects', async () => {
+    const result = await convertCcda(readLocal(), { sourceSystem: 'TestSystem' });
+    const quads = new Parser({ format: 'Turtle' }).parse(result.output);
+
+    const recordSubjects = new Set(
+      quads.filter((q) => q.predicate.value === RDF_TYPE).map((q) => q.subject.value),
+    );
+    const labResultSubjects = new Set(
+      quads
+        .filter((q) => q.predicate.value === RDF_TYPE && q.object.value === HEALTH + 'LabResultRecord')
+        .map((q) => q.subject.value),
+    );
+
+    const edges = quads.filter((q) => q.predicate.value === CLINICAL + 'hasLabResult');
+    expect(edges).toHaveLength(3); // the three CBC members, not the standalone
+
+    for (const e of edges) {
+      expect(e.object.termType).toBe('NamedNode');
+      // Every edge resolves to a real record subject, and specifically a lab result.
+      expect(recordSubjects.has(e.object.value), `edge object ${e.object.value} is a record subject`).toBe(true);
+      expect(labResultSubjects.has(e.object.value)).toBe(true);
+    }
+
+    // The edges cover the three named members (WBC, RBC, Hemoglobin).
+    const memberNames = new Set(
+      edges.map((e) =>
+        quads.find((q) => q.subject.value === e.object.value && q.predicate.value === HEALTH + 'testName')?.object.value,
+      ),
+    );
+    expect(memberNames.has('Leukocytes [#/volume] in Blood by Automated count')).toBe(true);
+    expect(memberNames.has('Erythrocytes [#/volume] in Blood by Automated count')).toBe(true);
+    expect(memberNames.has('Hemoglobin [Mass/volume] in Blood')).toBe(true);
+
+    // Reported edge tally matches (all resolve, none dropped).
+    expect(result.edgeResolution).toEqual({
+      resolved: 3,
+      unresolved: 0,
+      byPredicate: { 'clinical:hasLabResult': { resolved: 3, unresolved: 0 } },
+    });
+  });
+
+  it('leaves the standalone observation as a plain result with no panel', async () => {
+    const result = await convertCcda(readLocal(), { sourceSystem: 'TestSystem' });
+    const quads = new Parser({ format: 'Turtle' }).parse(result.output);
+
+    // Only one panel is produced (the standalone observation does not become one).
+    const panels = quads.filter(
+      (q) => q.predicate.value === RDF_TYPE && q.object.value === CLINICAL + 'LaboratoryReport',
+    );
+    expect(panels).toHaveLength(1);
+
+    // The standalone creatinine result exists as a LabResultRecord ...
+    const creatinine = quads.find(
+      (q) => q.predicate.value === HEALTH + 'testName' && q.object.value === 'Creatinine [Mass/volume] in Serum or Plasma',
+    )?.subject.value;
+    expect(creatinine).toBeTruthy();
+
+    // ... but it is not a member of any panel.
+    const edgeObjects = new Set(
+      quads.filter((q) => q.predicate.value === CLINICAL + 'hasLabResult').map((q) => q.object.value),
+    );
+    expect(edgeObjects.has(creatinine!)).toBe(false);
+  });
+
+  it('produces deterministic panel and member subjects across two conversions', async () => {
+    const a = await convertCcda(readLocal(), { sourceSystem: 'TestSystem' });
+    const b = await convertCcda(readLocal(), { sourceSystem: 'TestSystem' });
+
+    const identity = (ttl: string) => {
+      const quads = new Parser({ format: 'Turtle' }).parse(ttl);
+      const panel = quads.find(
+        (q) => q.predicate.value === RDF_TYPE && q.object.value === CLINICAL + 'LaboratoryReport',
+      )?.subject.value;
+      const edges = quads
+        .filter((q) => q.predicate.value === CLINICAL + 'hasLabResult')
+        .map((q) => q.object.value)
+        .sort();
+      return { panel, edges };
+    };
+
+    const ia = identity(a.output);
+    const ib = identity(b.output);
+    expect(ia.panel).toBeTruthy();
+    expect(ia.edges).toHaveLength(3);
+    expect(ia).toEqual(ib);
   });
 });

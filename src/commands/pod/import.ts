@@ -477,6 +477,17 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           resourceCount = result.resourceCount;
           warnings.push(...result.warnings);
           allWarnings.push(...result.warnings.map(w => `${filePath}: ${w}`));
+          // C-CDA lab panels write clinical:hasLabResult edges; fold their tally
+          // into the same import-summary accounting as the FHIR path.
+          if (result.edgeResolution) {
+            edgeResolution.resolved += result.edgeResolution.resolved;
+            edgeResolution.unresolved += result.edgeResolution.unresolved;
+            for (const [pred, c] of Object.entries(result.edgeResolution.byPredicate)) {
+              const acc = (edgeResolution.byPredicate[pred] ??= { resolved: 0, unresolved: 0 });
+              acc.resolved += c.resolved;
+              acc.unresolved += c.unresolved;
+            }
+          }
         } else {
           const content = rawContent;
           const trimmed = content.trim();
