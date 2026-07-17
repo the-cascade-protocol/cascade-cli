@@ -42,6 +42,50 @@ export function isReferencePlaceholder(iri: string): boolean {
   return iri.startsWith(REF_PLACEHOLDER_PREFIX);
 }
 
+/**
+ * Append a `clinical:hasEncounter` edge for a FHIR `.encounter` Reference (the
+ * visit an event occurred within), emitted as a resolvable placeholder that the
+ * batch loop rewrites to the Encounter record's minted subject or drops and
+ * counts. No-op when the reference is absent or malformed. `encounter` is the
+ * FHIR Reference object (`{ reference: "Encounter/x" | "urn:uuid:x" }`).
+ */
+export function pushEncounterEdge(quads: Quad[], subjectUri: string, encounter: unknown): void {
+  const ref = (encounter as { reference?: unknown } | null | undefined)?.reference;
+  if (typeof ref === 'string' && ref.length > 0) {
+    quads.push(
+      makeQuad(
+        namedNode(subjectUri),
+        namedNode(NS.clinical + 'hasEncounter'),
+        namedNode(referencePlaceholder(ref)),
+      ),
+    );
+  }
+}
+
+/**
+ * Append one `clinical:indicationReference` edge per FHIR `reasonReference` entry
+ * (the condition or observation that is the clinical reason for a medication or
+ * procedure). Each is a resolvable placeholder rewritten or dropped at end of
+ * batch. `reasonReference` is the FHIR array (each `{ reference: "..." }`).
+ * Free-text `reasonCode` is intentionally left to the existing text mappers, so
+ * this never duplicates an indication a converter already records as a literal.
+ */
+export function pushIndicationEdges(quads: Quad[], subjectUri: string, reasonReference: unknown): void {
+  if (!Array.isArray(reasonReference)) return;
+  for (const r of reasonReference) {
+    const ref = (r as { reference?: unknown } | null)?.reference;
+    if (typeof ref === 'string' && ref.length > 0) {
+      quads.push(
+        makeQuad(
+          namedNode(subjectUri),
+          namedNode(NS.clinical + 'indicationReference'),
+          namedNode(referencePlaceholder(ref)),
+        ),
+      );
+    }
+  }
+}
+
 export function decodeReferencePlaceholder(iri: string): string {
   return decodeURIComponent(iri.slice(REF_PLACEHOLDER_PREFIX.length));
 }
