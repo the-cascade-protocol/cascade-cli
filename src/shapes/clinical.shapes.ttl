@@ -1394,19 +1394,27 @@ clinical:SocialHistoryRecordShape a sh:NodeShape ;
 # Graph Edge Property Shapes (v1.10)
 # Open-world, non-required constraints for the record-to-record edges added in
 # clinical v1.10. Each targets the subjects that USE the predicate (so nothing
-# fires unless the edge is present) and checks only that the object is an IRI
-# (plus its class where the range is committed). Nothing is sh:closed, no
-# minCount is asserted, and severity is sh:Warning, so existing pods that carry
-# none of these predicates validate exactly as before, and future pods that do
-# carry them never fail validation (e.g. when an edge target lives in a sibling
-# file and sh:class cannot resolve during per-file validation).
+# fires unless the edge is present) and checks only that the object is an IRI.
+# Nothing is sh:closed, no minCount is asserted, and severity is sh:Warning, so
+# existing pods that carry none of these predicates validate exactly as before.
+#
+# v1.11: the sh:class checks on HasEncounterEdgeShape and LinkedConditionEdgeShape
+# were REMOVED. Cascade pods store records partitioned into per-type files and
+# the reference validator validates each file independently, so an edge whose
+# target record lives in a sibling file (a lab result in lab-results.ttl pointing
+# at an encounter in encounters.ttl) could never satisfy sh:class — it produced a
+# Warning on every well-formed, fully-resolving edge and none on a malformed one.
+# The constraint therefore only generated false positives. sh:nodeKind sh:IRI is
+# retained (it catches a genuinely malformed non-IRI object); the target class is
+# guaranteed at import time (edges are written only when they resolve to a real
+# record of the right type) and can be re-checked by a pod-wide validator later.
+# This mirrors IndicationReferenceEdgeShape, whose range was always left open.
 # ============================================================================
 
 clinical:HasEncounterEdgeShape a sh:PropertyShape ;
     sh:targetSubjectsOf clinical:hasEncounter ;
     sh:path clinical:hasEncounter ;
     sh:nodeKind sh:IRI ;
-    sh:class clinical:Encounter ;
     sh:severity sh:Warning ;
     sh:message "clinical:hasEncounter should reference a clinical:Encounter by IRI"@en ;
     sh:name "Has Encounter Edge"@en .
@@ -1423,7 +1431,6 @@ clinical:LinkedConditionEdgeShape a sh:PropertyShape ;
     sh:targetSubjectsOf clinical:linkedCondition ;
     sh:path clinical:linkedCondition ;
     sh:nodeKind sh:IRI ;
-    sh:class clinical:Condition ;
     sh:severity sh:Warning ;
     sh:message "clinical:linkedCondition should reference a clinical:Condition by IRI"@en ;
     sh:name "Linked Condition Edge"@en .
@@ -1431,6 +1438,17 @@ clinical:LinkedConditionEdgeShape a sh:PropertyShape ;
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.11 (2026-07-16)
+# - Removed the sh:class constraint from HasEncounterEdgeShape (clinical:Encounter)
+#   and LinkedConditionEdgeShape (clinical:Condition). Cascade stores records in
+#   per-type files and the reference validator checks each file independently, so
+#   an edge to a sibling-file target could never satisfy sh:class: it warned on
+#   every well-formed, fully-resolving edge (e.g. all 181 hasEncounter edges of
+#   the Synthea specimen) and never caught a real error. sh:nodeKind sh:IRI is
+#   kept. Target class is enforced at import (edges written only on resolution)
+#   and can be re-checked by a future pod-wide validator. Aligns these two shapes
+#   with IndicationReferenceEdgeShape. Paired with the R3 edge importer.
 #
 # Version 1.10 (2026-07-16)
 # - Added HasEncounterEdgeShape, IndicationReferenceEdgeShape, and

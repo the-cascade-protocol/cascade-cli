@@ -35,10 +35,12 @@
 #   linkedConditionIds deprecation; hasLabResult range fix clinical:LabResult ->
 #   health:LabResultRecord; three open-world sh:targetSubjectsOf edge shapes).
 #   spec PR the-cascade-protocol/spec#9, tag vocab/clinical-v1.10.
-# Updated 2026-07-16: synced clinical.ttl for clinical v1.11 — widened
-#   clinical:indicationReference domain (dropped rdfs:domain clinical:Medication;
-#   broad domain + SHACL, matching hasEncounter). Shapes byte-identical (the edge
-#   shape never encoded the domain). spec tag vocab/clinical-v1.11; slice R3.
+# Updated 2026-07-16: synced clinical.ttl + clinical.shapes.ttl for clinical v1.11
+#   — (1) widened clinical:indicationReference domain (dropped rdfs:domain
+#   clinical:Medication; broad domain + SHACL, matching hasEncounter); and
+#   (2) removed the sh:class constraints from HasEncounterEdgeShape +
+#   LinkedConditionEdgeShape (unenforceable + false-positive under per-file
+#   validation; sh:nodeKind sh:IRI kept). spec tag vocab/clinical-v1.11; slice R3.
 core=3.3
 health=2.4
 clinical=1.11
