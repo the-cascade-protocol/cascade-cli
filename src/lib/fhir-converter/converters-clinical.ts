@@ -39,7 +39,7 @@ import {
   mintSubjectUri,
   contentHashedUri,
 } from './types.js';
-import { referencePlaceholder } from './reference-resolution.js';
+import { referencePlaceholder, pushEncounterEdge, pushIndicationEdges } from './reference-resolution.js';
 
 // ---------------------------------------------------------------------------
 // Medication converter
@@ -135,6 +135,12 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
     if (noteText) quads.push(tripleStr(subjectUri, NS.health + 'notes', noteText));
   }
 
+  // Cross-record edges (resolved/dropped at end of batch): the visit this
+  // medication belongs to (MedicationRequest.encounter) and the condition(s) it
+  // was prescribed for (reasonReference). reasonCode free-text is left as is.
+  pushEncounterEdge(quads, subjectUri, resource.encounter);
+  pushIndicationEdges(quads, subjectUri, resource.reasonReference);
+
   return {
     turtle: '',
     warnings,
@@ -213,6 +219,9 @@ export function convertCondition(resource: any): ConversionResult & { _quads: Qu
     const noteText = resource.note.map((n: any) => n.text).filter(Boolean).join('; ');
     if (noteText) quads.push(tripleStr(subjectUri, NS.health + 'notes', noteText));
   }
+
+  // The visit this condition was recorded in (Condition.encounter).
+  pushEncounterEdge(quads, subjectUri, resource.encounter);
 
   return {
     turtle: '',
@@ -431,6 +440,9 @@ export function convertObservationLab(resource: any): ConversionResult & { _quad
     quads.push(tripleStr(subjectUri, NS.health + 'sourceRecordId', resource.id));
   }
 
+  // The visit this lab result was collected in (Observation.encounter).
+  pushEncounterEdge(quads, subjectUri, resource.encounter);
+
   return {
     turtle: '',
     jsonld: quadsToJsonLd(quads, 'health:LabResultRecord'),
@@ -576,6 +588,9 @@ export function convertObservationVital(resource: any): ConversionResult & { _qu
     quads.push(tripleStr(subjectUri, NS.health + 'sourceRecordId', resource.id));
   }
 
+  // The visit this vital sign was taken in (Observation.encounter).
+  pushEncounterEdge(quads, subjectUri, resource.encounter);
+
   return {
     turtle: '',
     jsonld: quadsToJsonLd(quads, 'clinical:VitalSign'),
@@ -627,6 +642,12 @@ export function convertProcedure(resource: any): ConversionResult & { _quads: Qu
   if (resource.id) {
     quads.push(tripleStr(subjectUri, NS.clinical + 'sourceRecordId', resource.id));
   }
+
+  // Cross-record edges: the visit this procedure was performed in
+  // (Procedure.encounter) and the condition(s) that indicated it
+  // (Procedure.reasonReference — the bulk of the specimen's indication edges).
+  pushEncounterEdge(quads, subjectUri, resource.encounter);
+  pushIndicationEdges(quads, subjectUri, resource.reasonReference);
 
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
 
@@ -688,6 +709,14 @@ export function convertClinicalDocument(resource: any): ConversionResult & { _qu
     quads.push(tripleStr(subjectUri, NS.clinical + 'sourceRecordId', resource.id));
   }
   quads.push(tripleStr(subjectUri, NS.clinical + 'fhirResourceType', resource.resourceType ?? 'DocumentReference'));
+
+  // The visit(s) this document belongs to. NOTE: on DocumentReference the
+  // reference is NESTED under context.encounter (an array), not top-level.
+  if (Array.isArray(resource.context?.encounter)) {
+    for (const enc of resource.context.encounter) {
+      pushEncounterEdge(quads, subjectUri, enc);
+    }
+  }
 
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
 
@@ -851,6 +880,9 @@ export function convertLaboratoryReport(resource: any): ConversionResult & { _qu
   }
   quads.push(tripleStr(subjectUri, NS.clinical + 'fhirResourceType', 'DiagnosticReport'));
 
+  // The visit this report was produced in (DiagnosticReport.encounter).
+  pushEncounterEdge(quads, subjectUri, resource.encounter);
+
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
 
   return {
@@ -907,6 +939,12 @@ export function convertMedicationAdministration(resource: any): ConversionResult
   if (resource.id) {
     quads.push(tripleStr(subjectUri, NS.clinical + 'sourceRecordId', resource.id));
   }
+
+  // The condition(s) this administration was given for
+  // (MedicationAdministration.reasonReference). The encounter link on this
+  // resource is FHIR .context (Encounter|EpisodeOfCare) and is out of R3b's
+  // top-level .encounter scope, so it is intentionally not wired here.
+  pushIndicationEdges(quads, subjectUri, resource.reasonReference);
 
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
 
@@ -1021,6 +1059,9 @@ export function convertImagingStudy(resource: any): ConversionResult & { _quads:
   if (resource.id) {
     quads.push(tripleStr(subjectUri, NS.clinical + 'sourceRecordId', resource.id));
   }
+
+  // The visit this imaging study was performed in (ImagingStudy.encounter).
+  pushEncounterEdge(quads, subjectUri, resource.encounter);
 
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
 

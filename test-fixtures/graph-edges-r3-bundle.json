@@ -1,0 +1,98 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "_comment": "Synthetic, PHI-free fixture for slice R3 edge wiring (root 3.11 b/c). A trimmed stand-in for the Synthea specimen exercising the two new edge families through R1's resolve-or-drop machinery: clinical:hasEncounter (resource.encounter + DocumentReference.context.encounter) and clinical:indicationReference (reasonReference). One Encounter is present; a second is deliberately absent (its edge is dropped and counted). One reasonReference target Condition is present, another deliberately absent. Expected: hasEncounter 3 resolved / 1 dropped; indicationReference 2 resolved / 1 dropped.",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:p1",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "p1",
+        "name": [{ "family": "Fixture", "given": ["Edge"] }],
+        "birthDate": "1965-03-02",
+        "gender": "female"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:enc-1",
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "enc-1",
+        "status": "finished",
+        "class": { "code": "AMB" },
+        "type": [{ "coding": [{ "system": "http://snomed.info/sct", "code": "162673000", "display": "General examination" }], "text": "General examination" }],
+        "subject": { "reference": "urn:uuid:p1" },
+        "period": { "start": "2023-04-01T09:00:00Z", "end": "2023-04-01T09:30:00Z" }
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:cond-1",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-1",
+        "clinicalStatus": { "coding": [{ "code": "active" }] },
+        "code": { "coding": [{ "system": "http://snomed.info/sct", "code": "38341003", "display": "Hypertension" }], "text": "Hypertension" },
+        "subject": { "reference": "urn:uuid:p1" },
+        "encounter": { "reference": "urn:uuid:enc-1" },
+        "onsetDateTime": "2020-01-15T00:00:00Z"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:obs-1",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "obs-1",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "2339-0", "display": "Glucose" }], "text": "Glucose" },
+        "subject": { "reference": "urn:uuid:p1" },
+        "encounter": { "reference": "urn:uuid:enc-1" },
+        "effectiveDateTime": "2023-04-01T09:10:00Z",
+        "valueQuantity": { "value": 92, "unit": "mg/dL" }
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:proc-1",
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "proc-1",
+        "status": "completed",
+        "code": { "coding": [{ "system": "http://snomed.info/sct", "code": "710824005", "display": "Assessment of health and social care needs" }], "text": "Assessment" },
+        "subject": { "reference": "urn:uuid:p1" },
+        "encounter": { "reference": "urn:uuid:enc-1" },
+        "performedDateTime": "2023-04-01T09:20:00Z",
+        "reasonReference": [
+          { "reference": "urn:uuid:cond-1" },
+          { "reference": "urn:uuid:cond-absent" }
+        ]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:med-1",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "med-1",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": { "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "197361", "display": "Amlodipine 5 MG Oral Tablet" }], "text": "Amlodipine 5 MG Oral Tablet" },
+        "subject": { "reference": "urn:uuid:p1" },
+        "encounter": { "reference": "urn:uuid:enc-absent" },
+        "authoredOn": "2023-04-01",
+        "reasonReference": [{ "reference": "urn:uuid:cond-1" }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:doc-1",
+      "resource": {
+        "resourceType": "DocumentReference",
+        "id": "doc-1",
+        "status": "current",
+        "type": { "coding": [{ "system": "http://loinc.org", "code": "34133-9", "display": "Summary of episode note" }], "text": "Summary of episode note" },
+        "subject": { "reference": "urn:uuid:p1" },
+        "date": "2023-04-01T10:00:00Z",
+        "content": [{ "attachment": { "contentType": "text/plain", "url": "https://example.org/doc-1.txt" } }],
+        "context": { "encounter": [{ "reference": "urn:uuid:enc-1" }] }
+      }
+    }
+  ]
+}

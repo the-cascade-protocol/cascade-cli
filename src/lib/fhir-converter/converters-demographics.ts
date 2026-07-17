@@ -24,6 +24,7 @@ import {
   mintSubjectUri,
   contentHashedUri,
 } from './types.js';
+import { pushEncounterEdge } from './reference-resolution.js';
 
 // ---------------------------------------------------------------------------
 // Patient converter
@@ -188,6 +189,9 @@ export function convertImmunization(resource: any): ConversionResult & { _quads:
   if (resource.id) {
     quads.push(tripleStr(subjectUri, NS.health + 'sourceRecordId', resource.id));
   }
+
+  // The visit this immunization was administered in (Immunization.encounter).
+  pushEncounterEdge(quads, subjectUri, resource.encounter);
 
   return {
     turtle: '',

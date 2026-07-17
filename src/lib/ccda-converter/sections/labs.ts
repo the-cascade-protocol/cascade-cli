@@ -16,10 +16,30 @@
 
 import { NS, contentHashedUri, tripleDateTime } from '../../fhir-converter/types.js';
 import { resolveCodeUri } from '../code-systems.js';
+import { buildEncounterRecord } from './encounters.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
+
+/**
+ * Recursively collect every <encounter> element in a C-CDA subtree. Real Epic
+ * lab organizers carry the visit an analysis was performed in as an <encounter>
+ * (classCode ENC) nested at varying depths — directly under the organizer or
+ * deep inside a member observation's entryRelationship chain. Each is a full
+ * encounter definition (id + type + effectiveTime), so the organizer's results
+ * can be linked to their visit (root 3.11 encounter completeness).
+ */
+function collectEncounters(node: any, out: any[]): void {
+  if (node == null || typeof node !== 'object') return;
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'encounter') {
+      const arr = Array.isArray(value) ? value : [value];
+      for (const e of arr) out.push(e);
+    }
+    if (value && typeof value === 'object') collectEncounters(value, out);
+  }
+}
 
 export const LABS_TEMPLATE_ID = '2.16.840.1.113883.10.20.22.2.3.1';
 export const LABS_LOINC = '30954-2';
@@ -130,6 +150,7 @@ function buildPanelQuads(
   importedAt: string,
   memberSubjects: string[],
   memberDates: string[],
+  encounterSubjects: string[],
 ): Quad[] {
   const codeEl = organizer?.code ?? {};
   const code = codeEl?.['@_code'] ?? codeEl?.code ?? '';
@@ -206,6 +227,13 @@ function buildPanelQuads(
     quads.push(makeQuad(subj, namedNode(NS.clinical + 'hasLabResult'), namedNode(memberSubject)));
   }
 
+  // Encounter edges: the visit(s) this panel was collected in, extracted from
+  // the organizer's own <encounter> definition(s). Same construction guarantee —
+  // each object is an encounter subject minted in the same batch.
+  for (const encounterSubject of encounterSubjects) {
+    quads.push(makeQuad(subj, namedNode(NS.clinical + 'hasEncounter'), namedNode(encounterSubject)));
+  }
+
   return quads;
 }
 
@@ -218,6 +246,10 @@ export function extractLabQuads(
 ): Quad[] {
   const quads: Quad[] = [];
   const stamp = importedAt ?? new Date().toISOString();
+  // Encounter records dedupe across the whole section: many organizers cite the
+  // same visit, so a given encounter subject is emitted once even though each
+  // panel that references it gets its own hasEncounter edge.
+  const emittedEncounterSubjects = new Set<string>();
 
   for (const entry of entries) {
     const organizer = entry?.organizer;
@@ -246,8 +278,31 @@ export function extractLabQuads(
       // CLUSTER organizers keep their members as standalone results (scope R2).
       const classCode = organizer?.['@_classCode'] ?? organizer?.classCode ?? '';
       if (classCode === 'BATTERY' && memberSubjects.length > 0) {
+        // The visit(s) this panel was collected in: mint one encounter record
+        // per distinct visit (deduped across the whole section) and link the
+        // panel to each with clinical:hasEncounter. Emitting encounters only
+        // here — alongside the panel that references them — keeps records and
+        // edges in lockstep, so every encounter record has an incoming edge and
+        // no orphan visit node is minted for an organizer with no results.
+        const rawEncounters: any[] = [];
+        collectEncounters(organizer, rawEncounters);
+        const encounterSubjects: string[] = [];
+        const seenThisOrganizer = new Set<string>();
+        for (const enc of rawEncounters) {
+          const built = buildEncounterRecord(enc, patientUri, sourceSystem);
+          if (!built) continue;
+          if (!seenThisOrganizer.has(built.subject)) {
+            seenThisOrganizer.add(built.subject);
+            encounterSubjects.push(built.subject);
+          }
+          if (!emittedEncounterSubjects.has(built.subject)) {
+            emittedEncounterSubjects.add(built.subject);
+            quads.push(...built.quads);
+          }
+        }
+
         quads.push(...buildPanelQuads(
-          organizer, patientUri, sourceSystem, stamp, memberSubjects, memberDates,
+          organizer, patientUri, sourceSystem, stamp, memberSubjects, memberDates, encounterSubjects,
         ));
       }
     } else if (entry?.observation) {

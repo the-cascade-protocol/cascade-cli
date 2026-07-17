@@ -22,7 +22,7 @@
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
     dct:modified "2026-07-16"^^xsd:date ;
-    owl:versionInfo "1.10" ;
+    owl:versionInfo "1.11" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -1301,6 +1301,19 @@ clinical:isActive a owl:DatatypeProperty ;
 # Changelog
 # ============================================================================
 #
+# Version 1.11 (2026-07-16)
+# - Widened clinical:indicationReference: dropped the restrictive
+#   rdfs:domain clinical:Medication in favor of the broad-domain comment +
+#   SHACL pattern the other cross-class edges already use. Reason: FHIR carries
+#   reasonReference on Procedure, MedicationRequest, MedicationAdministration,
+#   Encounter, and other event resources, not only medications. The importer
+#   (slice R3) materializes indication edges from Procedure (the common case in
+#   Synthea) and MedicationAdministration as well as MedicationRequest; the old
+#   domain would have made an OWL reasoner infer those Procedures are Medications.
+#   No SHACL change: IndicationReferenceEdgeShape never encoded the domain (it
+#   only checks sh:nodeKind sh:IRI), so existing pods are unaffected and the edge
+#   was already valid data. Purely a vocabulary-correctness fix.
+#
 # Version 1.10 (2026-07-16)
 # - Added clinical:hasEncounter ObjectProperty (range clinical:Encounter). The
 #   record-to-encounter edge for grouping clinical events by visit context.
@@ -1665,8 +1678,7 @@ clinical:hasEncounter a owl:ObjectProperty ;
 
 clinical:indicationReference a owl:ObjectProperty ;
     rdfs:label "Indication Reference"@en ;
-    rdfs:comment "Links a medication record to the condition (or observation) that is the clinical reason for it: the traversable edge alongside the free-text clinical:indication and clinical:reasonForUse literals, which are retained. FHIR alignment: MedicationRequest.reasonReference (R4), folded into MedicationRequest.reason as a CodeableReference in R5. The range is left open (rdfs:Resource) because FHIR permits either a Condition or an Observation as the reason; the common case, and what the importer materializes, is a clinical:Condition. SHACL constrains the object to an IRI without committing the class."@en ;
-    rdfs:domain clinical:Medication ;
+    rdfs:comment "Links a clinical record to the condition (or observation) that is the clinical reason for it: the traversable edge alongside the free-text clinical:indication and clinical:reasonForUse literals, which are retained. FHIR alignment: the reasonReference element (Reference(Condition|Observation|...)), which FHIR R4 carries on Procedure, MedicationRequest, MedicationAdministration, Encounter, and other event resources (see https://hl7.org/fhir/R4/procedure-definitions.html#Procedure.reasonReference), folded into a .reason CodeableReference in R5. The domain is intentionally broad (any record that carries a clinical reason), so it is left unrestricted here and constrained by SHACL rather than a restrictive rdfs:domain union, matching clinical:hasEncounter and the other cross-class properties in this vocabulary. The range is left open (rdfs:Resource) because FHIR permits either a Condition or an Observation as the reason; the common case, and what the importer materializes, is a clinical:Condition. SHACL constrains the object to an IRI without committing the class."@en ;
     rdfs:range rdfs:Resource .
 
 clinical:linkedCondition a owl:ObjectProperty ;
