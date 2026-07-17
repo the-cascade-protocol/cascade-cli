@@ -548,6 +548,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // --- Step 3: Reconcile or concatenate ---
       let mergedTurtle: string;
       let reconciliationSummary: object | undefined;
+      // Count of record-to-record edge objects the reconciler redirected from a
+      // merged-away subject to its survivor (R4, root backlog 3.13a).
+      let reconciledEdgeRewrites = 0;
 
       // Load existing pod data as an implicit source 0 when --reconcile-existing is set
       let existingInputs: ReconcilerInput[] = [];
@@ -569,6 +572,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         });
         mergedTurtle = reconcileResult.turtle;
         reconciliationSummary = reconcileResult.report.summary;
+        reconciledEdgeRewrites = reconcileResult.report.summary.edgeObjectsRewritten;
         printVerbose(`Reconciliation complete. Final records: ${reconcileResult.report.summary.finalRecordCount}`, globalOpts);
 
         // Persist unresolved conflicts to settings/pending-conflicts.ttl
@@ -886,6 +890,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           for (const [pred, c] of Object.entries(edgeResolution.byPredicate)) {
             console.log(`    - ${pred}: ${c.resolved} resolved` + (c.unresolved > 0 ? `, ${c.unresolved} dropped` : ''));
           }
+        }
+        if (reconciledEdgeRewrites > 0) {
+          console.log(`  Edges repaired on merge: ${reconciledEdgeRewrites} redirected to the surviving record`);
         }
         if (allWarnings.length > 0) {
           console.log(`  Warnings:         ${allWarnings.length}`);

@@ -61,6 +61,13 @@ export interface ReconcilerResult {
       finalRecordCount: number;
       /** Subjects preserved verbatim because their type is not reconcilable. */
       passthroughSubjects: number;
+      /**
+       * Record-to-record edge objects redirected from a merged-away (discarded)
+       * subject to its surviving canonical subject during serialization
+       * (R4, root backlog 3.13a). Zero when no referenced record was merged, e.g.
+       * a fresh single import. Excludes lineage predicates (dangling by design).
+       */
+      edgeObjectsRewritten: number;
     };
     transformations: object[];
     unresolvedConflicts: object[];
@@ -675,19 +682,113 @@ function resolveGroup(
 }
 
 // ---------------------------------------------------------------------------
+// Edge re-dangling repair (R4, root backlog 3.13a)
+// ---------------------------------------------------------------------------
+//
+// R1 resolved every record-to-record edge (clinical:hasLabResult,
+// coverage:relatedClaim, clinical:hasEncounter, clinical:indicationReference)
+// at conversion time, BEFORE reconciliation. The reconciler then merges
+// near-duplicate records and DISCARDS the losing subjects, but it never rewrote
+// other records' edge OBJECTS. So an edge pointing at a merged-away duplicate
+// re-dangled on every multi-source / --reconcile-existing path. This section
+// builds one discarded→canonical map over the run and rewrites matching edge
+// objects (in reconciled groups AND passthrough quads) to the survivor.
+
+/**
+ * Predicates whose objects deliberately point at PRE-merge (now non-materialized)
+ * subjects: they record the merge itself, so rewriting them to the survivor would
+ * erase the provenance they exist to capture (mergedFrom → self-loop). Excluded
+ * from the edge rewrite and dangling BY DESIGN per the ratified lineage decision
+ * (root backlog 3.13: exclude, do not tombstone). Any graph-query surface should
+ * treat these as references to historical, non-materialized subjects.
+ */
+const LINEAGE_PREDICATES: ReadonlySet<string> = new Set<string>([
+  NS.cascade + 'mergedFrom',
+  NS.prov + 'wasDerivedFrom',
+  NS.cascade + 'discardedRecords',
+  'https://ns.cascadeprotocol.org/workbench/v1#erasedRecord',
+]);
+
+/**
+ * Build the discarded-subject → canonical-subject map over every merge decision
+ * in the run (in-batch AND against existing pod content). A group of N>1 records
+ * collapses to one canonical (resolveGroup's winner); the other N−1 subjects are
+ * discarded and vanish from the output, so anything that referenced them must be
+ * redirected here. Self-entries (an exact re-import whose duplicate shares the
+ * canonical's content-hashed URI) are skipped so the map holds no A→A no-ops.
+ */
+export function buildDiscardedToCanonical(
+  groups: Group[],
+  resolutions: Resolution[],
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (let i = 0; i < groups.length; i++) {
+    const canonicalUri = resolutions[i].canonical.uri;
+    for (const r of groups[i].records) {
+      if (r.uri !== canonicalUri) map.set(r.uri, canonicalUri);
+    }
+  }
+  return map;
+}
+
+/**
+ * Resolve a subject to its FINAL canonical by following the map transitively
+ * (A→B→C lands on C), with a cycle guard so a malformed A→B→A can never spin.
+ * Returns the input unchanged when it was never discarded. A single reconciler
+ * run produces a star (each subject is assigned to exactly one group), not a
+ * chain, so the transitive walk is defensive: it covers a future multi-pass
+ * merge or pre-merged existing-pod content without ever looping.
+ */
+export function resolveCanonicalSubject(map: Map<string, string>, subject: string): string {
+  let current = subject;
+  const seen = new Set<string>([current]);
+  let next = map.get(current);
+  while (next !== undefined && next !== current) {
+    if (seen.has(next)) return next; // cycle: stop on the already-seen canonical
+    seen.add(next);
+    current = next;
+    next = map.get(current);
+  }
+  return current;
+}
+
+// ---------------------------------------------------------------------------
 // Serializer: resolved groups → Turtle
 // ---------------------------------------------------------------------------
 
 async function serializeGroups(
   groups: Group[],
   resolutions: Resolution[],
-  passthroughQuads: Quad[] = [],
-): Promise<string> {
+  passthroughQuads: Quad[],
+  discardedToCanonical: Map<string, string>,
+): Promise<{ turtle: string; edgeObjectsRewritten: number }> {
   return new Promise((resolve, reject) => {
     const writer = new Writer({ prefixes: TURTLE_PREFIXES });
+    let edgeObjectsRewritten = 0;
 
-    // Non-reconcilable subjects are preserved verbatim.
-    for (const q of passthroughQuads) writer.addQuad(q);
+    // Redirect a NamedNode edge object that points at a merged-away (discarded)
+    // subject to its surviving canonical subject; lineage predicates are left
+    // dangling by design (see LINEAGE_PREDICATES). Returns the IRI to serialize
+    // and counts every real redirect.
+    const rewriteEdgeIri = (predicate: string, objectValue: string): string => {
+      if (LINEAGE_PREDICATES.has(predicate)) return objectValue;
+      const canonical = resolveCanonicalSubject(discardedToCanonical, objectValue);
+      if (canonical !== objectValue) edgeObjectsRewritten++;
+      return canonical;
+    };
+
+    // Non-reconcilable subjects are preserved verbatim, except that an edge
+    // object pointing at a merged-away subject is redirected to the survivor.
+    for (const q of passthroughQuads) {
+      if (q.object.termType === 'NamedNode') {
+        const rewritten = rewriteEdgeIri(q.predicate.value, q.object.value);
+        if (rewritten !== q.object.value) {
+          writer.addQuad(makeQuad(q.subject, q.predicate, namedNode(rewritten)));
+          continue;
+        }
+      }
+      writer.addQuad(q);
+    }
 
     for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
@@ -696,8 +797,9 @@ async function serializeGroups(
 
       for (const [pred, vals] of res.canonical.properties) {
         for (const val of vals) {
-          const obj = val.value.startsWith('http') || val.value.startsWith('urn:')
-            ? namedNode(val.value)
+          const isIri = val.value.startsWith('http') || val.value.startsWith('urn:');
+          const obj = isIri
+            ? namedNode(rewriteEdgeIri(pred, val.value))
             : val.datatype
               ? literal(val.value, namedNode(val.datatype))
               : literal(val.value);
@@ -728,7 +830,7 @@ async function serializeGroups(
       }
     }
 
-    writer.end((err, result) => err ? reject(err) : resolve(result));
+    writer.end((err, result) => err ? reject(err) : resolve({ turtle: result, edgeObjectsRewritten }));
   });
 }
 
@@ -929,8 +1031,14 @@ export async function runReconciliation(
   const allowCrossProvenanceMerge = options?.allowCrossProvenanceMerge ?? true;
   const resolutions = groups.map(g => resolveGroup(g, trustScores, defaultTrust, allowCrossProvenanceMerge));
 
+  // Edge re-dangling repair (R4, root backlog 3.13a): map every subject discarded
+  // in a merge to its survivor, then rewrite matching edge objects at serialization.
+  const discardedToCanonical = buildDiscardedToCanonical(groups, resolutions);
+
   // Serialize
-  const turtle = await serializeGroups(groups, resolutions, passthroughQuads);
+  const { turtle, edgeObjectsRewritten } = await serializeGroups(
+    groups, resolutions, passthroughQuads, discardedToCanonical,
+  );
 
   // Build report
   let exactDups = 0, nearDups = 0, resolved = 0, unresolved = 0;
@@ -982,6 +1090,7 @@ export async function runReconciliation(
         conflictsUnresolved: unresolved,
         finalRecordCount: groups.length,
         passthroughSubjects: passthroughSubjectKeys.size,
+        edgeObjectsRewritten,
       },
       transformations,
       unresolvedConflicts: unresolvedList,
