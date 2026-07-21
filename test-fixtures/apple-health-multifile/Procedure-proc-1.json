@@ -1,0 +1,15 @@
+{
+  "resourceType": "Procedure",
+  "id": "proc-1",
+  "status": "completed",
+  "code": {
+    "coding": [
+      { "system": "http://snomed.info/sct", "code": "80146002", "display": "Appendectomy" }
+    ],
+    "text": "Appendectomy"
+  },
+  "performedDateTime": "2024-03-01T09:20:00Z",
+  "encounter": { "reference": "Encounter/enc-1" },
+  "reasonReference": [{ "reference": "Condition/cond-1" }],
+  "subject": { "reference": "Patient/pat-1" }
+}

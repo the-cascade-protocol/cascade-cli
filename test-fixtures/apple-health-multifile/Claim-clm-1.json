@@ -1,0 +1,18 @@
+{
+  "resourceType": "Claim",
+  "id": "clm-1",
+  "status": "active",
+  "use": "claim",
+  "type": {
+    "coding": [
+      { "system": "http://terminology.hl7.org/CodeSystem/claim-type", "code": "professional" }
+    ]
+  },
+  "patient": { "reference": "Patient/pat-1" },
+  "created": "2024-03-05",
+  "provider": { "display": "Test Clinic" },
+  "priority": { "coding": [{ "code": "normal" }] },
+  "insurance": [
+    { "sequence": 1, "focal": true, "coverage": { "display": "Test Coverage" } }
+  ]
+}
