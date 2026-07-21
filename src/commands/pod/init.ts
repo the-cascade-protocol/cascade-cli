@@ -9,7 +9,12 @@ import type { Command } from 'commander';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
-import { resolvePodDir, fileExists } from './helpers.js';
+import {
+  resolvePodDir,
+  fileExists,
+  applyCardIdentityName,
+  deriveCardIdentityName,
+} from './helpers.js';
 import {
   generateDek,
   buildPassphraseManifest,
@@ -273,7 +278,11 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
       'Encrypt pod resources at rest (AES-256-GCM, passphrase-wrapped). ' +
         'Passphrase is read from CASCADE_POD_PASSPHRASE or a hidden prompt.',
     )
-    .action(async (directory: string, options: { encrypt?: boolean }) => {
+    .option(
+      '--owner-name <name>',
+      "Set the pod owner's display name (foaf:name) in profile/card.ttl.",
+    )
+    .action(async (directory: string, options: { encrypt?: boolean; ownerName?: string }) => {
       const globalOpts = program.opts() as OutputOptions;
       const absDir = resolvePodDir(directory);
       const dirName = path.basename(absDir);
@@ -313,10 +322,17 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
           printVerbose(`Wrote encryption manifest: ${MANIFEST_RELATIVE_PATH}`, globalOpts);
         }
 
+        // When --owner-name is supplied, populate the card.ttl identity block via
+        // the shared helper so it matches import Step 9b byte-for-byte. Without the
+        // flag the template ships unchanged (commented-out placeholders).
+        const cardTtl = options.ownerName
+          ? applyCardIdentityName(PROFILE_CARD_TTL, deriveCardIdentityName(options.ownerName))
+          : PROFILE_CARD_TTL;
+
         // Write template files. Pod resources route through writeResource so they
         // are encrypted when a DEK is present; README.md stays plaintext (docs).
         writeResource(path.join(absDir, '.well-known', 'solid'), wellKnownSolid(absDir), dek);
-        writeResource(path.join(absDir, 'profile', 'card.ttl'), PROFILE_CARD_TTL, dek);
+        writeResource(path.join(absDir, 'profile', 'card.ttl'), cardTtl, dek);
         writeResource(path.join(absDir, 'profile', 'extended.ttl'), EXTENDED_PROFILE_TTL, dek);
         writeResource(path.join(absDir, 'settings', 'preferences'), PREFERENCES_TTL, dek);
         writeResource(path.join(absDir, 'settings', 'publicTypeIndex.ttl'), PUBLIC_TYPE_INDEX_TTL, dek);

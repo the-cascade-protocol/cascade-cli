@@ -191,6 +191,79 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
 // Re-export CASCADE_NAMESPACES for convenience
 export { CASCADE_NAMESPACES };
 
+// ─── Identity Helpers ────────────────────────────────────────────────────────
+
+/**
+ * Name parts written into a pod's profile/card.ttl identity block.
+ * `fullName` maps to foaf:name; the optional given/family parts map to
+ * foaf:givenName / foaf:familyName.
+ */
+export interface CardIdentityName {
+  fullName?: string;
+  givenName?: string;
+  familyName?: string;
+}
+
+/**
+ * Derive card.ttl identity parts from a single display-name string.
+ *
+ * A given/family split is only recorded when it is trivially derivable: exactly
+ * two whitespace-separated tokens (e.g. "Jane Doe"). A single token, or three or
+ * more tokens (middle names, particles, suffixes), records foaf:name only rather
+ * than guessing which token is the family name. Internal whitespace is collapsed
+ * to single spaces; an empty or whitespace-only string yields no parts.
+ */
+export function deriveCardIdentityName(name: string): CardIdentityName {
+  const fullName = name.trim().replace(/\s+/g, ' ');
+  if (!fullName) return {};
+  const tokens = fullName.split(' ');
+  if (tokens.length === 2) {
+    return { fullName, givenName: tokens[0], familyName: tokens[1] };
+  }
+  return { fullName };
+}
+
+/**
+ * Replace the commented-out identity placeholder block in a profile/card.ttl
+ * document with concrete foaf name triples, returning the updated Turtle. When
+ * no name parts are supplied the document is returned unchanged.
+ *
+ * Shared by `pod init --owner-name`, `pod profile set-name`, and `pod import`'s
+ * profile-population step so all three produce byte-identical card.ttl output.
+ *
+ * The section header rule uses U+2500 (box-drawings light horizontal); it must
+ * match the init.ts card template byte-for-byte for the replacement to apply.
+ */
+export function applyCardIdentityName(cardTurtle: string, name: CardIdentityName): string {
+  const nameFields: string[] = [];
+  if (name.fullName) nameFields.push(`    foaf:name "${name.fullName}" ;`);
+  if (name.givenName) nameFields.push(`    foaf:givenName "${name.givenName}" ;`);
+  if (name.familyName) nameFields.push(`    foaf:familyName "${name.familyName}" ;`);
+  if (nameFields.length === 0) return cardTurtle;
+  return cardTurtle.replace(
+    / {4}# ── Identity \(safe to make public\) ──\n( {4}#[^\n]*\n)*/,
+    `    # ── Identity (safe to make public) ──\n${nameFields.join('\n')}\n`,
+  );
+}
+
+/**
+ * Remove any populated foaf identity triples (name / givenName / familyName)
+ * that directly follow the card.ttl identity header, returning the block to a
+ * pristine state so a replacement name can be applied without duplicating
+ * triples. A card that still carries the commented-out placeholders is left
+ * untouched (those are comments, not populated triples).
+ *
+ * Used by `pod profile set-name` so re-naming an already-named pod is
+ * idempotent. `pod init` and import Step 9b only ever write a fresh card and do
+ * not call this.
+ */
+export function stripCardIdentityName(cardTurtle: string): string {
+  return cardTurtle.replace(
+    /( {4}# ── Identity \(safe to make public\) ──\n)(?: {4}foaf:(?:name|givenName|familyName) [^\n]*\n)+/,
+    '$1',
+  );
+}
+
 // ─── File-System Helpers ─────────────────────────────────────────────────────
 
 /**
@@ -328,8 +401,12 @@ export async function parseDataFile(filePath: string, dek?: Buffer): Promise<{
 
 /**
  * Read the patient profile from a pod to extract name, age, schema version.
+ *
+ * When `dek` is supplied, the profile resources are decrypted (combined
+ * AES-256-GCM layout) before parsing, so the owner name is resolvable on
+ * encrypted pods; otherwise they are read as plaintext.
  */
-export async function readPatientProfile(podDir: string): Promise<{
+export async function readPatientProfile(podDir: string, dek?: Buffer): Promise<{
   name?: string;
   age?: string;
   schemaVersion?: string;
@@ -349,7 +426,16 @@ export async function readPatientProfile(podDir: string): Promise<{
   for (const profilePath of profilePaths) {
     if (!(await fileExists(profilePath))) continue;
 
-    const result = await parseTurtleFile(profilePath);
+    let result;
+    if (dek) {
+      try {
+        result = parseTurtle(readResource(profilePath, dek), `file://${profilePath}`);
+      } catch {
+        continue;
+      }
+    } else {
+      result = await parseTurtleFile(profilePath);
+    }
     if (!result.success) continue;
 
     for (const subject of result.subjects) {
