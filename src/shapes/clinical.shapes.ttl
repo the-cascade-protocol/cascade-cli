@@ -1435,9 +1435,26 @@ clinical:LinkedConditionEdgeShape a sh:PropertyShape ;
     sh:message "clinical:linkedCondition should reference a clinical:Condition by IRI"@en ;
     sh:name "Linked Condition Edge"@en .
 
+clinical:ParsedIndicationReferenceEdgeShape a sh:PropertyShape ;
+    sh:targetSubjectsOf clinical:parsedIndicationReference ;
+    sh:path clinical:parsedIndicationReference ;
+    sh:nodeKind sh:IRI ;
+    sh:severity sh:Warning ;
+    sh:message "clinical:parsedIndicationReference should reference the matched reason record (a Condition or Observation) by IRI"@en ;
+    sh:name "Parsed Indication Reference Edge"@en .
+
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.12 (2026-07-20)
+# - Added ParsedIndicationReferenceEdgeShape for the new
+#   clinical:parsedIndicationReference subproperty. Warning-only and
+#   nodeKind-only, matching IndicationReferenceEdgeShape: the target class is
+#   deliberately NOT constrained, both because FHIR permits a Condition or an
+#   Observation as the reason and because cascade-cli validates each per-type
+#   pod file independently, so a cross-file sh:class check produces false
+#   positives (the v1.11 rationale, root 4.6a).
 #
 # Version 1.11 (2026-07-16)
 # - Removed the sh:class constraint from HasEncounterEdgeShape (clinical:Encounter)

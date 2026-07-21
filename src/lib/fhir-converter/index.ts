@@ -59,6 +59,7 @@ import { convertCascadeToFhir } from './cascade-to-fhir.js';
 import { EXCLUDED_TYPES } from './converters-passthrough.js';
 import { SOURCE_EHR_UNKNOWN } from './provenance.js';
 import { resolveReferenceEdges, type ConvertedResourceRef } from './reference-resolution.js';
+import { liftTrappedLiterals, type LiteralLiftSummary } from '../literal-lifting.js';
 
 // Re-export public types
 export type { InputFormat, OutputFormat, ConversionResult, BatchConversionResult };
@@ -84,6 +85,16 @@ export { convertCascadeToFhir } from './cascade-to-fhir.js';
  *                            When set it REPLACES any host-derived clinical:sourceEHR
  *                            and pre-empts the data-absent "unknown" fallback, so
  *                            all records from one account share one honest source.
+ * @param deferLiteralLifting Leave M1 parsed-indication placeholders in the
+ *                            returned quads for a caller that will run
+ *                            `liftTrappedLiterals` itself over a WIDER scope.
+ *                            `pod import` sets this because its conditions may
+ *                            live in other files of the same import or already
+ *                            in the pod (an Apple Health export is one resource
+ *                            per file, so an in-batch-only match finds nothing).
+ *                            Default false: resolve against this batch and drop
+ *                            what does not match, so no placeholder can ever
+ *                            reach serialized output on the standalone path.
  */
 export async function convert(
   input: string | Buffer,
@@ -93,6 +104,7 @@ export async function convert(
   sourceSystem?: string,
   passthroughMinimal = false,
   sourceEhrOverride?: string,
+  deferLiteralLifting = false,
 ): Promise<BatchConversionResult> {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -261,13 +273,24 @@ export async function convert(
       convertedResources,
     );
 
+    // M1 literal lifting. Unless the caller defers (see `deferLiteralLifting`),
+    // resolve parsed-indication placeholders against this batch's own condition
+    // records and drop the rest, so serialized output never carries one.
+    let finalQuads = resolvedQuads;
+    let literalLifting: LiteralLiftSummary | undefined;
+    if (!deferLiteralLifting) {
+      const lifted = liftTrappedLiterals(resolvedQuads);
+      finalQuads = lifted.quads;
+      literalLifting = lifted.stats;
+    }
+
     // Determine output format
     let output: string;
     if (outputSerialization === 'jsonld' || to === 'jsonld') {
-      const jsonLd = quadsToJsonLd(resolvedQuads, results[0]?.cascadeType ?? '');
+      const jsonLd = quadsToJsonLd(finalQuads, results[0]?.cascadeType ?? '');
       output = JSON.stringify(jsonLd, null, 2);
     } else {
-      output = await quadsToTurtle(resolvedQuads);
+      output = await quadsToTurtle(finalQuads);
     }
 
     return {
@@ -280,6 +303,7 @@ export async function convert(
       errors,
       results,
       edgeResolution,
+      literalLifting,
     };
   } else if (from === 'cascade' && to === 'fhir') {
     // Cascade -> FHIR

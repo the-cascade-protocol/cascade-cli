@@ -39,7 +39,12 @@ import {
   mintSubjectUri,
   contentHashedUri,
 } from './types.js';
-import { referencePlaceholder, pushEncounterEdge, pushIndicationEdges } from './reference-resolution.js';
+import {
+  referencePlaceholder,
+  pushEncounterEdge,
+  pushIndicationEdges,
+  pushParsedIndicationCandidates,
+} from './reference-resolution.js';
 
 // ---------------------------------------------------------------------------
 // Medication converter
@@ -137,9 +142,12 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
 
   // Cross-record edges (resolved/dropped at end of batch): the visit this
   // medication belongs to (MedicationRequest.encounter) and the condition(s) it
-  // was prescribed for (reasonReference). reasonCode free-text is left as is.
+  // was prescribed for (reasonReference). The coded reasonCode is captured as a
+  // retained clinical:indication literal plus a parsed-indication candidate
+  // (M1); it was dropped entirely before.
   pushEncounterEdge(quads, subjectUri, resource.encounter);
   pushIndicationEdges(quads, subjectUri, resource.reasonReference);
+  pushParsedIndicationCandidates(quads, subjectUri, resource.reasonCode);
 
   return {
     turtle: '',
@@ -646,8 +654,10 @@ export function convertProcedure(resource: any): ConversionResult & { _quads: Qu
   // Cross-record edges: the visit this procedure was performed in
   // (Procedure.encounter) and the condition(s) that indicated it
   // (Procedure.reasonReference — the bulk of the specimen's indication edges).
+  // Procedure.reasonCode rides the M1 parsed-indication path.
   pushEncounterEdge(quads, subjectUri, resource.encounter);
   pushIndicationEdges(quads, subjectUri, resource.reasonReference);
+  pushParsedIndicationCandidates(quads, subjectUri, resource.reasonCode);
 
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
 
@@ -945,6 +955,7 @@ export function convertMedicationAdministration(resource: any): ConversionResult
   // resource is FHIR .context (Encounter|EpisodeOfCare) and is out of R3b's
   // top-level .encounter scope, so it is intentionally not wired here.
   pushIndicationEdges(quads, subjectUri, resource.reasonReference);
+  pushParsedIndicationCandidates(quads, subjectUri, resource.reasonCode);
 
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
 

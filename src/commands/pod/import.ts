@@ -25,6 +25,13 @@ import { printResult, printError, printVerbose, type OutputOptions } from '../..
 import { convert } from '../../lib/fhir-converter/index.js';
 import { quadsToTurtle } from '../../lib/fhir-converter/types.js';
 import { runReconciliation, type ReconcilerInput } from '../../lib/reconciler.js';
+import {
+  liftTrappedLiterals,
+  emptyLiftSummary,
+  mergeLiftSummary,
+  liftSummaryTotal,
+  type LiteralLiftSummary,
+} from '../../lib/literal-lifting.js';
 import { detectSource, type FileSourceMeta, type CompletenessCheck } from '../../lib/source-adapters/registry.js';
 import {
   DATA_TYPES,
@@ -79,6 +86,13 @@ interface ImportReport {
     unresolved: number;
     byPredicate: Record<string, { resolved: number; unresolved: number }>;
   };
+  /**
+   * M1 trapped-literal lifting: relations that arrived as strings, turned into
+   * real edges. Run ONCE over the merged result (every input plus the existing
+   * pod) rather than per file, because the condition a literal names is
+   * routinely in another file of the same import or already in the pod.
+   */
+  literalLifting: LiteralLiftSummary;
   warnings: string[];
   dryRun: boolean;
 }
@@ -464,7 +478,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         if (Buffer.isBuffer(rawContent)) {
           // C-CDA ZIP or XML — convert natively
           printVerbose(`Converting C-CDA: ${filePath}`, globalOpts);
-          const result = await convert(rawContent, 'c-cda', 'cascade', 'turtle', systemName, passthroughMinimal);
+          const result = await convert(rawContent, 'c-cda', 'cascade', 'turtle', systemName, passthroughMinimal, undefined, true);
           if (!result.success) {
             // Skip an unconvertible file with a reason rather than aborting the
             // whole batch: in a folder import (e.g. an IHE XDM export's manifest,
@@ -496,7 +510,11 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
           // FHIR JSON
           printVerbose(`Converting FHIR JSON: ${filePath}`, globalOpts);
-          const result = await convert(content, 'fhir', 'cascade', 'turtle', systemName, passthroughMinimal, entry.source?.sourceEhr);
+          // deferLiteralLifting: the condition a reason names is routinely in
+          // another file of this import or already in the pod (an Apple Health
+          // export is one resource per file), so the lift runs once below over
+          // the merged result instead of per file.
+          const result = await convert(content, 'fhir', 'cascade', 'turtle', systemName, passthroughMinimal, entry.source?.sourceEhr, true);
           if (!result.success) {
             // Skip an unconvertible file with a reason rather than aborting the
             // whole batch: in a folder import (e.g. an IHE XDM export's manifest,
@@ -614,6 +632,28 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         printError(`Failed to parse merged Turtle: ${msg}`, globalOpts);
         process.exitCode = 1;
         return;
+      }
+
+      // --- Step 4b: Lift trapped literals into real edges (M1) ---
+      // Runs on the merged, reconciled quad set so a literal can resolve against
+      // a condition in ANY input file or already in the pod, and so every edge
+      // points at a surviving subject by construction (the reconciler has
+      // already collapsed merged-away records). Also the point where every
+      // parsed-indication placeholder is resolved or dropped, so none is ever
+      // written to disk.
+      const literalLifting: LiteralLiftSummary = emptyLiftSummary();
+      {
+        const merged = liftTrappedLiterals([...subjectQuads.values()].flat());
+        mergeLiftSummary(literalLifting, merged.stats);
+        // Re-group: the pass appends new edge quads and rewrites placeholders.
+        const regrouped = new Map<string, Quad[]>();
+        for (const q of merged.quads) {
+          const subj = q.subject.value;
+          let arr = regrouped.get(subj);
+          if (!arr) regrouped.set(subj, (arr = []));
+          arr.push(q);
+        }
+        subjectQuads = regrouped;
       }
 
       // Source breakdown by EHR of origin (clinical:sourceEHR), for the pre-import
@@ -845,6 +885,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         completeness,
         totalRecordsImported,
         edgeResolution,
+        literalLifting,
         warnings: allWarnings,
         dryRun,
       };
@@ -884,6 +925,24 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             (edgeResolution.unresolved > 0 ? `, ${edgeResolution.unresolved} dropped (reference target not in import)` : ''));
           for (const [pred, c] of Object.entries(edgeResolution.byPredicate)) {
             console.log(`    - ${pred}: ${c.resolved} resolved` + (c.unresolved > 0 ? `, ${c.unresolved} dropped` : ''));
+          }
+        }
+        if (liftSummaryTotal(literalLifting) > 0) {
+          const lc = literalLifting.linkedCondition;
+          const pi = literalLifting.parsedIndication;
+          console.log(`  Edges lifted from record text: ${lc.lifted + pi.lifted}`);
+          if (lc.lifted + lc.unresolved > 0) {
+            console.log(`    - clinical:linkedCondition: ${lc.lifted} lifted` +
+              (lc.unresolved > 0 ? `, ${lc.unresolved} unresolved (no such condition in pod)` : ''));
+          }
+          if (pi.lifted + pi.ambiguous + pi.unmatched + pi.redundant > 0) {
+            const notes = [
+              pi.ambiguous > 0 ? `${pi.ambiguous} ambiguous` : '',
+              pi.unmatched > 0 ? `${pi.unmatched} unmatched` : '',
+              pi.redundant > 0 ? `${pi.redundant} already stated` : '',
+            ].filter(Boolean).join(', ');
+            console.log(`    - clinical:parsedIndicationReference: ${pi.lifted} lifted` +
+              (notes ? ` (${notes})` : ''));
           }
         }
         if (reconciledEdgeRewrites > 0) {
