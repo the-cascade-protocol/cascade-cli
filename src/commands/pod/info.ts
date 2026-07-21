@@ -25,6 +25,8 @@ import {
   readPatientProfile,
   normalizeProvenanceLabel,
 } from './helpers.js';
+import { isPodEncrypted, resolveDek } from '../../lib/pod-encryption.js';
+import { passphraseFromEnv } from '../../lib/passphrase.js';
 
 // ── Extraction pipeline status helper ─────────────────────────────────────────
 
@@ -92,8 +94,24 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
       }
 
       try {
+        // On an encrypted pod, resolve the DEK from CASCADE_POD_PASSPHRASE so the
+        // owner name is decryptable for the display chain. Best-effort and
+        // non-interactive: no env var (or a wrong one) simply omits the name
+        // rather than prompting or failing this read-only command.
+        let profileDek: Buffer | undefined;
+        if (isPodEncrypted(absDir)) {
+          const pass = passphraseFromEnv();
+          if (pass) {
+            try {
+              profileDek = resolveDek(absDir, pass);
+            } catch {
+              /* wrong/absent key: proceed without the name */
+            }
+          }
+        }
+
         // Read patient profile info
-        const profile = await readPatientProfile(absDir);
+        const profile = await readPatientProfile(absDir, profileDek);
 
         // Scan data files
         const clinicalSummary: Array<{ file: string; records: number; provenance: string; label: string }> = [];
