@@ -37,6 +37,7 @@ import {
   DATA_TYPES,
   resolvePodDir,
   fileExists,
+  applyCardIdentityName,
 } from './helpers.js';
 import {
   writePendingConflicts,
@@ -821,17 +822,11 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
               const fullName = [givenName, familyName].filter(Boolean).join(' ');
 
               // ── card.ttl: public-safe name fields only ──
+              // Shared identity-block writer (also used by pod init --owner-name
+              // and pod profile set-name) so all three stay byte-consistent.
               if (fullName || givenName || familyName) {
                 const cardTurtle = readResource(cardPath, dek);
-                const nameFields: string[] = [];
-                if (fullName) nameFields.push(`    foaf:name "${fullName}" ;`);
-                if (givenName) nameFields.push(`    foaf:givenName "${givenName}" ;`);
-                if (familyName) nameFields.push(`    foaf:familyName "${familyName}" ;`);
-                // Replace the commented-out identity block
-                const updated = cardTurtle.replace(
-                  /    # ── Identity \(safe to make public\) ──\n(    #[^\n]*\n)*/,
-                  `    # ── Identity (safe to make public) ──\n${nameFields.join('\n')}\n`,
-                );
+                const updated = applyCardIdentityName(cardTurtle, { fullName, givenName, familyName });
                 writeResource(cardPath, updated, dek);
                 printVerbose('  Populated profile/card.ttl with name from PatientProfile', globalOpts);
               }
