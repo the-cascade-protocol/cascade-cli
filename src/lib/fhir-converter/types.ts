@@ -49,6 +49,12 @@ export interface BatchConversionResult {
   results: ConversionResult[];
   /** Present for FHIR -> Cascade conversions; tallies cross-record edges. */
   edgeResolution?: EdgeResolutionSummary;
+  /**
+   * M1 trapped-literal lifting tally. Present only when this call performed the
+   * lift itself; absent when the caller deferred it to a wider scope (see
+   * `convert`'s `deferLiteralLifting`), in which case the caller owns the tally.
+   */
+  literalLifting?: import('../literal-lifting.js').LiteralLiftSummary;
 }
 
 // ---------------------------------------------------------------------------

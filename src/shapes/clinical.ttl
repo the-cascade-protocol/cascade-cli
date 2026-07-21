@@ -21,8 +21,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-07-16"^^xsd:date ;
-    owl:versionInfo "1.11" ;
+    dct:modified "2026-07-20"^^xsd:date ;
+    owl:versionInfo "1.12" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -1301,6 +1301,27 @@ clinical:isActive a owl:DatatypeProperty ;
 # Changelog
 # ============================================================================
 #
+# Version 1.12 (2026-07-20)
+# - Added clinical:parsedIndicationReference ObjectProperty, a
+#   rdfs:subPropertyOf clinical:indicationReference. Records an indication edge
+#   the importer DERIVED by parsing a coded/free-text reason on the record
+#   (FHIR reasonCode, or a clinical:indication / clinical:reasonForUse literal)
+#   and matching it to a condition record in the same pod, as distinct from
+#   clinical:indicationReference proper, which restates an explicit
+#   reasonReference the source carried. Modeled as a subproperty so traversal
+#   over the superproperty returns both families while the predicate remains
+#   the machine-readable basis label; no reification and no RDF-star, keeping
+#   the edge a plain triple every existing consumer can already read.
+#   Motivation (M1 literal-lifting census, 2026-07-20): a real Apple Health
+#   provider export carried 0 reasonReference but 50 reasonCode instances on
+#   medication/procedure records, 25 of which resolve unambiguously to a
+#   condition record by exact coding identity. Those relations are dropped
+#   entirely today. Matching is code-first with a normalized-name fallback and
+#   unambiguous-only; ambiguous/unmatched are counted, never guessed.
+#   Deliberately NOT modeled with a confidence score: this is a deterministic
+#   parse of what the record says, not structural/temporal inference (which
+#   stays out of the pod and is computed at query time).
+#
 # Version 1.11 (2026-07-16)
 # - Widened clinical:indicationReference: dropped the restrictive
 #   rdfs:domain clinical:Medication in favor of the broad-domain comment +
@@ -1686,3 +1707,9 @@ clinical:linkedCondition a owl:ObjectProperty ;
     rdfs:comment "Links a condition to a related condition by IRI (e.g. a complication to its root condition). The traversable RDF replacement for the deprecated clinical:linkedConditionIds literal. FHIR R4 core has no first-class condition-to-condition reference; the closest precedents are the condition-dueTo and condition-occurredFollowing extensions (http://hl7.org/fhir/StructureDefinition/condition-dueTo). This property keeps the generic linked semantics of its predecessor; a more specific relation can be added later if a use case needs it."@en ;
     rdfs:domain clinical:Condition ;
     rdfs:range clinical:Condition .
+
+clinical:parsedIndicationReference a owl:ObjectProperty ;
+    rdfs:label "Parsed Indication Reference"@en ;
+    rdfs:comment "An indication edge the importer DERIVED by parsing a coded or free-text reason the record carries (FHIR reasonCode, or a clinical:indication / clinical:reasonForUse literal) and matching it to a condition record in the same pod. It is a subproperty of clinical:indicationReference, so one traversal over the superproperty returns both stated and parsed indications, while the predicate itself remains the machine-readable basis: clinical:indicationReference proper restates an explicit reference the SOURCE carried (FHIR reasonReference), whereas this property records a match the importer computed. Consumers must present the two differently (e.g. 'Indication' vs 'Indication (from record text)') because a parsed match is only as good as the code or wording it matched on. Matching is code-first (exact coding-system + code identity against the condition's own code) with a normalized-name fallback, and an edge is written only when exactly one candidate matches; ambiguous and unmatched reasons are counted in the import report, never guessed. This property carries no confidence score: it is a deterministic parse of what the record already says, NOT an inference from structure, timing, or co-occurrence, which remain out of scope for the importer and are computed at query time instead."@en ;
+    rdfs:subPropertyOf clinical:indicationReference ;
+    rdfs:range rdfs:Resource .

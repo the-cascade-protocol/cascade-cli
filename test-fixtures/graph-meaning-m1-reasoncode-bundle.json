@@ -1,0 +1,141 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:c0000000-0000-4000-8000-000000000001",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "c0000000-0000-4000-8000-000000000001",
+        "subject": { "reference": "urn:uuid:p0000000-0000-4000-8000-00000000000p" },
+        "code": {
+          "text": "Essential hypertension",
+          "coding": [
+            { "system": "http://snomed.info/sct", "code": "59621000", "display": "Essential hypertension" }
+          ]
+        },
+        "onsetDateTime": "2023-04-02T00:00:00Z"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:c0000000-0000-4000-8000-000000000002",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "c0000000-0000-4000-8000-000000000002",
+        "subject": { "reference": "urn:uuid:p0000000-0000-4000-8000-00000000000p" },
+        "code": {
+          "text": "Type 2 diabetes mellitus",
+          "coding": [
+            { "system": "http://snomed.info/sct", "code": "44054006", "display": "Type 2 diabetes mellitus" }
+          ]
+        },
+        "onsetDateTime": "2023-06-11T00:00:00Z"
+      }
+    },
+
+    {
+      "fullUrl": "urn:uuid:m0000000-0000-4000-8000-00000000000a",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "m0000000-0000-4000-8000-00000000000a",
+        "status": "active",
+        "intent": "order",
+        "subject": { "reference": "urn:uuid:p0000000-0000-4000-8000-00000000000p" },
+        "authoredOn": "2023-04-03T00:00:00Z",
+        "medicationCodeableConcept": {
+          "text": "lisinopril 10 MG oral tablet",
+          "coding": [
+            { "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "314076", "display": "lisinopril 10 MG oral tablet" }
+          ]
+        },
+        "reasonCode": [
+          {
+            "text": "High blood pressure",
+            "coding": [
+              { "system": "http://snomed.info/sct", "code": "59621000", "display": "Essential hypertension" }
+            ]
+          }
+        ]
+      }
+    },
+
+    {
+      "fullUrl": "urn:uuid:m0000000-0000-4000-8000-00000000000b",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "m0000000-0000-4000-8000-00000000000b",
+        "status": "active",
+        "intent": "order",
+        "subject": { "reference": "urn:uuid:p0000000-0000-4000-8000-00000000000p" },
+        "authoredOn": "2024-01-09T00:00:00Z",
+        "medicationCodeableConcept": {
+          "text": "warfarin sodium 5 MG oral tablet",
+          "coding": [
+            { "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "855332", "display": "warfarin sodium 5 MG oral tablet" }
+          ]
+        },
+        "reasonCode": [
+          {
+            "text": "Atrial fibrillation",
+            "coding": [
+              { "system": "http://snomed.info/sct", "code": "49436004", "display": "Atrial fibrillation" }
+            ]
+          }
+        ]
+      }
+    },
+
+    {
+      "fullUrl": "urn:uuid:m0000000-0000-4000-8000-00000000000c",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "m0000000-0000-4000-8000-00000000000c",
+        "status": "active",
+        "intent": "order",
+        "subject": { "reference": "urn:uuid:p0000000-0000-4000-8000-00000000000p" },
+        "authoredOn": "2023-06-12T00:00:00Z",
+        "medicationCodeableConcept": {
+          "text": "metformin 500 MG oral tablet",
+          "coding": [
+            { "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "860975", "display": "metformin 500 MG oral tablet" }
+          ]
+        },
+        "reasonReference": [{ "reference": "urn:uuid:c0000000-0000-4000-8000-000000000002" }],
+        "reasonCode": [
+          {
+            "text": "Type 2 diabetes mellitus",
+            "coding": [
+              { "system": "http://snomed.info/sct", "code": "44054006", "display": "Type 2 diabetes mellitus" }
+            ]
+          }
+        ]
+      }
+    },
+
+    {
+      "fullUrl": "urn:uuid:pr000000-0000-4000-8000-00000000000d",
+      "resource": {
+        "resourceType": "Procedure",
+        "id": "pr000000-0000-4000-8000-00000000000d",
+        "status": "completed",
+        "subject": { "reference": "urn:uuid:p0000000-0000-4000-8000-00000000000p" },
+        "performedDateTime": "2023-07-20T00:00:00Z",
+        "code": {
+          "text": "Diabetic retinopathy screening",
+          "coding": [
+            { "system": "http://snomed.info/sct", "code": "252779009", "display": "Diabetic retinopathy screening" }
+          ]
+        },
+        "reasonCode": [
+          {
+            "text": "Type 2 diabetes mellitus",
+            "coding": [
+              { "system": "http://hl7.org/fhir/sid/icd-9-cm", "code": "250.00", "display": "Diabetes mellitus" },
+              { "system": "http://snomed.info/sct", "code": "44054006", "display": "Type 2 diabetes mellitus" }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -43,7 +43,7 @@
 #   validation; sh:nodeKind sh:IRI kept). spec tag vocab/clinical-v1.11; slice R3.
 core=3.3
 health=2.4
-clinical=1.11
+clinical=1.12
 coverage=1.3
 checkup=3.2
 pots=1.4

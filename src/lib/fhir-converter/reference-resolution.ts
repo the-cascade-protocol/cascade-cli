@@ -20,7 +20,15 @@
  */
 
 import { DataFactory, type Quad } from 'n3';
-import { NS, type EdgeResolutionSummary } from './types.js';
+import {
+  NS,
+  CODING_SYSTEM_MAP,
+  codeableConceptText,
+  extractCodings,
+  tripleStr,
+  type EdgeResolutionSummary,
+} from './types.js';
+import { parsedIndicationPlaceholder } from '../literal-lifting.js';
 
 const { namedNode, quad: makeQuad } = DataFactory;
 
@@ -83,6 +91,67 @@ export function pushIndicationEdges(quads: Quad[], subjectUri: string, reasonRef
         ),
       );
     }
+  }
+}
+
+/**
+ * Capture a record's coded/free-text reason (`reasonCode`) so the M1 lifting
+ * pass can turn it into a real indication edge, and so the reason itself stops
+ * being discarded.
+ *
+ * Two things are emitted, and they are independent on purpose:
+ *
+ *  1. ONE `clinical:indication` literal carrying the reason's display text,
+ *     retained whether or not the reason ever resolves to a condition record, so
+ *     a reason the importer cannot match is still visible in the pod instead of
+ *     being dropped (which is what happened to every `reasonCode` before M1).
+ *     Multiple reasons are joined into a single literal because
+ *     `clinical:MedicationShape` constrains `clinical:indication` to
+ *     `sh:maxCount 1`.
+ *  2. One placeholder edge per reason on `clinical:parsedIndicationReference`,
+ *     carrying that reason's fully-qualified code IRIs. `liftTrappedLiterals`
+ *     rewrites each to the matched condition's subject, or drops and counts it.
+ *
+ * `reasonReference` (the reference the source states explicitly) is handled
+ * separately by `pushIndicationEdges` and always wins: the lifting pass skips a
+ * parsed restatement of an indication the record already states.
+ */
+export function pushParsedIndicationCandidates(
+  quads: Quad[],
+  subjectUri: string,
+  reasonCode: unknown,
+): void {
+  if (!reasonCode) return;
+  const concepts = Array.isArray(reasonCode) ? reasonCode : [reasonCode];
+
+  const texts: string[] = [];
+  const placeholders: string[] = [];
+
+  for (const cc of concepts) {
+    if (!cc) continue;
+    const text = codeableConceptText(cc) ?? '';
+    const codes: string[] = [];
+    for (const coding of extractCodings(cc)) {
+      const nsUri = CODING_SYSTEM_MAP[coding.system];
+      // Unmappable systems (e.g. ICD-9) are skipped: a code that cannot be
+      // qualified to a Cascade code IRI can never match a condition's own code.
+      if (nsUri) codes.push(nsUri + coding.code);
+    }
+    if (text && !texts.includes(text)) texts.push(text);
+    if (codes.length > 0 || text) placeholders.push(parsedIndicationPlaceholder(codes, text));
+  }
+
+  if (texts.length > 0) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'indication', texts.join('; ')));
+  }
+  for (const p of placeholders) {
+    quads.push(
+      makeQuad(
+        namedNode(subjectUri),
+        namedNode(NS.clinical + 'parsedIndicationReference'),
+        namedNode(p),
+      ),
+    );
   }
 }
 
