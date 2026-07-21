@@ -1,0 +1,16 @@
+{
+  "resourceType": "ExplanationOfBenefit",
+  "id": "eob-1",
+  "status": "active",
+  "use": "claim",
+  "type": {
+    "coding": [
+      { "system": "http://terminology.hl7.org/CodeSystem/claim-type", "code": "professional" }
+    ]
+  },
+  "patient": { "reference": "Patient/pat-1" },
+  "created": "2024-03-10",
+  "outcome": "complete",
+  "insurer": { "display": "Test Insurer" },
+  "claim": { "reference": "Claim/clm-1" }
+}

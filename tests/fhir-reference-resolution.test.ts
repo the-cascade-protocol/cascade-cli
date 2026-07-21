@@ -14,18 +14,22 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { Parser } from 'n3';
+import { DataFactory, Parser } from 'n3';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 import { convert } from '../src/lib/fhir-converter/index.js';
+import { NS } from '../src/lib/fhir-converter/types.js';
 import {
   parseReference,
   referencePlaceholder,
   isReferencePlaceholder,
   decodeReferencePlaceholder,
+  buildResourceRefsFromQuads,
 } from '../src/lib/fhir-converter/reference-resolution.js';
+
+const { namedNode, literal, quad: makeQuad } = DataFactory;
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const FIXTURE = resolve(__dirname, '../test-fixtures/reference-resolution-bundle.json');
@@ -136,5 +140,67 @@ describe('cross-record edge resolution over a trimmed bundle (R1)', () => {
 
     expect(edgeObjects(a.output)).toEqual(edgeObjects(b.output));
     expect(edgeObjects(a.output).length).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildResourceRefsFromQuads (R5, root 2.11): rebuild the resolution index from
+// serialized pod quads for the end-of-import (once-per-invocation) pass.
+// ---------------------------------------------------------------------------
+
+describe('buildResourceRefsFromQuads (R5 index reconstruction)', () => {
+  const S1 = 'urn:uuid:1111';
+  const S2 = 'urn:uuid:2222';
+
+  it('indexes a record by its persisted source id and subject', () => {
+    const quads = [
+      makeQuad(namedNode(S1), namedNode(NS.rdf + 'type'), namedNode(NS.health + 'LabResultRecord')),
+      makeQuad(namedNode(S1), namedNode(NS.health + 'sourceRecordId'), literal('obs-1')),
+    ];
+    expect(buildResourceRefsFromQuads(quads)).toEqual([
+      { resourceType: '', id: 'obs-1', subject: S1 },
+    ]);
+  });
+
+  it('fills resourceType from fhirResourceType when the record carries it', () => {
+    const quads = [
+      makeQuad(namedNode(S1), namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'LaboratoryReport')),
+      makeQuad(namedNode(S1), namedNode(NS.clinical + 'sourceRecordId'), literal('dr-1')),
+      makeQuad(namedNode(S1), namedNode(NS.clinical + 'fhirResourceType'), literal('DiagnosticReport')),
+    ];
+    expect(buildResourceRefsFromQuads(quads)).toEqual([
+      { resourceType: 'DiagnosticReport', id: 'dr-1', subject: S1 },
+    ]);
+  });
+
+  it('skips non-record subjects (no rdf:type) and records with no source id', () => {
+    const quads = [
+      // A record with a type but no source id -> not indexable (no join key).
+      makeQuad(namedNode(S1), namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Encounter')),
+      // A bare subject that is not a record (an edge object leftover) -> ignored.
+      makeQuad(namedNode(S2), namedNode(NS.health + 'sourceRecordId'), literal('orphan')),
+    ];
+    expect(buildResourceRefsFromQuads(quads)).toEqual([]);
+  });
+
+  it('feeds resolveReferenceEdges so a relative reference resolves by bare id', async () => {
+    // Rebuild the index from a target record, then resolve a placeholder edge
+    // that points at it with a typed relative reference.
+    const { resolveReferenceEdges } = await import('../src/lib/fhir-converter/reference-resolution.js');
+    const quads = [
+      makeQuad(namedNode(S1), namedNode(NS.rdf + 'type'), namedNode(NS.health + 'LabResultRecord')),
+      makeQuad(namedNode(S1), namedNode(NS.health + 'sourceRecordId'), literal('obs-9')),
+      makeQuad(
+        namedNode(S2),
+        namedNode(NS.clinical + 'hasLabResult'),
+        namedNode(referencePlaceholder('Observation/obs-9')),
+      ),
+    ];
+    const refs = buildResourceRefsFromQuads(quads);
+    const { quads: out, stats } = resolveReferenceEdges(quads, refs);
+    expect(stats.resolved).toBe(1);
+    expect(stats.unresolved).toBe(0);
+    const edge = out.find((q) => q.predicate.value === NS.clinical + 'hasLabResult');
+    expect(edge?.object.value).toBe(S1);
   });
 });

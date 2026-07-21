@@ -1,0 +1,13 @@
+{
+  "resourceType": "Encounter",
+  "id": "enc-1",
+  "status": "finished",
+  "class": {
+    "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+    "code": "AMB",
+    "display": "ambulatory"
+  },
+  "type": [{ "text": "Office Visit" }],
+  "subject": { "reference": "Patient/pat-1" },
+  "period": { "start": "2024-03-01T09:00:00Z", "end": "2024-03-01T09:30:00Z" }
+}

@@ -24,6 +24,10 @@ import type { Quad } from 'n3';
 import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
 import { convert } from '../../lib/fhir-converter/index.js';
 import { quadsToTurtle } from '../../lib/fhir-converter/types.js';
+import {
+  resolveReferenceEdges,
+  buildResourceRefsFromQuads,
+} from '../../lib/fhir-converter/reference-resolution.js';
 import { runReconciliation, type ReconcilerInput } from '../../lib/reconciler.js';
 import {
   liftTrappedLiterals,
@@ -510,11 +514,14 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
           // FHIR JSON
           printVerbose(`Converting FHIR JSON: ${filePath}`, globalOpts);
-          // deferLiteralLifting: the condition a reason names is routinely in
+          // deferLiteralLifting + deferReferenceResolution: the condition a
+          // reason names, and the record a reference points at, are routinely in
           // another file of this import or already in the pod (an Apple Health
-          // export is one resource per file), so the lift runs once below over
-          // the merged result instead of per file.
-          const result = await convert(content, 'fhir', 'cascade', 'turtle', systemName, passthroughMinimal, entry.source?.sourceEhr, true);
+          // export is one resource per file), so BOTH the lift and the
+          // cross-record reference resolution run once below over the merged
+          // result instead of per file (root backlog 2.11). Per-file resolution
+          // would drop every cross-file edge as unresolved.
+          const result = await convert(content, 'fhir', 'cascade', 'turtle', systemName, passthroughMinimal, entry.source?.sourceEhr, true, true);
           if (!result.success) {
             // Skip an unconvertible file with a reason rather than aborting the
             // whole batch: in a folder import (e.g. an IHE XDM export's manifest,
@@ -632,6 +639,42 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         printError(`Failed to parse merged Turtle: ${msg}`, globalOpts);
         process.exitCode = 1;
         return;
+      }
+
+      // --- Step 4a2: Resolve cross-record reference edges (R5, root 2.11) ---
+      // The FHIR converter deferred reference resolution (each file was
+      // converted separately, and an Apple Health export is one resource per
+      // file, so a reference's target was almost never in the same batch). Every
+      // placeholder edge therefore survived into this merged, reconciled quad
+      // set. Resolve them ONCE here, over the whole import: build the
+      // (resourceType, id) -> subject index from the merged records' persisted
+      // source ids and rewrite each placeholder to the referenced record's real
+      // subject, or drop-and-count it when the target is genuinely absent (e.g.
+      // an Apple Health `.encounter` reference when the export carries no
+      // Encounter resource). Building the index from the merged quads keeps this
+      // reconciliation-safe: a record merged away is not in the index, so no
+      // edge can resolve to a discarded subject. Runs before the literal lift so
+      // both placeholder families are cleared before anything is written; a
+      // no-op for the C-CDA path, which already resolved its edges in-batch.
+      {
+        const flat = [...subjectQuads.values()].flat();
+        const refs = buildResourceRefsFromQuads(flat);
+        const { quads: resolvedQuads, stats: refStats } = resolveReferenceEdges(flat, refs);
+        edgeResolution.resolved += refStats.resolved;
+        edgeResolution.unresolved += refStats.unresolved;
+        for (const [pred, c] of Object.entries(refStats.byPredicate)) {
+          const acc = (edgeResolution.byPredicate[pred] ??= { resolved: 0, unresolved: 0 });
+          acc.resolved += c.resolved;
+          acc.unresolved += c.unresolved;
+        }
+        const regrouped = new Map<string, Quad[]>();
+        for (const q of resolvedQuads) {
+          const subj = q.subject.value;
+          let arr = regrouped.get(subj);
+          if (!arr) regrouped.set(subj, (arr = []));
+          arr.push(q);
+        }
+        subjectQuads = regrouped;
       }
 
       // --- Step 4b: Lift trapped literals into real edges (M1) ---
