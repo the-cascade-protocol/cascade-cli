@@ -213,6 +213,75 @@ export interface ConvertedResourceRef {
 }
 
 /**
+ * Predicates that carry a record's source FHIR id (`resource.id`), the join key
+ * a `Reference.reference` string points at. Every importer path persists one of
+ * these on a record, so a resolution index can be rebuilt from serialized pod
+ * quads without the conversion-time `ConvertedResourceRef[]` in hand.
+ */
+const SOURCE_ID_PREDICATES = new Set([
+  NS.health + 'sourceRecordId',
+  NS.clinical + 'sourceRecordId',
+  NS.coverage + 'sourceRecordId',
+  NS.cascade + 'sourceRecordId',
+  NS.clinical + 'fhirResourceId',
+]);
+
+/** Predicates that carry a record's source FHIR resourceType, when persisted. */
+const SOURCE_TYPE_PREDICATES = new Set([
+  NS.clinical + 'fhirResourceType',
+  NS.cascade + 'fhirResourceType',
+]);
+
+/**
+ * Rebuild the `(resourceType, id) -> subject` resolution index from a set of
+ * already-minted record quads, for a caller that resolves reference edges ONCE
+ * per import invocation rather than per conversion batch (root backlog 2.11).
+ *
+ * The per-batch path passes the conversion-time `ConvertedResourceRef[]`
+ * directly. `pod import`, by contrast, converts each file separately (an Apple
+ * Health export is one FHIR resource per file, so a reference's target is almost
+ * never in the same batch) and then resolves across the merged, reconciled quad
+ * set. Building the index from THOSE quads (not an accumulated conversion-time
+ * list) is what keeps resolution reconciliation-safe: a record the reconciler
+ * merged away is simply not in the merged quads, so its id is absent from the
+ * index and a reference to it drops-and-counts instead of resolving to a
+ * discarded subject. The join key is the persisted `sourceRecordId` literal
+ * (the 2026-07-16 audit measured that join at 100%).
+ *
+ * Only subjects that are records (carry an `rdf:type`) and persist a source id
+ * are indexed; `resourceType` is filled from `fhirResourceType` when the record
+ * carries it (documents, passthrough) and left empty otherwise, exactly as
+ * `resolveReferenceEdges` tolerates (it falls back to the bare-id key, which is
+ * how `urn:uuid:` and same-type relative references resolve).
+ */
+export function buildResourceRefsFromQuads(quads: Quad[]): ConvertedResourceRef[] {
+  const recordSubjects = new Set<string>();
+  for (const q of quads) {
+    if (q.predicate.value === NS.rdf + 'type') recordSubjects.add(q.subject.value);
+  }
+
+  const ids = new Map<string, string>();
+  const types = new Map<string, string>();
+  for (const q of quads) {
+    const s = q.subject.value;
+    if (!recordSubjects.has(s)) continue;
+    if (q.object.termType !== 'Literal') continue;
+    const p = q.predicate.value;
+    if (SOURCE_ID_PREDICATES.has(p)) {
+      if (!ids.has(s)) ids.set(s, q.object.value);
+    } else if (SOURCE_TYPE_PREDICATES.has(p)) {
+      if (!types.has(s)) types.set(s, q.object.value);
+    }
+  }
+
+  const refs: ConvertedResourceRef[] = [];
+  for (const [subject, id] of ids) {
+    refs.push({ resourceType: types.get(subject) ?? '', id, subject });
+  }
+  return refs;
+}
+
+/**
  * Rewrite every reference-placeholder object in `quads` to the referenced
  * record's real minted subject, using an index built over `resources`. An edge
  * is kept only when it resolves; an unresolvable reference (target absent from

@@ -95,6 +95,20 @@ export { convertCascadeToFhir } from './cascade-to-fhir.js';
  *                            Default false: resolve against this batch and drop
  *                            what does not match, so no placeholder can ever
  *                            reach serialized output on the standalone path.
+ * @param deferReferenceResolution Leave cross-record reference-edge placeholders
+ *                            (`clinical:hasLabResult`, `clinical:hasEncounter`,
+ *                            `clinical:indicationReference`, `coverage:relatedClaim`)
+ *                            in the returned quads for a caller that will run
+ *                            `resolveReferenceEdges` itself over a WIDER scope
+ *                            (root backlog 2.11). Same rationale as
+ *                            `deferLiteralLifting`: a reference's target is
+ *                            routinely in another file of the same import or
+ *                            already in the pod, so `pod import` accumulates the
+ *                            index across every converted file and resolves once
+ *                            at end of import. Default false: resolve against
+ *                            this batch and drop what does not match, so no
+ *                            placeholder can ever reach serialized output on the
+ *                            standalone `cascade convert` path.
  */
 export async function convert(
   input: string | Buffer,
@@ -105,6 +119,7 @@ export async function convert(
   passthroughMinimal = false,
   sourceEhrOverride?: string,
   deferLiteralLifting = false,
+  deferReferenceResolution = false,
 ): Promise<BatchConversionResult> {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -268,10 +283,20 @@ export async function convert(
     // each placeholder object is rewritten to the referenced record's real
     // subject IRI, or the edge is dropped and counted if the target is absent.
     // Runs over the full quad set so every edge family goes through one path.
-    const { quads: resolvedQuads, stats: edgeResolution } = resolveReferenceEdges(
-      allQuads,
-      convertedResources,
-    );
+    //
+    // Unless the caller defers (see `deferReferenceResolution`): then the
+    // placeholders are left intact for `pod import` to resolve once over the
+    // merged, reconciled result, because a reference's target is routinely in
+    // another file of the same import (root backlog 2.11). On the standalone
+    // path the default resolves here and drops what does not match, so no
+    // placeholder ever reaches serialized output.
+    let resolvedQuads = allQuads;
+    let edgeResolution: import('./types.js').EdgeResolutionSummary | undefined;
+    if (!deferReferenceResolution) {
+      const resolved = resolveReferenceEdges(allQuads, convertedResources);
+      resolvedQuads = resolved.quads;
+      edgeResolution = resolved.stats;
+    }
 
     // M1 literal lifting. Unless the caller defers (see `deferLiteralLifting`),
     // resolve parsed-indication placeholders against this batch's own condition
