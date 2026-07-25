@@ -57,6 +57,7 @@ import {
   PodDecryptError,
 } from '../../lib/pod-encryption.js';
 import { obtainPassphrase } from '../../lib/passphrase.js';
+import { classifyImportInput, isPathInsidePod } from '../../lib/import-input.js';
 
 // ---------------------------------------------------------------------------
 // Import report type
@@ -461,10 +462,35 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         } catch {
           // stat failed; let the read below produce the precise error.
         }
-        const isZip = absPath.toLowerCase().endsWith('.zip') || absPath.toLowerCase().endsWith('.xml');
-        let rawContent: string | Buffer;
+        // Read the input. Almost every input is an EXTERNAL document (a C-CDA
+        // the user picked out of Downloads) and is plaintext on disk. The one
+        // exception is an input that resolves INSIDE the destination pod — an
+        // app writing a bundle to `<pod>/analysis/<id>.ttl` and importing the
+        // file it just wrote. That is a pod resource, so on an encrypted pod it
+        // must be read through the DEK we already resolved above (root 4.23).
+        // Containment is decided by the filesystem, not by a flag, because a
+        // flag would eventually be passed for a genuinely external file.
+        let rawBytes: Buffer;
         try {
-          rawContent = isZip ? await fs.readFile(absPath) : await fs.readFile(absPath, 'utf-8');
+          let decrypted: string | undefined;
+          if (dek && isPathInsidePod(absPath, podDir)) {
+            try {
+              decrypted = readResource(absPath, dek);
+              printVerbose(`Input is a pod resource; decrypted with the pod DEK: ${filePath}`, globalOpts);
+            } catch (e) {
+              if (!(e instanceof PodDecryptError)) throw e;
+              // A pod-internal resource that does not authenticate under the pod
+              // DEK is a plaintext leftover (`pod encrypt` seals only some
+              // containers today — root 4.25). Read it as plaintext rather than
+              // failing an import that would otherwise succeed.
+              printVerbose(
+                `Pod resource ${filePath} did not decrypt under the pod DEK; reading it as plaintext.`,
+                globalOpts,
+              );
+            }
+          }
+          rawBytes =
+            decrypted !== undefined ? Buffer.from(decrypted, 'utf-8') : await fs.readFile(absPath);
         } catch {
           printError(`Cannot read file: ${absPath}`, globalOpts);
           process.exitCode = 1;
@@ -478,11 +504,16 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         let turtleContent: string;
         let resourceCount = 0;
 
-        // Detect C-CDA ZIP/XML vs FHIR JSON vs Turtle
-        if (Buffer.isBuffer(rawContent)) {
+        // Route C-CDA ZIP/XML vs FHIR JSON vs Turtle. A recognized extension is
+        // the fast path; a missing or unrecognized extension is decided by
+        // sniffing the bytes, because real portal downloads arrive
+        // extension-less and an IHE XDM zip that reaches the Turtle parser dies
+        // with `Unexpected "PK..."` (root 2.8).
+        const inputKind = classifyImportInput(absPath, rawBytes);
+        if (inputKind === 'ccda') {
           // C-CDA ZIP or XML — convert natively
           printVerbose(`Converting C-CDA: ${filePath}`, globalOpts);
-          const result = await convert(rawContent, 'c-cda', 'cascade', 'turtle', systemName, passthroughMinimal, undefined, true);
+          const result = await convert(rawBytes, 'c-cda', 'cascade', 'turtle', systemName, passthroughMinimal, undefined, true);
           if (!result.success) {
             // Skip an unconvertible file with a reason rather than aborting the
             // whole batch: in a folder import (e.g. an IHE XDM export's manifest,
@@ -508,10 +539,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             }
           }
         } else {
-          const content = rawContent;
-          const trimmed = content.trim();
-        // Detect FHIR JSON vs Turtle
-        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          const content = rawBytes.toString('utf-8');
+        if (inputKind === 'fhir-json') {
           // FHIR JSON
           printVerbose(`Converting FHIR JSON: ${filePath}`, globalOpts);
           // deferLiteralLifting + deferReferenceResolution: the condition a
