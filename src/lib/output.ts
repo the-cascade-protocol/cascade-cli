@@ -69,6 +69,21 @@ export function printError(message: string, opts: OutputOptions): void {
 }
 
 /**
+ * Print a warning to stderr, ALWAYS. Not gated on --verbose.
+ *
+ * For facts a user needs even when the command succeeds: "this ran, and here is
+ * something about the result you would not otherwise know". A warning that only
+ * appears under --verbose is a warning nobody reads.
+ */
+export function printWarning(message: string, opts: OutputOptions): void {
+  if (opts.json) {
+    console.error(JSON.stringify({ warning: message }));
+  } else {
+    console.error(`WARNING: ${message}`);
+  }
+}
+
+/**
  * Print a verbose/debug message (only if verbose mode is enabled).
  */
 export function printVerbose(message: string, opts: OutputOptions): void {
