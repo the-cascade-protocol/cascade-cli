@@ -21,7 +21,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Parser } from 'n3';
 import type { Quad } from 'n3';
-import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
+import { printResult, printError, printVerbose, printWarning, type OutputOptions } from '../../lib/output.js';
 import { convert } from '../../lib/fhir-converter/index.js';
 import { quadsToTurtle } from '../../lib/fhir-converter/types.js';
 import {
@@ -480,11 +480,20 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             } catch (e) {
               if (!(e instanceof PodDecryptError)) throw e;
               // A pod-internal resource that does not authenticate under the pod
-              // DEK is a plaintext leftover (`pod encrypt` seals only some
-              // containers today — root 4.25). Read it as plaintext rather than
-              // failing an import that would otherwise succeed.
-              printVerbose(
-                `Pod resource ${filePath} did not decrypt under the pod DEK; reading it as plaintext.`,
+              // DEK is a plaintext leftover. `pod encrypt` now walks the whole
+              // pod (root 4.25), so a pod sealed by THIS build has none, but
+              // three sources still produce them: pods sealed by an older CLI,
+              // the MCP surface's plaintext writes (root 3.36), and any file a
+              // migration pass deliberately left alone. Read it as plaintext
+              // rather than failing an import that would otherwise succeed.
+              //
+              // This announces itself as a WARNING, not a verbose line: "a file
+              // in your encrypted pod was not encrypted" is a trust-relevant
+              // fact, and a user who never passes --verbose is exactly the user
+              // who needs to hear it. Delete the whole fallback once 3.36 lands
+              // and no writer can leave plaintext in a sealed pod.
+              printWarning(
+                `${filePath} is inside an encrypted pod but was NOT encrypted; it was read as plaintext.`,
                 globalOpts,
               );
             }

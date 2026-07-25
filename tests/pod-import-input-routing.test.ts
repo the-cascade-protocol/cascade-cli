@@ -51,19 +51,26 @@ function buildProgram(): Command {
   return program;
 }
 
-async function runCli(args: string[]): Promise<{ stdout: string; exitCode: number }> {
+/**
+ * stdout and stderr are captured SEPARATELY. They used to be merged, which is
+ * fine for text mode and wrong under `--json`: the result object goes to stdout
+ * and diagnostics go to stderr, so merging them made a valid `--json` payload
+ * unparseable the moment the command also warned about something.
+ */
+async function runCli(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const program = buildProgram();
-  const chunks: string[] = [];
+  const out: string[] = [];
+  const err: string[] = [];
   const logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
-    chunks.push(a.map(String).join(' '));
+    out.push(a.map(String).join(' '));
   });
   const errSpy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
-    chunks.push(a.map(String).join(' '));
+    err.push(a.map(String).join(' '));
   });
   const writeSpy = vi
     .spyOn(process.stdout, 'write')
     .mockImplementation((chunk: unknown): boolean => {
-      chunks.push(typeof chunk === 'string' ? chunk : String(chunk));
+      out.push(typeof chunk === 'string' ? chunk : String(chunk));
       return true;
     });
   process.exitCode = 0;
@@ -76,7 +83,7 @@ async function runCli(args: string[]): Promise<{ stdout: string; exitCode: numbe
   }
   const exitCode = typeof process.exitCode === 'number' ? process.exitCode : 0;
   process.exitCode = 0;
-  return { stdout: chunks.join('\n'), exitCode };
+  return { stdout: out.join('\n'), stderr: err.join('\n'), exitCode };
 }
 
 // ─── Synthetic documents ──────────────────────────────────────────────────────
@@ -422,7 +429,7 @@ describe('pod import: extension-less inputs (root 2.8)', () => {
 
     const imp = await runCli(['--json', 'pod', 'import', pod, capture]);
     expect(imp.exitCode).toBe(0);
-    expect(imp.stdout).not.toContain('Unexpected "PK');
+    expect(imp.stdout + imp.stderr).not.toContain('Unexpected "PK');
 
     const report = JSON.parse(imp.stdout);
     expect(report.totalRecordsImported).toBeGreaterThan(0);
@@ -547,6 +554,9 @@ describe('pod import: pod-internal resources on an encrypted pod (root 4.23)', (
     const imp = await runCli(['--json', 'pod', 'import', pod, bundlePath]);
     expect(imp.exitCode).toBe(0);
     expect(JSON.parse(imp.stdout).totalRecordsImported).toBe(2);
+    // "A file in your encrypted pod was not encrypted" is trust-relevant, so it
+    // is a warning on stderr rather than a --verbose-only line nobody reads.
+    expect(imp.stderr).toContain('was NOT encrypted');
   }, TEST_TIMEOUT_MS);
 
   it('imports a pod-internal bundle on a PLAINTEXT pod (no DEK, no change)', async () => {
@@ -562,5 +572,8 @@ describe('pod import: pod-internal resources on an encrypted pod (root 4.23)', (
     const imp = await runCli(['--json', 'pod', 'import', pod, bundlePath]);
     expect(imp.exitCode).toBe(0);
     expect(JSON.parse(imp.stdout).totalRecordsImported).toBe(2);
+    // A plaintext pod has no encryption expectation to violate, so there is
+    // nothing to warn about here.
+    expect(imp.stderr).not.toContain('was NOT encrypted');
   }, TEST_TIMEOUT_MS);
 });
