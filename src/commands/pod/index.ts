@@ -42,7 +42,7 @@ export function registerPodCommand(program: Command): void {
   registerInfoSubcommand(pod, program);
   registerProfileSubcommand(pod, program);
   registerImportSubcommand(pod, program);
-  registerConflictsCommand(pod);
+  registerConflictsCommand(pod, program);
   registerResolveCommand(pod, program);
   registerExtractSubcommand(pod);
   registerEncryptSubcommand(pod, program);

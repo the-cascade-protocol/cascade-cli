@@ -3,22 +3,47 @@
  *
  * List unresolved conflicts in a pod.
  * Reads settings/pending-conflicts.ttl and displays them.
- * Exits with code 1 if any conflicts are present (useful for CI).
+ *
+ * Exit codes:
+ *   0 — no unresolved conflicts (text mode)
+ *   1 — unresolved conflicts present (text mode; useful for CI)
+ *   2 — the conflicts file exists but could NOT be read
+ *
+ * The third one is the point. `settings/` is inside the encrypted set, so on an
+ * encrypted pod this file is ciphertext; without the DEK the Turtle parse failed
+ * and the failure was swallowed into an empty list, so the command printed
+ * "No unresolved conflicts" and exited 0 with the conflict sitting right there.
+ * "None" and "could not tell" must not share an answer.
  */
 
 import { Command } from 'commander';
-import { loadPendingConflicts } from '../../lib/user-resolutions.js';
-import { resolvePodDir } from './helpers.js';
+import { loadPendingConflicts, ConflictStoreError } from '../../lib/user-resolutions.js';
+import { resolvePodDir, resolvePodDekIfEncrypted } from './helpers.js';
+import { printError, type OutputOptions } from '../../lib/output.js';
 
-export function registerConflictsCommand(podProgram: Command): void {
+export function registerConflictsCommand(podProgram: Command, program: Command): void {
   podProgram
     .command('conflicts')
     .description('List unresolved conflicts in a pod')
     .argument('<pod-dir>', 'Path to the Cascade Pod directory')
     .option('--format <format>', 'Output format: text or json', 'text')
     .action(async (podDirArg: string, options: { format: string }) => {
+      const globalOpts = program.opts() as OutputOptions;
       const podDir = resolvePodDir(podDirArg);
-      const conflicts = await loadPendingConflicts(podDir);
+
+      let conflicts;
+      try {
+        const dek = await resolvePodDekIfEncrypted(podDir);
+        conflicts = await loadPendingConflicts(podDir, dek);
+      } catch (err: unknown) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const message =
+          err instanceof ConflictStoreError
+            ? `Could not read the conflicts in ${podDir}: ${detail}. This is NOT the same as having no conflicts.`
+            : `Could not open the pod at ${podDir}: ${detail}`;
+        printError(message, globalOpts);
+        process.exit(2);
+      }
 
       if (options.format === 'json') {
         console.log(JSON.stringify(conflicts, null, 2));

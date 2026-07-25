@@ -646,7 +646,10 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             sourceA: c.sources?.[0],
             sourceB: c.sources?.[1],
           }));
-          await writePendingConflicts(podDir, pendingConflicts);
+          // With the DEK: on a sealed pod this file holds record types, source
+          // EHR names and candidate record IRIs, and it used to be written back
+          // in the clear on every import.
+          await writePendingConflicts(podDir, pendingConflicts, dek);
           if (pendingConflicts.length > 0) {
             printVerbose(`  ${pendingConflicts.length} unresolved conflict(s) written to settings/pending-conflicts.ttl`, globalOpts);
           }
