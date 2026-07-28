@@ -16,9 +16,10 @@ import {
   loadPendingConflicts,
   saveUserResolution,
   writePendingConflicts,
+  ConflictStoreError,
   type ResolutionChoice,
 } from '../../lib/user-resolutions.js';
-import { resolvePodDir } from './helpers.js';
+import { resolvePodDir, resolvePodDekIfEncrypted } from './helpers.js';
 import { printResult, printError, type OutputOptions } from '../../lib/output.js';
 import { randomUUID } from 'node:crypto';
 
@@ -45,8 +46,35 @@ export function registerResolveCommand(podProgram: Command, program: Command): v
         options.keep === 'source-a' ? 'kept-source-a' :
         options.keep === 'source-b' ? 'kept-source-b' : 'kept-both';
 
+      // On an encrypted pod both conflict-store files are ciphertext. Resolve the
+      // DEK once and route every read and write below through it; a failure here
+      // must stop the command rather than let it read ciphertext, find no match,
+      // and report the conflict as missing.
+      let dek: Buffer | undefined;
+      try {
+        dek = await resolvePodDekIfEncrypted(podDir);
+      } catch (err: unknown) {
+        printError(
+          `Could not open the pod at ${podDir}: ${err instanceof Error ? err.message : String(err)}`,
+          globalOpts,
+        );
+        process.exit(2);
+      }
+
       // Load pending conflicts to find the one being resolved
-      const pending = await loadPendingConflicts(podDir);
+      let pending;
+      try {
+        pending = await loadPendingConflicts(podDir, dek);
+      } catch (err: unknown) {
+        const detail = err instanceof Error ? err.message : String(err);
+        printError(
+          err instanceof ConflictStoreError
+            ? `Could not read the conflicts in ${podDir}: ${detail}. Nothing was changed.`
+            : `Could not read the conflicts in ${podDir}: ${detail}`,
+          globalOpts,
+        );
+        process.exit(2);
+      }
       const conflict = pending.find(c => c.conflictId === options.conflict);
 
       if (!conflict) {
@@ -73,11 +101,11 @@ export function registerResolveCommand(podProgram: Command, program: Command): v
         keptRecordUri,
         discardedRecordUris,
         userNote: options.note,
-      });
+      }, dek);
 
       // Remove the conflict from the pending list
       const remaining = pending.filter(c => c.conflictId !== options.conflict);
-      await writePendingConflicts(podDir, remaining);
+      await writePendingConflicts(podDir, remaining, dek);
 
       if (globalOpts.json) {
         printResult(

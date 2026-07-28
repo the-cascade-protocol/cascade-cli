@@ -15,7 +15,8 @@ import {
   extractLabel,
   CASCADE_NAMESPACES,
 } from '../../lib/turtle-parser.js';
-import { readResource } from '../../lib/pod-encryption.js';
+import { readResource, isPodEncrypted, resolveDek } from '../../lib/pod-encryption.js';
+import { obtainPassphrase } from '../../lib/passphrase.js';
 
 // ─── Data Type Registry ──────────────────────────────────────────────────────
 
@@ -271,6 +272,23 @@ export function stripCardIdentityName(cardTurtle: string): string {
  */
 export function resolvePodDir(podDir: string): string {
   return path.resolve(process.cwd(), podDir);
+}
+
+/**
+ * Resolve a pod's DEK when the pod is encrypted, or `undefined` when it is not.
+ *
+ * Obtains the passphrase from `CASCADE_POD_PASSPHRASE` or a hidden prompt. Every
+ * failure THROWS: a command that cannot get the key must say so rather than
+ * carry on keyless, which on an encrypted pod means reading ciphertext and
+ * calling the result empty.
+ *
+ * @throws {PodDecryptError} on a wrong passphrase.
+ * @throws {Error} when no passphrase is available at all.
+ */
+export async function resolvePodDekIfEncrypted(podDir: string): Promise<Buffer | undefined> {
+  if (!isPodEncrypted(podDir)) return undefined;
+  const passphrase = await obtainPassphrase();
+  return resolveDek(podDir, passphrase);
 }
 
 /**

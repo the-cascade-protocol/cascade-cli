@@ -32,6 +32,13 @@ export const NONCE_LEN = 12;
 export const TAG_LEN = 16;
 /** DEK / KEK length in bytes (256-bit). */
 export const KEY_LEN = 32;
+/**
+ * The smallest possible combined blob: an empty plaintext still costs a nonce
+ * and a tag. Anything shorter CANNOT be ciphertext, which is one half of the
+ * "is this file already in the target state?" test used by `pod decrypt`.
+ * Must match `MIN_ENVELOPE_LEN` in the Workbench's `pod_io.rs`.
+ */
+export const MIN_ENVELOPE_LEN = NONCE_LEN + TAG_LEN;
 
 // ─── Manifest types ───────────────────────────────────────────────────────────
 
@@ -140,6 +147,26 @@ function openCombined(blob: Buffer, key: Buffer): Buffer {
  */
 export function encryptResource(plaintext: string, dek: Buffer): Buffer {
   return sealCombined(Buffer.from(plaintext, 'utf-8'), dek);
+}
+
+/**
+ * Encrypt arbitrary BYTES with the DEK, returning the combined blob.
+ *
+ * The text-flavoured {@link encryptResource} is the right call for `.ttl`
+ * resources. This one exists because a pod also holds bytes that are not text
+ * (retained source PDFs under `sources/`, for one), and round-tripping those
+ * through a UTF-8 string silently replaces every invalid sequence with U+FFFD.
+ */
+export function encryptBytes(plaintext: Buffer, dek: Buffer): Buffer {
+  return sealCombined(plaintext, dek);
+}
+
+/**
+ * Decrypt a combined resource blob with the DEK back to BYTES.
+ * @throws {PodDecryptError} on auth failure.
+ */
+export function decryptBytes(blob: Buffer, dek: Buffer): Buffer {
+  return openCombined(blob, dek);
 }
 
 /**
@@ -281,4 +308,25 @@ export function writeResource(absPath: string, content: string, dek?: Buffer): v
   } else {
     fs.writeFileSync(absPath, content, 'utf-8');
   }
+}
+
+/**
+ * Read a resource as BYTES. With a DEK the on-disk blob is opened from the
+ * combined layout; without one the raw file bytes are returned.
+ *
+ * Byte-exact, so it is safe for the non-text resources a pod carries.
+ *
+ * @throws {PodDecryptError} on auth failure when a DEK is supplied.
+ */
+export function readResourceBytes(absPath: string, dek?: Buffer): Buffer {
+  const blob = fs.readFileSync(absPath);
+  return dek ? decryptBytes(blob, dek) : blob;
+}
+
+/**
+ * Write a resource from BYTES. With a DEK the content is sealed into the
+ * combined layout; without one the bytes are written verbatim.
+ */
+export function writeResourceBytes(absPath: string, content: Buffer, dek?: Buffer): void {
+  fs.writeFileSync(absPath, dek ? encryptBytes(content, dek) : content);
 }

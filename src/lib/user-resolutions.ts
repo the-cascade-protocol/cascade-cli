@@ -4,17 +4,92 @@
  * Files written to the pod:
  *   settings/user-resolutions.ttl — User's stored resolution decisions
  *   settings/pending-conflicts.ttl — Unresolved conflicts from most recent import
+ *
+ * Both files live under `settings/`, which `pod encrypt` covers, so on an
+ * encrypted pod they are ciphertext. Every read and write here therefore takes
+ * the pod DEK. It used to take none, in either direction, which had two
+ * consequences: a sealed conflicts file failed to parse and was swallowed into
+ * an empty list, so `pod conflicts` printed "No unresolved conflicts" and
+ * exited 0 with the conflict sitting right there; and every import into a
+ * sealed pod dropped a PLAINTEXT file back into it holding record types, source
+ * EHR names and candidate record IRIs.
+ *
+ * The soft-failure catches are gone with it. An absent file is an empty list;
+ * anything else throws {@link ConflictStoreError}, so a caller can always tell
+ * "no conflicts" from "could not read the conflicts".
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Parser, Writer, DataFactory } from 'n3';
 import { NS, TURTLE_PREFIXES } from './fhir-converter/types.js';
 import { randomUUID } from 'node:crypto';
+import { readResource, writeResource, PodDecryptError } from './pod-encryption.js';
 
 export { randomUUID };
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
+
+/**
+ * A conflict-store file exists but could not be read.
+ *
+ * Distinct from "the file is not there", which is a legitimate empty state and
+ * the ONLY absence this module tolerates. Carries the offending path and the
+ * underlying cause so a command can say which of the two happened.
+ */
+export class ConflictStoreError extends Error {
+  constructor(
+    message: string,
+    readonly filePath: string,
+    override readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'ConflictStoreError';
+  }
+}
+
+/** Is this a "file does not exist" error, as opposed to a real read failure? */
+function isNotFound(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+}
+
+/**
+ * Read one conflict-store file, decrypting when a DEK is supplied.
+ *
+ * @returns the Turtle text, or `null` when the file simply does not exist.
+ * @throws {ConflictStoreError} on any other read or decrypt failure.
+ */
+async function readStoreFile(filePath: string, dek?: Buffer): Promise<string | null> {
+  if (dek) {
+    try {
+      return readResource(filePath, dek);
+    } catch (err) {
+      if (isNotFound(err)) return null;
+      if (err instanceof PodDecryptError) {
+        throw new ConflictStoreError(
+          `Could not decrypt ${filePath}: ${err.message}`,
+          filePath,
+          err,
+        );
+      }
+      throw new ConflictStoreError(
+        `Could not read ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+        filePath,
+        err,
+      );
+    }
+  }
+  try {
+    return await readFile(filePath, 'utf-8');
+  } catch (err) {
+    if (isNotFound(err)) return null;
+    throw new ConflictStoreError(
+      `Could not read ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+      filePath,
+      err,
+    );
+  }
+}
 
 export type ResolutionChoice = 'kept-source-a' | 'kept-source-b' | 'kept-both' | 'manual-edit';
 
@@ -53,25 +128,37 @@ export function generateConflictId(recordType: string, matchedOn: string): strin
 /**
  * Load user resolutions from settings/user-resolutions.ttl.
  * Returns a Map from conflictId -> UserResolution.
+ *
+ * @param dek pod DEK when the pod is encrypted; omit for a plaintext pod.
+ * @throws {ConflictStoreError} when the file exists but cannot be read, decrypted
+ *   or parsed. An absent file is an empty map; a corrupt one is NOT.
  */
-export async function loadUserResolutions(podDir: string): Promise<Map<string, UserResolution>> {
+export async function loadUserResolutions(
+  podDir: string,
+  dek?: Buffer,
+): Promise<Map<string, UserResolution>> {
   const filePath = join(podDir, 'settings', 'user-resolutions.ttl');
   const map = new Map<string, UserResolution>();
 
-  let content: string;
-  try {
-    content = await readFile(filePath, 'utf-8');
-  } catch {
-    return map; // File doesn't exist yet
-  }
+  const content = await readStoreFile(filePath, dek);
+  if (content === null) return map; // File doesn't exist yet
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const parser = new Parser({ format: 'Turtle' });
     const bySubject = new Map<string, Map<string, string>>();
     const discardedBySubject = new Map<string, string[]>();
 
     parser.parse(content, (error, quad) => {
-      if (error) { resolve(map); return; }  // Soft failure — return empty map
+      if (error) {
+        // Used to resolve an empty map under "soft failure", which silently
+        // forgot every recorded decision the user had made.
+        reject(new ConflictStoreError(
+          `Could not parse ${filePath}: ${error.message}`,
+          filePath,
+          error,
+        ));
+        return;
+      }
       if (!quad) {
         for (const [uri, props] of bySubject) {
           const type = props.get(NS.rdf + 'type');
@@ -113,21 +200,33 @@ export async function loadUserResolutions(podDir: string): Promise<Map<string, U
 /**
  * Save a user resolution to settings/user-resolutions.ttl.
  * Appends to existing file or creates it.
+ *
+ * @param dek pod DEK when the pod is encrypted; omit for a plaintext pod.
+ * @throws {ConflictStoreError} when an existing file cannot be read. Writing a
+ *   fresh file over decisions we failed to read would lose them.
  */
-export async function saveUserResolution(podDir: string, resolution: UserResolution): Promise<void> {
+export async function saveUserResolution(
+  podDir: string,
+  resolution: UserResolution,
+  dek?: Buffer,
+): Promise<void> {
   const settingsDir = join(podDir, 'settings');
   await mkdir(settingsDir, { recursive: true });
   const filePath = join(settingsDir, 'user-resolutions.ttl');
 
   // Load existing resolutions
-  const existing = await loadUserResolutions(podDir);
+  const existing = await loadUserResolutions(podDir, dek);
   existing.set(resolution.conflictId, resolution);
 
   // Write all resolutions to file
-  await writeUserResolutions(filePath, Array.from(existing.values()));
+  await writeUserResolutions(filePath, Array.from(existing.values()), dek);
 }
 
-async function writeUserResolutions(filePath: string, resolutions: UserResolution[]): Promise<void> {
+async function writeUserResolutions(
+  filePath: string,
+  resolutions: UserResolution[],
+  dek?: Buffer,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const writer = new Writer({ prefixes: TURTLE_PREFIXES });
 
@@ -149,10 +248,10 @@ async function writeUserResolutions(filePath: string, resolutions: UserResolutio
       }
     }
 
-    writer.end(async (err, result) => {
+    writer.end((err, result) => {
       if (err) { reject(err); return; }
       try {
-        await writeFile(filePath, result, 'utf-8');
+        writeResource(filePath, result, dek);
         resolve();
       } catch (writeErr) {
         reject(writeErr);
@@ -164,8 +263,16 @@ async function writeUserResolutions(filePath: string, resolutions: UserResolutio
 /**
  * Write pending conflicts to settings/pending-conflicts.ttl.
  * Replaces the previous state entirely (written after each import).
+ *
+ * @param dek pod DEK when the pod is encrypted; omit for a plaintext pod. Without
+ *   it this used to drop a plaintext file into a sealed pod on every import,
+ *   which both leaked and produced a file DEK-aware readers could not read.
  */
-export async function writePendingConflicts(podDir: string, conflicts: PendingConflict[]): Promise<void> {
+export async function writePendingConflicts(
+  podDir: string,
+  conflicts: PendingConflict[],
+  dek?: Buffer,
+): Promise<void> {
   const settingsDir = join(podDir, 'settings');
   await mkdir(settingsDir, { recursive: true });
   const filePath = join(settingsDir, 'pending-conflicts.ttl');
@@ -188,10 +295,10 @@ export async function writePendingConflicts(podDir: string, conflicts: PendingCo
       if (conflict.sourceB) writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'sourceB'), literal(conflict.sourceB)));
     }
 
-    writer.end(async (err, result) => {
+    writer.end((err, result) => {
       if (err) { reject(err); return; }
       try {
-        await writeFile(filePath, result, 'utf-8');
+        writeResource(filePath, result, dek);
         resolve();
       } catch (writeErr) {
         reject(writeErr);
@@ -202,24 +309,36 @@ export async function writePendingConflicts(podDir: string, conflicts: PendingCo
 
 /**
  * Load pending conflicts from settings/pending-conflicts.ttl.
+ *
+ * @param dek pod DEK when the pod is encrypted; omit for a plaintext pod.
+ * @throws {ConflictStoreError} when the file exists but cannot be read, decrypted
+ *   or parsed. An absent file is an empty list; a sealed or corrupt one is NOT,
+ *   because "no conflicts" and "could not read the conflicts" are different
+ *   answers and the caller has to be able to tell them apart.
  */
-export async function loadPendingConflicts(podDir: string): Promise<PendingConflict[]> {
+export async function loadPendingConflicts(
+  podDir: string,
+  dek?: Buffer,
+): Promise<PendingConflict[]> {
   const filePath = join(podDir, 'settings', 'pending-conflicts.ttl');
   const conflicts: PendingConflict[] = [];
 
-  let content: string;
-  try {
-    content = await readFile(filePath, 'utf-8');
-  } catch {
-    return conflicts;
-  }
+  const content = await readStoreFile(filePath, dek);
+  if (content === null) return conflicts;
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const parser = new Parser({ format: 'Turtle' });
     const bySubject = new Map<string, Map<string, string[]>>();
 
     parser.parse(content, (error, quad) => {
-      if (error) { resolve(conflicts); return; }
+      if (error) {
+        reject(new ConflictStoreError(
+          `Could not parse ${filePath}: ${error.message}`,
+          filePath,
+          error,
+        ));
+        return;
+      }
       if (!quad) {
         for (const [uri, props] of bySubject) {
           const types = props.get(NS.rdf + 'type') ?? [];
