@@ -27,6 +27,7 @@ import { quadsToTurtle } from '../../lib/fhir-converter/types.js';
 import {
   resolveReferenceEdges,
   buildResourceRefsFromQuads,
+  RECORD_EDGE_PREDICATES,
 } from '../../lib/fhir-converter/reference-resolution.js';
 import { runReconciliation, type ReconcilerInput } from '../../lib/reconciler.js';
 import {
@@ -73,13 +74,34 @@ interface ImportReport {
     existingRecordsLoaded?: number;
     summary?: object;
   };
-  filesWritten: Array<{ path: string; recordsAdded: number; type: string }>;
+  filesWritten: Array<{
+    path: string;
+    recordsAdded: number;
+    /**
+     * Of `recordsAdded`, how many subjects the target file did not already hold.
+     * `recordsAdded` counts every subject WRITTEN, which on the cross-batch
+     * replace path is the file's whole post-merge content, so on a re-import of
+     * data the pod already has it equals the total and reads as if everything
+     * were new (root 3.53).
+     */
+    recordsNew: number;
+    type: string;
+  }>;
   typeCounts: Record<string, number>;
   /** Record counts grouped by EHR of origin (clinical:sourceEHR), for the plan. */
   sourceBreakdown: Record<string, number>;
   /** "Do we have everything?" checks from container adapters (e.g. source labels). */
   completeness: CompletenessCheck[];
   totalRecordsImported: number;
+  /**
+   * Of `totalRecordsImported`, how many subjects the pod did not already hold,
+   * and how many it did. An honest re-import summary: a 100% duplicate import
+   * reports `recordsNew: 0` instead of restating the whole pod as if it were
+   * fresh. The fuller {new, duplicate, conflict} record report is root 1.5;
+   * these two are the subset of it this command can answer from disk today.
+   */
+  recordsNew: number;
+  recordsAlreadyPresent: number;
   /**
    * Cross-record edge resolution tally across all converted inputs: how many
    * reference edges (clinical:hasLabResult, coverage:relatedClaim) were written
@@ -89,7 +111,19 @@ interface ImportReport {
   edgeResolution: {
     resolved: number;
     unresolved: number;
-    byPredicate: Record<string, { resolved: number; unresolved: number }>;
+    /**
+     * Record-to-record edges the pod holds after this import, counted over the
+     * merged result rather than over this run's rewrites.
+     *
+     * `resolved`/`unresolved` are per-RUN deltas: they count placeholders this
+     * invocation turned into edges. On a re-import of data the pod already has,
+     * the reconciler recognizes those edges as already stated and there is
+     * nothing left to resolve, so the deltas legitimately fall to zero — which
+     * read as edge LOSS while being the opposite (root 3.53). This total is the
+     * number a "K of N and J linked" surface wants: stable across re-imports.
+     */
+    totalInPod: number;
+    byPredicate: Record<string, { resolved: number; unresolved: number; totalInPod: number }>;
   };
   /**
    * M1 trapped-literal lifting: relations that arrived as strings, turned into
@@ -441,6 +475,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       const edgeResolution: ImportReport['edgeResolution'] = {
         resolved: 0,
         unresolved: 0,
+        totalInPod: 0,
         byPredicate: {},
       };
 
@@ -542,7 +577,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             edgeResolution.resolved += result.edgeResolution.resolved;
             edgeResolution.unresolved += result.edgeResolution.unresolved;
             for (const [pred, c] of Object.entries(result.edgeResolution.byPredicate)) {
-              const acc = (edgeResolution.byPredicate[pred] ??= { resolved: 0, unresolved: 0 });
+              const acc = (edgeResolution.byPredicate[pred] ??= { resolved: 0, unresolved: 0, totalInPod: 0 });
               acc.resolved += c.resolved;
               acc.unresolved += c.unresolved;
             }
@@ -577,7 +612,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             edgeResolution.resolved += result.edgeResolution.resolved;
             edgeResolution.unresolved += result.edgeResolution.unresolved;
             for (const [pred, c] of Object.entries(result.edgeResolution.byPredicate)) {
-              const acc = (edgeResolution.byPredicate[pred] ??= { resolved: 0, unresolved: 0 });
+              const acc = (edgeResolution.byPredicate[pred] ??= { resolved: 0, unresolved: 0, totalInPod: 0 });
               acc.resolved += c.resolved;
               acc.unresolved += c.unresolved;
             }
@@ -658,7 +693,16 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           // With the DEK: on a sealed pod this file holds record types, source
           // EHR names and candidate record IRIs, and it used to be written back
           // in the clear on every import.
-          await writePendingConflicts(podDir, pendingConflicts, dek);
+          //
+          // Zero conflicts and no existing file means there is nothing to say:
+          // creating a prefixes-only pending-conflicts.ttl announced a conflict
+          // queue that does not exist (root 3.53). An existing file is still
+          // rewritten when the list is empty, because "no conflicts remain" has
+          // to be able to CLEAR stale entries from an earlier import.
+          const conflictsFile = path.join(podDir, 'settings', 'pending-conflicts.ttl');
+          if (pendingConflicts.length > 0 || (await fileExists(conflictsFile))) {
+            await writePendingConflicts(podDir, pendingConflicts, dek);
+          }
           if (pendingConflicts.length > 0) {
             printVerbose(`  ${pendingConflicts.length} unresolved conflict(s) written to settings/pending-conflicts.ttl`, globalOpts);
           }
@@ -704,7 +748,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         edgeResolution.resolved += refStats.resolved;
         edgeResolution.unresolved += refStats.unresolved;
         for (const [pred, c] of Object.entries(refStats.byPredicate)) {
-          const acc = (edgeResolution.byPredicate[pred] ??= { resolved: 0, unresolved: 0 });
+          const acc = (edgeResolution.byPredicate[pred] ??= { resolved: 0, unresolved: 0, totalInPod: 0 });
           acc.resolved += c.resolved;
           acc.unresolved += c.unresolved;
         }
@@ -738,6 +782,28 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           arr.push(q);
         }
         subjectQuads = regrouped;
+      }
+
+      // Record-to-record edges the merged result actually holds. Counted here,
+      // over the final quad set, because the per-run `resolved`/`unresolved`
+      // deltas fall to zero on a re-import whose edges the pod already states —
+      // honest as a delta, but read as edge loss by any surface that shows the
+      // linked-record count (root 3.53).
+      for (const [, quads] of subjectQuads) {
+        for (const q of quads) {
+          if (!RECORD_EDGE_PREDICATES.has(q.predicate.value)) continue;
+          if (q.object.termType !== 'NamedNode') continue;
+          edgeResolution.totalInPod++;
+          // Same `prefix:local` label the resolution pass reports under, so the
+          // per-run deltas and this total share one key per predicate.
+          const pred = shortenForTurtle(q.predicate.value);
+          const acc = (edgeResolution.byPredicate[pred] ??= {
+            resolved: 0,
+            unresolved: 0,
+            totalInPod: 0,
+          });
+          acc.totalInPod++;
+        }
       }
 
       // Source breakdown by EHR of origin (clinical:sourceEHR), for the pre-import
@@ -781,6 +847,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
 
         let finalTurtle: string;
         let recordsAdded = subjectQArrays.length;
+        // Of those, the subjects this file did not already hold. Equal to
+        // recordsAdded on a fresh file; zero on a fully duplicate re-import.
+        let recordsNew = subjectQArrays.length;
         let isNewFile = true;
 
         if (useCrossBatchReplace) {
@@ -791,6 +860,22 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           finalTurtle = newTurtle;
           // recordsAdded reflects the full set of subjects in this bucket after reconciliation
           recordsAdded = subjectQArrays.length;
+          // Which of them are genuinely new needs the pre-import file: the
+          // replace path never reads it, which is exactly why a re-import used to
+          // report its whole merged output as freshly imported records.
+          if (!isNewFile) {
+            let priorSubjects: Set<string>;
+            try {
+              priorSubjects = new Set(
+                (await parseTurtleToQuads(readResource(targetFile, dek))).keys(),
+              );
+            } catch {
+              priorSubjects = new Set();
+            }
+            recordsNew = subjectQArrays.filter(
+              (quads) => quads.length > 0 && !priorSubjects.has(quads[0].subject.value),
+            ).length;
+          }
         } else if (await fileExists(targetFile)) {
           isNewFile = false;
           // Merge: parse existing, combine unique subjects
@@ -811,6 +896,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             }
           }
           recordsAdded = addedCount;
+          // The additive path only ever writes subjects the file lacked.
+          recordsNew = addedCount;
 
           const mergedQuads = Array.from(existingQuads.values()).flat();
           finalTurtle = await quadsToTurtle(mergedQuads);
@@ -824,7 +911,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         }
 
         typeCounts[typeKey] = (typeCounts[typeKey] ?? 0) + recordsAdded;
-        filesWritten.push({ path: targetFile, recordsAdded, type: typeKey });
+        filesWritten.push({ path: targetFile, recordsAdded, recordsNew, type: typeKey });
 
         if (isNewFile) {
           newFiles.push(relPath);
@@ -950,6 +1037,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
 
       // --- Step 10: Summary and report ---
       const totalRecordsImported = Object.values(typeCounts).reduce((a, b) => a + b, 0);
+      const recordsNew = filesWritten.reduce((a, f) => a + f.recordsNew, 0);
+      const recordsAlreadyPresent = totalRecordsImported - recordsNew;
 
       const importReport: ImportReport = {
         importedAt: new Date().toISOString(),
@@ -968,15 +1057,26 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         sourceBreakdown,
         completeness,
         totalRecordsImported,
+        recordsNew,
+        recordsAlreadyPresent,
         edgeResolution,
         literalLifting,
         warnings: allWarnings,
         dryRun,
       };
 
-      if (options.report && !dryRun) {
+      // Written under --dry-run too. Dry-run is where a machine-readable report
+      // matters MOST — a GUI preflight ("here is what importing this would do")
+      // has no other way to get the numbers — and the report already carries
+      // `dryRun: true` so a consumer can tell a preview from a completed import.
+      // The report file is a user-named output path, not pod content, so writing
+      // it does not break the dry-run promise of leaving the pod untouched.
+      if (options.report) {
         await fs.writeFile(options.report, JSON.stringify(importReport, null, 2), 'utf-8');
-        printVerbose(`Import report written to: ${options.report}`, globalOpts);
+        printVerbose(
+          `${dryRun ? '[dry-run] ' : ''}Import report written to: ${options.report}`,
+          globalOpts,
+        );
       }
 
       if (globalOpts.json) {
@@ -988,7 +1088,14 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           console.log(`\nImport complete: ${podDir}`);
         }
         console.log(`  Sources:          ${sourceReport.length} file(s)`);
-        console.log(`  Records imported: ${totalRecordsImported}`);
+        // "Records imported: 243" on a re-import of 243 records the pod already
+        // held read as 243 fresh records. Name the duplicates (root 3.53).
+        console.log(
+          `  Records imported: ${totalRecordsImported}` +
+            (recordsAlreadyPresent > 0
+              ? ` (${recordsNew} new, ${recordsAlreadyPresent} already in pod)`
+              : ''),
+        );
         console.log(`  Files written:    ${filesWritten.length}`);
         const bySource = Object.entries(sourceBreakdown).sort((a, b) => b[1] - a[1]);
         if (bySource.length > 0) {
@@ -1003,12 +1110,19 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             if (c.note) console.log(`        ${c.note}`);
           }
         }
-        const edgeTotal = edgeResolution.resolved + edgeResolution.unresolved;
+        const edgeTotal =
+          edgeResolution.resolved + edgeResolution.unresolved + edgeResolution.totalInPod;
         if (edgeTotal > 0) {
-          console.log(`  Record-to-record edges: ${edgeResolution.resolved} resolved` +
-            (edgeResolution.unresolved > 0 ? `, ${edgeResolution.unresolved} dropped (reference target not in import)` : ''));
+          // Lead with the number the pod HOLDS. The per-run "resolved" count
+          // legitimately falls to zero on a re-import whose edges are already
+          // stated, and on its own that reads as edge loss (root 3.53).
+          console.log(`  Record-to-record edges: ${edgeResolution.totalInPod} in pod` +
+            ` (${edgeResolution.resolved} newly resolved this import` +
+            (edgeResolution.unresolved > 0 ? `, ${edgeResolution.unresolved} dropped (reference target not in import)` : '') +
+            `)`);
           for (const [pred, c] of Object.entries(edgeResolution.byPredicate)) {
-            console.log(`    - ${pred}: ${c.resolved} resolved` + (c.unresolved > 0 ? `, ${c.unresolved} dropped` : ''));
+            console.log(`    - ${pred}: ${c.totalInPod} in pod` +
+              ` (${c.resolved} newly resolved` + (c.unresolved > 0 ? `, ${c.unresolved} dropped` : '') + `)`);
           }
         }
         if (liftSummaryTotal(literalLifting) > 0) {

@@ -112,11 +112,14 @@ describe('R5 cross-file reference resolution (root 2.11)', () => {
   });
 
   it('resolves each edge family across files', () => {
+    // `totalInPod` is the edges the pod HOLDS afterwards (root 3.53): on this
+    // fresh-pod import it equals `resolved`, since nothing was already stated and
+    // a dropped reference writes no edge (hence hasEncounter 4, not 5).
     const bp = report.edgeResolution.byPredicate;
-    expect(bp['clinical:hasLabResult']).toEqual({ resolved: 2, unresolved: 0 });
-    expect(bp['clinical:hasEncounter']).toEqual({ resolved: 4, unresolved: 1 });
-    expect(bp['clinical:indicationReference']).toEqual({ resolved: 1, unresolved: 0 });
-    expect(bp['coverage:relatedClaim']).toEqual({ resolved: 1, unresolved: 0 });
+    expect(bp['clinical:hasLabResult']).toEqual({ resolved: 2, unresolved: 0, totalInPod: 2 });
+    expect(bp['clinical:hasEncounter']).toEqual({ resolved: 4, unresolved: 1, totalInPod: 4 });
+    expect(bp['clinical:indicationReference']).toEqual({ resolved: 1, unresolved: 0, totalInPod: 1 });
+    expect(bp['coverage:relatedClaim']).toEqual({ resolved: 1, unresolved: 0, totalInPod: 1 });
   });
 
   it('leaves no unresolved-reference or parsed-indication placeholder on disk', () => {
