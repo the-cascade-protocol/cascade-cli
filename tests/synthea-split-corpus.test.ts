@@ -145,11 +145,14 @@ describe('Synthea bundle == split equivalence (root 3.22)', () => {
   });
 
   it('resolves each of the four edge families identically across layouts', () => {
+    // `totalInPod` (the edges the pod holds afterwards, root 3.53) equals
+    // `resolved` here: both layouts import into a fresh pod, so every edge in the
+    // pod is one this run resolved.
     const expected = {
-      'clinical:hasEncounter': { resolved: 181, unresolved: 0 },
-      'clinical:hasLabResult': { resolved: 31, unresolved: 0 },
-      'clinical:indicationReference': { resolved: 19, unresolved: 0 },
-      'coverage:relatedClaim': { resolved: 18, unresolved: 0 },
+      'clinical:hasEncounter': { resolved: 181, unresolved: 0, totalInPod: 181 },
+      'clinical:hasLabResult': { resolved: 31, unresolved: 0, totalInPod: 31 },
+      'clinical:indicationReference': { resolved: 19, unresolved: 0, totalInPod: 19 },
+      'coverage:relatedClaim': { resolved: 18, unresolved: 0, totalInPod: 18 },
     };
     for (const [pred, counts] of Object.entries(expected)) {
       expect(bundleReport.edgeResolution.byPredicate[pred]).toEqual(counts);

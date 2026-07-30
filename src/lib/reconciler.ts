@@ -8,6 +8,12 @@
 import { Parser, Writer, DataFactory } from 'n3';
 import type { Quad, Quad_Subject, Quad_Object } from 'n3';
 import { NS, TURTLE_PREFIXES } from './fhir-converter/types.js';
+import {
+  buildReferenceResolver,
+  buildResourceRefsFromQuads,
+  decodeReferencePlaceholder,
+  isReferencePlaceholder,
+} from './fhir-converter/reference-resolution.js';
 import { normalizeMedName, normalizeDose, normalizeFrequency, type DrugNameNormalizer } from './medication-normalize.js';
 import { medicationCodeKeys, sharedMedicationCodeKey } from './code-keys.js';
 import { cascadeTerminologyResolver } from './terminology.js';
@@ -56,6 +62,19 @@ export interface ReconcilerResult {
       totalInputRecords: number;
       exactDuplicatesRemoved: number;
       nearDuplicatesMerged: number;
+      /**
+       * Input records dropped because another input in the same run already
+       * contributed their subject IRI: the signature of re-importing a document
+       * the pod already holds (Cascade subjects are content-hashed, so the same
+       * record mints the same IRI every run).
+       *
+       * Disjoint from `exactDuplicatesRemoved` / `nearDuplicatesMerged`, which
+       * count MATCH-driven merges of records that arrived under DIFFERENT
+       * subject IRIs. Both are "duplicates" for a caller that wants one number;
+       * they are separate because only this one means "this input was already in
+       * the pod, byte for byte".
+       */
+      duplicateSubjectsDropped: number;
       conflictsResolved: number;
       conflictsUnresolved: number;
       finalRecordCount: number;
@@ -164,7 +183,8 @@ export async function parseTurtle(turtle: string, defaultSystem: string): Promis
 
 /**
  * Collect the quads of every subject that is NOT a reconcilable record, i.e.
- * whose rdf:type is outside KNOWN_TYPES or that has no rdf:type at all.
+ * whose rdf:type is outside KNOWN_TYPES or that has no rdf:type at all, plus
+ * the input's complete quad list.
  *
  * The reconciler only understands the KNOWN_TYPES record families. Everything
  * else (clinical:ClinicalDocument narrative documents and their
@@ -172,11 +192,18 @@ export async function parseTurtle(turtle: string, defaultSystem: string): Promis
  * passthrough nodes, provenance activities, ...) must survive reconciliation
  * verbatim. Before this existed, any reconciliation pass silently dropped
  * those subjects from the merged output.
+ *
+ * `all` carries every quad of the input, reconcilable records included: the
+ * reference-resolution index (`buildResourceRefsFromQuads`) is built from the
+ * `sourceRecordId` literals that records persist, and those live on RECORD
+ * subjects, so the placeholder-equivalence dedup below cannot be computed from
+ * the passthrough slice alone.
  */
-async function collectPassthroughQuads(turtle: string): Promise<Quad[]> {
+async function collectQuads(turtle: string): Promise<{ passthrough: Quad[]; all: Quad[] }> {
   return new Promise((resolve, reject) => {
     const parser = new Parser({ format: 'Turtle' });
     const quadsBySubject = new Map<string, Quad[]>();
+    const all: Quad[] = [];
 
     parser.parse(turtle, (error, quad) => {
       if (error) { reject(error); return; }
@@ -187,9 +214,10 @@ async function collectPassthroughQuads(turtle: string): Promise<Quad[]> {
           if (typeQuad && KNOWN_TYPES[typeQuad.object.value]) continue; // reconciled elsewhere
           passthrough.push(...quads);
         }
-        resolve(passthrough);
+        resolve({ passthrough, all });
         return;
       }
+      all.push(quad);
       const subjKey = `${quad.subject.termType}:${quad.subject.value}`;
       const bucket = quadsBySubject.get(subjKey);
       if (bucket) bucket.push(quad);
@@ -277,6 +305,94 @@ function collapseSingleCardinalityPassthrough(quads: Quad[]): Quad[] {
       emitted.add(key);
     }
     out.push(q);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Stated-edge re-import idempotence (root backlog 2.22)
+// ---------------------------------------------------------------------------
+//
+// Record-to-record edges (clinical:hasEncounter, clinical:indicationReference,
+// clinical:hasLabResult, coverage:relatedClaim, ...) reach the reconciler in TWO
+// different shapes, and quad-identity dedup cannot see that they are the same
+// statement:
+//
+//   * already RESOLVED, as the pod holds it:  <proc> hasEncounter <urn:uuid:86ed…>
+//   * still a PLACEHOLDER, as a fresh convert emits it (reference resolution is
+//     deferred to once per import invocation, R5 / root 2.11):
+//                                             <proc> hasEncounter <urn:cascade:unresolved-ref:Encounter%2Fenc-1>
+//
+// On a re-import the pod contributes the first and the new input the second.
+// Both survive `quadKey` dedup (their objects differ byte-wise), the caller then
+// resolves the placeholder to the very same target, and the passthrough subject
+// ends up with the edge stated TWICE. Every re-sync added another copy: measured
+// `hasEncounter` 200 -> 214 and `indicationReference` 5 -> 8 on a real pull, with
+// Turtle bytes +18%. Same family as the `clinical:importedAt` duplication above,
+// one resolution stage further out.
+//
+// The repair keys each passthrough edge on where its object RESOLVES TO rather
+// than on the object's current spelling, and keeps one quad per key. It cannot
+// simply drop placeholders that share a (subject, predicate) with a resolved
+// edge: a lab report legitimately gains a third result, and that placeholder
+// names a target the pod does not have yet.
+
+/**
+ * Collapse passthrough edge quads that name the same target through different
+ * spellings, keeping ONE quad per (subject, predicate, resolved-target).
+ *
+ * `resolveRef` maps a raw FHIR reference string to the subject IRI it resolves
+ * to over this run's inputs (`null` when the target is absent). A placeholder
+ * whose target cannot be resolved keys on its own IRI, so it is never confused
+ * with a different unresolvable edge and still reaches the caller's resolution
+ * pass to be dropped-and-counted there.
+ *
+ * The ALREADY-RESOLVED spelling wins whenever both are present, for two reasons:
+ * the pod's own copy of an edge is the one whose target provably exists, and
+ * keeping it means the surviving quad needs no further rewriting. Emission order
+ * follows each key's first occurrence, so output stays byte-stable; an input set
+ * with no placeholder/resolved pair (every single import, where all edges are
+ * placeholders) is returned untouched.
+ */
+function collapseResolvedEquivalentEdges(
+  quads: Quad[],
+  resolveRef: (raw: string) => string | null,
+): Quad[] {
+  // Where a quad's object lands once references are resolved. Non-placeholder
+  // objects are already there; a placeholder resolves, or keys on itself.
+  const targetOf = (q: Quad): string => {
+    const v = q.object.value;
+    if (q.object.termType !== 'NamedNode' || !isReferencePlaceholder(v)) return v;
+    return resolveRef(decodeReferencePlaceholder(v)) ?? v;
+  };
+  const keyOf = (q: Quad): string =>
+    `${q.subject.termType}:${q.subject.value}|${q.predicate.value}|${targetOf(q)}`;
+
+  // Winner per key: the first non-placeholder quad if any, else the first quad.
+  const winner = new Map<string, Quad>();
+  let collapsed = 0;
+  for (const q of quads) {
+    if (q.object.termType !== 'NamedNode') continue;
+    const key = keyOf(q);
+    const current = winner.get(key);
+    if (current === undefined) {
+      winner.set(key, q);
+      continue;
+    }
+    collapsed++;
+    const currentIsPlaceholder = isReferencePlaceholder(current.object.value);
+    if (currentIsPlaceholder && !isReferencePlaceholder(q.object.value)) winner.set(key, q);
+  }
+  if (collapsed === 0) return quads;
+
+  const emitted = new Set<string>();
+  const out: Quad[] = [];
+  for (const q of quads) {
+    if (q.object.termType !== 'NamedNode') { out.push(q); continue; }
+    const key = keyOf(q);
+    if (emitted.has(key)) continue;
+    emitted.add(key);
+    out.push(winner.get(key) ?? q);
   }
   return out;
 }
@@ -815,6 +931,26 @@ export function resolveCanonicalSubject(map: Map<string, string>, subject: strin
 // Serializer: resolved groups → Turtle
 // ---------------------------------------------------------------------------
 
+/**
+ * Reconciler bookkeeping that `serializeGroups` derives from THIS run's decision
+ * and re-states unconditionally on every record. When the pod is fed back in as
+ * an input (the `--reconcile-existing` re-import path), the previous run's value
+ * arrives as an ordinary parsed property, gets written out, and the derived value
+ * is appended next to it, so the record accumulates a second copy on every
+ * re-sync. Dropping it on the way in and letting the run re-derive it keeps
+ * exactly one, and keeps the value TRUE for the current run rather than stale.
+ *
+ * Deliberately NOT in this set:
+ *  - `cascade:sourceSystem`: also converter-emitted (it is source data, not
+ *    bookkeeping), and already a fixed point (one parsed value + one derived).
+ *  - `cascade:mergedFrom` / `prov:wasDerivedFrom`: real lineage pointing at
+ *    historical subjects. They must SURVIVE a run in which nothing merged, so
+ *    they are preserved and de-duplicated at emission instead.
+ */
+const RECONCILER_DERIVED_PREDICATES: ReadonlySet<string> = new Set<string>([
+  NS.cascade + 'reconciliationStatus',
+]);
+
 async function serializeGroups(
   groups: Group[],
   resolutions: Resolution[],
@@ -854,7 +990,13 @@ async function serializeGroups(
       const res = resolutions[i];
       const subj = namedNode(res.canonical.uri);
 
+      // Lineage this record already carried, so a re-emission below cannot
+      // duplicate it (the pod's own copy arrives as a parsed property).
+      const emittedLineage = new Set<string>();
+
       for (const [pred, vals] of res.canonical.properties) {
+        // Re-derived below for every record; a carried-over copy would double it.
+        if (RECONCILER_DERIVED_PREDICATES.has(pred)) continue;
         for (const val of vals) {
           const isIri = val.value.startsWith('http') || val.value.startsWith('urn:');
           const obj = isIri
@@ -862,6 +1004,7 @@ async function serializeGroups(
             : val.datatype
               ? literal(val.value, namedNode(val.datatype))
               : literal(val.value);
+          if (LINEAGE_PREDICATES.has(pred)) emittedLineage.add(`${pred}|${obj.value}`);
           writer.addQuad(makeQuad(subj, namedNode(pred), obj));
         }
       }
@@ -876,8 +1019,13 @@ async function serializeGroups(
 
       if (g.matchType !== 'pass_through' && res.mergedUris.length > 1) {
         for (const srcUri of res.mergedUris) {
-          writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'mergedFrom'), namedNode(srcUri)));
-          writer.addQuad(makeQuad(subj, namedNode(NS.prov + 'wasDerivedFrom'), namedNode(srcUri)));
+          for (const pred of [NS.cascade + 'mergedFrom', NS.prov + 'wasDerivedFrom']) {
+            // Already carried on the record from an earlier run's merge: state it
+            // once, not once per re-import.
+            if (emittedLineage.has(`${pred}|${srcUri}`)) continue;
+            emittedLineage.add(`${pred}|${srcUri}`);
+            writer.addQuad(makeQuad(subj, namedNode(pred), namedNode(srcUri)));
+          }
         }
         writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'mergedSources'), literal(res.mergedSystems.join(', '))));
         writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'conflictResolution'), literal(res.strategy)));
@@ -924,6 +1072,9 @@ export async function runReconciliation(
   const passthroughQuads: Quad[] = [];
   const seenPassthrough = new Set<string>();
   const passthroughSubjectKeys = new Set<string>();
+  // Every quad of every input, for the reference-resolution index that the
+  // stated-edge collapse below keys on (root 2.22).
+  const allInputQuads: Quad[] = [];
 
   for (let i = 0; i < inputs.length; i++) {
     const input = inputs[i];
@@ -931,7 +1082,9 @@ export async function runReconciliation(
     allRecords.push(...records);
     sourceInfo.push({ system: input.systemName, count: records.length });
 
-    for (const q of await collectPassthroughQuads(input.content)) {
+    const { passthrough, all } = await collectQuads(input.content);
+    allInputQuads.push(...all);
+    for (const q of passthrough) {
       const key = quadKey(q);
       if (seenPassthrough.has(key)) continue;
       seenPassthrough.add(key);
@@ -944,7 +1097,16 @@ export async function runReconciliation(
   // content-hash-stable, so quad-identity dedup keeps every run's value and the
   // record fails SHACL maxCount 1. Collapse single-cardinality passthrough
   // predicates to one value per subject (root backlog 1.5, symptom 3).
-  const dedupedPassthroughQuads = collapseSingleCardinalityPassthrough(passthroughQuads);
+  const singleValuedPassthroughQuads = collapseSingleCardinalityPassthrough(passthroughQuads);
+
+  // A stated edge arrives resolved from the pod and as a placeholder from the new
+  // input, so quad-identity dedup keeps both and the caller's resolution pass
+  // turns them into two copies of one statement. Collapse on where each object
+  // RESOLVES TO (root backlog 2.22).
+  const dedupedPassthroughQuads = collapseResolvedEquivalentEdges(
+    singleValuedPassthroughQuads,
+    buildReferenceResolver(buildResourceRefsFromQuads(allInputQuads)),
+  );
 
   // Match and group
   const groups: Group[] = [];
@@ -1092,6 +1254,18 @@ export async function runReconciliation(
     }
   }
 
+  // How many input records never reached a group because another input had
+  // already contributed their subject IRI. Cascade subjects are content-hashed,
+  // so a second arrival of the same IRI is a re-import of the same record, and
+  // the loops above silently pass over it (`assigned.has(...)`). Counting it is
+  // what makes a 100%-duplicate import stop reporting "0 duplicates" while
+  // quietly deduplicating everything (root backlog 3.53). Measured on record
+  // OBJECT identity, so it never double-counts a record the matcher already
+  // reported as a merge.
+  const groupedRecords = new Set<ParsedRecord>();
+  for (const g of groups) for (const r of g.records) groupedRecords.add(r);
+  const duplicateSubjectsDropped = allRecords.length - groupedRecords.size;
+
   // Resolve
   const allowCrossProvenanceMerge = options?.allowCrossProvenanceMerge ?? true;
   const resolutions = groups.map(g => resolveGroup(g, trustScores, defaultTrust, allowCrossProvenanceMerge));
@@ -1151,6 +1325,7 @@ export async function runReconciliation(
         totalInputRecords: allRecords.length,
         exactDuplicatesRemoved: exactDups,
         nearDuplicatesMerged: nearDups,
+        duplicateSubjectsDropped,
         conflictsResolved: resolved,
         conflictsUnresolved: unresolved,
         finalRecordCount: groups.length,

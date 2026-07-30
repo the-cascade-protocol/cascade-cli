@@ -42,6 +42,22 @@ const URN_UUID_PREFIX = 'urn:uuid:';
  * `tripleRef(subject, predicate, referencePlaceholder(ref))` instead of minting
  * a fake target; the batch loop rewrites or drops it.
  */
+/**
+ * Every predicate whose object is another RECORD in the pod (as opposed to a
+ * code, a literal, or a lineage pointer at a non-materialized subject). Four
+ * arrive as resolvable placeholders from a converter; `clinical:linkedCondition`
+ * is minted by the M1 literal lift. Used to count the edges a pod actually holds
+ * — the "K of N and J linked" number — which must stay stable when an import
+ * re-states edges the pod already had rather than dropping to zero (root 3.53).
+ */
+export const RECORD_EDGE_PREDICATES: ReadonlySet<string> = new Set<string>([
+  NS.clinical + 'hasEncounter',
+  NS.clinical + 'indicationReference',
+  NS.clinical + 'hasLabResult',
+  NS.clinical + 'linkedCondition',
+  NS.coverage + 'relatedClaim',
+]);
+
 export function referencePlaceholder(rawReference: string): string {
   return REF_PLACEHOLDER_PREFIX + encodeURIComponent(rawReference);
 }
@@ -282,19 +298,22 @@ export function buildResourceRefsFromQuads(quads: Quad[]): ConvertedResourceRef[
 }
 
 /**
- * Rewrite every reference-placeholder object in `quads` to the referenced
- * record's real minted subject, using an index built over `resources`. An edge
- * is kept only when it resolves; an unresolvable reference (target absent from
- * the batch, or its converter skipped it) is dropped and counted.
+ * Build the raw-reference → subject-IRI lookup used to resolve placeholders.
  *
  * The index is keyed two ways: a typed key ("Type/id") and a bare-id fallback
  * (for `urn:uuid:` references that carry no type). A bare id that maps to two
  * different subjects is marked ambiguous and only resolvable via its typed key.
+ * Returns `null` for a reference the index cannot place.
+ *
+ * Exported so a caller that needs to know *where a placeholder would resolve to*
+ * without rewriting anything can ask the same question `resolveReferenceEdges`
+ * answers. The reconciler uses it to recognize that an already-resolved edge in
+ * the pod and a fresh placeholder edge naming the same target are the SAME
+ * statement, so a re-import does not land a second copy of it (root 2.22).
  */
-export function resolveReferenceEdges(
-  quads: Quad[],
+export function buildReferenceResolver(
   resources: ConvertedResourceRef[],
-): { quads: Quad[]; stats: EdgeResolutionSummary } {
+): (raw: string) => string | null {
   const byKey = new Map<string, string>();
   const ambiguousIds = new Set<string>();
   for (const r of resources) {
@@ -308,7 +327,7 @@ export function resolveReferenceEdges(
     }
   }
 
-  const resolve = (raw: string): string | null => {
+  return (raw: string): string | null => {
     const parsed = parseReference(raw);
     if (!parsed) return null;
     if (parsed.resourceType) {
@@ -318,6 +337,19 @@ export function resolveReferenceEdges(
     if (ambiguousIds.has(parsed.id)) return null;
     return byKey.get(parsed.id) ?? null;
   };
+}
+
+/**
+ * Rewrite every reference-placeholder object in `quads` to the referenced
+ * record's real minted subject, using an index built over `resources`. An edge
+ * is kept only when it resolves; an unresolvable reference (target absent from
+ * the batch, or its converter skipped it) is dropped and counted.
+ */
+export function resolveReferenceEdges(
+  quads: Quad[],
+  resources: ConvertedResourceRef[],
+): { quads: Quad[]; stats: EdgeResolutionSummary } {
+  const resolve = buildReferenceResolver(resources);
 
   const stats: EdgeResolutionSummary = { resolved: 0, unresolved: 0, byPredicate: {} };
   const bump = (predicate: string, key: 'resolved' | 'unresolved') => {
