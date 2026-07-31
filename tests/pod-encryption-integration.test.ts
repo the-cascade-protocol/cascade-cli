@@ -189,7 +189,11 @@ describe('encrypted pod end-to-end', () => {
 
     process.env.CASCADE_POD_PASSPHRASE = 'definitely-wrong';
     const q = await runCli(['--json', 'pod', 'query', dir, '--medications']);
-    expect(q.exitCode).toBe(1);
+    // 2, not 1: a pod that cannot be opened is a hard READ failure, the same
+    // exit `pod conflicts` uses, and a caller must be able to tell it from a
+    // usage error as well as from an empty result. See
+    // tests/pod-query-encrypted-read.test.ts for the full contract.
+    expect(q.exitCode).toBe(2);
   }, TEST_TIMEOUT_MS);
 
   it('validate succeeds on an encrypted pod (decrypts first)', async () => {

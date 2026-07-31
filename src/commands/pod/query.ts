@@ -3,11 +3,43 @@
  *
  * Query data within a Cascade Pod by type (medications, conditions, etc.)
  * or across all data types.
+ *
+ * Exit codes:
+ *   0 — the query ran and every file it needed was read
+ *   1 — usage error (no filter, bad --hops, unknown --edge, unknown --neighbors seed)
+ *   2 — the pod, or a file inside it, could NOT be read
+ *
+ * The third one is the point, and it is the same lesson `pod conflicts` learned:
+ * a file that cannot be read must never be reported as a file with nothing in
+ * it. Every read here goes through `parseDataFile`, which returns
+ * `{ records: [], error }` when a resource fails to decrypt or fails to parse.
+ * Those errors used to travel in a per-bucket `error` field on an otherwise
+ * successful (exit 0) payload whose counts were all zero — so a consumer that
+ * read only `count` saw an empty pod, and said so, over a pod full of records.
+ * A read failure now fails the command with a message naming the files.
+ *
+ * TWO failures, weighed differently, because "fail on anything" is its own
+ * outage:
+ *
+ *   * A file that will not DECRYPT means this pod's key is wrong for it, and
+ *     nothing about the pod's contents is known. Always fatal.
+ *   * A file that decrypts (or is plaintext) and is not valid Turtle is fatal
+ *     only for a REGISTERED record file (`clinical/…`, `wellness/…`), which is
+ *     the record picture itself. For an unregistered `.ttl` the `--all` sweep
+ *     happens to find — a pod also holds notes, investigations, reports and
+ *     other app-written resources — it is a loud WARNING and the query still
+ *     answers. One stray file must not blank a pod's whole record list.
  */
 
 import type { Command } from 'commander';
 import * as path from 'path';
-import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
+import {
+  printResult,
+  printError,
+  printVerbose,
+  printWarning,
+  type OutputOptions,
+} from '../../lib/output.js';
 import {
   DATA_TYPES,
   resolvePodDir,
@@ -39,6 +71,95 @@ function classifyExtraBucket(relPath: string, baseName: string): string {
     return 'ai-extracted';
   }
   return 'other';
+}
+
+/** One pod file the query needed and could not read, with the reason. */
+interface UnreadableFile {
+  /** Pod-relative path, forward slashes. */
+  file: string;
+  /** The underlying decrypt/parse failure. */
+  error: string;
+}
+
+/**
+ * A CLI failure reason, made fit to print.
+ *
+ * A Turtle parse failure quotes the offending token, and for a sealed file read
+ * without the key that token is a run of raw ciphertext bytes. Keep the reason,
+ * drop the noise: strip everything outside printable ASCII and cap the length.
+ */
+function tidyReason(text: string): string {
+  const flat = text.replace(/[^\x20-\x7E]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return flat.length > 120 ? `${flat.slice(0, 117)}...` : flat;
+}
+
+/** How many files one message names before it says "and N more". */
+const SHOWN = 5;
+
+/** `a/b.ttl (reason); c/d.ttl (reason)`, capped at {@link SHOWN} entries. */
+function listFiles(files: UnreadableFile[]): string {
+  const listed = files
+    .slice(0, SHOWN)
+    .map((u) => `${u.file.split(/[\\/]/).join('/')} (${tidyReason(u.error)})`)
+    .join('; ');
+  return listed + (files.length > SHOWN ? `; and ${files.length - SHOWN} more` : '');
+}
+
+/**
+ * The message for a query that could not read part of the pod.
+ *
+ * Names the files (capped, so a wholly-sealed pod does not print fifteen
+ * identical lines) and ends by saying what this is NOT, because the whole class
+ * of bug this guards against is a caller quietly turning it into "no records".
+ */
+export function unreadableFilesMessage(
+  podDir: string,
+  unreadable: UnreadableFile[],
+  attempted: number,
+): string {
+  return (
+    `Could not read ${unreadable.length} of ${attempted} file(s) in ${podDir}: ` +
+    `${listFiles(unreadable)}. This is NOT the same as the pod having no records.`
+  );
+}
+
+/**
+ * The warning for unregistered files the sweep stepped over. Says what was
+ * skipped and what that costs, so "not fatal" never becomes "not mentioned".
+ */
+export function skippedFilesMessage(skipped: UnreadableFile[]): string {
+  return (
+    `Skipped ${skipped.length} file(s) that are not valid Turtle: ${listFiles(skipped)}. ` +
+    `They hold no records this query can count; everything else was read.`
+  );
+}
+
+/**
+ * Weigh a loaded graph's read failures and say so.
+ *
+ * Returns `false` (having set exit 2 and printed the error) when a file would
+ * not DECRYPT: the pod's key is wrong for it and no traversal over the result
+ * means anything. Parse failures are warned about and stepped over — a pod also
+ * holds notes, investigations and reports, and one stray file must not take the
+ * whole graph down with it.
+ */
+function reportGraphReadFailures(
+  absDir: string,
+  graph: { parseErrors: Array<{ file: string; error: string; kind: 'decrypt' | 'parse' }>; files: string[] },
+  globalOpts: OutputOptions,
+): boolean {
+  const undecryptable = graph.parseErrors.filter((e) => e.kind === 'decrypt');
+  if (undecryptable.length > 0) {
+    printError(
+      unreadableFilesMessage(absDir, undecryptable, graph.files.length),
+      globalOpts,
+    );
+    process.exitCode = 2;
+    return false;
+  }
+  const unparsed = graph.parseErrors.filter((e) => e.kind === 'parse');
+  if (unparsed.length > 0) printWarning(skippedFilesMessage(unparsed), globalOpts);
+  return true;
 }
 
 export function registerQuerySubcommand(pod: Command, program: Command): void {
@@ -132,8 +253,15 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           } catch (e: unknown) {
             const msg =
               e instanceof PodDecryptError ? e.message : e instanceof Error ? e.message : String(e);
-            printError(`Cannot read encrypted pod: ${msg}`, globalOpts);
-            process.exitCode = 1;
+            // Exit 2, not 1: this is "could not open the pod", the same hard read
+            // failure `pod conflicts` exits 2 on. A caller must be able to tell it
+            // apart from a usage error AND from an empty result.
+            printError(
+              `Could not open the pod at ${absDir}: ${msg}. ` +
+                `This is NOT the same as the pod having no records.`,
+              globalOpts,
+            );
+            process.exitCode = 2;
             return;
           }
         }
@@ -204,6 +332,17 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             }
           > = {};
 
+          // Files the query needed and could not read. Collected rather than
+          // thrown on the first one, so the message can name all of them (a
+          // sealed pod read without the key fails on every file, and the useful
+          // report is "the pod", not "clinical/allergies.ttl").
+          const unreadable: UnreadableFile[] = [];
+          // Unregistered `.ttl` files that decrypted but are not valid Turtle.
+          // Reported, never fatal: they hold no records this command counts, and
+          // one of them must not cost the user the whole record list.
+          const skipped: UnreadableFile[] = [];
+          let attempted = 0;
+
           // If --all, also discover any TTL files not in the registry
           const extraFiles: string[] = [];
           if (options.all) {
@@ -238,7 +377,17 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
               continue;
             }
 
+            attempted += 1;
             const { records, error } = await parseDataFile(filePath, dek);
+            // A REGISTERED record file is the record picture. Either failure on
+            // one of these — a key that will not open it, or bytes that are not
+            // Turtle — leaves the count unknown, and unknown is not zero.
+            if (error) {
+              unreadable.push({
+                file: `${typeInfo.directory}/${typeInfo.filename}`,
+                error,
+              });
+            }
 
             queryResults[typeName] = {
               count: records.length,
@@ -260,7 +409,21 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             const relPath = path.relative(absDir, extraFile);
             const baseName = path.basename(extraFile, '.ttl');
 
-            const { records, error } = await parseDataFile(extraFile, dek);
+            attempted += 1;
+            const { records, error, errorKind } = await parseDataFile(extraFile, dek);
+            // Recorded BEFORE the empty-file skip below: an unreadable file and
+            // an empty one are indistinguishable after that `continue`, which is
+            // exactly the conflation this command must not make.
+            //
+            // An unregistered file that will not DECRYPT is still a key problem
+            // and still fatal. One that decrypts and is not valid Turtle is a
+            // stray file, not a broken pod — a pod holds notes, investigations
+            // and reports too — so it is reported and stepped over.
+            if (error) {
+              const entry = { file: relPath.split(path.sep).join('/'), error };
+              if (errorKind === 'parse') skipped.push(entry);
+              else unreadable.push(entry);
+            }
             if (records.length === 0) continue;
 
             const bucketKey = classifyExtraBucket(relPath, baseName);
@@ -284,12 +447,34 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             }
           }
 
+          // A file that could not be read fails the QUERY. Reporting the
+          // readable part with a per-bucket `error` field was tried and is what
+          // produced the bug: consumers read `count`, saw zero, and rendered a
+          // pod full of records as an empty one.
+          if (unreadable.length > 0) {
+            printError(unreadableFilesMessage(absDir, unreadable, attempted), globalOpts);
+            process.exitCode = 2;
+            return;
+          }
+
+          // Not fatal, but never silent: the sweep stepped over files it could
+          // not parse, and the caller is entitled to know the list is of what
+          // could be read.
+          if (skipped.length > 0) {
+            printWarning(skippedFilesMessage(skipped), globalOpts);
+          }
+
           // With --all --edges, compute the record-to-record edge projection.
           // This is strictly additive: without --edges the output object is
           // built exactly as before, so existing consumers see no change.
           let edges: ReturnType<typeof recordEdges> | undefined;
           if (options.all && options.edges) {
             const graph = await loadPodGraph(absDir, dek);
+            // `loadPodGraph` collects its read failures instead of throwing, so
+            // an unread file would otherwise become "this record has no edges".
+            // Same split as above: a file that will not decrypt is fatal, a file
+            // that is not valid Turtle is reported and stepped over.
+            if (!reportGraphReadFailures(absDir, graph, globalOpts)) return;
             edges = recordEdges(graph);
           }
 
@@ -406,6 +591,9 @@ async function runNeighborsQuery(
   }
 
   const graph = await loadPodGraph(absDir, dek);
+  // Before "no record found with that IRI": over a graph with files that would
+  // not decrypt, that sentence is a guess dressed as an answer.
+  if (!reportGraphReadFailures(absDir, graph, globalOpts)) return;
   const result = neighborhood(graph, seedIri, { hops, edgeFilters });
 
   if (result === null) {
