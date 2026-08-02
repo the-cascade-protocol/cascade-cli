@@ -340,6 +340,20 @@ export async function discoverTtlFiles(podDir: string): Promise<string[]> {
 // ─── Parsing Helpers ─────────────────────────────────────────────────────────
 
 /**
+ * WHY a read of a pod file failed, which is not the same question as whether it
+ * failed.
+ *
+ *  - `decrypt` — the bytes would not open under this pod's DEK. The pod's key is
+ *    wrong for this file, and nothing about its contents is known.
+ *  - `parse`   — the bytes opened (or were plaintext) and are not valid Turtle.
+ *
+ * Callers weigh them differently on purpose: a file that will not decrypt is a
+ * key problem and taints the whole read, while a stray `.ttl` that is not valid
+ * Turtle is one bad file among readable ones.
+ */
+export type DataFileErrorKind = 'decrypt' | 'parse';
+
+/**
  * Parse a single TTL file and extract typed records.
  *
  * When `dek` is supplied, the on-disk resource is decrypted (combined
@@ -354,6 +368,8 @@ export async function parseDataFile(filePath: string, dek?: Buffer): Promise<{
   }>;
   totalQuads: number;
   error?: string;
+  /** Set whenever `error` is: which of the two failures this was. */
+  errorKind?: DataFileErrorKind;
 }> {
   let result;
   if (dek) {
@@ -362,14 +378,19 @@ export async function parseDataFile(filePath: string, dek?: Buffer): Promise<{
       content = readResource(filePath, dek);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      return { records: [], totalQuads: 0, error: message };
+      return { records: [], totalQuads: 0, error: message, errorKind: 'decrypt' };
     }
     result = parseTurtle(content, `file://${filePath}`);
   } else {
     result = await parseTurtleFile(filePath);
   }
   if (!result.success) {
-    return { records: [], totalQuads: 0, error: result.errors.join('; ') };
+    return {
+      records: [],
+      totalQuads: 0,
+      error: result.errors.join('; '),
+      errorKind: 'parse',
+    };
   }
 
   const records: Array<{

@@ -59,7 +59,7 @@ export interface PodGraph {
   /** Pod-relative paths the graph covers (the files `--all` reads). */
   files: string[];
   /** Files that could not be read/parsed (decrypt failure, bad Turtle). */
-  parseErrors: Array<{ file: string; error: string }>;
+  parseErrors: Array<{ file: string; error: string; kind: 'decrypt' | 'parse' }>;
 }
 
 export interface RecordEdge {
@@ -121,7 +121,7 @@ export async function loadPodGraph(absDir: string, dek?: Buffer): Promise<PodGra
   const files = discovered.filter((f) => !exclude.has(f));
 
   const store = new Store();
-  const parseErrors: Array<{ file: string; error: string }> = [];
+  const parseErrors: Array<{ file: string; error: string; kind: 'decrypt' | 'parse' }> = [];
 
   for (const file of files) {
     const rel = path.relative(absDir, file);
@@ -130,12 +130,18 @@ export async function loadPodGraph(absDir: string, dek?: Buffer): Promise<PodGra
       // readResource decrypts when a dek is supplied, else reads plaintext.
       content = dek ? readResource(file, dek) : await fs.readFile(file, 'utf-8');
     } catch (err: unknown) {
-      parseErrors.push({ file: rel, error: err instanceof Error ? err.message : String(err) });
+      parseErrors.push({
+        file: rel,
+        error: err instanceof Error ? err.message : String(err),
+        // Only a DEK-backed read can fail for key reasons; a plain read that
+        // fails is an I/O problem, weighed with the parse failures.
+        kind: dek ? 'decrypt' : 'parse',
+      });
       continue;
     }
     const result = parseTurtle(content, `file://${file}`);
     if (!result.success) {
-      parseErrors.push({ file: rel, error: result.errors.join('; ') });
+      parseErrors.push({ file: rel, error: result.errors.join('; '), kind: 'parse' });
       continue;
     }
     store.addQuads(result.quads);
