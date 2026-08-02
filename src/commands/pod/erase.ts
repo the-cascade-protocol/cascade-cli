@@ -17,24 +17,50 @@
  * This is the ONLY records command that mutates a base bucket file (removal);
  * every other command is purely additive. `--confirm` is REQUIRED.
  *
+ * Exit codes:
+ *   0 — the record was erased
+ *   1 — usage error (no --confirm, no pod, the record genuinely is not there)
+ *   2 — a file that might hold the record could NOT be read
+ *
+ * The third one matters more here than anywhere else. The search loop used to
+ * `catch { continue }` past any file it could not open, so on an encrypted pod
+ * read without the key EVERY bucket was skipped and the command reported
+ * "Record not found" — about a record sitting right there. For an erasure verb
+ * the direction of the error is the whole point: never say "not found" about a
+ * file you could not open. A record that IS found while other files were
+ * unreadable still warns, because the search was not exhaustive.
+ *
  * --json result:
  *   { erased: true, tombstoneUri, recordUri, action }
  */
 
 import type { Command } from 'commander';
 import * as path from 'node:path';
-import { Parser, type Quad } from 'n3';
-import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
+import { type Quad } from 'n3';
+import {
+  printResult,
+  printError,
+  printErrorDetail,
+  printVerbose,
+  printWarning,
+  type OutputOptions,
+} from '../../lib/output.js';
 import { resolvePodDir, fileExists, discoverTtlFiles } from './helpers.js';
 import {
-  resolvePodDek,
   appendOverlay,
   mintUri,
   iriRef,
   strLit,
   type OverlayLine,
 } from '../../lib/annotations.js';
-import { readResource, writeResource } from '../../lib/pod-encryption.js';
+import {
+  openPod,
+  listFiles,
+  PodUnreadableError,
+  type PodReader,
+  type PodReadFailure,
+} from '../../lib/pod-read.js';
+import { writeResource } from '../../lib/pod-encryption.js';
 import { quadsToTurtle } from '../../lib/fhir-converter/types.js';
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
@@ -44,12 +70,6 @@ const ERASE_ACTION = 'hard-erase';
 
 /** Default actor for the erasure audit event (the Pod patient WebID). */
 const PATIENT_WEBID = '/profile/card.ttl#me';
-
-/** Parse Turtle into a flat quad array. */
-function parseQuads(turtle: string): Quad[] {
-  const parser = new Parser({ format: 'Turtle' });
-  return parser.parse(turtle);
-}
 
 /** Shorten a known rdf:type IRI to a CURIE for the Tombstone audit marker. */
 function shortenType(iri: string): string {
@@ -96,14 +116,26 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
         return;
       }
 
-      let dek: Buffer | undefined;
+      // Open the pod ONCE. Exit 2, not 1: a pod that will not open is "could
+      // not read what exists", and the caller must be able to tell that apart
+      // from the record genuinely not being there.
+      let reader: PodReader;
       try {
-        dek = await resolvePodDek(podDir);
+        reader = await openPod(podDir);
       } catch (e: unknown) {
-        printError(e instanceof Error ? e.message : String(e), globalOpts);
-        process.exitCode = 1;
+        if (e instanceof PodUnreadableError) {
+          printErrorDetail(
+            e.message,
+            { encrypted: true, readable: false, reason: e.reason },
+            globalOpts,
+          );
+        } else {
+          printError(e instanceof Error ? e.message : String(e), globalOpts);
+        }
+        process.exitCode = 2;
         return;
       }
+      const dek = reader.dek;
 
       // Find the bucket file that contains the subject. Search data + extra
       // ttl files, excluding overlays, indexes, profile, and settings.
@@ -121,30 +153,73 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
       let foundFile: string | undefined;
       let subjectQuads: Quad[] = [];
       let remainingQuads: Quad[] = [];
+      // Every file the search could not open. ANY failure counts here, not just
+      // the ones the read layer calls fatal elsewhere: a file this command
+      // could not parse might be the file holding the record, and "I did not
+      // look there" is not "it is not there".
+      const unreadable: PodReadFailure[] = [];
 
       for (const file of allTtl) {
         if (excludeFiles.has(file)) continue;
         if ([...excludeDirs].some((d) => file.startsWith(d + path.sep))) continue;
 
-        let quads: Quad[];
-        try {
-          quads = parseQuads(readResource(file, dek));
-        } catch {
+        // baseIri '' because the surviving quads are re-serialized back to this
+        // same file: resolving relative IRIs against the file URL here would
+        // rewrite them as a side effect of the erasure.
+        const parsed = reader.parseFile(file, { baseIri: '' });
+        if (!parsed.ok) {
+          unreadable.push(parsed.failure);
           continue;
         }
+        // Keep walking after a hit. Only the FIRST match is erased (unchanged),
+        // but the loop no longer stops there, because whether the user is told
+        // about an unreadable file must not depend on where it happens to sort
+        // relative to the file the record was found in.
+        if (foundFile) continue;
+
+        const quads = parsed.value.quads;
         const match = quads.filter((q) => q.subject.value === options.record);
         if (match.length > 0) {
           foundFile = file;
           subjectQuads = match;
           remainingQuads = quads.filter((q) => q.subject.value !== options.record);
-          break;
         }
       }
 
       if (!foundFile) {
+        // "Not found" is only honest when everything was actually searched.
+        if (unreadable.length > 0) {
+          printErrorDetail(
+            `Could not read ${unreadable.length} file(s) while searching ${podDir} for ` +
+              `${options.record}: ${listFiles(unreadable)}. The record was not found in the ` +
+              `files that COULD be read, which is not the same as the record not existing. ` +
+              `Nothing was erased.`,
+            {
+              readable: false,
+              reason: 'files-unreadable',
+              erased: false,
+              files: unreadable.map((f) => f.file),
+            },
+            globalOpts,
+          );
+          process.exitCode = 2;
+          return;
+        }
         printError(`Record not found in any bucket file: ${options.record}`, globalOpts);
         process.exitCode = 1;
         return;
+      }
+
+      // Found it, but the sweep still stepped over files. The erasure below is
+      // correct; the claim "this record is now gone from the pod" is only as
+      // good as the files that were searched, so say which were not.
+      if (unreadable.length > 0) {
+        printWarning(
+          `Erasing ${options.record}, but ${unreadable.length} file(s) could not be read and ` +
+            `were not searched: ${listFiles(unreadable)}. If a copy of this record is in one of ` +
+            `them it was NOT erased.`,
+          globalOpts,
+        );
       }
 
       // Capture the erased type (category only, if present). We deliberately do
