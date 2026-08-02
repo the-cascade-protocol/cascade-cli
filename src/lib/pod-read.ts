@@ -43,6 +43,7 @@
  *   2 — could not read what exists (the pod, or a file inside it)
  */
 
+import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import {
@@ -60,6 +61,7 @@ import {
   PodDecryptError,
 } from './pod-encryption.js';
 import { obtainPassphrase } from './passphrase.js';
+import { looksLikePlaintext } from './pod-resources.js';
 import { DATA_TYPES } from './pod-data-types.js';
 
 // ─── Failure model ────────────────────────────────────────────────────────────
@@ -119,6 +121,45 @@ export class PodUnreadableError extends Error {
     this.reason = reason;
     this.detail = detail;
   }
+}
+
+/**
+ * WHY a decrypt failed, told apart rather than guessed at.
+ *
+ * A sealed pod containing one file that was never sealed — an interrupted
+ * `pod encrypt`, a resource written by a tool that did not know the pod's state
+ * — fails authentication exactly like a WRONG KEY does, and the raw error for
+ * both is "incorrect passphrase or corrupt key". That sentence is a
+ * misdiagnosis for the unsealed case: the passphrase was RIGHT, and it sends
+ * the user to re-check the one thing that is not wrong. Naming the wrong cause
+ * is the same defect as reporting an encrypted pod as an empty one, one level
+ * down, so it is told apart here rather than at each call site.
+ *
+ * The discrimination is the one {@link looksLikePlaintext} already makes for
+ * `pod encrypt` / `pod decrypt`: GCM authentication is authoritative and is
+ * tried first, so a sealed resource is never mistaken for text; bytes that fail
+ * it and still decode as UTF-8 are text that was never sealed. Ciphertext under
+ * a DIFFERENT key is high-entropy and stays "wrong key".
+ *
+ * The file stays UNREADABLE either way, and callers keep treating it as fatal.
+ * Bytes that did not authenticate under the pod's key have not been shown to
+ * belong to this pod, and serving them as records would spend the guarantee
+ * AES-GCM is here to provide: anyone who could drop a file into the directory
+ * would otherwise have their records read back as the patient's own.
+ */
+export function decryptFailureReason(absPath: string, err: unknown): string {
+  let blob: Buffer;
+  try {
+    blob = fs.readFileSync(absPath);
+  } catch {
+    return errText(err);
+  }
+  if (!looksLikePlaintext(blob)) return errText(err);
+  // Kept under tidyReason's 120-character cap ON PURPOSE. That cap exists to
+  // stop a parse error quoting a run of raw ciphertext, and it truncates from
+  // the right — so a longer sentence here would lose its most useful half, the
+  // remedy, and leave the user with a diagnosis and no next step.
+  return 'NOT sealed: plaintext in an encrypted pod (passphrase is fine); re-run `cascade pod encrypt` to seal it';
 }
 
 /** The prose half of {@link PodUnreadableError}: name the state, plainly. */
@@ -223,10 +264,15 @@ export class PodReader {
     try {
       return { ok: true, value: readResource(absPath, this.dek) };
     } catch (e: unknown) {
-      const kind: PodReadFailureKind =
-        this.dek && e instanceof PodDecryptError ? 'decrypt' : 'io';
-      return { ok: false, failure: this.failure(absPath, kind, errText(e)) };
+      if (this.dek && e instanceof PodDecryptError) {
+        return { ok: false, failure: this.failure(absPath, 'decrypt', this.decryptReason(absPath, e)) };
+      }
+      return { ok: false, failure: this.failure(absPath, 'io', errText(e)) };
     }
+  }
+
+  private decryptReason(absPath: string, e: PodDecryptError): string {
+    return decryptFailureReason(absPath, e);
   }
 
   /**

@@ -445,6 +445,18 @@ describe.each(READ_VERBS)('read conformance: pod %s', (name, spec) => {
         expect(res.exitCode, `stderr: ${res.stderr}`).toBe(spec.successExit);
         expect(res.stderr).toContain(spec.strayTarget!);
       }
+
+      // And it must name the RIGHT cause. An unsealed file fails GCM exactly
+      // like a wrong key does, and the raw error for both is "incorrect
+      // passphrase or corrupt key" — which is a lie here, because the
+      // passphrase supplied was the correct one. Sending the user to re-check
+      // the one thing that is not wrong is the same class of defect as
+      // reporting an encrypted pod as an empty one.
+      expect(res.stderr).toMatch(/NOT sealed/i);
+      expect(res.stderr).not.toMatch(/incorrect passphrase/i);
+      // The remedy has to SURVIVE the reason-length cap, which truncates from
+      // the right. A diagnosis with its next step cut off is half a message.
+      expect(res.stderr).toContain('cascade pod encrypt');
     },
     TEST_TIMEOUT_MS,
   );
