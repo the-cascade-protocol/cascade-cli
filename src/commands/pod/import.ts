@@ -674,6 +674,22 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         reconciledEdgeRewrites = reconcileResult.report.summary.edgeObjectsRewritten;
         printVerbose(`Reconciliation complete. Final records: ${reconcileResult.report.summary.finalRecordCount}`, globalOpts);
 
+        // Not printVerbose: an identity collision means two records this import
+        // treats as different were minted onto ONE IRI, so the identity key that
+        // produced it is narrower than the records it is identifying. That is a
+        // defect in the source data or in a converter, and a user who is never
+        // told has no way to discover it — the records look reconciled.
+        const collisionsSplit = reconcileResult.report.summary.identityCollisionsSplit;
+        if (collisionsSplit > 0) {
+          printWarning(
+            `${collisionsSplit} identity collision(s): two or more records with DIFFERENT content were ` +
+            `assigned the same IRI. They have been kept as separate records rather than one being ` +
+            `dropped as a duplicate, and raised as unresolved conflicts — run \`cascade pod conflicts\` ` +
+            `to review them.`,
+            globalOpts,
+          );
+        }
+
         // Persist unresolved conflicts to settings/pending-conflicts.ttl
         if (!dryRun) {
           const pendingConflicts: PendingConflict[] = (reconcileResult.report.unresolvedConflicts as Array<{
@@ -681,12 +697,14 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             matchedOn: string;
             sources?: string[];
             candidateUris?: string[];
+            label?: string;
           }>).map((c) => ({
             uri: `urn:uuid:conflict-${randomUUID()}`,
             conflictId: generateConflictId(c.recordType, c.matchedOn),
             recordType: c.recordType,
             detectedAt: new Date(),
             candidateRecordUris: c.candidateUris ?? [],
+            label: c.label,
             sourceA: c.sources?.[0],
             sourceB: c.sources?.[1],
           }));
