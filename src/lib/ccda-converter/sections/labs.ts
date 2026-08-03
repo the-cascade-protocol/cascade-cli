@@ -41,7 +41,8 @@
  * asking the next reader to guess.
  */
 
-import { NS, contentHashedUri, tripleDateTime } from '../../fhir-converter/types.js';
+import { NS, tripleDateTime } from '../../fhir-converter/types.js';
+import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { contentFingerprint, EMPTY_SEED } from '../../identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { buildEncounterRecord } from './encounters.js';
@@ -87,12 +88,6 @@ function formatCcdaDate(dateVal: string): string {
     : dateVal;
 }
 
-/** Extract an HL7 II (id) element's "root:extension" string, or '' if no extension. */
-function extractSourceId(node: any): string {
-  const idEl = Array.isArray(node?.id) ? node.id[0] : node?.id;
-  return idEl?.['@_extension'] ? `${idEl['@_root'] ?? ''}:${idEl['@_extension']}` : '';
-}
-
 /** The subject IRI, quads, and clinical date for one converted lab observation. */
 interface LabObservation {
   subject: string;
@@ -120,8 +115,8 @@ interface LabObservation {
  */
 function extractObservationQuads(
   obs: any,
-  patientUri: string,
   sourceSystem: string,
+  warnings?: string[],
 ): LabObservation | null {
   if (!obs) return null;
 
@@ -147,28 +142,37 @@ function extractObservationQuads(
   const refRange = obs?.referenceRange?.observationRange;
   const refRangeText = refRange?.text?.['#text'] ?? refRange?.text ?? '';
 
-  const sourceId = extractSourceId(obs);
+  const sourceId = ccdaSourceId(obs?.id);
 
   // Tier 1 — the source identified this result. Nothing else is consulted, so
-  // two results the source kept apart can never be merged here. Passing the id
-  // as `contentHashedUri`'s `fallbackId` with an EMPTY field set produces
-  // exactly `deterministicUuid('LabResult:' + sourceId)`.
+  // two results the source kept apart can never be merged here. The door's
+  // `{type}:{id}` template is byte-identical to the `contentHashedUri('LabResult',
+  // {}, sourceId, obs)` this call used to spell inline, so no id-bearing lab IRI
+  // moves. What DOES move: `ccdaSourceId` also reads a root-only `<id>`, which
+  // the old reader here discarded, so an observation identified that way stops
+  // falling through to the content tier.
   //
   // Tier 2 — no id. Now the key has to do the separating, so it carries the
   // full-precision effective time and the measured value, both of which the
-  // previous key set left out.
-  const uri = sourceId
-    ? contentHashedUri('LabResult', {}, sourceId, obs)
-    : contentHashedUri('LabResult', {
-        patient: patientUri,
-        loincCode: isLoinc ? code : undefined,
-        testName: displayName || undefined,
-        // `dateVal` raw, NOT `dateStr`. `formatCcdaDate` truncates to a calendar
-        // day, which merged a 07:00 draw with an 11:00 draw.
-        effective: dateVal || undefined,
-        value: value || undefined,
-        unit: unit || undefined,
-      }, undefined, obs);
+  // pre-#36 key set left out.
+  const uri = ccdaRecordUri({
+    type: 'LabResult',
+    sourceId,
+    content: {
+      loincCode: isLoinc ? code : undefined,
+      testName: displayName || undefined,
+      // `dateVal` raw, NOT `dateStr`. `formatCcdaDate` truncates to a calendar
+      // day, which merged a 07:00 draw with an 11:00 draw.
+      effective: dateVal || undefined,
+      value: value || undefined,
+      unit: unit || undefined,
+      // Serialized as health:referenceRangeText and was outside the key.
+      refRange: refRangeText || undefined,
+    },
+    source: obs,
+    warnings,
+    label: 'C-CDA lab result',
+  });
 
   const subj = namedNode(uri);
   const quads: Quad[] = [];
@@ -200,12 +204,12 @@ function extractObservationQuads(
  */
 function buildPanelQuads(
   organizer: any,
-  patientUri: string,
   sourceSystem: string,
   importedAt: string,
   memberSubjects: string[],
   memberDates: string[],
   encounterSubjects: string[],
+  warnings?: string[],
 ): Quad[] {
   const codeEl = organizer?.code ?? {};
   const code = codeEl?.['@_code'] ?? codeEl?.code ?? '';
@@ -225,49 +229,47 @@ function buildPanelQuads(
     memberDates.filter((d) => d).sort()[0] ||
     '';
 
-  const sourceId = extractSourceId(organizer);
+  const sourceId = ccdaSourceId(organizer);
 
-  // Panel identity: patient + panel code + clinical date + the organizer's own
-  // id (root:extension). The id must be a first-class identity field, not just
-  // the contentHashedUri fallback: real Epic exports routinely omit the
-  // organizer-level <code> (verified: 47 of 55 panels in the acceptance export
-  // carry no code), so keying on code+date alone collapses genuinely distinct
-  // same-day panels into one record and pools their members. The organizer id is
-  // present and unique per panel, so it yields one record per BATTERY organizer
-  // while staying deterministic (the id is stable in the source) and dedupe-safe
-  // (an exact re-import mints the same id and collapses to the same subject).
+  // Panel identity, tier 1: the organizer's own id decides. That is the same
+  // rule every other C-CDA record now follows, and this path had already reached
+  // most of the way to it on its own — the id was a first-class CONTENT field
+  // (`panelId`) rather than a dead `fallbackId`, because real Epic exports
+  // routinely omit the organizer-level <code> (verified: 47 of 55 panels in the
+  // acceptance export carry no code), so keying on code+date alone collapsed
+  // genuinely distinct same-day panels and pooled their members.
+  //
+  // Tier 2, and only tier 2: `clinicalDate` is `formatCcdaDate`-truncated to a
+  // calendar day, so for an organizer with neither id nor code the key would
+  // degenerate to a single day. Measured: two id-less code-less BATTERY
+  // organizers four hours apart on one day, holding DIFFERENT results, both
+  // minted urn:uuid:0335391b-48fb-5d69-ab87-7bbf2429e434. So the id-less branch
+  // additionally carries the organizer's raw full-precision effectiveTime and a
+  // fingerprint of its members and encounters — which is what a panel's content
+  // actually IS, since a panel has no measured value of its own. The cost is
+  // that an id-less panel which GAINS a result in a later export mints a new
+  // IRI, i.e. a duplicate; that is a split, and a split is the recoverable
+  // failure. A merge is not.
+  //
   // Timestamps that vary between imports (importedAt) are deliberately excluded.
-  //
-  // THAT PRE-EXISTING FIX IS WHY THIS PATH DOES NOT CARRY THE MEMBER PATH'S
-  // "the id was discarded" DEFECT: `panelId` is a content field, so an
-  // id-bearing organizer is already separated by it, and the id-bearing key is
-  // therefore left BYTE-IDENTICAL here. Moving it would break panel IRIs for no
-  // correctness gain.
-  //
-  // What it DID carry is the other half of that defect: `clinicalDate` is
-  // `formatCcdaDate`-truncated to a calendar day, and when the organizer has
-  // neither an id nor a code — the combination the comment above says is common
-  // in real exports — the whole key degenerates to {patient, day}. Measured: two
-  // id-less code-less BATTERY organizers four hours apart on one day, holding
-  // DIFFERENT results, both minted urn:uuid:0335391b-48fb-5d69-ab87-7bbf2429e434.
-  //
-  // So the id-less branch, and only the id-less branch, additionally carries the
-  // organizer's raw full-precision effectiveTime and a fingerprint of its member
-  // subjects — which is what a panel's content actually IS, since a panel has no
-  // measured value of its own. The cost is that an id-less panel which GAINS a
-  // result in a later export mints a new IRI, i.e. a duplicate; that is a split,
-  // and a split is the recoverable failure. A merge is not.
   const memberKey = contentFingerprint(memberSubjects);
-  const uri = contentHashedUri('LaboratoryReport', {
-    patient: patientUri,
-    panelCode: code || undefined,
-    date: clinicalDate || undefined,
-    panelId: sourceId || undefined,
-    ...(sourceId ? {} : {
+  const encounterKey = contentFingerprint(encounterSubjects);
+  const uri = ccdaRecordUri({
+    type: 'LaboratoryReport',
+    sourceId,
+    content: {
+      panelCode: code || undefined,
+      // Serialized as clinical:panelName and was outside the key.
+      panelName: displayName || undefined,
+      date: clinicalDate || undefined,
       effective: orgDateRaw || undefined,
       members: memberKey === EMPTY_SEED ? undefined : memberKey,
-    }),
-  }, sourceId || undefined, organizer);
+      encounters: encounterKey === EMPTY_SEED ? undefined : encounterKey,
+    },
+    source: organizer,
+    warnings,
+    label: 'C-CDA lab panel',
+  });
 
   const subj = namedNode(uri);
   const quads: Quad[] = [];
@@ -319,10 +321,10 @@ function buildPanelQuads(
 
 export function extractLabQuads(
   entries: any[],
-  patientUri: string,
   sourceSystem: string,
   _sectionText?: any,
   importedAt?: string,
+  warnings?: string[],
 ): Quad[] {
   const quads: Quad[] = [];
   const stamp = importedAt ?? new Date().toISOString();
@@ -346,7 +348,7 @@ export function extractLabQuads(
         if (!comp?.observation) continue;
         const obsList = Array.isArray(comp.observation) ? comp.observation : [comp.observation];
         for (const obs of obsList) {
-          const member = extractObservationQuads(obs, patientUri, sourceSystem);
+          const member = extractObservationQuads(obs, sourceSystem, warnings);
           if (!member) continue;
           quads.push(...member.quads);
           memberSubjects.push(member.subject);
@@ -369,7 +371,7 @@ export function extractLabQuads(
         const encounterSubjects: string[] = [];
         const seenThisOrganizer = new Set<string>();
         for (const enc of rawEncounters) {
-          const built = buildEncounterRecord(enc, patientUri, sourceSystem);
+          const built = buildEncounterRecord(enc, sourceSystem, warnings);
           if (!built) continue;
           if (!seenThisOrganizer.has(built.subject)) {
             seenThisOrganizer.add(built.subject);
@@ -382,14 +384,14 @@ export function extractLabQuads(
         }
 
         quads.push(...buildPanelQuads(
-          organizer, patientUri, sourceSystem, stamp, memberSubjects, memberDates, encounterSubjects,
+          organizer, sourceSystem, stamp, memberSubjects, memberDates, encounterSubjects, warnings,
         ));
       }
     } else if (entry?.observation) {
       // Standalone observation (no organizer): a plain lab result, no panel.
       const obsList = Array.isArray(entry.observation) ? entry.observation : [entry.observation];
       for (const obs of obsList) {
-        const member = extractObservationQuads(obs, patientUri, sourceSystem);
+        const member = extractObservationQuads(obs, sourceSystem, warnings);
         if (member) quads.push(...member.quads);
       }
     }

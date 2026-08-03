@@ -9,7 +9,8 @@
  * dedupe-safe encounter records (root 3.11 encounter completeness).
  */
 
-import { NS, contentHashedUri } from '../../fhir-converter/types.js';
+import { NS } from '../../fhir-converter/types.js';
+import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
 
@@ -61,14 +62,16 @@ function formatCcdaDate(dateVal: string): string {
 /**
  * Build one clinical:Encounter record from a C-CDA <encounter> element, or null
  * when the element carries no usable identity (no id, type, or date — a bare
- * reference rather than a real definition). The subject is content-hashed on
- * stable identity (patient + type + date + id) so the same encounter, appearing
- * across many lab organizers or documents, dedupes to one record.
+ * reference rather than a real definition).
+ *
+ * Identity is the shared C-CDA rule: the encounter's own `<id>` decides, and
+ * without one the key is type + date. The same encounter appearing across many
+ * lab organizers or documents therefore dedupes to one record.
  */
 export function buildEncounterRecord(
   enc: any,
-  patientUri: string,
   sourceSystem: string,
+  warnings?: string[],
 ): CcdaEncounterRecord | null {
   if (!enc || typeof enc !== 'object' || Array.isArray(enc)) return null;
 
@@ -80,22 +83,23 @@ export function buildEncounterRecord(
     effTime?.['@_value'] ?? effTime?.value ?? effTime?.low?.['@_value'] ?? effTime?.low?.value ?? '';
   const dateStr = formatCcdaDate(dateVal);
 
-  const idEl = Array.isArray(enc?.id) ? enc.id[0] : enc?.id;
-  const sourceId = idEl?.['@_extension']
-    ? `${idEl['@_root'] ?? ''}:${idEl['@_extension']}`
-    : idEl?.['@_root']
-      ? String(idEl['@_root'])
-      : '';
+  const sourceId = ccdaSourceId(enc?.id);
 
   // Require real content: an id, a type, or a date. A bare <encounter> with none
   // of these is a stray reference, not a visit — do not mint a record for it.
   if (!sourceId && !displayName && !dateStr) return null;
 
-  const uri = contentHashedUri('Encounter', {
-    patient: patientUri,
-    displayName: displayName || undefined,
-    date: dateStr || undefined,
-  }, sourceId || undefined, enc);
+  const uri = ccdaRecordUri({
+    type: 'Encounter',
+    sourceId,
+    content: {
+      displayName: displayName || undefined,
+      date: dateStr || undefined,
+    },
+    source: enc,
+    warnings,
+    label: 'C-CDA encounter',
+  });
 
   const subj = namedNode(uri);
   const quads: Quad[] = [];
@@ -110,8 +114,10 @@ export function buildEncounterRecord(
 
 export function extractEncounterQuads(
   entries: any[],
-  patientUri: string,
   sourceSystem: string,
+  _sectionText?: any,
+  _importedAt?: string,
+  warnings?: string[],
 ): Quad[] {
   const quads: Quad[] = [];
 
@@ -126,7 +132,7 @@ export function extractEncounterQuads(
         ? [entry.encounter]
         : [entry];
     for (const enc of encList) {
-      const built = buildEncounterRecord(enc, patientUri, sourceSystem);
+      const built = buildEncounterRecord(enc, sourceSystem, warnings);
       if (built) quads.push(...built.quads);
     }
   }

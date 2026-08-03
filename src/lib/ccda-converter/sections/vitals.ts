@@ -10,7 +10,8 @@
  * converter's convertObservationVital -> convertObservationLab fallback.
  */
 
-import { NS, contentHashedUri, VITAL_LOINC_CODES } from '../../fhir-converter/types.js';
+import { NS, VITAL_LOINC_CODES } from '../../fhir-converter/types.js';
+import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
@@ -43,8 +44,10 @@ const VITAL_TYPE_TO_SHACL: Record<string, string> = {
 
 export function extractVitalQuads(
   entries: any[],
-  patientUri: string,
   sourceSystem: string,
+  _sectionText?: any,
+  _importedAt?: string,
+  warnings?: string[],
 ): Quad[] {
   const quads: Quad[] = [];
   const loincOid = '2.16.840.1.113883.6.1';
@@ -93,10 +96,7 @@ export function extractVitalQuads(
       const value = valueEl?.['@_value'] ?? valueEl?.value ?? valueEl?.['#text'] ?? '';
       const unit = valueEl?.['@_unit'] ?? valueEl?.unit ?? '';
 
-      const sourceId = (() => {
-        const idEl = Array.isArray(obs?.id) ? obs.id[0] : obs?.id;
-        return idEl?.['@_extension'] ? `${idEl['@_root'] ?? ''}:${idEl['@_extension']}` : '';
-      })();
+      const sourceId = ccdaSourceId(obs?.id);
 
       // Resolve a clinical:vitalType the VitalSignShape enum accepts.
       const vitalInfo = isLoinc && loincCode ? VITAL_LOINC_CODES[loincCode] : undefined;
@@ -106,19 +106,28 @@ export function extractVitalQuads(
         // Not a VitalSign per the shape (no LOINC match, or a LOINC outside the
         // canonical enum). Preserve the value as a lab result rather than drop it.
         quads.push(...buildLabFallback({
-          patientUri, sourceSystem, loincCode, isLoinc, loincOid,
-          displayName, dateStr, value, unit, sourceId,
+          sourceSystem, loincCode, isLoinc, loincOid,
+          displayName, dateStr, value, unit, sourceId, source: obs, warnings,
         }));
         continue;
       }
 
-      const uri = contentHashedUri('VitalSign', {
-        patient: patientUri,
-        loincCode: isLoinc ? loincCode : undefined,
-        displayName: displayName || undefined,
-        date: dateStr || undefined,
-        value: value || undefined,
-      }, sourceId || undefined, obs);
+      const uri = ccdaRecordUri({
+        type: 'VitalSign',
+        sourceId,
+        content: {
+          loincCode: isLoinc ? loincCode : undefined,
+          displayName: displayName || undefined,
+          date: dateStr || undefined,
+          value: value || undefined,
+          // Serialized as clinical:unit and was outside the key: a weight of
+          // "70 kg" and one of "70 lb" are different readings.
+          unit: unit || undefined,
+        },
+        source: obs,
+        warnings,
+        label: 'C-CDA vital sign',
+      });
 
       const subj = namedNode(uri);
       quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'VitalSign')));
@@ -145,7 +154,6 @@ export function extractVitalQuads(
  * SHACL target shape, so this validates cleanly while keeping the data.
  */
 function buildLabFallback(args: {
-  patientUri: string;
   sourceSystem: string;
   loincCode: string;
   isLoinc: boolean;
@@ -154,18 +162,29 @@ function buildLabFallback(args: {
   dateStr: string;
   value: string;
   unit: string;
-  sourceId: string;
+  sourceId: string | undefined;
+  /** The raw observation. It was NOT passed before, so the last identity tier
+   *  landed on the per-type sentinel rather than on a hash of the record. */
+  source: unknown;
+  warnings: string[] | undefined;
 }): Quad[] {
-  const { patientUri, sourceSystem, loincCode, isLoinc, loincOid, displayName, dateStr, value, unit, sourceId } = args;
+  const { sourceSystem, loincCode, isLoinc, loincOid, displayName, dateStr, value, unit, sourceId, source, warnings } = args;
   const quads: Quad[] = [];
 
-  const uri = contentHashedUri('LabResult', {
-    patient: patientUri,
-    loincCode: isLoinc ? loincCode : undefined,
-    testName: displayName || undefined,
-    date: dateStr || undefined,
-    value: value || undefined,
-  }, sourceId || undefined);
+  const uri = ccdaRecordUri({
+    type: 'LabResult',
+    sourceId,
+    content: {
+      loincCode: isLoinc ? loincCode : undefined,
+      testName: displayName || undefined,
+      date: dateStr || undefined,
+      value: value || undefined,
+      unit: unit || undefined,
+    },
+    source,
+    warnings,
+    label: 'C-CDA vital-sign observation (recorded as a lab result)',
+  });
 
   const subj = namedNode(uri);
   quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.health + 'LabResultRecord')));

@@ -27,9 +27,22 @@ import { convertCcda } from '../src/lib/ccda-converter/index.js';
 function makeSyntheticCcda(options: {
   patientGiven?: string;
   patientFamily?: string;
+  /**
+   * The MRN in `patientRole/id`. Two different PEOPLE carry two different MRNs;
+   * two renderings of one person carry the same one. It is parameterized because
+   * patient identity now reads it, and a fixture that hard-codes one MRN for
+   * everybody cannot express the difference.
+   */
+  patientMrn?: string | null;
 } = {}): string {
   const given = options.patientGiven ?? 'TestGiven';
   const family = options.patientFamily ?? 'TestFamily';
+  // `null` omits the <id> element entirely — a recordTarget with no identifier
+  // at all, which is what forces the demographics tier to do the separating.
+  const mrn = options.patientMrn === undefined ? 'FAKE-PAT-001' : options.patientMrn;
+  const patientIdEl = mrn === null
+    ? ''
+    : `<id root="2.16.840.1.113883.19.5" extension="${mrn}"/>`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <ClinicalDocument xmlns="urn:hl7-org:v3"
@@ -48,7 +61,7 @@ function makeSyntheticCcda(options: {
   <!-- Patient demographics (fake) -->
   <recordTarget>
     <patientRole>
-      <id root="2.16.840.1.113883.19.5" extension="FAKE-PAT-001"/>
+      ${patientIdEl}
       <patient>
         <name>
           <given>${given}</given>
@@ -301,26 +314,56 @@ describe('C-CDA import pipeline (integration)', () => {
 
   // ─── Test 3: Different patients → different record URIs ────────────────────
 
-  it('should produce different patient URIs for different patient demographics', async () => {
-    const xmlA = makeSyntheticCcda({ patientGiven: 'AliceGiven', patientFamily: 'AlphaFamily' });
-    const xmlB = makeSyntheticCcda({ patientGiven: 'BobGiven', patientFamily: 'BetaFamily' });
+  // Patient URIs appear as subjects in lines like:
+  //   <urn:uuid:...> a cascade:PatientProfile
+  const PATIENT_URI_REGEX = /<(urn:uuid:[0-9a-f-]{36})>\s+a\s+cascade:PatientProfile/g;
 
-    const resultA = await convertCcda(xmlA, { sourceSystem: 'TestSystem' });
-    const resultB = await convertCcda(xmlB, { sourceSystem: 'TestSystem' });
+  async function patientUriOf(xml: string): Promise<string> {
+    const result = await convertCcda(xml, { sourceSystem: 'TestSystem' });
+    const matches = [...result.output.matchAll(PATIENT_URI_REGEX)].map((m) => m[1]);
+    expect(matches.length, 'document produced no cascade:PatientProfile').toBeGreaterThan(0);
+    return matches[0];
+  }
 
-    // Extract URIs following cascade:PatientProfile type assertion
-    // Patient URIs appear as subjects in lines like: <urn:uuid:...> a cascade:PatientProfile
-    const patientUriRegex = /<(urn:uuid:[0-9a-f-]{36})>\s+a\s+cascade:PatientProfile/g;
+  it('should produce different patient URIs for two different people', async () => {
+    // Two different people, so two different MRNs — which is what an EHR
+    // assigns and what `patientRole/id` carries.
+    const a = await patientUriOf(makeSyntheticCcda({
+      patientGiven: 'AliceGiven', patientFamily: 'AlphaFamily', patientMrn: 'FAKE-PAT-001',
+    }));
+    const b = await patientUriOf(makeSyntheticCcda({
+      patientGiven: 'BobGiven', patientFamily: 'BetaFamily', patientMrn: 'FAKE-PAT-002',
+    }));
 
-    const matchesA = [...resultA.output.matchAll(patientUriRegex)].map(m => m[1]);
-    const matchesB = [...resultB.output.matchAll(patientUriRegex)].map(m => m[1]);
+    expect(a).not.toBe(b);
+  });
 
-    // Both documents must have produced a patient URI
-    expect(matchesA.length).toBeGreaterThan(0);
-    expect(matchesB.length).toBeGreaterThan(0);
+  it('should produce ONE patient URI for one person recorded under two names', async () => {
+    // The other half, and the half that was broken: one person, one MRN, two
+    // documents spelling the given name differently ("John" / "Johnny" in the
+    // real report of this). The demographics-derived key made these two people,
+    // and then split every clinical record in both documents along with them.
+    const john = await patientUriOf(makeSyntheticCcda({
+      patientGiven: 'John', patientFamily: 'Smith', patientMrn: 'FAKE-PAT-777',
+    }));
+    const johnny = await patientUriOf(makeSyntheticCcda({
+      patientGiven: 'Johnny', patientFamily: 'Smith', patientMrn: 'FAKE-PAT-777',
+    }));
 
-    // The URIs must differ (different demographics → different content hash)
-    expect(matchesA[0]).not.toBe(matchesB[0]);
+    expect(johnny).toBe(john);
+  });
+
+  it('should produce different patient URIs for two id-less people', async () => {
+    // With no MRN the demographics are all there is, so the content tier has to
+    // do the separating. It must still separate.
+    const a = await patientUriOf(makeSyntheticCcda({
+      patientGiven: 'AliceGiven', patientFamily: 'AlphaFamily', patientMrn: null,
+    }));
+    const b = await patientUriOf(makeSyntheticCcda({
+      patientGiven: 'BobGiven', patientFamily: 'BetaFamily', patientMrn: null,
+    }));
+
+    expect(a).not.toBe(b);
   });
 
   // ─── Test 4: CVX codes are preserved in immunization output ────────────────

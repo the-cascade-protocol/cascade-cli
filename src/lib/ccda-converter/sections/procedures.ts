@@ -2,7 +2,8 @@
  * Extract procedures from C-CDA section (templateId 2.16.840.1.113883.10.20.22.2.7.1)
  */
 
-import { NS, contentHashedUri } from '../../fhir-converter/types.js';
+import { NS } from '../../fhir-converter/types.js';
+import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
@@ -14,8 +15,10 @@ export const PROCEDURES_LOINC = '47519-4';
 
 export function extractProcedureQuads(
   entries: any[],
-  patientUri: string,
   sourceSystem: string,
+  _sectionText?: any,
+  _importedAt?: string,
+  warnings?: string[],
 ): Quad[] {
   const quads: Quad[] = [];
   const snomedOid = '2.16.840.1.113883.6.96';
@@ -37,17 +40,20 @@ export function extractProcedureQuads(
       ? `${dateVal.slice(0, 4)}-${dateVal.slice(4, 6)}-${dateVal.slice(6, 8)}`
       : dateVal;
 
-    const sourceId = (() => {
-      const idEl = Array.isArray(proc?.id) ? proc.id[0] : proc?.id;
-      return idEl?.['@_extension'] ? `${idEl['@_root'] ?? ''}:${idEl['@_extension']}` : '';
-    })();
+    const sourceId = ccdaSourceId(proc?.id);
 
-    const uri = contentHashedUri('Procedure', {
-      patient: patientUri,
-      code: code || undefined,
-      displayName: displayName || undefined,
-      date: dateStr || undefined,
-    }, sourceId || undefined, entry);
+    const uri = ccdaRecordUri({
+      type: 'Procedure',
+      sourceId,
+      content: {
+        code: code || undefined,
+        displayName: displayName || undefined,
+        date: dateStr || undefined,
+      },
+      source: entry,
+      warnings,
+      label: 'C-CDA procedure',
+    });
 
     const subj = namedNode(uri);
     quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Procedure')));

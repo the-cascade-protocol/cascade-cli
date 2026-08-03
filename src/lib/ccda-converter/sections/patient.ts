@@ -2,7 +2,8 @@
  * Extract patient demographics from C-CDA recordTarget → cascade:PatientProfile
  */
 
-import { NS, contentHashedUri } from '../../fhir-converter/types.js';
+import { NS, structuredKey } from '../../fhir-converter/types.js';
+import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
 
@@ -34,11 +35,11 @@ export function extractPatientQuads(
   recordTarget: any,
   sourceSystem: string,
   /**
-   * Collects a tier-4 identity-collapse notice. This is the ONE C-CDA site that
-   * can reach tier 4: every other section keys on `patient: patientUri`, which is
-   * always a non-empty `urn:uuid:` string, so their content tier always fires.
-   * Here the key is the demographics themselves, and a recordTarget can carry
-   * none of them.
+   * Collects a tier-4 identity-collapse notice. This used to be the ONE C-CDA
+   * site that could reach tier 4, because every other section keyed on
+   * `patient: patientUri` — always a non-empty `urn:uuid:` — so their content
+   * tier always fired. That component is gone from the section keys, so the
+   * salvage and loud-collapse tiers are reachable across the whole path now.
    */
   warnings?: string[],
 ): { quads: Quad[]; patientUri: string } {
@@ -91,16 +92,46 @@ export function extractPatientQuads(
     return raw.replace(/^mailto:/, '');
   })();
 
-  // Deterministic URI from identity fields. `patientRole` is passed as the last
-  // tier so that a recordTarget with no name, no birthTime and no gender keys on
-  // whatever else it does carry (ids, address, telecom) instead of on a random
-  // UUID, which is what the un-passed version fell through to.
-  const patientUri = contentHashedUri('Patient', {
-    dob: dob.slice(0, 8),  // YYYYMMDD
-    sex: sex,
-    family: familyStr.toLowerCase(),
-    given: givenStr.toLowerCase(),
-  }, undefined, patientRole, warnings);
+  // IDENTITY.
+  //
+  // Tier 1 is the MRN. `patientRole/id` is where a C-CDA carries the medical
+  // record number — the identifier the EHR itself uses to tell two patients
+  // apart — and this call passed `undefined` where the id belongs, so it did not
+  // even ATTEMPT it. Measured on `main`: two different people, distinct MRNs,
+  // sharing a birth date, a sex, a surname and a first given name minted ONE
+  // profile IRI, and every record of either then hung off it.
+  //
+  // Tier 2 is the demographics, and the four fields it used to be
+  // ({dob, sex, family, given[0]}) are exactly the four the FHIR Patient key was
+  // widened away from in the same release, for the same reason: reading
+  // `given[0]` alone means middle names, suffixes and maiden names contribute
+  // nothing, and everything the converter SERIALIZES but leaves out of the key
+  // is a field two people sharing one IRI can disagree on. So the key now
+  // fingerprints the whole `name` array, the whole `addr` array and the whole
+  // `telecom` array. (`telecom` is excluded on the FHIR path because that
+  // converter does not serialize it; this one emits vcard:hasTelephone and
+  // vcard:hasEmail, so here it must be in the key.)
+  //
+  // THE SAME PERSON FROM TWO EHRs STILL RECONCILES. Two exports carrying two
+  // MRNs now mint two profiles where they previously minted one; they do not
+  // stay two, because `matchPatientProfiles` merges on date of birth plus sex at
+  // 0.95 against a 0.65 threshold — with a merge trail, and with a conflict
+  // raised wherever they disagree. The merge moves out of a hash nobody can
+  // inspect and into the layer built to make it reviewable.
+  const patientUri = ccdaRecordUri({
+    type: 'Patient',
+    sourceId: ccdaSourceId(patientRole?.id),
+    content: {
+      dob: dob.slice(0, 8),  // YYYYMMDD
+      sex: sex,
+      name: structuredKey(patient?.name),
+      address: structuredKey(patientRole?.addr),
+      telecom: structuredKey(patientRole?.telecom),
+    },
+    source: patientRole,
+    warnings,
+    label: 'C-CDA patient (recordTarget)',
+  });
 
   const subj = namedNode(patientUri);
   const quads: Quad[] = [

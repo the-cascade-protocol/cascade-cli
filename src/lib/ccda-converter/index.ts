@@ -41,15 +41,22 @@ import { extractNarrativeQuads } from './narrative.js';
 import { deriveSourceEhr, ensureProvenanceQuads, ensureSourceEhrQuads } from './provenance.js';
 import { identityKey } from '../identity.js';
 
-// Map templateId → extractor function and LOINC code
+// Map templateId → extractor function and LOINC code.
+//
+// NOTE THE ABSENT PARAMETER. Every handler used to take the document's derived
+// `patientUri` and splice it into each record's identity key. It is gone from
+// this signature deliberately, and not merely unused: while it was a parameter,
+// the next key written here would have reached for it. See
+// `record-identity.ts` for why a per-document patient component both merged
+// records the source kept apart and split records that were the same.
 const SECTION_HANDLERS: Record<string, {
   loinc: string;
   extract: (
     entries: any[],
-    patientUri: string,
     sourceSystem: string,
     sectionText?: any,
     importedAt?: string,
+    warnings?: string[],
   ) => any[];
 }> = {
   [IMMUNIZATIONS_TEMPLATE_ID]:  { loinc: '11369-6', extract: extractImmunizationQuads },
@@ -247,7 +254,9 @@ function convertSingleCcda(
     return { quads: allQuads, count };
   }
 
-  const { quads: patientQuads, patientUri } = extractPatientQuads(
+  // The patient profile is a record like any other. Its IRI is NOT threaded into
+  // the section handlers below — see the note on SECTION_HANDLERS.
+  const { quads: patientQuads } = extractPatientQuads(
     Array.isArray(recordTarget) ? recordTarget : [recordTarget],
     sourceSystem,
     warnings,
@@ -299,7 +308,7 @@ function convertSingleCcda(
         sectionCode || (matchedTemplateId ? (SECTION_HANDLERS[matchedTemplateId]?.loinc ?? '') : '');
       const narrativeQuads = extractNarrativeQuads(
         sectionText, effectiveLoinc, documentType, documentId, sourceSystem, importedAt,
-        requiresLLMExtraction, sourceEhr,
+        requiresLLMExtraction, sourceEhr, warnings,
       );
       allQuads.push(...narrativeQuads);
     }
@@ -307,7 +316,7 @@ function convertSingleCcda(
     // Extract structured entries
     if (matchedTemplateId && SECTION_HANDLERS[matchedTemplateId]) {
       const handler = SECTION_HANDLERS[matchedTemplateId];
-      const quads = handler.extract(entries, patientUri, sourceSystem, sectionText, importedAt);
+      const quads = handler.extract(entries, sourceSystem, sectionText, importedAt, warnings);
 
       // Tag each structured record from a summarization document so the
       // reconciler can apply a lower confidence threshold for deduplication.

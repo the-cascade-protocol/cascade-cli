@@ -5,7 +5,8 @@
  * cascade:requiresLLMExtraction (true when section has no <entry> children).
  */
 
-import { NS, contentHashedUri } from '../fhir-converter/types.js';
+import { NS } from '../fhir-converter/types.js';
+import { ccdaRecordUri } from './record-identity.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
 import { extractNarrativeText } from './narrative-extractor.js';
@@ -23,6 +24,7 @@ export function extractNarrativeQuads(
   importedAt: string,
   requiresLLMExtraction: boolean = false,
   sourceEhr: string = '',
+  warnings?: string[],
 ): Quad[] {
   if (!sectionText && !requiresLLMExtraction) return [];
 
@@ -32,13 +34,23 @@ export function extractNarrativeQuads(
   // If no text and not a narrative-only section, skip
   if (!narrativeStr.trim() && !requiresLLMExtraction) return [];
 
-  const uri = contentHashedUri('ClinicalDocument', {
-    section: sectionLoincCode,
-    document: documentId,
-    source: sourceSystem,
+  // A section narrative node has no `<id>` of its own — the id in play is the
+  // enclosing DOCUMENT's, which is already a content field — so this takes the
+  // door with no source id rather than being the one mint that sits outside it.
+  // The IRI is byte-identical to what this call produced before.
+  const uri = ccdaRecordUri({
+    type: 'ClinicalDocument',
+    content: {
+      section: sectionLoincCode,
+      document: documentId,
+      source: sourceSystem,
+    },
     // The narrative itself is the salvage-tier content for a section document
     // that somehow carries no section code, document id or source system.
-  }, undefined, sectionText);
+    source: sectionText,
+    warnings,
+    label: 'C-CDA section narrative',
+  });
 
   const subj = namedNode(uri);
   const quads: Quad[] = [

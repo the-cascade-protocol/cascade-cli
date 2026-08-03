@@ -10,9 +10,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 > **Version number not yet chosen.** This section contains IRI-breaking changes for lab
-> results, conditions, allergies, immunizations and patient profiles (see the first upgrade
-> note), so it is not a patch release. Decide between a minor and a major bump before cutting
-> it.
+> results, conditions, allergies, immunizations and patient profiles from FHIR sources, and for
+> EVERY record type read from a C-CDA document (see the upgrade notes), so it is not a patch
+> release. Decide between a minor and a major bump before cutting it.
 
 **This release is about record identity — the IRI each record gets, which decides whether a
 re-import updates a record or duplicates it, and whether two records stay two records.** Two
@@ -22,12 +22,14 @@ which:
 1. **Records the source never identified used to get a RANDOM IRI**, so re-importing the same
    document duplicated them, forever. They now get an IRI derived from their own content, so
    they reconcile. **No IRI that a source identifier already determined moves because of this.**
-2. **Five kinds of record were identified too coarsely, and ignored the identifier their own
+2. **Many kinds of record were identified too coarsely, and ignored the identifier their own
    source assigned them** — lab results by patient, test code and calendar day; conditions,
-   allergies, immunizations and patient profiles by a similarly short list. So two genuinely
-   different records merged into one and one of them was silently lost. Fixing that necessarily
-   moves those IRIs. **These are the release's IRI-breaking changes**, and the upgrade note
-   below says what to do about them.
+   allergies, immunizations and patient profiles by a similarly short list; and on the C-CDA
+   path, EVERY record type, because the identifier was passed in a position the code reads only
+   when nothing else is present, and something else always was. So two genuinely different
+   records merged into one and one of them was silently lost. Fixing that necessarily moves
+   those IRIs. **These are the release's IRI-breaking changes**, and the upgrade notes below
+   say what to do about them.
 
 ### Upgrade notes
 
@@ -71,8 +73,8 @@ which:
   **What this particular change moved.** Across the FHIR conformance corpus, 46 of 91 converted
   resources were unchanged by it and every one of the 45 that moved was a lab observation;
   across the C-CDA corpus, 40 of 43 identities were unchanged and all 3 that moved were lab
-  results. Four more record types move for their own reason, described in the next note; those
-  are the only other IRIs in the release that change.
+  results. Four more FHIR record types move for their own reason, described in the next note,
+  and the whole C-CDA path moves for a third reason described in the note after that.
 
   **Lab PANELS keep their IRIs, with one narrow exception.** A panel read from a C-CDA document
   whose source gave it neither an identifier nor a test code was previously indistinguishable
@@ -138,12 +140,92 @@ which:
   a single profile — a merge across three documents decided by four demographic fields and
   nothing else, which no test noticed.
 
-  **Nothing else moves.** Vital signs, medications, procedures, encounters, documents, coverage
-  and claims all keep the IRIs they had. Verified across the same corpus: every one of the 18
-  resources that moved was one of the four types named here, and across the C-CDA corpus
-  identities are unchanged.
+  **Nothing else moves ON THE FHIR PATH.** Vital signs, medications, procedures, encounters,
+  documents, coverage and claims all keep the IRIs they had when they arrive as FHIR. Verified
+  across the same corpus: every one of the 18 resources that moved was one of the four types
+  named here. The C-CDA path is a separate matter and is covered by the next note.
+
+- **Breaking for EVERY record type read from a C-CDA document.** If you have imported a
+  downloaded portal export — a MyChart or HealtheLife C-CDA, or an IHE XDM zip of them — every
+  record from it changes IRI in this release. Not one type: all of them.
+
+  What was wrong, and why it was all of them at once: every C-CDA section built its record's
+  identity from a list of fields that began with the DOCUMENT'S PATIENT, and passed the source
+  record's own `<id>` in a position the code consults only when every one of those fields is
+  empty. The patient field was never empty. So the identifier your provider's system assigned
+  the record was read on no record at all — not "usually ignored", never read — at all ten
+  places a C-CDA record gets an identity. Measured: two entries identical in every field except
+  their `<id>` produced ONE record, in all ten sections, and one of the two was discarded.
+
+  It also failed in the opposite direction, from the same cause. That patient field was not
+  your patient identifier; it was a value derived from four demographic fields — birth date,
+  sex, surname and FIRST given name. So one document recording "John" and another recording
+  "Johnny", for the same person with the same medical record number, produced two different
+  patient values, and every clinical record in both documents was re-identified along with
+  them. Measured: a byte-identical procedure carrying the SAME source identifier became two
+  records. So the same design both merged records your provider kept apart and split records
+  that were the same.
+
+  And on most real documents there was no identifier left to read anyway. C-CDA's ordinary form
+  for a locally minted identifier is `<id root="9a6d1bac-…"/>` with no `extension` attribute,
+  which is what Epic and Cerner emit, and nine of ten sections extracted an identifier ONLY
+  when `extension` was present. On those records the identifier was discarded outright — which
+  is also why `cascade:sourceRecordId` was missing from them, a loss visible in pod output
+  today and not only in identity.
+
+  What it is now: a C-CDA record takes its identity from the `<id>` its source assigned it, in
+  all four of the forms a real export uses (root plus extension, extension alone, root alone,
+  and several `<id>` elements where the first may be a `nullFlavor` placeholder). Where a
+  record carries no identifier, identity comes from what the record IS — its codes, its full
+  timestamp, its measured value and unit, and the other fields the pod will display. The
+  derived patient value is in no key at all: within a pod it either never varies, and so told no
+  two records apart, or varied, and every variation was one of the splits above.
+
+  **The patient profile from a C-CDA now uses the medical record number.** It is in
+  `patientRole/id` in every real export and was not consulted at all, so two different people
+  sharing a birth date, a sex, a surname and a first given name were one profile. Where a
+  document carries no MRN, the profile is identified by the whole name (every given name, not
+  the first), the whole address and the contact details — all of which the pod displays and none
+  of which were in the old key.
+
+  **What to do.** The same as for the FHIR changes above: re-import your C-CDA documents into a
+  fresh pod and use that, or accept that records imported before and after this release sit
+  side by side. Re-importing the same document twice still produces one record set, before and
+  after — that behaviour is unchanged and is held by a test.
+
+  **The scale, measured.** Across the nine C-CDA documents in the conformance corpus and this
+  repo's own fixtures, which convert to 56 records: **28 move and 28 do not.** The 28 that keep
+  their IRIs are the 19 section-narrative document nodes and the 9 lab results that already
+  carried an identifier — a lab result identified by its `<id>` mints exactly the IRI it did
+  before, deliberately. Everything else moves: 9 patient profiles, 5 allergies, 5 lab panels,
+  3 conditions, 3 immunizations, 2 medications and 1 encounter. Counted as distinct IRIs rather
+  than per document, 17 of 44 move. **The FHIR import path is untouched by this change**: 266
+  distinct IRIs across the same fixtures, 0 moved.
 
 ### Fixed
+
+- **Allergies written in C-CDA's standard nesting were dropped entirely.** An allergy in a
+  C-CDA document is normally recorded as a concern act wrapping the allergy observation
+  (`act` → `entryRelationship` → `observation`), which is what Epic and Cerner emit. The
+  importer only walked the looser `act` → `observation` shape, so on a standard document it
+  produced NO allergy records at all — not a wrong allergy, none. Both shapes are read now.
+
+- **Family history was dropped entirely, for the same class of reason.** The section handler
+  read an organizer's component observations as a single object where the parser always
+  produces a list, so every field came back empty and no family history record was ever
+  emitted from a real document.
+
+- **A root-only `<id>` is no longer discarded, so `cascade:sourceRecordId` survives.** Nine of
+  ten C-CDA sections read a record's identifier only when it carried an `extension` attribute,
+  so `<id root="9a6d1bac-…"/>` — the ordinary form for a locally minted identifier — was thrown
+  away and the record was stored with no `cascade:sourceRecordId` at all. This is the same fix
+  as the identity change above and is listed separately because the loss was visible in pod
+  output independently of identity.
+
+- **Two C-CDA identity keys were missing the record's own source object.** The vital-sign
+  observation re-routed to a lab result, and every medication, passed no source object to the
+  last identity tier, so a record with nothing else to go on landed on a shared per-type
+  sentinel instead of a hash of itself.
 
 - **A missing drug name no longer merges unrelated medication records.** When a
   `MedicationStatement` or `MedicationRequest` named no drug, the importer substituted the
