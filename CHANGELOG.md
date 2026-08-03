@@ -9,6 +9,38 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Re-importing a document no longer duplicates the records in it that carry no `id`.**
+  This closes the known limitation named in 0.10.0.
+
+  Every importer minted a subject IRI from the source resource's `id`, and when a resource
+  had none, made one up: a random UUID on the FHIR clinical path, `Math.random()` in the
+  genomics converters, and a per-run import timestamp in the phenopacket and C-CDA
+  converters. Because a fresh IRI is indistinguishable from a new record, importing the same
+  document twice produced a second copy of every id-less record in it, on every import,
+  with no warning. `Resource.id` is optional in FHIR, so this was reachable from real
+  payloads — transaction Bundles, contained resources, exported and hand-authored documents,
+  and C-CDA files whose `ClinicalDocument` carries no `<id>`.
+
+  Identity for these resources now comes from the resource's own content: the same record
+  yields the same IRI across runs, across machines, across working directories, and
+  regardless of its position in a bundle. Different records still yield different IRIs.
+
+  **Nothing that already had an `id` changes.** If a source resource carries an identifier,
+  its IRI is byte-for-byte what previous versions minted, so no IRI in an existing pod moves
+  and no re-import is needed. This is not comparable to the 0.10.0 genomics change, which
+  was deliberately IRI-breaking.
+
+  Server-assigned volatile fields are excluded from the content hash — `meta.lastUpdated`,
+  `meta.versionId`, `meta.source` and generated narrative `text` — so a resource re-fetched
+  from an EHR keeps its identity even though the server stamped it with new metadata.
+
+  One behavior worth stating plainly: two id-less resources that carry no distinguishing
+  content at all now collapse to a single IRI rather than multiplying. Records that nothing
+  can tell apart are treated as one record, which is visible and arguable, where the old
+  behavior silently grew a duplicate set forever.
+
 ---
 
 ## [0.10.0] - 2026-08-02

@@ -83,13 +83,16 @@ export function extractPatientQuads(
     return raw.replace(/^mailto:/, '');
   })();
 
-  // Deterministic URI from identity fields
+  // Deterministic URI from identity fields. `patientRole` is passed as the last
+  // tier so that a recordTarget with no name, no birthTime and no gender keys on
+  // whatever else it does carry (ids, address, telecom) instead of on a random
+  // UUID, which is what the un-passed version fell through to.
   const patientUri = contentHashedUri('Patient', {
     dob: dob.slice(0, 8),  // YYYYMMDD
     sex: sex,
     family: familyStr.toLowerCase(),
     given: givenStr.toLowerCase(),
-  });
+  }, undefined, patientRole);
 
   const subj = namedNode(patientUri);
   const quads: Quad[] = [

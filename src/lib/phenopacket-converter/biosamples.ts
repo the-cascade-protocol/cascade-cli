@@ -46,6 +46,7 @@ import {
   tripleRef,
   deterministicUuid,
 } from '../fhir-converter/types.js';
+import { identityKey } from '../identity.js';
 
 export interface BiosampleParseOutput {
   records: ParsedRecord[];
@@ -190,8 +191,11 @@ export function parseBiosample(
 
   if (!bs || typeof bs !== 'object') return { records, quads, warnings, gaps };
 
-  const sourceId: string =
-    typeof bs.id === 'string' && bs.id.length > 0 ? bs.id : `biosample:${ctx.importedAt}:${Math.random()}`;
+  // Identity comes from the biosample's own id, or from its content when it has
+  // none. This used to seed on `${ctx.importedAt}:${Math.random()}` — and note
+  // that dropping only the Math.random() would have left it non-deterministic,
+  // because importedAt is a fresh timestamp on every invocation.
+  const sourceId: string = identityKey(bs.id, bs);
   const iri = mintSpecimenIri(sourceId, ctx);
   const sQuads: Quad[] = [];
 

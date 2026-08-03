@@ -34,6 +34,7 @@ import {
   tripleRef,
   deterministicUuid,
 } from '../fhir-converter/types.js';
+import { identityKey } from '../identity.js';
 
 export interface HaplotypeParseOutput {
   record: ParsedRecord;
@@ -42,7 +43,10 @@ export interface HaplotypeParseOutput {
 }
 
 function mintHaplotypeIri(resource: any, ctx: ImportContext): string {
-  const id = resource?.id ?? Math.random().toString(36);
+  // Identity comes from the source id, or from the resource's own content
+  // when it has none. It used to come from Math.random(), so re-importing
+  // the same bundle minted a second record every time.
+  const id = identityKey(resource?.id, resource);
   const sys = ctx.sourceSystem ?? 'fhir-genomics';
   return `urn:uuid:${deterministicUuid(`genomics:Haplotype:${sys}:${id}`)}`;
 }

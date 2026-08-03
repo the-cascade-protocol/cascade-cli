@@ -37,7 +37,10 @@ export function convertPatient(resource: any): ConversionResult & { _quads: Quad
     sex: resource.gender,
     family: resource.name?.[0]?.family,
     given: resource.name?.[0]?.given?.[0],
-  }, resource.id);
+    // A Patient with no name, no birthDate, no gender and no id used to fall
+    // through to a random UUID. Passing the resource gives the last tier the
+    // rest of the demographics (address, telecom, identifier) to key on.
+  }, resource.id, resource);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.cascade + 'PatientProfile'));

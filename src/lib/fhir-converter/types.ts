@@ -5,8 +5,9 @@
  */
 
 import { DataFactory, Writer, type Quad } from 'n3';
-import { randomUUID, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { normalizeMedName } from '../medication-normalize.js';
+import { identitySeed } from '../identity.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -333,14 +334,26 @@ export function deterministicUuid(input: string): string {
  * Mint a deterministic subject URI from a FHIR resource.
  * - If resource.id is a valid UUID v4: returns urn:uuid:{resource.id}
  * - If resource.id exists but is not a UUID: returns urn:uuid:{deterministicUuid(resourceType:id)}
- * - If no resource.id: falls back to a random UUID (last resort)
+ * - If no resource.id: the seed comes from the resource's own non-volatile
+ *   content, via the identity door. Never from randomness.
+ *
+ * This used to answer the id-less case with `randomUUID()`, so re-importing one
+ * document minted a fresh identity for every id-less record in it and the pod
+ * duplicated instead of reconciling — on every sync, silently. `Resource.id` is
+ * optional in FHIR and real payloads omit it (transaction Bundles, contained
+ * resources, hand-authored and exported documents), so this was reachable, not
+ * theoretical.
+ *
+ * The with-id path is UNCHANGED, deliberately: an anonymous seed is
+ * `anon-` + 64 hex = 69 characters, and FHIR caps `Resource.id` at 64, so a
+ * content seed can never be mistaken for an id a source assigned, and no IRI
+ * that a source id already determines moves.
  */
 export function mintSubjectUri(resource: any): string {
-  const id = resource?.id as string | undefined;
-  if (!id) return `urn:uuid:${randomUUID()}`;
-  if (UUID_V4_REGEX.test(id)) return `urn:uuid:${id}`;
+  const { seed } = identitySeed({ explicitId: resource?.id, content: resource });
+  if (UUID_V4_REGEX.test(seed)) return `urn:uuid:${seed}`;
   const resourceType = (resource?.resourceType as string) ?? 'Unknown';
-  return `urn:uuid:${deterministicUuid(`${resourceType}:${id}`)}`;
+  return `urn:uuid:${deterministicUuid(`${resourceType}:${seed}`)}`;
 }
 
 /**
@@ -358,7 +371,22 @@ export function mintSubjectUri(resource: any): string {
  * URI selection:
  *   If identity string has content: return "urn:uuid:" + deterministicUuid(identity)
  *   Else if fallbackId:             return "urn:uuid:" + deterministicUuid("{resourceType}:{fallbackId}")
- *   Else:                           return "urn:uuid:" + randomUUID()  (non-deterministic fallback)
+ *   Else:                           hash `source` through the identity door
+ *
+ * The final tier used to be `randomUUID()`, labelled "true last resort". It was
+ * more defensible than the other random fallbacks in this codebase — it fires
+ * only after BOTH the content fields and a fallback id come up empty — but it
+ * has the same consequence when it does fire, so it is gone. It is replaced by
+ * a hash of the raw `source` object where a caller can supply one, and by a
+ * deterministic per-type sentinel where it cannot.
+ *
+ * That sentinel COLLAPSES records rather than splitting them: two resources
+ * with no identity-bearing content and no id are indistinguishable to every
+ * part of this system, and merging things nothing can tell apart is a decision
+ * a user can see and argue with, where minting a fresh IRI for each one is a
+ * duplicate set that grows forever and never announces itself. The sentinel key
+ * also cannot collide with the content tier: content entries are always `k=v`
+ * pairs and always contain `=`, and an anonymous seed never does.
  *
  * Example:
  *   contentHashedUri("Patient", { dob:"1985-03-15", sex:"male", family:"Smith", given:"John" })
@@ -370,6 +398,13 @@ export function contentHashedUri(
   resourceType: string,
   contentFields: Record<string, string | undefined>,
   fallbackId?: string,
+  /**
+   * The raw source object, used only when the content fields and the fallback
+   * id are both empty. Optional so that the ~20 existing call sites are
+   * unaffected; supplying it simply gives the last tier something real to hash
+   * instead of landing on the per-type sentinel.
+   */
+  source?: unknown,
 ): string {
   // Filter out undefined/empty values and sort keys for stability. Values are
   // coerced to string before trimming: the type says string, but real-world
@@ -387,7 +422,11 @@ export function contentHashedUri(
   if (fallbackId) {
     return `urn:uuid:${deterministicUuid(`${resourceType}:${fallbackId}`)}`;
   }
-  return `urn:uuid:${randomUUID()}`;  // true last resort
+  // Last tier: the identity door. Deterministic whether or not `source` was
+  // supplied — with it, a hash of the resource's non-volatile content; without
+  // it, the per-type sentinel. Never random.
+  const { seed } = identitySeed({ content: source });
+  return `urn:uuid:${deterministicUuid(`${resourceType}::${seed}`)}`;
 }
 
 /**

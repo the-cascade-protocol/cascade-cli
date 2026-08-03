@@ -40,6 +40,7 @@ import {
   tripleDate,
   deterministicUuid,
 } from '../fhir-converter/types.js';
+import { identityKey } from '../identity.js';
 
 export interface SubjectParseOutput {
   record: ParsedRecord;
@@ -49,7 +50,13 @@ export interface SubjectParseOutput {
 
 /**
  * Mint a deterministic Cascade IRI for a phenopacket subject. Falls back to
- * the parent phenopacket id when the subject itself has no id.
+ * the parent phenopacket id when the subject itself has no id, and to the
+ * subject's own content when neither exists.
+ *
+ * The final tier used to be `unknown:${ctx.importedAt}`. That reads as
+ * deterministic and is not: `importedAt` is stamped per invocation, so an
+ * anonymous subject became a NEW patient profile on every re-import of the same
+ * phenopacket. Same defect as the `Math.random()` sites, wearing a timestamp.
  */
 export function mintSubjectIri(
   subject: any,
@@ -60,7 +67,7 @@ export function mintSubjectIri(
   const sid: string =
     (typeof subject?.id === 'string' && subject.id) ||
     (typeof parentId === 'string' && parentId) ||
-    `unknown:${ctx.importedAt}`;
+    identityKey(undefined, subject);
   return `urn:uuid:${deterministicUuid(`PatientProfile:${sys}:${sid}`)}`;
 }
 
