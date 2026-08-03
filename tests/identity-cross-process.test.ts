@@ -30,7 +30,12 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(REPO, 'dist');
-const HAVE_DIST = fs.existsSync(path.join(DIST, 'lib', 'identity.js'));
+// Guard on a module that exists in EVERY revision, not on identity.js. Keying
+// the guard on the new module made this suite SKIP rather than FAIL when run
+// against a build that predates the fix, which would have made it useless as
+// a negative control — the exact way a determinism test can look green and
+// prove nothing.
+const HAVE_DIST = fs.existsSync(path.join(DIST, 'lib', 'fhir-converter', 'fhir-to-cascade.js'));
 
 /**
  * A self-contained script run in a fresh process. It imports the BUILT

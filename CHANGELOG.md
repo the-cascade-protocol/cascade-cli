@@ -33,13 +33,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   was deliberately IRI-breaking.
 
   Server-assigned volatile fields are excluded from the content hash — `meta.lastUpdated`,
-  `meta.versionId`, `meta.source` and generated narrative `text` — so a resource re-fetched
-  from an EHR keeps its identity even though the server stamped it with new metadata.
+  `meta.versionId` and `meta.source` — so a resource re-fetched from an EHR keeps its
+  identity even though the server stamped it with new metadata. Generated narrative (`text`)
+  is excluded too wherever structured fields exist, since servers re-render it freely.
 
-  One behavior worth stating plainly: two id-less resources that carry no distinguishing
-  content at all now collapse to a single IRI rather than multiplying. Records that nothing
-  can tell apart are treated as one record, which is visible and arguable, where the old
-  behavior silently grew a duplicate set forever.
+  **When identity is uncertain, this errs toward a duplicate rather than a merge.** A
+  duplicate is recoverable: all the data is present and can be reconciled later. A merge is
+  not: the second record's content is gone. So a resource with no structured content still
+  takes its identity from its narrative — two Conditions whose only content is
+  "Type 2 diabetes mellitus" and "Metastatic breast cancer" remain two records. The cost is
+  that a server which re-renders such a narrative can produce a duplicate, which is the
+  failure worth preferring.
+
+  A resource with genuinely nothing — no id, no structured content, no narrative — does
+  collapse onto a shared IRI, because there is no content to lose and splitting would mint a
+  fresh IRI on every sync. That case now emits a warning naming what happened rather than
+  passing silently.
 
 ---
 
