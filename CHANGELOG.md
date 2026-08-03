@@ -11,6 +11,60 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Two records that share one subject IRI but disagree on content are no longer silently
+  reduced to one.**
+
+  Cascade subject IRIs are content-hashed, so the reconciler treated a second arrival of an
+  IRI as a re-import of the same record and passed over it. That is right for a re-import
+  and wrong for an identity COLLISION — two genuinely different records that an identity key
+  narrower than the records themselves minted onto one IRI. A fasting glucose of 95 and a
+  post-prandial of 310, drawn the same day, are exactly that shape, and serial same-day
+  results are ordinary clinical practice (glucose curves, troponin series, repeat potassium,
+  pre/post dialysis).
+
+  The consequence was silent clinical data loss on the primary import path: one of the two
+  values was discarded, the loss was reported as successful deduplication, no conflict was
+  written, nothing was printed — and WHICH value survived was decided by the order the
+  inputs happened to be enumerated, i.e. by the filesystem. The same two files imported on
+  two machines could leave a normal glucose in one pod and a critical hyperglycemia reading
+  in the other.
+
+  The reconciler now compares the records behind a shared IRI:
+
+  - **Identical content is still a re-import**, handled exactly as before. Per-run
+    bookkeeping (`clinical:importedAt`, `cascade:reconciliationStatus`, merge lineage,
+    ingestion source labels) is not content, and neither is the difference between a
+    reference edge stored resolved in the pod and the same edge carried as an unresolved
+    placeholder by a fresh conversion. Nothing here changes for an ordinary re-sync.
+  - **Differing content is a COLLISION**, and it is split rather than merged: every distinct
+    content keeps its own record. This follows the rule the identity layer already states —
+    when identity is uncertain, prefer a split, because a duplicate is recoverable and a
+    merge is not. The IRI the identity layer minted stays occupied by one of them, so
+    nothing that referenced it starts dangling, and which one that is depends only on the
+    records' own contents, never on input order. Reversing the input order now produces a
+    byte-identical pod.
+  - **The collision is raised as an unresolved conflict** through the existing queue:
+    `settings/pending-conflicts.ttl`, `cascade pod conflicts` (which exits 1), and
+    `cascade pod resolve`. The conflict names which predicates disagree. `pod import` prints
+    a warning rather than reporting the collision as a duplicate, and the two split records
+    are kept out of each other's match candidates for that run, so a question raised for a
+    person is not answered by an automatic merge in the same breath.
+
+  The import summary gains `identityCollisionsSplit`, and `duplicateSubjectsDropped` now
+  means only what it says: a record the pod already held, byte for byte.
+
+  **No IRI moves for any pod that has no collision in it.** Where a collision does exist,
+  the record that previously survived keeps its IRI and the record that was previously
+  DELETED reappears under a new derived one, so this recovers data rather than relocating
+  it.
+
+- **`src/lib/reconciler.ts` is searchable again.** It used NUL as a key delimiter written as
+  a raw byte rather than as an escape, which made `file(1)` classify the source as binary
+  and made `grep` and `ripgrep` skip all 1,339 lines of it without saying so — a content
+  search returned "no matches" for symbols the file demonstrably contains. The three sites
+  now use `\u0000`, which is the same string, and a test rejects a raw NUL anywhere under
+  `src/`.
+
 - **Re-importing a document no longer duplicates the records in it that carry no `id`.**
   This closes the known limitation named in 0.10.0.
 
