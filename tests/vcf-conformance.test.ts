@@ -30,7 +30,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,17 +48,12 @@ const DEFAULT_FIXTURES_DIR = path.resolve(
   __dirname,
   '../../conformance/fixtures/genomics/vcf',
 );
-const RAW_FIXTURES_DIR = process.env.CASCADE_CONFORMANCE_DIR
+// No realpath canonicalization needed: derived IRIs no longer depend on the
+// path the fixture is read through, so any path that reaches the same bytes
+// produces the same graph.
+const FIXTURES_DIR = process.env.CASCADE_CONFORMANCE_DIR
   ? path.resolve(process.env.CASCADE_CONFORMANCE_DIR, 'fixtures/genomics/vcf')
   : DEFAULT_FIXTURES_DIR;
-// Canonicalize via realpath: the VCF importer hashes ImportContext.inputPath
-// into derived IRIs (SequencingRun, prov:wasGeneratedBy back-references), so
-// the test must pass the same canonical path the oracle was authored against
-// regardless of which symlink chain the test process traversed (~/Development
-// is a symlink to ~/Documents/Development on dev machines).
-const FIXTURES_DIR = (() => {
-  try { return realpathSync(RAW_FIXTURES_DIR); } catch { return RAW_FIXTURES_DIR; }
-})();
 
 const FIXTURES = [
   {
@@ -130,21 +125,17 @@ function shortDiff(actual: string, expected: string, maxLines = 40): string {
   return out.join('\n') || '(no line-level diff found within first 40 lines)';
 }
 
-// QUARANTINE (CI only): the sample-clinvar.expected.ttl oracle bakes the
-// absolute input path into every IRI. genomics:SequencingRun is minted by
-// hashing ImportContext.inputPath (see mintSequencingRunIri in
-// src/lib/vcf-converter/multi-sample.ts) and every Variant IRI derives from
-// that SequencingRun IRI, so the oracle's IRIs only reproduce when the fixture
-// sits at the exact absolute path it was authored against. On any other host
-// (CI, or another dev) every IRI differs and the byte-equal comparison fails
-// even though the variant data is identical (verified: variant count matches,
-// only the path-derived UUIDs differ). This is a pre-existing portability
-// defect in the conformance oracle, independent of this CI setup. Skip in CI
-// until the oracle is regenerated with a path-independent run identifier (or
-// the VCF importer hashes a stable basename instead of the full inputPath).
-const SKIP_PATH_PINNED_ORACLE = Boolean(process.env.CI);
-
-describe.skipIf(SKIP_PATH_PINNED_ORACLE)('vcf conformance regression (Phase 3A)', () => {
+// Portability: this oracle used to reproduce only at the one absolute path
+// it was authored against, because genomics:SequencingRun was minted by
+// hashing ImportContext.inputPath and every Variant IRI derives from it —
+// which forced these two tests to be quarantined in CI. The run IRI is now
+// minted from a SHA-256 of the DECOMPRESSED VCF content and nothing else
+// (see mintSequencingRunIri in src/lib/vcf-converter/multi-sample.ts), so
+// the oracle's IRIs reproduce anywhere the fixture bytes are the same:
+// CI, a second developer's checkout, or a relocated tree. The invariant
+// itself is pinned separately in vcf-content-addressed-identity.test.ts,
+// which does not depend on this fixture.
+describe('vcf conformance regression (Phase 3A)', () => {
   for (const { id, inputName } of FIXTURES) {
     describe(id, () => {
       const inputPath = path.join(FIXTURES_DIR, inputName);

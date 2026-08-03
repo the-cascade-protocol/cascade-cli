@@ -36,16 +36,40 @@ import type { ParsedRecord } from './record.js';
 const { namedNode } = DataFactory;
 void namedNode;
 
-/** Mint a SequencingRun IRI deterministically from input + header coords. */
-function mintSequencingRunIri(header: VcfHeader, ctx: ImportContext): string {
-  const parts = [
-    'SequencingRun',
-    ctx.inputPath ?? '<stdin>',
-    header.fileDate ?? '',
-    header.source ?? '',
-    header.reference ?? '',
-  ].join('|');
-  return `urn:uuid:${deterministicUuid(parts)}`;
+/**
+ * Mint a SequencingRun IRI from the content of the VCF, and nothing else.
+ *
+ * Key:  `SequencingRun|sha256:<digest of the decompressed VCF bytes>`
+ *
+ * The invariant this buys: **the same VCF content always has the same run
+ * identity, no matter where the file sits, what it is named, or whether it
+ * is gzipped.** Every `genomics:Variant` IRI derives from the run IRI
+ * (`mintVariantIri` in record.ts) and so does every sample IRI
+ * (`mintSampleIri` below), so this one key fixes the identity of the whole
+ * subgraph. Re-importing a moved, renamed, or re-compressed copy of a VCF
+ * therefore reconciles against the records already in the pod instead of
+ * minting a duplicate run with a duplicate set of variants.
+ *
+ * Two things this key deliberately does NOT contain:
+ *
+ *   - `ImportContext.inputPath`. Hashing the absolute path was the original
+ *     scheme, and it is exactly what made run identity non-reproducible:
+ *     identical bytes at two paths minted two different runs. The path is
+ *     still recorded as `sourceId` on the import manifest entry, which is
+ *     the right home for "where did these bytes come from" — provenance,
+ *     not identity.
+ *   - The header coordinates (`fileDate`, `source`, `reference`) that the
+ *     old key carried alongside the path. They are read out of the content,
+ *     so the digest already determines them; including them again would
+ *     imply they contribute identity when they cannot.
+ *
+ * A basename would also be path-independent, but it is not content-
+ * addressed: two unrelated VCFs both named `sample.vcf.gz` would collide
+ * into one run. The digest is the only key here that is both stable under
+ * relocation and distinct across distinct content.
+ */
+function mintSequencingRunIri(contentDigest: string): string {
+  return `urn:uuid:${deterministicUuid(`SequencingRun|sha256:${contentDigest}`)}`;
 }
 
 /** Mint a per-sample IRI deterministic on (sequencingRunIri, sampleName). */
@@ -73,12 +97,17 @@ function normalizeFileDate(raw: string | undefined): string | undefined {
  * Emit the SequencingRun record for the VCF. Properties the v1-draft
  * doesn't yet model (per-sample observedIn, contig manifest) are returned
  * via `gaps` so the orchestrator can fold them into the run-level audit.
+ *
+ * `contentDigest` is the SHA-256 of the decompressed VCF bytes, computed
+ * once by the orchestrator (`computeContentDigest` in index.ts). It is the
+ * sole input to the run's identity — see `mintSequencingRunIri` above.
  */
 export function emitSequencingRun(
   header: VcfHeader,
   ctx: ImportContext,
+  contentDigest: string,
 ): ParsedRecord & { sampleIris: Map<string, string>; gaps: VocabularyGap[] } {
-  const iri = mintSequencingRunIri(header, ctx);
+  const iri = mintSequencingRunIri(contentDigest);
   const quads: Quad[] = [];
   const gaps: VocabularyGap[] = [];
 
