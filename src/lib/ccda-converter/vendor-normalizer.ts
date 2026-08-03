@@ -9,6 +9,7 @@
  */
 
 import { detectVendor as detectVendorInternal } from './vendor/detect.js';
+import { firstOf, listOf } from './multivalued.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -100,14 +101,11 @@ class DefaultVendorNormalizer implements VendorNormalizer {
 
   normalizeConditionDisplayName(entry: any, section: any): string {
     // Try the direct path first: <value displayName="...">
-    const actRaw = entry?.act;
-    const act = Array.isArray(actRaw) ? actRaw[0] : (actRaw ?? entry);
-    const entryRelArr = Array.isArray(act?.entryRelationship)
-      ? act.entryRelationship
-      : act?.entryRelationship ? [act.entryRelationship] : [];
+    const act = firstOf<any>(entry?.act) ?? entry;
+    const entryRelArr = listOf<any>(act?.entryRelationship);
 
     for (const er of entryRelArr) {
-      const obsArr = Array.isArray(er?.observation) ? er.observation : er?.observation ? [er.observation] : [];
+      const obsArr = listOf<any>(er?.observation);
       for (const obs of obsArr) {
         const valueEl = obs?.value ?? obs?.code ?? {};
         const displayName = valueEl?.['@_displayName'] ?? valueEl?.displayName ?? '';

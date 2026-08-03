@@ -18,10 +18,11 @@
 
 import AdmZip from 'adm-zip';
 import { Writer, DataFactory } from 'n3';
-import { NS, TURTLE_PREFIXES, type BatchConversionResult, type EdgeResolutionSummary } from '../fhir-converter/types.js';
+import { NS, TURTLE_PREFIXES, type BatchConversionResult, type EdgeResolutionSummary, type SectionCensusEntry } from '../fhir-converter/types.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 import { parseCcdaXml } from './parser.js';
+import { firstOf, listOf } from './multivalued.js';
 import { detectVendor, getSourceSystemName } from './vendor/detect.js';
 import { applyVendorNormalization } from './vendor/normalize.js';
 import { detectDocumentType } from './document-type.js';
@@ -94,6 +95,7 @@ export async function convertCcda(
 ): Promise<BatchConversionResult> {
   const warnings: string[] = [];
   const allQuads: any[] = [];
+  const sectionCensus: SectionCensusEntry[] = [];
   let resourceCount = 0;
 
   const importedAt = options.importedAt ?? new Date().toISOString();
@@ -122,8 +124,25 @@ export async function convertCcda(
       const result = convertSingleCcda(xml, options, importedAt, warnings);
       allQuads.push(...result.quads);
       resourceCount += result.count;
+      mergeSectionCensus(sectionCensus, result.census);
     } catch (err) {
       warnings.push(`Failed to convert C-CDA document: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Absence has to be reported as absence. A section that offered structured
+  // entries and yielded no records is named here, whatever the cause — a handler
+  // that cannot read that nesting, an unsupported template, or entries that were
+  // genuinely empty. Three whole sections used to import as nothing while the
+  // summary printed a record count and simply omitted the empty buckets.
+  for (const s of sectionCensus) {
+    if (s.entriesIn > 0 && s.recordsOut === 0) {
+      warnings.push(
+        `Section "${s.label}"${s.loinc ? ` (LOINC ${s.loinc})` : ''}: read ${s.entriesIn} structured ` +
+          `entr${s.entriesIn === 1 ? 'y' : 'ies'} and imported 0 records` +
+          (s.handled ? '' : ' — no structured handler for this section type') +
+          '. Nothing from this section reached the pod.',
+      );
     }
   }
 
@@ -164,7 +183,27 @@ export async function convertCcda(
     // verifies that against the final record set and surfaces the count in the
     // import summary, matching the FHIR path's accounting.
     edgeResolution: censusForwardEdges(uniqueQuads),
+    sectionCensus,
   };
+}
+
+/**
+ * Fold one document's per-section census into the batch census. An IHE XDM zip
+ * carries the same sections across several documents; they are summed under one
+ * label so the reported numbers say "this import read N entries", not "the last
+ * document did".
+ */
+function mergeSectionCensus(into: SectionCensusEntry[], from: SectionCensusEntry[]): void {
+  for (const s of from) {
+    const existing = into.find((e) => e.label === s.label && e.loinc === s.loinc);
+    if (existing) {
+      existing.entriesIn += s.entriesIn;
+      existing.recordsOut += s.recordsOut;
+      existing.handled = existing.handled || s.handled;
+    } else {
+      into.push({ ...s });
+    }
+  }
 }
 
 /**
@@ -204,7 +243,7 @@ function convertSingleCcda(
   options: CcdaConversionOptions,
   importedAt: string,
   warnings: string[],
-): { quads: any[]; count: number } {
+): { quads: any[]; count: number; census: SectionCensusEntry[] } {
   const parsed = parseCcdaXml(xml);
 
   // Detect vendor and apply normalization
@@ -222,7 +261,7 @@ function convertSingleCcda(
   const sourceEhr = deriveSourceEhr(ccdaDoc);
 
   // Document ID for narrative linking
-  const docIdEl = Array.isArray(ccdaDoc?.id) ? ccdaDoc.id[0] : ccdaDoc?.id;
+  const docIdEl = firstOf<any>(ccdaDoc?.id);
   // HL7 II semantics: root+extension when both present; root alone IS the
   // globally unique document id when extension is absent. When the document
   // carries no id at all, identity comes from the document's own parsed,
@@ -245,13 +284,14 @@ function convertSingleCcda(
           : `doc:${identityKey(undefined, ccdaDoc, warnings, 'C-CDA ClinicalDocument (no <id>)')}`;
 
   const allQuads: any[] = [];
+  const census: SectionCensusEntry[] = [];
   let count = 0;
 
   // Extract patient demographics
   const recordTarget = ccdaDoc?.recordTarget;
   if (!recordTarget) {
     warnings.push('C-CDA document has no recordTarget — patient demographics not extracted');
-    return { quads: allQuads, count };
+    return { quads: allQuads, count, census };
   }
 
   // The patient profile is a record like any other. Its IRI is NOT threaded into
@@ -265,18 +305,14 @@ function convertSingleCcda(
   count++;
 
   // Process each section
-  // ccdaDoc.component is always an array (fast-xml-parser isArray config), so we must
-  // search through the array for the element that contains structuredBody rather than
-  // accessing .structuredBody directly on the array.
-  const componentTopLevel = ccdaDoc?.component;
-  const componentTopArr = Array.isArray(componentTopLevel)
-    ? componentTopLevel
-    : componentTopLevel ? [componentTopLevel] : [];
+  // `<component>` is a repeatable element and is therefore always an array (see
+  // multivalued.ts), so we must search the array for the element that contains
+  // structuredBody rather than reading .structuredBody off the array.
+  const componentTopArr = listOf<any>(ccdaDoc?.component);
   const body =
     componentTopArr.find((c: any) => c?.structuredBody)?.structuredBody
     ?? ccdaDoc?.structuredBody;
-  const components = body?.component ?? [];
-  const componentArr = Array.isArray(components) ? components : [components];
+  const componentArr = listOf<any>(body?.component);
 
   for (const comp of componentArr) {
     const section = comp?.section ?? comp;
@@ -296,9 +332,11 @@ function convertSingleCcda(
     const sectionCode = section?.code?.['@_code'] ?? section?.code?.code ?? '';
 
     // Extract structured entries (needed before narrative to know requiresLLMExtraction)
-    const entries = Array.isArray(section?.entry)
-      ? section.entry
-      : section?.entry ? [section.entry] : [];
+    const entries = listOf<any>(section?.entry);
+    const sectionLabel =
+      (typeof section?.title === 'string' ? section.title : section?.title?.['#text']) ||
+      (sectionCode ? `LOINC ${sectionCode}` : templateIds[0]) ||
+      'untitled section';
 
     // Extract narrative — always attempt, even if section also has entries
     const sectionText = section?.text;
@@ -340,12 +378,41 @@ function convertSingleCcda(
 
       allQuads.push(...quads);
       count += entries.length;
-    } else if (templateIds.length > 0) {
-      const isKnownNarrativeOnly = templateIds.some((id: string) => NARRATIVE_ONLY_TEMPLATE_IDS.has(id));
-      if (!isKnownNarrativeOnly) {
-        warnings.push(
-          `Unknown section templateId: ${templateIds[0]} — narrative preserved if present`,
-        );
+
+      // Entries read versus records written, for THIS section. Counted from the
+      // handler's own output — the distinct subjects it gave an rdf:type — so it
+      // cannot be satisfied by a handler that returns quads without records.
+      const recordSubjects = new Set(
+        quads
+          .filter((q: any) => q.predicate.value === NS.rdf + 'type')
+          .map((q: any) => q.subject.value),
+      );
+      census.push({
+        label: sectionLabel,
+        loinc: sectionCode || handler.loinc || undefined,
+        entriesIn: entries.length,
+        recordsOut: recordSubjects.size,
+        handled: true,
+      });
+    } else {
+      // No structured handler. If the section still carried entries, they were
+      // read and dropped, and that has to be counted rather than assumed empty.
+      if (entries.length > 0) {
+        census.push({
+          label: sectionLabel,
+          loinc: sectionCode || undefined,
+          entriesIn: entries.length,
+          recordsOut: 0,
+          handled: false,
+        });
+      }
+      if (templateIds.length > 0) {
+        const isKnownNarrativeOnly = templateIds.some((id: string) => NARRATIVE_ONLY_TEMPLATE_IDS.has(id));
+        if (!isKnownNarrativeOnly) {
+          warnings.push(
+            `Unknown section templateId: ${templateIds[0]} — narrative preserved if present`,
+          );
+        }
       }
     }
   }
@@ -359,5 +426,5 @@ function convertSingleCcda(
   ensureProvenanceQuads(allQuads);
   ensureSourceEhrQuads(allQuads, sourceEhr);
 
-  return { quads: allQuads, count };
+  return { quads: allQuads, count, census };
 }

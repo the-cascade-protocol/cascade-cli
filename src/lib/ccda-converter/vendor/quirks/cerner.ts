@@ -2,25 +2,17 @@
  * Cerner PowerChart quirks:
  * - Omits <id> on many entries; uses <setId> as fallback
  * - Some templateIds may be absent on section entries
+ *
+ * Array shape is not decided here. See the note in `epic.ts` and the header of
+ * `ccda-converter/multivalued.ts`: one list, applied by the parser to every
+ * document. This shim's canonicalization is a no-op on parser output and exists
+ * only so it stays correct on a document assembled some other way.
  */
 
-const SHOULD_BE_ARRAY = [
-  'entry', 'component', 'observation', 'organizer',
-  'substanceAdministration', 'act', 'encounter', 'procedure', 'name', 'id', 'telecom', 'addr',
-];
+import { canonicalizeMultivaluedElements } from '../../multivalued.js';
 
 export function normalizeCerner(doc: any): any {
   const result = JSON.parse(JSON.stringify(doc));
-  normalizeArraysRecursive(result);
+  canonicalizeMultivaluedElements(result);
   return result;
-}
-
-function normalizeArraysRecursive(obj: any): void {
-  if (!obj || typeof obj !== 'object') return;
-  for (const key of Object.keys(obj)) {
-    if (SHOULD_BE_ARRAY.includes(key) && obj[key] && !Array.isArray(obj[key])) {
-      obj[key] = [obj[key]];
-    }
-    if (typeof obj[key] === 'object') normalizeArraysRecursive(obj[key]);
-  }
 }

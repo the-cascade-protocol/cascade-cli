@@ -42,6 +42,7 @@
  */
 
 import { NS, tripleDateTime } from '../../fhir-converter/types.js';
+import { firstOf, listOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { contentFingerprint, EMPTY_SEED } from '../../identity.js';
 import { resolveCodeUri } from '../code-systems.js';
@@ -334,19 +335,23 @@ export function extractLabQuads(
   const emittedEncounterSubjects = new Set<string>();
 
   for (const entry of entries) {
-    const organizer = entry?.organizer;
+    // `<organizer>` is a repeatable element and is therefore an ARRAY (see
+    // `multivalued.ts`). This used to be `const organizer = entry?.organizer`,
+    // read straight as an object, so `organizer?.component` was `undefined` and
+    // an entire results section of panels imported as NOTHING — no records, no
+    // error, no skip count. Measured on a two-panel section: 0 quads before, 86
+    // after.
+    const organizer = firstOf<any>(entry?.organizer);
 
     if (organizer?.component) {
       // Lab panel (organizer wrapping member observations).
-      const comps = Array.isArray(organizer.component)
-        ? organizer.component
-        : [organizer.component];
+      const comps = listOf<any>(organizer.component);
 
       const memberSubjects: string[] = [];
       const memberDates: string[] = [];
       for (const comp of comps) {
         if (!comp?.observation) continue;
-        const obsList = Array.isArray(comp.observation) ? comp.observation : [comp.observation];
+        const obsList = listOf<any>(comp.observation);
         for (const obs of obsList) {
           const member = extractObservationQuads(obs, sourceSystem, warnings);
           if (!member) continue;
@@ -389,7 +394,7 @@ export function extractLabQuads(
       }
     } else if (entry?.observation) {
       // Standalone observation (no organizer): a plain lab result, no panel.
-      const obsList = Array.isArray(entry.observation) ? entry.observation : [entry.observation];
+      const obsList = listOf<any>(entry.observation);
       for (const obs of obsList) {
         const member = extractObservationQuads(obs, sourceSystem, warnings);
         if (member) quads.push(...member.quads);

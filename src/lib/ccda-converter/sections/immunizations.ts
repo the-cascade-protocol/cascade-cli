@@ -3,6 +3,7 @@
  */
 
 import { NS } from '../../fhir-converter/types.js';
+import { firstOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { DataFactory } from 'n3';
@@ -23,9 +24,7 @@ export function extractImmunizationQuads(
   const quads: Quad[] = [];
 
   for (const entry of entries) {
-    // entry.substanceAdministration is always an array from fast-xml-parser's isArray config — unwrap first element
-    const saRaw = entry?.substanceAdministration;
-    const sa = Array.isArray(saRaw) ? saRaw[0] : (saRaw ?? entry);
+    const sa = firstOf<any>(entry?.substanceAdministration) ?? entry;
     if (!sa) continue;
 
     // Extract vaccine code

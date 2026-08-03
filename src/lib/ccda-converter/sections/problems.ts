@@ -3,6 +3,7 @@
  */
 
 import { NS } from '../../fhir-converter/types.js';
+import { firstOf, listOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { DataFactory } from 'n3';
@@ -27,14 +28,10 @@ export function extractProblemQuads(
   for (const entry of entries) {
     // Conditions are inside an act/observation
     // entry.act is always an array from fast-xml-parser's isArray config — unwrap first element
-    const actRaw = entry?.act;
-    const act = Array.isArray(actRaw) ? actRaw[0] : (actRaw ?? entry);
-    const entryRelArr = Array.isArray(act?.entryRelationship) ? act.entryRelationship : (act?.entryRelationship ? [act.entryRelationship] : []);
-    const obs = entryRelArr.flatMap((er: any) => {
-      const o = er?.observation;
-      return Array.isArray(o) ? o : (o ? [o] : []);
-    });
-    const obsArr = obs.length > 0 ? obs : (act?.observation ? (Array.isArray(act.observation) ? act.observation : [act.observation]) : [act]);
+    const act = firstOf<any>(entry?.act) ?? entry;
+    const entryRelArr = listOf<any>(act?.entryRelationship);
+    const obs = entryRelArr.flatMap((er: any) => listOf<any>(er?.observation));
+    const obsArr = obs.length > 0 ? obs : (act?.observation ? listOf<any>(act.observation) : [act]);
 
     for (const observation of obsArr) {
       if (!observation?.code && !observation?.value) continue;
@@ -62,8 +59,18 @@ export function extractProblemQuads(
       // "we do not know" into "these are the same record", and a content tier
       // that succeeds with a constant is indistinguishable from one that fails
       // except that it merges.
-      const statusObs = observation?.entryRelationship?.observation;
-      const statusValue = (Array.isArray(statusObs) ? statusObs[0] : statusObs)?.value;
+      //
+      // `<entryRelationship>` is a repeatable element and is therefore an ARRAY.
+      // This read used to be `observation?.entryRelationship?.observation`,
+      // which is `undefined` on an array — so `statedStatus` was ALWAYS empty
+      // and `status` was ALWAYS the 'active' default, on every document, whether
+      // or not the source said the problem was resolved. A resolved problem
+      // imported as active. The status observation is found the same way the
+      // condition observation above is.
+      const statusObs = listOf<any>(observation?.entryRelationship)
+        .flatMap((er: any) => listOf<any>(er?.observation))
+        .find((o: any) => o?.value != null);
+      const statusValue = statusObs?.value;
       const statedStatus = statusValue?.['@_displayName'] ?? statusValue?.displayName ?? '';
       const status = statedStatus || 'active';
 

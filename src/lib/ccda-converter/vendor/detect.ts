@@ -2,16 +2,20 @@
  * EHR vendor detection from C-CDA custodian organization name.
  */
 
+import { firstOf } from '../multivalued.js';
+
 export type EhrVendor = 'epic' | 'cerner' | 'athena' | 'unknown';
 
 function extractOrgName(doc: any): string {
-  const raw =
-    doc?.ClinicalDocument?.custodian?.assignedCustodian?.representedCustodianOrganization?.name?.['#text'] ??
-    doc?.ClinicalDocument?.custodian?.assignedCustodian?.representedCustodianOrganization?.name ??
-    '';
-  // fast-xml-parser's isArray config may wrap <name> in an array
-  if (Array.isArray(raw)) return (raw[0]?.['#text'] ?? raw[0] ?? '').toString();
-  return raw.toString();
+  // `<name>` is a repeatable element and is therefore an ARRAY (see
+  // `multivalued.ts`), so take its single occurrence before reading a value out
+  // of it. The element may hold a bare string or a { '#text' } node.
+  const name = firstOf<any>(
+    doc?.ClinicalDocument?.custodian?.assignedCustodian?.representedCustodianOrganization?.name,
+  );
+  if (name == null) return '';
+  if (typeof name === 'string') return name;
+  return (name['#text'] ?? '').toString();
 }
 
 export function detectVendor(doc: any): EhrVendor {
