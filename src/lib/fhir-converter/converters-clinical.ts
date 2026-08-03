@@ -45,6 +45,7 @@ import {
   pushIndicationEdges,
   pushParsedIndicationCandidates,
 } from './reference-resolution.js';
+import { contentFingerprint, EMPTY_SEED } from '../identity.js';
 
 // ---------------------------------------------------------------------------
 // Medication converter
@@ -54,17 +55,34 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
   const warnings: string[] = [];
   const patientRef = resource.subject?.reference ?? resource.patient?.reference ?? '';
 
-  // Medication name (needed for the identity URI, which keys on the normalized name).
-  const medName = codeableConceptText(resource.medicationCodeableConcept)
-    ?? resource.medicationReference?.display
-    ?? 'Unknown Medication';
+  // The DISPLAY name and the IDENTITY name are deliberately two different
+  // values, and conflating them was a silent record-merging bug.
+  //
+  // `medName` is what the record says on screen, so a placeholder is the right
+  // answer when the source names no drug. `identityMedName` is an input to the
+  // subject IRI, where a placeholder is never the right answer: it converts
+  // "we do not know what drug this is" into "these are the same drug". Measured
+  // before this split, with the placeholder feeding both: a bare
+  // `{resourceType:'MedicationStatement'}` and one carrying a distinct `note`
+  // minted ONE IRI, with no warning — because the content tier "succeeded" with
+  // a constant identical for every content-free medication, so the identity
+  // door's tier-4 collapse notice could never fire. A content hash that
+  // succeeds with a constant is indistinguishable from one that fails, except
+  // that it merges records instead of splitting them.
+  //
+  // Leaving the field `undefined` instead hands the decision back to the
+  // identity door, which falls through to the RxNorm code, the start date, the
+  // patient, then the resource's own content, and finally collapses LOUDLY.
+  const identityMedName = codeableConceptText(resource.medicationCodeableConcept)
+    ?? resource.medicationReference?.display;
+  const medName = identityMedName ?? 'Unknown Medication';
 
   const subjectUri = medicationUri({
     patient: patientRef,
     rxNormCode: resource.medicationCodeableConcept?.coding?.find((c: any) => c.system?.includes('rxnorm'))?.code,
-    medicationName: medName,
+    medicationName: identityMedName,
     startDate: (resource.authoredOn ?? resource.effectivePeriod?.start)?.split('T')[0],
-  }, resource.id, resource, warnings);
+  }, resource.id, resource, warnings, resource.resourceType);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'Medication'));
@@ -338,14 +356,129 @@ export function isVitalSignObservation(resource: any): boolean {
 // Observation (lab) converter
 // ---------------------------------------------------------------------------
 
+/**
+ * The FHIR `value[x]` choice element prefix. Every measured result a lab
+ * Observation can carry is spelled `value` + a type name.
+ */
+const VALUE_X_PREFIX = 'value';
+
+/**
+ * A stable token standing for THE MEASURED RESULT of a lab Observation, or
+ * `undefined` when the resource carries no result at all.
+ *
+ * Collected by PREFIX rather than from a hand-written list of the `value[x]`
+ * forms this converter happens to serialize today. A list would have to be kept
+ * in step with FHIR forever, and the failure mode of missing one is not a
+ * dropped display value — it is two genuinely different results sharing an
+ * identity. `component` is included because a panel-style Observation carries
+ * its readings there instead.
+ *
+ * Reduced to a fingerprint rather than embedded raw so that the identity string
+ * stays a fixed length regardless of how many components a panel has, and so
+ * that a free-text `valueString` cannot smuggle the `|` and `=` characters that
+ * `contentHashedUri` uses as its own field separators into the key.
+ */
+function labMeasuredValueKey(resource: any): string | undefined {
+  if (resource == null || typeof resource !== 'object') return undefined;
+  const measured: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(resource)) {
+    if (value === undefined || value === null) continue;
+    if (key === 'component' || (key.startsWith(VALUE_X_PREFIX) && key.length > VALUE_X_PREFIX.length)) {
+      measured[key] = value;
+    }
+  }
+  if (Object.keys(measured).length === 0) return undefined;
+  const fingerprint = contentFingerprint(measured);
+  return fingerprint === EMPTY_SEED ? undefined : fingerprint;
+}
+
+/**
+ * The Observation's category codes, or `undefined` when it carries none.
+ *
+ * Sorted, because `Observation.category` is a set rather than an ordered list
+ * and two servers may enumerate the same categories in different order. Sorting
+ * therefore removes a source of spurious SPLITS; it can never cause a merge,
+ * since a differing set still sorts to a differing string.
+ */
+function labCategoryKey(resource: any): string | undefined {
+  if (!Array.isArray(resource?.category)) return undefined;
+  const parts: string[] = [];
+  for (const cat of resource.category) {
+    if (Array.isArray(cat?.coding)) {
+      for (const c of cat.coding) {
+        if (c?.code) parts.push(`${c.system ?? ''}#${c.code}`);
+      }
+    }
+    if (typeof cat?.text === 'string' && cat.text.trim().length > 0) parts.push(cat.text.trim());
+  }
+  return parts.length > 0 ? parts.sort().join(',') : undefined;
+}
+
+/**
+ * The subject IRI for a lab Observation.
+ *
+ * WHY THIS IS NO LONGER `contentHashedUri('Observation', {patient, loincCode, date}, resource.id)`
+ * ------------------------------------------------------------------------------------------------
+ * That key set was a strict subset of the record. The MEASURED VALUE was not in
+ * it; the timestamp was truncated to a calendar day by `.split('T')[0]`; and the
+ * record's own server-assigned `id` was passed as `fallbackId`, which
+ * `contentHashedUri` consults ONLY when every content field is empty — which
+ * never happens on a real lab. So the id was discarded and identity was
+ * `{patient, LOINC, calendar day}`.
+ *
+ * Measured consequence: a fasting glucose of 95 (`id "obs-fasting-95"`) and a
+ * post-prandial glucose of 310 (`id "obs-postprandial-310"`) drawn the same
+ * morning minted ONE IRI. The reconciler then passed over the second as a
+ * re-import of the first, and WHICH value survived was decided by the order the
+ * input files enumerated. Serial same-day labs are routine clinical practice —
+ * glucose curves, troponin series, repeat potassium, pre/post dialysis — so
+ * this fired on ordinary EHR output, not on exotic input.
+ *
+ * THE RULE: A PRESENT `id` WINS.
+ * -----------------------------
+ * Identity answers "is this that record?". Two records that are the same
+ * *thing* may well need merging, but that is a different judgement, it needs a
+ * conflict trail, and it belongs to the reconciler — which can see both
+ * records, where the identity layer sees one at a time and can only silently
+ * overwrite. Honouring the id makes the collision structurally impossible.
+ *
+ * It is also what `convertObservationVital` has always done via
+ * `mintSubjectUri`, which is why same-day repeat VITALS survived as distinct
+ * records in a real 1,150-subject pod while same-day repeat LABS did not. The
+ * two Observation converters in this file no longer use opposite strategies, so
+ * an Observation rerouted from the vital converter to this one (see
+ * `VITAL_TYPE_TO_SHACL`) keeps the same IRI either way.
+ *
+ * WITHOUT AN ID, the key carries what actually tells two results apart:
+ * patient, LOINC code, the effective instant AT FULL PRECISION, the measured
+ * value in every `value[x]` form, the specimen, and the category.
+ *
+ * `testName` is deliberately NOT a key field. The converter defaults it to the
+ * literal 'Unknown Lab Test', and a placeholder default in an identity key is
+ * the same defect in a different costume.
+ */
+function labSubjectUri(resource: any, warnings: string[]): string {
+  // Tier 1 — the source assigned an identifier. Same door, same key template,
+  // and the same answer `convertObservationVital` gives for this resource.
+  if (typeof resource?.id === 'string' && resource.id.trim().length > 0) {
+    return mintSubjectUri(resource, warnings);
+  }
+  return contentHashedUri('Observation', {
+    patient: resource?.subject?.reference,
+    loincCode: resource?.code?.coding?.find((c: any) => c.system?.includes('loinc'))?.code,
+    // Full precision. `.split('T')[0]` merged a 07:00 draw with an 11:00 draw.
+    effective: resource?.effectiveDateTime ?? resource?.effectivePeriod?.start,
+    value: labMeasuredValueKey(resource),
+    specimen: resource?.specimen?.reference,
+    category: labCategoryKey(resource),
+    // No `fallbackId`: this branch runs only when there is no id to fall back
+    // to. Passing one here is what hid the defect above for so long.
+  }, undefined, resource, warnings);
+}
+
 export function convertObservationLab(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const patientRef = resource.subject?.reference ?? '';
-  const subjectUri = contentHashedUri('Observation', {
-    patient: patientRef,
-    loincCode: resource.code?.coding?.find((c: any) => c.system?.includes('loinc'))?.code,
-    date: (resource.effectiveDateTime ?? resource.effectivePeriod?.start)?.split('T')[0],
-  }, resource.id, resource, warnings);
+  const subjectUri = labSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'LabResultRecord'));

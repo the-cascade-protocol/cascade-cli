@@ -417,6 +417,16 @@ export function contentHashedUri(
   source?: unknown,
   /** Collects a tier-4 collapse notice. See `mintSubjectUri` for why it is optional. */
   warnings?: string[],
+  /**
+   * How to name the record in a tier-4 collapse notice. Defaults to
+   * `resourceType`, which is right at most call sites and wrong where the
+   * identity `resourceType` is a shared canonical key rather than the source's
+   * own type: a bare `MedicationStatement` mints under `MedicationRequest` (the
+   * single medication identity used by every importer), and reporting the
+   * collapse of a "MedicationRequest" to someone who imported a
+   * MedicationStatement sends them looking for a record that is not there.
+   */
+  label?: string,
 ): string {
   // Filter out undefined/empty values and sort keys for stability. Values are
   // coerced to string before trimming: the type says string, but real-world
@@ -440,7 +450,7 @@ export function contentHashedUri(
   const { seed } = identitySeed({
     content: source,
     warnings,
-    label: `${resourceType} (no id)`,
+    label: `${label ?? resourceType} (no id)`,
   });
   return `urn:uuid:${deterministicUuid(`${resourceType}::${seed}`)}`;
 }
@@ -465,6 +475,12 @@ export function medicationUri(
   source?: unknown,
   /** Forwarded to `contentHashedUri`; collects a tier-4 collapse notice. */
   warnings?: string[],
+  /**
+   * The SOURCE's own resource type, for the tier-4 notice only. Identity is
+   * always minted under `MedicationRequest` — that is the shared key every
+   * importer agrees on — but a warning should name what the caller imported.
+   */
+  label?: string,
 ): string {
   return contentHashedUri(
     'MedicationRequest',
@@ -477,6 +493,7 @@ export function medicationUri(
     fallbackId,
     source,
     warnings,
+    label,
   );
 }
 

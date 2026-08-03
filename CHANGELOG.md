@@ -9,7 +9,74 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+> **Version number not yet chosen.** This section contains an IRI-breaking change for lab
+> results (see the first upgrade note), so it is not a patch release. Decide between a minor
+> and a major bump before cutting it.
+
+### Upgrade notes
+
+- **Breaking for lab results imported from FHIR.** Lab result IRIs change in this release for
+  anything imported through a FHIR source — a SMART on FHIR connection, a FHIR bundle, an
+  Apple Health export. If you have imported labs with an earlier version, records imported by
+  this one will not match them. Labs imported from C-CDA documents are unchanged; see the
+  known limitation below.
+
+  What was wrong: a lab result's identity was built from the patient, the LOINC code and the
+  calendar DAY, and from nothing else. The measured result was not part of it, the time of day
+  was thrown away, and the lab's own identifier from your provider's system was ignored. So two
+  different results for the same test on the same day — a fasting glucose in the morning and a
+  post-prandial one before lunch — were treated as one record, and one of the two values was
+  silently discarded. Which one survived depended on the order the files happened to be read
+  in. Serial same-day labs are ordinary medicine (glucose curves, troponin series, repeat
+  potassium, before-and-after dialysis), so this did not need unusual data to happen.
+
+  A lab result now takes its identity from the identifier your provider's system assigned it,
+  the same way vital signs already did. When a result carries no identifier, its identity comes
+  from the patient, the LOINC code, the FULL timestamp, the measured value, the specimen and
+  the category — everything that actually tells two results apart.
+
+  **What to do.** Re-import the sources your labs came from, into a fresh pod, and use that.
+  Alternatively, keep the pod you have and accept that labs imported before and after this
+  release sit side by side as separate records. Records that were merged by the old behavior
+  cannot be recovered from the pod — the discarded value was never written — so a re-import
+  from the original source is the only way to get them back.
+
+  Measured on the published FHIR Genomics IG example bundles that ship with the conformance
+  fixtures: 16 groups of records, 49 records in total, shared an IRI with a record they
+  differed from — including six distinct HLA observations collapsed onto a single identity.
+  After this change no lab observation collides with another; the only records that still
+  share an IRI are the same record appearing in two files, which is correct.
+
+  Nothing outside FHIR lab results moves. Vital signs, conditions, allergies, medications,
+  procedures, encounters, documents, immunizations, coverage and claims all keep the IRIs they
+  had. Verified across the conformance corpus: 46 of 91 converted resources were unchanged, and
+  every one of the 45 that moved was a lab observation.
+
+### Known limitations in this release
+
+- **The same defect remains on the C-CDA import path, and is not fixed here.** A lab result
+  read from a C-CDA document is still identified by patient, test code, test name and calendar
+  day, with the measured value left out and the document's own identifier for the result
+  ignored. Two different same-day results for one test therefore still collapse into one
+  record on that path. It is called out rather than quietly fixed because closing it is a
+  second IRI-breaking change for labs, and breaking lab identity twice in two releases is
+  worse for anyone holding a pod than doing both at once. Verified reproducible.
+
 ### Fixed
+
+- **A missing drug name no longer merges unrelated medication records.** When a
+  `MedicationStatement` or `MedicationRequest` named no drug, the importer substituted the
+  literal text "Unknown Medication" and then used it to build the record's identity. Every
+  medication with no name therefore got the SAME identity, so they merged into one record
+  without warning. The substituted text is still what the record displays; it is no longer
+  what the record is identified by, so such records now stay separate and, when they carry
+  nothing at all to tell them apart, say so. **A medication that names a drug is unaffected
+  and its IRI does not move.**
+
+- **A collapse notice now names the resource type you imported.** Medications are identified
+  under a single shared key regardless of which FHIR resource they arrived as, and the notice
+  reported that shared key — telling someone who imported a `MedicationStatement` to go
+  looking for a `MedicationRequest`.
 
 - **Re-importing a document no longer duplicates the records in it that carry no `id`.**
   This closes the known limitation named in 0.10.0.
@@ -27,10 +94,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   yields the same IRI across runs, across machines, across working directories, and
   regardless of its position in a bundle. Different records still yield different IRIs.
 
-  **Nothing that already had an `id` changes.** If a source resource carries an identifier,
-  its IRI is byte-for-byte what previous versions minted, so no IRI in an existing pod moves
-  and no re-import is needed. This is not comparable to the 0.10.0 genomics change, which
-  was deliberately IRI-breaking.
+  **This particular change moves no IRI that a source `id` already determined.** Where a
+  source resource carries an identifier, the IRI it produces here is byte-for-byte what
+  previous versions minted. (The lab-result change described under Upgrade notes above IS
+  IRI-breaking, and is the only thing in this release that is.)
 
   Server-assigned volatile fields are excluded from the content hash — `meta.lastUpdated`,
   `meta.versionId` and `meta.source` — so a resource re-fetched from an EHR keeps its
