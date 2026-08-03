@@ -527,6 +527,15 @@ describe('the tier-4 warning reaches the converter API, not just the identity un
   const COLLAPSE = 'no identifier and no identity-bearing content';
 
   const converters: ReadonlyArray<{ name: string; fn: (r: any) => { warnings: string[] } | null; bare: any }> = [
+    // `convertMedicationStatement` was the one FHIR converter absent from this
+    // table, because it could not reach tier 4 at all: it defaulted the drug
+    // name to the literal 'Unknown Medication' before minting, so the content
+    // tier always "succeeded" — with a constant identical for every content-free
+    // medication. The converter no longer feeds a placeholder into its identity
+    // key, so the whole table is now exceptionless, and this list is the standing
+    // guard on the class: any converter that starts baking a placeholder default
+    // into an identity key stops reporting its collapse and fails here.
+    { name: 'convertMedicationStatement', fn: convertMedicationStatement, bare: { resourceType: 'MedicationStatement' } },
     { name: 'convertCondition', fn: convertCondition, bare: { resourceType: 'Condition' } },
     { name: 'convertAllergyIntolerance', fn: convertAllergyIntolerance, bare: { resourceType: 'AllergyIntolerance' } },
     { name: 'convertObservationLab', fn: convertObservationLab, bare: { resourceType: 'Observation' } },
@@ -580,34 +589,43 @@ describe('the tier-4 warning reaches the converter API, not just the identity un
   });
 
   /**
-   * DOCUMENTED EXCEPTION, pinned rather than fixed.
+   * THE EXCEPTION THAT WAS PINNED HERE IS NOW FIXED, and this is what replaced
+   * it. Kept as its own case rather than folded into the table because the
+   * mechanism is worth naming.
    *
-   * `convertMedicationStatement` is the one FHIR converter that cannot reach
-   * tier 4, so it is deliberately absent from the list above. It defaults
+   * `convertMedicationStatement` could not reach tier 4 at all: it defaulted
    * `medName` to the literal 'Unknown Medication' before minting, so the
-   * identity key always has a non-empty field and the content tier always
-   * "succeeds" — with a value identical for every content-free medication.
+   * identity key always carried a non-empty field and the content tier always
+   * "succeeded" — with a value identical for every content-free medication.
+   * Measured then: a bare MedicationStatement and one carrying a distinct
+   * `note` minted urn:uuid:6fdb46b2-be25-52f9-80b8-2a356c4c3a87, both of them,
+   * with empty `warnings`.
    *
-   * That is the same shape as the `resourceType` scaffold bug this module fixed
-   * (tier 2 succeeding with a constant is indistinguishable from tier 2 failing,
-   * except that it merges), but the constant is supplied by the CONVERTER's
-   * choice of identity fields rather than by the identity door, so it is not
-   * this module's to fix. It belongs with the converter identity-field review
-   * that is deliberately sequenced after this change, and it is filed there.
-   *
-   * This test pins today's behavior so the follow-up has a starting point and so
-   * nobody reads the absence above as an oversight.
+   * Same shape as the `resourceType` scaffold bug this module fixed — tier 2
+   * succeeding with a constant is indistinguishable from tier 2 failing, except
+   * that it MERGES records instead of splitting them — but the constant came
+   * from the CONVERTER's choice of identity fields rather than from the identity
+   * door, which is why the door could not see it. The converter now passes the
+   * drug name only when the source actually supplies one.
    */
-  it('convertMedicationStatement does NOT reach tier 4 — placeholder constant, filed separately', () => {
+  it('a placeholder default no longer stands in for a drug name in the identity key', () => {
     const bare = convertMedicationStatement({ resourceType: 'MedicationStatement' });
     const withNote = convertMedicationStatement({
       resourceType: 'MedicationStatement',
       note: [{ text: 'a different medication entirely' }],
     });
-    expect(bare.warnings.filter((w) => w.includes(COLLAPSE))).toEqual([]);
-    // Documenting the consequence rather than asserting it is correct: two
-    // content-free medications currently share one identity, silently.
-    expect(subjectOf(bare)).toBe(subjectOf(withNote));
+    expect(subjectOf(bare)).not.toBe(subjectOf(withNote));
+    expect(bare.warnings.filter((w) => w.includes(COLLAPSE)).length).toBe(1);
+    expect(withNote.warnings.filter((w) => w.includes(COLLAPSE))).toEqual([]);
+  });
+
+  it('the collapse notice names the resource type the caller imported', () => {
+    // Medication identity is minted under the shared `MedicationRequest` key by
+    // every importer, so the notice used to say "MedicationRequest (no id)" to
+    // someone who had imported a MedicationStatement — sending them to look for
+    // a record that is not in their data.
+    const bare = convertMedicationStatement({ resourceType: 'MedicationStatement' });
+    expect(bare.warnings.find((w) => w.includes(COLLAPSE))).toContain('MedicationStatement (no id)');
   });
 });
 

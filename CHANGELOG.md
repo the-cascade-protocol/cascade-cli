@@ -9,7 +9,144 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+> **Version number not yet chosen.** This section contains an IRI-breaking change for lab
+> results (see the first upgrade note), so it is not a patch release. Decide between a minor
+> and a major bump before cutting it.
+
+**This release is about record identity — the IRI each record gets, which decides whether a
+re-import updates a record or duplicates it, and whether two records stay two records.** Two
+things changed, and they pull in opposite directions, so it is worth being clear which is
+which:
+
+1. **Records the source never identified used to get a RANDOM IRI**, so re-importing the same
+   document duplicated them, forever. They now get an IRI derived from their own content, so
+   they reconcile. **No IRI that a source identifier already determined moves because of this.**
+2. **Lab results used to be identified too coarsely** — by patient, test code and calendar day,
+   ignoring the measured value, the time of day, and the source's own identifier — so two
+   genuinely different results on one day merged into one and a value was silently lost. Fixing
+   that necessarily moves lab IRIs. **This is the only IRI-breaking change in the release**, and
+   the upgrade note below says what to do about it.
+
+### Upgrade notes
+
+- **Breaking for lab results, from EVERY import source.** Lab result IRIs change in this
+  release, whether the results came from a FHIR source (a SMART on FHIR connection, a FHIR
+  bundle, an Apple Health export) or from a downloaded C-CDA document (a MyChart-style portal
+  export). If you have imported labs with an earlier version, records imported by this one
+  will not match them.
+
+  What was wrong: a lab result's identity was built from the patient, the test code and the
+  calendar DAY, and from nothing else. The measured result was not part of it, the time of day
+  was thrown away, and the lab's own identifier from your provider's system was ignored. So two
+  different results for the same test on the same day — a fasting glucose in the morning and a
+  post-prandial one before lunch — were treated as one record, and one of the two values was
+  silently discarded. Which one survived depended on the order the files happened to be read
+  in. Serial same-day labs are ordinary medicine (glucose curves, troponin series, repeat
+  potassium, before-and-after dialysis), so this did not need unusual data to happen.
+
+  **Both importers carried the same defect, in the same shape, and both are fixed here** —
+  together, deliberately, so that lab identity changes exactly once rather than once per
+  importer across two releases.
+
+  A lab result now takes its identity from the identifier your provider's system assigned it,
+  the same way vital signs already did. When a result carries no identifier, its identity comes
+  from the patient, the test code, the FULL timestamp and the measured value, plus the specimen
+  and category where the source records them — everything that actually tells two results
+  apart.
+
+  **What to do.** Re-import the sources your labs came from, into a fresh pod, and use that.
+  Alternatively, keep the pod you have and accept that labs imported before and after this
+  release sit side by side as separate records. Records that were merged by the old behavior
+  cannot be recovered from the pod — the discarded value was never written — so a re-import
+  from the original source is the only way to get them back.
+
+  Measured on the published FHIR Genomics IG example bundles that ship with the conformance
+  fixtures: 16 groups of records, 49 records in total, shared an IRI with a record they
+  differed from — including six distinct HLA observations collapsed onto a single identity.
+  After this change no lab observation collides with another; the only records that still
+  share an IRI are the same record appearing in two files, which is correct.
+
+  **Nothing but lab results moves.** Vital signs, conditions, allergies, medications,
+  procedures, encounters, documents, immunizations, coverage and claims all keep the IRIs they
+  had. Verified twice: across the FHIR conformance corpus, 46 of 91 converted resources were
+  unchanged and every one of the 45 that moved was a lab observation; across the C-CDA corpus,
+  40 of 43 identities were unchanged and all 3 that moved were lab results.
+
+  **Lab PANELS keep their IRIs, with one narrow exception.** A panel read from a C-CDA document
+  whose source gave it neither an identifier nor a test code was previously indistinguishable
+  from any other panel drawn for the same patient on the same day, so several genuinely
+  different panels shared one record and pooled their results. Such a panel now takes its
+  identity from its full timestamp and the set of results it contains, and so moves. A panel
+  that carries an identifier — the common case — is unchanged.
+
 ### Fixed
+
+- **A missing drug name no longer merges unrelated medication records.** When a
+  `MedicationStatement` or `MedicationRequest` named no drug, the importer substituted the
+  literal text "Unknown Medication" and then used it to build the record's identity. Every
+  medication with no name therefore got the SAME identity, so they merged into one record
+  without warning. The substituted text is still what the record displays; it is no longer
+  what the record is identified by, so such records now stay separate and, when they carry
+  nothing at all to tell them apart, say so. **A medication that names a drug is unaffected
+  and its IRI does not move.**
+
+- **A collapse notice now names the resource type you imported.** Medications are identified
+  under a single shared key regardless of which FHIR resource they arrived as, and the notice
+  reported that shared key — telling someone who imported a `MedicationStatement` to go
+  looking for a `MedicationRequest`.
+- **Two records that share one subject IRI but disagree on content are no longer silently
+  reduced to one.**
+
+  Cascade subject IRIs are content-hashed, so the reconciler treated a second arrival of an
+  IRI as a re-import of the same record and passed over it. That is right for a re-import
+  and wrong for an identity COLLISION — two genuinely different records that an identity key
+  narrower than the records themselves minted onto one IRI. A fasting glucose of 95 and a
+  post-prandial of 310, drawn the same day, are exactly that shape, and serial same-day
+  results are ordinary clinical practice (glucose curves, troponin series, repeat potassium,
+  pre/post dialysis).
+
+  The consequence was silent clinical data loss on the primary import path: one of the two
+  values was discarded, the loss was reported as successful deduplication, no conflict was
+  written, nothing was printed — and WHICH value survived was decided by the order the
+  inputs happened to be enumerated, i.e. by the filesystem. The same two files imported on
+  two machines could leave a normal glucose in one pod and a critical hyperglycemia reading
+  in the other.
+
+  The reconciler now compares the records behind a shared IRI:
+
+  - **Identical content is still a re-import**, handled exactly as before. Per-run
+    bookkeeping (`clinical:importedAt`, `cascade:reconciliationStatus`, merge lineage,
+    ingestion source labels) is not content, and neither is the difference between a
+    reference edge stored resolved in the pod and the same edge carried as an unresolved
+    placeholder by a fresh conversion. Nothing here changes for an ordinary re-sync.
+  - **Differing content is a COLLISION**, and it is split rather than merged: every distinct
+    content keeps its own record. This follows the rule the identity layer already states —
+    when identity is uncertain, prefer a split, because a duplicate is recoverable and a
+    merge is not. The IRI the identity layer minted stays occupied by one of them, so
+    nothing that referenced it starts dangling, and which one that is depends only on the
+    records' own contents, never on input order. Reversing the input order now produces a
+    byte-identical pod.
+  - **The collision is raised as an unresolved conflict** through the existing queue:
+    `settings/pending-conflicts.ttl`, `cascade pod conflicts` (which exits 1), and
+    `cascade pod resolve`. The conflict names which predicates disagree. `pod import` prints
+    a warning rather than reporting the collision as a duplicate, and the two split records
+    are kept out of each other's match candidates for that run, so a question raised for a
+    person is not answered by an automatic merge in the same breath.
+
+  The import summary gains `identityCollisionsSplit`, and `duplicateSubjectsDropped` now
+  means only what it says: a record the pod already held, byte for byte.
+
+  **No IRI moves for any pod that has no collision in it.** Where a collision does exist,
+  the record that previously survived keeps its IRI and the record that was previously
+  DELETED reappears under a new derived one, so this recovers data rather than relocating
+  it.
+
+- **`src/lib/reconciler.ts` is searchable again.** It used NUL as a key delimiter written as
+  a raw byte rather than as an escape, which made `file(1)` classify the source as binary
+  and made `grep` and `ripgrep` skip all 1,339 lines of it without saying so — a content
+  search returned "no matches" for symbols the file demonstrably contains. The three sites
+  now use `\u0000`, which is the same string, and a test rejects a raw NUL anywhere under
+  `src/`.
 
 - **Re-importing a document no longer duplicates the records in it that carry no `id`.**
   This closes the known limitation named in 0.10.0.
@@ -27,10 +164,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   yields the same IRI across runs, across machines, across working directories, and
   regardless of its position in a bundle. Different records still yield different IRIs.
 
-  **Nothing that already had an `id` changes.** If a source resource carries an identifier,
-  its IRI is byte-for-byte what previous versions minted, so no IRI in an existing pod moves
-  and no re-import is needed. This is not comparable to the 0.10.0 genomics change, which
-  was deliberately IRI-breaking.
+  **This change moves no IRI that a source identifier already determined** — see point 1 of
+  the summary at the top of this section. Where a source resource carries an identifier, the
+  IRI it produces here is byte-for-byte what previous versions minted. The lab-result change
+  under Upgrade notes is a separate change and is the release's only IRI break.
 
   Server-assigned volatile fields are excluded from the content hash — `meta.lastUpdated`,
   `meta.versionId` and `meta.source` — so a resource re-fetched from an EHR keeps its

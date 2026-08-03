@@ -5,9 +5,10 @@
  * without going through the CLI layer.
  */
 
+import { createHash } from 'node:crypto';
 import { Parser, Writer, DataFactory } from 'n3';
 import type { Quad, Quad_Subject, Quad_Object } from 'n3';
-import { NS, TURTLE_PREFIXES } from './fhir-converter/types.js';
+import { NS, TURTLE_PREFIXES, deterministicUuid } from './fhir-converter/types.js';
 import {
   buildReferenceResolver,
   buildResourceRefsFromQuads,
@@ -77,6 +78,20 @@ export interface ReconcilerResult {
       duplicateSubjectsDropped: number;
       conflictsResolved: number;
       conflictsUnresolved: number;
+      /**
+       * Minted IRIs that two or more MATERIALLY DIFFERENT records claimed, and
+       * that were therefore split apart instead of one being dropped as a
+       * duplicate.
+       *
+       * Disjoint from `duplicateSubjectsDropped` by construction, and the point
+       * of the distinction: a shared IRI whose holders agree is a re-import and
+       * is counted there; a shared IRI whose holders disagree is an identity
+       * collision, counted here, and every one of them also appears in
+       * `unresolvedConflicts` (so it reaches `settings/pending-conflicts.ttl`).
+       * Non-zero means the identity key that minted those IRIs is narrower than
+       * the records it is identifying.
+       */
+      identityCollisionsSplit: number;
       finalRecordCount: number;
       /** Subjects preserved verbatim because their type is not reconcilable. */
       passthroughSubjects: number;
@@ -285,11 +300,11 @@ const SINGLE_CARDINALITY_PASSTHROUGH_PREDICATES: ReadonlySet<string> = new Set<s
  * single-cardinality predicate is present.
  */
 function collapseSingleCardinalityPassthrough(quads: Quad[]): Quad[] {
-  const keep = new Map<string, string>(); // `${subjectKey} ${predicate}` -> winning object value
+  const keep = new Map<string, string>(); // `${subjectKey}\u0000${predicate}` -> winning object value
   const subjectKey = (q: Quad) => `${q.subject.termType}:${q.subject.value}`;
   for (const q of quads) {
     if (!SINGLE_CARDINALITY_PASSTHROUGH_PREDICATES.has(q.predicate.value)) continue;
-    const key = `${subjectKey(q)} ${q.predicate.value}`;
+    const key = `${subjectKey(q)}\u0000${q.predicate.value}`;
     const cur = keep.get(key);
     if (cur === undefined || q.object.value < cur) keep.set(key, q.object.value);
   }
@@ -299,7 +314,7 @@ function collapseSingleCardinalityPassthrough(quads: Quad[]): Quad[] {
   const out: Quad[] = [];
   for (const q of quads) {
     if (SINGLE_CARDINALITY_PASSTHROUGH_PREDICATES.has(q.predicate.value)) {
-      const key = `${subjectKey(q)} ${q.predicate.value}`;
+      const key = `${subjectKey(q)}\u0000${q.predicate.value}`;
       if (q.object.value !== keep.get(key)) continue; // drop a later run's duplicate value
       if (emitted.has(key)) continue;                 // keep exactly one winning quad
       emitted.add(key);
@@ -395,6 +410,315 @@ function collapseResolvedEquivalentEdges(
     out.push(winner.get(key) ?? q);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Identity collisions: telling a collision apart from a re-import
+// ---------------------------------------------------------------------------
+//
+// Two records can arrive under the SAME subject IRI for two completely
+// different reasons, and until this section existed the reconciler could not
+// tell them apart:
+//
+//   RE-IMPORT   — the same source record, imported twice. Cascade subjects are
+//                 content-hashed, so this is the expected and overwhelmingly
+//                 common case. Passing over the second arrival is correct: it
+//                 carries nothing the first does not.
+//
+//   COLLISION   — two DIFFERENT records that the identity layer minted onto one
+//                 IRI, because the minting key was narrower than the records
+//                 (e.g. a lab key of {patient, LOINC, date} for a fasting and a
+//                 post-prandial glucose drawn on the same day). Passing over the
+//                 second arrival here silently destroys a clinical value, and
+//                 WHICH value survives is decided by the order the inputs were
+//                 enumerated — i.e. by the filesystem.
+//
+// The old code assumed the first case unconditionally (`assigned.has(uri)`), so
+// the second was invisible: the run reported the loser as a duplicate, wrote no
+// conflict, and printed nothing.
+//
+// THE RULE APPLIED HERE is the one stated in `lib/identity.ts`: when identity is
+// uncertain, PREFER A SPLIT OVER A MERGE. A split is recoverable because both
+// records are still present and can be reconciled later by a tool or a person; a
+// merge is not, because the loser's content is simply gone. So a collision does
+// not pick a winner — every distinct content gets its own IRI, and the collision
+// is raised as an unresolved conflict so a human is asked which (if either) is
+// the duplicate.
+//
+// WHY THE ASSIGNMENT IS ORDER-INDEPENDENT. The colliding contents are ranked by
+// their own fingerprints, not by arrival order: the lexicographically smallest
+// fingerprint keeps the original IRI and every other distinct fingerprint moves
+// to an IRI derived from (original IRI, fingerprint). Reversing the input order
+// therefore produces a byte-identical pod, which is the actual repair for "the
+// filesystem decides which glucose value you keep". Keeping the smallest at the
+// original IRI also means the IRI stays occupied, so nothing that referenced it
+// starts dangling.
+//
+// WHY IT IS STABLE ACROSS RE-IMPORTS. The derived IRI is a pure function of the
+// original IRI and the record's own content fingerprint, so importing the same
+// pair of records again re-derives the same two IRIs, matches the pod's existing
+// copies, and drops them as the re-imports they are. The pod does not grow.
+
+/**
+ * Predicates ignored when fingerprinting a record's content for collision
+ * detection.
+ *
+ * Every entry is a claim that the predicate can legitimately DIFFER between two
+ * encounters with the same logical record, so a difference in it is not evidence
+ * of two different records. Getting this list wrong in the permissive direction
+ * hides a collision; getting it wrong in the strict direction turns every
+ * re-import into a false conflict and grows the pod on every sync, which is the
+ * defect `lib/identity.ts` exists to prevent. Both errors are visible in tests.
+ */
+const COLLISION_IGNORED_PREDICATES: ReadonlySet<string> = new Set<string>([
+  // Stamped `new Date().toISOString()` at conversion time; changes every run.
+  NS.clinical + 'importedAt',
+  NS.prov + 'generatedAtTime',
+  // Written by the reconciler itself, so a record read back out of the pod
+  // carries them and a freshly converted one does not.
+  NS.cascade + 'reconciliationStatus',
+  NS.cascade + 'mergedFrom',
+  NS.cascade + 'mergedSources',
+  NS.cascade + 'discardedRecords',
+  NS.cascade + 'conflictResolution',
+  NS.cascade + 'conflictField',
+  NS.cascade + 'conflictValues',
+  NS.prov + 'wasDerivedFrom',
+  // Ingestion bookkeeping, not clinical content. `sourceSystem` in particular is
+  // re-derived at serialization and is the axis two cross-source copies of one
+  // result differ on — those are duplicates for the matcher to merge, not
+  // evidence that two different results exist.
+  NS.cascade + 'sourceSystem',
+  NS.cascade + 'dataProvenance',
+  NS.cascade + 'schemaVersion',
+  // The originating server's record id, and the EHR it came from. Two copies of
+  // ONE result retrieved from two systems carry different values here while
+  // saying the same clinical thing, and the identity layer has already declared
+  // them one record by minting them one IRI. Treating that as evidence of two
+  // different results would raise a conflict on every cross-source duplicate —
+  // the common, benign case — and bury the ones where the VALUES disagree, which
+  // are the whole point. A genuine collision differs on clinical content too.
+  NS.cascade + 'sourceRecordId',
+  NS.clinical + 'sourceRecordId',
+  NS.health + 'sourceRecordId',
+  NS.clinical + 'sourceEHR',
+]);
+
+/**
+ * One property value as the POD will hold it.
+ *
+ * A record-to-record edge exists in three spellings that all mean one thing, and
+ * a comparison that cannot see through them cannot tell a re-import from a
+ * collision:
+ *
+ *   - resolved (`urn:uuid:…`)  — how the pod stores it, once an import has
+ *                                resolved the reference;
+ *   - placeholder, resolvable  — how a freshly converted record carries it,
+ *                                because reference resolution happens once per
+ *                                import invocation (R5), after conversion;
+ *   - placeholder, unresolvable — a reference to a record that is not in the
+ *                                batch and not in the pod. The import pipeline
+ *                                DROPS these rather than persisting them, so the
+ *                                pod's copy of the record simply has no such
+ *                                property. Returning `undefined` here is what
+ *                                makes the fresh copy agree with it.
+ *
+ * Measured against this repo's `apple-health-multifile` fixture, which carries a
+ * deliberately dangling `Encounter/enc-MISSING`: without the resolvable case, 3
+ * false collisions on the second import and 6 on the third; without the
+ * unresolvable case, 1 and 2. Both grow without bound, because each false split
+ * mints a new IRI that the next import collides with in turn.
+ */
+function normalizeEdgeValue(
+  value: string,
+  resolveRef?: (raw: string) => string | null,
+): string | undefined {
+  if (!isReferencePlaceholder(value)) return value;
+  return resolveRef?.(decodeReferencePlaceholder(value)) ?? undefined;
+}
+
+/**
+ * A content fingerprint for one parsed record: SHA-256 over its
+ * (predicate, value, datatype) triples, sorted, with
+ * {@link COLLISION_IGNORED_PREDICATES} removed.
+ *
+ * Sorted because the parser's property order follows the input document's, and
+ * two serializations of one record may order their triples differently.
+ * Exported so a test can assert the fingerprint itself is order-independent
+ * rather than only observing its effect.
+ */
+export function recordContentFingerprint(
+  r: ParsedRecord,
+  resolveRef?: (raw: string) => string | null,
+): string {
+  const parts: string[] = [];
+  for (const [pred, vals] of r.properties) {
+    if (COLLISION_IGNORED_PREDICATES.has(pred)) continue;
+    for (const v of vals) {
+      const value = normalizeEdgeValue(v.value, resolveRef);
+      if (value === undefined) continue;  // an unresolvable edge is never persisted
+      // `\u0000` as an ESCAPE, never as a raw byte: a literal NUL in a .ts file
+      // makes grep and ripgrep classify it as binary and silently skip the whole
+      // file, which is how a defect in this very module went unfound.
+      parts.push(`${pred}\u0000${value}\u0000${v.datatype ?? ''}`);
+    }
+  }
+  parts.sort();
+  return createHash('sha256').update(parts.join('\u0001'), 'utf8').digest('hex');
+}
+
+/** `https://ns.cascadeprotocol.org/health/v1#resultValue` -> `health:resultValue`. */
+function shortPredicate(iri: string): string {
+  for (const [prefix, ns] of Object.entries(NS)) {
+    if (iri.startsWith(ns)) return `${prefix}:${iri.slice(ns.length)}`;
+  }
+  return iri;
+}
+
+/** One IRI that two or more materially different records both claimed. */
+export interface IdentityCollision {
+  /** The IRI the identity layer minted for all of them. */
+  mintedUri: string;
+  recordType: CascadeRecordType;
+  /** Final IRI of each distinct content, smallest fingerprint first. */
+  resultingUris: string[];
+  /** Source systems involved, deduplicated, in the order first seen. */
+  sourceSystems: string[];
+  /**
+   * Predicates the colliding records DISAGREE on, sorted.
+   *
+   * The answer to the only question a person resolving this conflict has ("what
+   * is actually different about these two?"), and the answer a bare pair of
+   * IRIs cannot give. Surfaced as the pending conflict's label.
+   */
+  differingPredicates: string[];
+}
+
+/**
+ * The IRI a colliding content is moved to.
+ *
+ * Domain-separated (`identity-collision:`) so it can never equal an IRI any
+ * converter mints, and derived from nothing but the original IRI and the
+ * record's own fingerprint, so it is reproducible on any machine, in any
+ * directory, in any input order.
+ */
+function collisionSplitUri(mintedUri: string, fingerprint: string): string {
+  return `urn:uuid:${deterministicUuid(`identity-collision:${mintedUri}::${fingerprint}`)}`;
+}
+
+/**
+ * Which predicates a set of colliding records disagree on: present-with-
+ * different-values on at least two of them, or present on some and absent on
+ * others. Ignored predicates are excluded, so this always explains the same
+ * difference the fingerprint saw.
+ */
+function differingPredicates(
+  bucket: ParsedRecord[],
+  resolveRef?: (raw: string) => string | null,
+): string[] {
+  const normalize = (r: ParsedRecord, pred: string): string | undefined => {
+    const vals = r.properties.get(pred);
+    if (!vals) return undefined;
+    const normalized = vals
+      .map((v) => normalizeEdgeValue(v.value, resolveRef))
+      .filter((v): v is string => v !== undefined)
+      .sort();
+    return normalized.length > 0 ? normalized.join(', ') : undefined;
+  };
+  const preds = new Set<string>();
+  for (const r of bucket) for (const p of r.properties.keys()) {
+    if (!COLLISION_IGNORED_PREDICATES.has(p)) preds.add(p);
+  }
+  const out: string[] = [];
+  for (const p of preds) {
+    const seen = new Set(bucket.map((r) => normalize(r, p)));
+    if (seen.size > 1) out.push(p);
+  }
+  return out.sort();
+}
+
+/**
+ * Re-key every record whose minted IRI is shared by two or more materially
+ * different records, so that no record is dropped for being a "duplicate" of
+ * something it does not match.
+ *
+ * Records that share an IRI *and* a fingerprint are left completely alone: they
+ * are a re-import, and the caller's existing `assigned.has(uri)` pass-over is
+ * the correct handling for them.
+ *
+ * Runs to a fixpoint because a split can move a record onto an IRI that an
+ * earlier import already assigned to different content (a pod record edited
+ * between runs). The bound is defensive; one round settles every real case.
+ */
+export function splitIdentityCollisions(
+  records: ParsedRecord[],
+  resolveRef?: (raw: string) => string | null,
+): {
+  records: ParsedRecord[];
+  collisions: IdentityCollision[];
+  /**
+   * Which collision each split record came out of, keyed by its FINAL uri.
+   *
+   * The matcher must not pair two records from one collision back together: the
+   * identity layer said they were the same record, their contents said
+   * otherwise, and that disagreement has just been raised as a question for a
+   * person. Auto-merging them by trust priority in the same run would answer
+   * that question silently, by discarding one of the two values — which is the
+   * behaviour this whole change exists to remove, reintroduced one layer later.
+   */
+  collisionGroupByUri: Map<string, string>;
+} {
+  const collisions: IdentityCollision[] = [];
+  const collisionGroupByUri = new Map<string, string>();
+  const fingerprints = new Map<ParsedRecord, string>();
+  for (const r of records) fingerprints.set(r, recordContentFingerprint(r, resolveRef));
+
+  let current = records;
+  for (let round = 0; round < 8; round++) {
+    const byUri = new Map<string, ParsedRecord[]>();
+    for (const r of current) {
+      const bucket = byUri.get(r.uri);
+      if (bucket) bucket.push(r);
+      else byUri.set(r.uri, [r]);
+    }
+
+    const rekeyed = new Map<ParsedRecord, string>();
+    for (const [uri, bucket] of byUri) {
+      if (bucket.length < 2) continue;
+      const distinct = [...new Set(bucket.map((r) => fingerprints.get(r)!))].sort();
+      if (distinct.length < 2) continue;  // a re-import, not a collision
+
+      // Smallest fingerprint keeps `uri`; the rest move. Ranking on the
+      // fingerprint rather than on position is what makes this independent of
+      // the order the inputs were enumerated.
+      const target = new Map<string, string>();
+      for (let i = 1; i < distinct.length; i++) target.set(distinct[i], collisionSplitUri(uri, distinct[i]));
+      for (const r of bucket) {
+        const to = target.get(fingerprints.get(r)!);
+        if (to) rekeyed.set(r, to);
+      }
+      for (const u of [uri, ...distinct.slice(1).map((fp) => target.get(fp)!)]) {
+        collisionGroupByUri.set(u, uri);
+      }
+      collisions.push({
+        mintedUri: uri,
+        recordType: bucket[0].type,
+        resultingUris: [uri, ...distinct.slice(1).map((fp) => target.get(fp)!)],
+        sourceSystems: [...new Set(bucket.map((r) => r.sourceSystem))],
+        differingPredicates: differingPredicates(bucket, resolveRef),
+      });
+    }
+
+    if (rekeyed.size === 0) return { records: current, collisions, collisionGroupByUri };
+    current = current.map((r) => {
+      const to = rekeyed.get(r);
+      if (!to) return r;
+      const moved: ParsedRecord = { ...r, uri: to };
+      fingerprints.set(moved, fingerprints.get(r)!);
+      return moved;
+    });
+  }
+  return { records: current, collisions, collisionGroupByUri };
 }
 
 // ---------------------------------------------------------------------------
@@ -1063,7 +1387,7 @@ export async function runReconciliation(
   const resolver = options?.terminologyResolver ?? cascadeTerminologyResolver();
 
   // Parse all inputs
-  const allRecords: ParsedRecord[] = [];
+  let allRecords: ParsedRecord[] = [];
   const sourceInfo: Array<{ system: string; count: number }> = [];
 
   // Subjects the reconciler cannot reconcile are carried through verbatim,
@@ -1103,10 +1427,38 @@ export async function runReconciliation(
   // input, so quad-identity dedup keeps both and the caller's resolution pass
   // turns them into two copies of one statement. Collapse on where each object
   // RESOLVES TO (root backlog 2.22).
+  const referenceResolver = buildReferenceResolver(buildResourceRefsFromQuads(allInputQuads));
   const dedupedPassthroughQuads = collapseResolvedEquivalentEdges(
     singleValuedPassthroughQuads,
-    buildReferenceResolver(buildResourceRefsFromQuads(allInputQuads)),
+    referenceResolver,
   );
+
+  // Identity collisions. Everything below treats a second arrival of an IRI as a
+  // re-import and passes over it (`assigned.has(...)`), which destroys the loser
+  // when the two are actually different records that the identity layer minted
+  // onto one IRI. Split those apart FIRST, so the pass-over below only ever sees
+  // records it is right about. The reference resolver is passed for the same
+  // reason it is passed above: a stated edge arrives resolved from the pod and as
+  // a placeholder from the new input, and without normalizing the two spellings
+  // every re-import of an edge-bearing record reads as a collision.
+  const split = splitIdentityCollisions(allRecords, referenceResolver);
+  allRecords = split.records;
+  const identityCollisions = split.collisions;
+
+  /**
+   * True when two records are the two halves of one identity collision.
+   *
+   * They are deliberately kept out of each other's candidate lists. The split
+   * has already asked a person which of the two readings is right; letting the
+   * matcher merge them by trust in the same run would answer that question by
+   * throwing one of the values away, which is the exact behaviour being fixed.
+   * Each still matches freely against every OTHER record.
+   */
+  const sameCollision = (a: ParsedRecord, b: ParsedRecord): boolean => {
+    if (split.collisionGroupByUri.size === 0) return false;
+    const ga = split.collisionGroupByUri.get(a.uri);
+    return ga !== undefined && ga === split.collisionGroupByUri.get(b.uri);
+  };
 
   // Match and group
   const groups: Group[] = [];
@@ -1145,7 +1497,7 @@ export async function runReconciliation(
 
       const candidates = existingIndex.get(a.type) ?? [];
       for (const b of candidates) {
-        if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
+        if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem || sameCollision(a, b)) continue;
         const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
@@ -1180,7 +1532,7 @@ export async function runReconciliation(
 
       for (let j = i + 1; j < newRecords.length; j++) {
         const b = newRecords[j];
-        if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
+        if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem || sameCollision(a, b)) continue;
         const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
@@ -1234,7 +1586,7 @@ export async function runReconciliation(
 
       const candidates = typeIndex.get(a.type) ?? [];
       for (const b of candidates) {
-        if (b === a || assigned.has(b.uri) || a.sourceSystem === b.sourceSystem) continue;
+        if (b === a || assigned.has(b.uri) || a.sourceSystem === b.sourceSystem || sameCollision(a, b)) continue;
         const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
@@ -1317,6 +1669,30 @@ export async function runReconciliation(
     if (!res.resolved) unresolvedList.push({ ...t, candidateUris: g.records.map(r => r.uri) });
   }
 
+  // An identity collision is a conflict, not a duplicate: the identity layer
+  // asserted these records are the same and their contents say otherwise, and
+  // only a person can say which reading is right. Raised through the SAME queue
+  // as every other unresolved conflict — `settings/pending-conflicts.ttl`,
+  // `pod conflicts` (exit 1), `pod resolve` — rather than through a private
+  // channel nobody is watching. The records themselves have already been split,
+  // so this reports a question, not a loss.
+  for (const c of identityCollisions) {
+    unresolved++;
+    const entry = {
+      type: 'identity_collision',
+      recordType: c.recordType,
+      canonicalUri: c.mintedUri,
+      sources: c.sourceSystems,
+      matchedOn: `identity-collision:${c.mintedUri}`,
+      strategy: 'split_unresolved',
+      resolved: false,
+      candidateUris: c.resultingUris,
+      label: `differs on ${c.differingPredicates.map(shortPredicate).join(', ')}`,
+    };
+    transformations.push(entry);
+    unresolvedList.push(entry);
+  }
+
   return {
     turtle,
     report: {
@@ -1328,6 +1704,7 @@ export async function runReconciliation(
         duplicateSubjectsDropped,
         conflictsResolved: resolved,
         conflictsUnresolved: unresolved,
+        identityCollisionsSplit: identityCollisions.length,
         finalRecordCount: groups.length,
         passthroughSubjects: passthroughSubjectKeys.size,
         edgeObjectsRewritten,
