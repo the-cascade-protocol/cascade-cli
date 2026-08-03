@@ -2,7 +2,8 @@
  * Extract conditions/problems from C-CDA section (templateId 2.16.840.1.113883.10.20.22.2.5.1)
  */
 
-import { NS, contentHashedUri } from '../../fhir-converter/types.js';
+import { NS } from '../../fhir-converter/types.js';
+import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
@@ -14,8 +15,10 @@ export const PROBLEMS_LOINC = '11450-4';
 
 export function extractProblemQuads(
   entries: any[],
-  patientUri: string,
   sourceSystem: string,
+  _sectionText?: any,
+  _importedAt?: string,
+  warnings?: string[],
 ): Quad[] {
   const quads: Quad[] = [];
   const snomedOid = '2.16.840.1.113883.6.96';
@@ -66,18 +69,22 @@ export function extractProblemQuads(
         ? `${onsetVal.slice(0, 4)}-${onsetVal.slice(4, 6)}-${onsetVal.slice(6, 8)}`
         : onsetVal;
 
-      const sourceId = (() => {
-        const idEl = Array.isArray(observation?.id) ? observation.id[0] : observation?.id;
-        return idEl?.['@_extension'] ? `${idEl['@_root'] ?? ''}:${idEl['@_extension']}` : '';
-      })();
+      const sourceId = ccdaSourceId(observation?.id);
 
-      const uri = contentHashedUri('Condition', {
-        patient: patientUri,
-        snomedCode: isSnomed ? code : undefined,
-        icd10Code: isIcd10 ? code : undefined,
-        conditionName: displayName || undefined,
-        onsetDate: onsetDate || undefined,
-      }, sourceId || undefined, entry);
+      const uri = ccdaRecordUri({
+        type: 'Condition',
+        sourceId,
+        content: {
+          snomedCode: isSnomed ? code : undefined,
+          icd10Code: isIcd10 ? code : undefined,
+          conditionName: displayName || undefined,
+          onsetDate: onsetDate || undefined,
+          status: status || undefined,
+        },
+        source: entry,
+        warnings,
+        label: 'C-CDA problem',
+      });
 
       const subj = namedNode(uri);
       quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.health + 'ConditionRecord')));

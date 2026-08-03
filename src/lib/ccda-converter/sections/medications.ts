@@ -2,7 +2,8 @@
  * Extract medications from C-CDA section (templateId 2.16.840.1.113883.10.20.22.2.1.1)
  */
 
-import { NS, medicationUri } from '../../fhir-converter/types.js';
+import { NS } from '../../fhir-converter/types.js';
+import { ccdaMedicationRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { lookupRxNormName } from '../rxnorm-lookup.js';
 import { DataFactory } from 'n3';
@@ -78,9 +79,10 @@ function resolveNarrativeName(codeEl: any, narrativeIdMap: Record<string, string
 
 export function extractMedicationQuads(
   entries: any[],
-  patientUri: string,
   sourceSystem: string,
   sectionText?: any,
+  _importedAt?: string,
+  warnings?: string[],
 ): Quad[] {
   const quads: Quad[] = [];
   const rxNormOid = '2.16.840.1.113883.6.88';
@@ -125,19 +127,27 @@ export function extractMedicationQuads(
     const dose = doseEl?.['@_value'] ?? doseEl?.value ?? '';
     const doseUnit = doseEl?.['@_unit'] ?? doseEl?.unit ?? '';
 
-    const sourceId = (() => {
-      const idEl = Array.isArray(sa?.id) ? sa.id[0] : sa?.id;
-      return idEl?.['@_extension'] ? `${idEl['@_root'] ?? ''}:${idEl['@_extension']}` : '';
-    })();
+    const sourceId = ccdaSourceId(sa?.id);
 
     if (!displayName && !code) continue;
 
-    const uri = medicationUri({
-      patient: patientUri,
-      rxNormCode: isRxNorm ? code : undefined,
-      medicationName: displayName || undefined,
-      startDate: startDate || undefined,
-    }, sourceId || undefined);
+    // `dose` and `doseUnit` are serialized but deliberately outside the key:
+    // `medicationUri` is the ONE medication identity shared by every importer,
+    // and it treats a dose change as a conflict on the same medication rather
+    // than as a second medication. Changing that would move FHIR IRIs too.
+    const uri = ccdaMedicationRecordUri({
+      sourceId,
+      fields: {
+        rxNormCode: isRxNorm ? code : undefined,
+        medicationName: displayName || undefined,
+        startDate: startDate || undefined,
+      },
+      // The raw entry was NOT passed before, so the last identity tier landed on
+      // the per-type sentinel rather than on a hash of the record.
+      source: entry,
+      warnings,
+      label: 'C-CDA medication',
+    });
 
     const subj = namedNode(uri);
     quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Medication')));

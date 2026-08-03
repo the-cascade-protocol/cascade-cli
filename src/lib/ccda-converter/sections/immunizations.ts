@@ -2,7 +2,8 @@
  * Extract immunizations from C-CDA section (templateId 2.16.840.1.113883.10.20.22.2.2.1)
  */
 
-import { NS, contentHashedUri } from '../../fhir-converter/types.js';
+import { NS } from '../../fhir-converter/types.js';
+import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
@@ -14,8 +15,10 @@ export const IMMUNIZATIONS_LOINC = '11369-6';
 
 export function extractImmunizationQuads(
   entries: any[],
-  patientUri: string,
   sourceSystem: string,
+  _sectionText?: any,
+  _importedAt?: string,
+  warnings?: string[],
 ): Quad[] {
   const quads: Quad[] = [];
 
@@ -42,21 +45,22 @@ export function extractImmunizationQuads(
       ? `${dateVal.slice(0, 4)}-${dateVal.slice(4, 6)}-${dateVal.slice(6, 8)}`
       : dateVal;
 
-    // Extract source ID for fallback
-    const idEl = Array.isArray(sa?.id) ? sa.id[0] : sa?.id;
-    const sourceId = idEl?.['@_extension']
-      ? `${idEl['@_root'] ?? ''}:${idEl['@_extension']}`
-      : idEl?.extension
-        ? `${idEl.root ?? ''}:${idEl.extension}`
-        : '';
+    const sourceId = ccdaSourceId(sa?.id);
 
-    // Deterministic URI
-    const uri = contentHashedUri('Immunization', {
-      patient: patientUri,
-      cvxCode: codeSystem.includes('292') || codeSystem === cvxOid ? code : undefined,
-      vaccineName: displayName !== 'Unknown Vaccine' ? displayName.toLowerCase() : undefined,
-      date: dateStr,
-    }, sourceId || undefined, entry);
+    const uri = ccdaRecordUri({
+      type: 'Immunization',
+      sourceId,
+      content: {
+        cvxCode: codeSystem.includes('292') || codeSystem === cvxOid ? code : undefined,
+        // 'Unknown Vaccine' is a placeholder default, and a placeholder in an
+        // identity key turns "we do not know" into "these are the same record".
+        vaccineName: displayName !== 'Unknown Vaccine' ? displayName.toLowerCase() : undefined,
+        date: dateStr,
+      },
+      source: entry,
+      warnings,
+      label: 'C-CDA immunization',
+    });
 
     const subj = namedNode(uri);
     quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.health + 'ImmunizationRecord')));

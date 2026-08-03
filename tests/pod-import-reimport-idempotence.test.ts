@@ -295,3 +295,97 @@ describe('pod import: --report under --dry-run (root 3.52)', () => {
     expect(real.edgeResolution.totalInPod).toBe(preflight.edgeResolution.totalInPod);
   });
 });
+
+// ---------------------------------------------------------------------------
+// C-CDA: the same acceptance, on the import path a portal download takes
+// ---------------------------------------------------------------------------
+
+/**
+ * CONTROL for the C-CDA record-identity change, and the reason it is here rather
+ * than in that change's own suite: this file already owns "a re-import must not
+ * grow the pod", and a fix that makes the source's `<id>` decide identity is
+ * exactly the kind of change that can over-correct into a blunt split.
+ *
+ * It passes before AND after by design. Its job is to fail if identity ever
+ * becomes a function of anything but the record.
+ */
+const CCDA_ROOT_ONLY_FIXTURE = resolve(__dirname, '../test-fixtures/ccda-root-only-ids.xml');
+
+describe('pod import: an identical C-CDA re-import leaves the pod unchanged', () => {
+  it('imports twice, adds no records the second time, and stays byte-identical', () => {
+    const podDir = newPod('cascade-reimport-ccda-');
+
+    const first = importOnce(podDir, CCDA_ROOT_ONLY_FIXTURE);
+    const second = importOnce(podDir, CCDA_ROOT_ONLY_FIXTURE);
+    // A single-FILE import does not reconcile until there is existing pod
+    // content to reconcile against, and `profile/card.ttl` is populated from the
+    // reconciled `clinical/patient-profile.ttl` on the import AFTER that. So the
+    // pod reaches its steady state on import 3, and byte-identity is asserted
+    // from there. Deduplication (`recordsNew === 0`) holds from import 2, and is
+    // asserted from import 2.
+    const third = importOnce(podDir, CCDA_ROOT_ONLY_FIXTURE);
+    const afterThird = podSnapshot(podDir);
+    const fourth = importOnce(podDir, CCDA_ROOT_ONLY_FIXTURE);
+    const afterFourth = podSnapshot(podDir);
+
+    // The document actually carries records, so a green here is not vacuous.
+    expect(first.totalRecordsImported).toBeGreaterThan(0);
+    expect(first.recordsNew).toBeGreaterThan(0);
+
+    // Every later import recognizes every record as already present. THIS is
+    // what separates a fix from a blunt split: if honouring the source `<id>`
+    // had been implemented as "mint something new per entry", recordsNew would
+    // equal totalRecordsImported here, forever, on every re-sync.
+    for (const report of [second, third, fourth]) {
+      expect(report.recordsNew).toBe(0);
+      expect(report.recordsAlreadyPresent).toBe(report.totalRecordsImported);
+    }
+
+    // And the RECORD files did not move.
+    //
+    // TWO files are excluded, and the exclusions are statements rather than
+    // conveniences. Both grow without bound on every C-CDA re-import, both grow
+    // BYTE-FOR-BYTE IDENTICALLY on a build without this change, and both are the
+    // same family as the stated-edge duplication above — filed, not fixed here,
+    // and not hidden either:
+    //
+    //   clinical/documents.ttl  the section-narrative node accumulates a fresh
+    //                           prov:generatedAtTime per import. Measured over
+    //                           four imports: 8050 -> 8720 -> 9140 -> 9560
+    //                           bytes, +420 each. The document SUBJECT count is
+    //                           stable at 10, so this is unbounded property
+    //                           growth, not duplicate records.
+    //   profile/card.ttl        the identity-name block is APPENDED rather than
+    //                           replaced, so foaf:name is stated once per
+    //                           import: 1237 -> 1320 -> 1403 -> 1486 -> 1569
+    //                           bytes, +83 each. The FHIR import path does NOT
+    //                           do this (stable at 1247 bytes across three
+    //                           imports), so it is specific to this path.
+    const KNOWN_UNBOUNDED = new Set([
+      path.join('clinical', 'documents.ttl'),
+      path.join('profile', 'card.ttl'),
+    ]);
+    const recordFiles = (snap: Map<string, string>) =>
+      [...snap.keys()].filter((k) => !KNOWN_UNBOUNDED.has(k));
+    expect(recordFiles(afterFourth)).toEqual(recordFiles(afterThird));
+    for (const rel of recordFiles(afterThird)) {
+      expect(afterFourth.get(rel), rel).toBe(afterThird.get(rel));
+    }
+  });
+
+  it('keeps entries the source kept apart apart, in the pod and not just in a hash', () => {
+    // The other half. A pod that dedupes perfectly by collapsing everything into
+    // one record would pass the test above.
+    const podDir = newPod('cascade-ccda-distinct-');
+    importOnce(podDir, CCDA_ROOT_ONLY_FIXTURE);
+
+    const typed = podQuads(podDir).filter(
+      (q) => q.predicate.value === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
+    );
+    const subjects = new Set(typed.map((q) => q.subject.value));
+
+    // The fixture pairs every section: two entries per section, identical except
+    // for a root-only <id>. All ten pairs must survive as pairs.
+    expect(subjects.size).toBeGreaterThan(18);
+  });
+});

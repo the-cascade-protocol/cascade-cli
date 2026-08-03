@@ -49,7 +49,6 @@ import { extractLabQuads } from '../src/lib/ccda-converter/sections/labs.js';
 // Helpers and fixtures — the shapes fast-xml-parser produces from real C-CDA
 // ---------------------------------------------------------------------------
 
-const PATIENT = 'urn:uuid:synthetic-patient-1';
 const SOURCE = 'SyntheticEHR';
 const IMPORTED_AT = '2026-08-03T00:00:00Z';
 
@@ -93,7 +92,7 @@ function panel(opts: { id?: string; code?: string; time?: string; members: any[]
 }
 
 function convert(entries: any[]): any[] {
-  return extractLabQuads(entries, PATIENT, SOURCE, undefined, IMPORTED_AT);
+  return extractLabQuads(entries, SOURCE, undefined, IMPORTED_AT);
 }
 
 /** Every subject carrying an `rdf:type` of the given local name, in emission order. */
@@ -202,24 +201,43 @@ describe('C-CDA lab results that differ are two records', () => {
 /**
  * The panel path did NOT carry the member path's "the id was discarded" defect:
  * `panelId` was already a first-class content field, put there by an earlier fix
- * for a related collision. So an id-bearing organizer was already separated by
- * its id, and its IRI is deliberately left byte-identical by this change.
+ * for a related collision, so an id-bearing organizer was already separated by
+ * its id.
  *
- * What it DID carry is the other half — a day-truncated `clinicalDate` — which
- * bites when the organizer has neither an id nor a code, the combination the
- * code's own comment reports is common in real Epic exports (47 of 55 panels in
- * an acceptance export carry no code).
+ * Its IRI moves anyway, and it is worth being precise about why, because the
+ * previous revision of this file pinned it as deliberately unmoved. The panel
+ * key also carried the document's DERIVED patient IRI, and that component has
+ * left every C-CDA key — it merged records the source kept apart and split
+ * records that were the same. So the panel IRI was going to move whichever way
+ * this was written, and given that, the panel takes the same door as every other
+ * record rather than keeping a hybrid key: the organizer's own `<id>` decides.
+ *
+ * The other half of the original defect stands and is still pinned below: a
+ * day-truncated `clinicalDate`, which bites when the organizer has neither an id
+ * nor a code — the combination the converter's own comment reports is common in
+ * real Epic exports (47 of 55 panels in an acceptance export carry no code).
  */
 describe('C-CDA lab panels', () => {
   const memberA = labObs({ id: 'm-a', value: '95', time: '20260802070000-0500' });
   const memberB = labObs({ id: 'm-b', value: '310', time: '20260802110000-0500' });
 
-  it('an id-bearing panel mints exactly the IRI it always has', () => {
-    // GOLDEN PIN, and it passes with or without this change BY DESIGN — that is
-    // what it is asserting. The value was measured against the previous build.
-    // A drift here means panel IRIs moved in an existing pod for no reason.
-    expect(panelUri(panel({ id: 'org-1', code: '24323-8', time: '20260802070000-0500', members: [memberA] })))
-      .toBe('urn:uuid:f9e45f8f-0927-571b-bee2-e1cf609cda5a');
+  it('an id-bearing panel keys on its id alone', () => {
+    // GOLDEN PIN. The value is `deterministicUuid('LaboratoryReport:1.2.3:org-1')`
+    // and nothing else feeds it, so changing the organizer's code, its time or
+    // its members cannot move it.
+    const withId = (over: Record<string, unknown>) =>
+      panelUri(panel({ id: 'org-1', code: '24323-8', time: '20260802070000-0500', members: [memberA], ...over }));
+
+    expect(withId({})).toBe('urn:uuid:a3ae422f-8cea-51a9-8a2c-61cb10216694');
+    expect(withId({ code: '58410-2' })).toBe(withId({}));
+    expect(withId({ time: '20260802110000-0500' })).toBe(withId({}));
+    expect(withId({ members: [memberB] })).toBe(withId({}));
+  });
+
+  it('two panels with different ids are two records', () => {
+    const p1 = panel({ id: 'org-1', code: '24323-8', time: '20260802070000-0500', members: [memberA] });
+    const p2 = panel({ id: 'org-2', code: '24323-8', time: '20260802070000-0500', members: [memberA] });
+    expect(panelUri(p1)).not.toBe(panelUri(p2));
   });
 
   it('two id-less, code-less panels on one day are two records', () => {
@@ -288,7 +306,7 @@ const { extractLabQuads } = await import(
   pathToFileURL(path.join(dist, 'lib/ccda-converter/sections/labs.js')).href
 );
 const p = JSON.parse(process.env.CASCADE_PAYLOAD);
-const quads = extractLabQuads(p.entries, p.patient, p.source, undefined, p.importedAt);
+const quads = extractLabQuads(p.entries, p.source, undefined, p.importedAt);
 const uris = quads
   .filter((q) => q.predicate.value.endsWith('#type'))
   .map((q) => q.subject.value);
@@ -303,7 +321,7 @@ function mintIn(dir: string, entries: any[]): { cwd: string; uris: string[] } {
     env: {
       ...process.env,
       CASCADE_DIST: DIST,
-      CASCADE_PAYLOAD: JSON.stringify({ entries, patient: PATIENT, source: SOURCE, importedAt: IMPORTED_AT }),
+      CASCADE_PAYLOAD: JSON.stringify({ entries, source: SOURCE, importedAt: IMPORTED_AT }),
     },
     encoding: 'utf8',
   });

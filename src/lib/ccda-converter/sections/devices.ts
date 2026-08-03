@@ -3,7 +3,8 @@
  * Minimal implementation — narrative is preserved by the main converter.
  */
 
-import { NS, contentHashedUri } from '../../fhir-converter/types.js';
+import { NS } from '../../fhir-converter/types.js';
+import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
 
@@ -14,8 +15,10 @@ export const DEVICES_LOINC = '46264-8';
 
 export function extractDeviceQuads(
   entries: any[],
-  patientUri: string,
   sourceSystem: string,
+  _sectionText?: any,
+  _importedAt?: string,
+  warnings?: string[],
 ): Quad[] {
   const quads: Quad[] = [];
 
@@ -39,16 +42,21 @@ export function extractDeviceQuads(
       ? `${dateVal.slice(0, 4)}-${dateVal.slice(4, 6)}-${dateVal.slice(6, 8)}`
       : dateVal;
 
-    const sourceId = (() => {
-      const idEl = Array.isArray(supply?.id) ? supply.id[0] : supply?.id;
-      return idEl?.['@_extension'] ? `${idEl['@_root'] ?? ''}:${idEl['@_extension']}` : '';
-    })();
+    // The <supply> carries the id in most exports; the device participantRole
+    // carries its own (typically the UDI) where the supply does not.
+    const sourceId = ccdaSourceId(supply?.id) ?? ccdaSourceId(participant?.participantRole?.id);
 
-    const uri = contentHashedUri('Device', {
-      patient: patientUri,
-      displayName: displayName.toLowerCase(),
-      date: dateStr || undefined,
-    }, sourceId || undefined, entry);
+    const uri = ccdaRecordUri({
+      type: 'Device',
+      sourceId,
+      content: {
+        displayName: displayName.toLowerCase(),
+        date: dateStr || undefined,
+      },
+      source: entry,
+      warnings,
+      label: 'C-CDA implanted device',
+    });
 
     const subj = namedNode(uri);
     quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'ImplantedDevice')));

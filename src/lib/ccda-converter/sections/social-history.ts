@@ -10,7 +10,6 @@ export const SOCIAL_HISTORY_LOINC = '29762-2';
 
 export function extractSocialHistoryQuads(
   _entries: any[],
-  _patientUri: string,
   _sourceSystem: string,
 ): Quad[] {
   // Social history structured extraction is deferred; narrative is preserved separately.
