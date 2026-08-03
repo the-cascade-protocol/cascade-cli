@@ -77,7 +77,7 @@ export function extractProblemQuads(
         icd10Code: isIcd10 ? code : undefined,
         conditionName: displayName || undefined,
         onsetDate: onsetDate || undefined,
-      }, sourceId || undefined);
+      }, sourceId || undefined, entry);
 
       const subj = namedNode(uri);
       quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.health + 'ConditionRecord')));

@@ -47,7 +47,7 @@ export function extractProcedureQuads(
       code: code || undefined,
       displayName: displayName || undefined,
       date: dateStr || undefined,
-    }, sourceId || undefined);
+    }, sourceId || undefined, entry);
 
     const subj = namedNode(uri);
     quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Procedure')));

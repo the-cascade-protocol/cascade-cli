@@ -85,9 +85,9 @@ export interface VariantParseOutput {
  * extra steps. A genome is the last place a re-import should mint a second
  * identity, so identity now comes from the variant itself.
  */
-function mintVariantIri(resource: any, ctx: ImportContext): string {
+function mintVariantIri(resource: any, ctx: ImportContext, idWarnings: string[]): string {
   const sys = ctx.sourceSystem ?? 'fhir-genomics';
-  const id = identityKey(resource?.id, resource);
+  const id = identityKey(resource?.id, resource, idWarnings, 'Variant');
   return `urn:uuid:${deterministicUuid(`genomics:Variant:${sys}:${id}`)}`;
 }
 
@@ -178,11 +178,14 @@ export function parseVariantObservation(
   if (!resource || resource.resourceType !== 'Observation') return null;
 
   const sourceId: string = resource.id ?? '<no-id>';
-  const iri = mintVariantIri(resource, ctx);
-  const subject = namedNode(iri);
   const quads: Quad[] = [];
   const warnings: ImportWarning[] = [];
   const gaps: VocabularyGap[] = [];
+  // Surface a tier-4 identity collapse as an import warning.
+  const idWarnings: string[] = [];
+  const iri = mintVariantIri(resource, ctx, idWarnings);
+  for (const m of idWarnings) warnings.push({ message: m });
+  const subject = namedNode(iri);
 
   // ---- Type + provenance ----
   quads.push(tripleType(iri, GENOMICS_NS + 'Variant'));

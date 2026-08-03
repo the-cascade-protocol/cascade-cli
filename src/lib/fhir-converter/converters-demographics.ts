@@ -127,7 +127,7 @@ export function convertImmunization(resource: any): ConversionResult & { _quads:
     patient: patientRef,
     cvxCode: resource.vaccineCode?.coding?.[0]?.code,
     date: resource.occurrenceDateTime?.split('T')[0],
-  }, resource.id);
+  }, resource.id, resource);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'ImmunizationRecord'));

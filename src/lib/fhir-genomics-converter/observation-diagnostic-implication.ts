@@ -63,11 +63,12 @@ function mintInterpretationIri(
   resource: any,
   conditionCode: string,
   ctx: ImportContext,
+  idWarnings: string[],
 ): string {
   // Identity comes from the source id, or from the resource's own content
   // when it has none. It used to come from Math.random(), so re-importing
   // the same bundle minted a second record every time.
-  const id = identityKey(resource?.id, resource);
+  const id = identityKey(resource?.id, resource, idWarnings, 'VariantInterpretation');
   const sys = ctx.sourceSystem ?? 'fhir-genomics';
   return `urn:uuid:${deterministicUuid(`genomics:VariantInterpretation:${sys}:${id}:${conditionCode}`)}`;
 }
@@ -253,7 +254,9 @@ export function parseDiagnosticImplication(
   for (const cc of conditionComps) {
     const condCcc = cc.valueCodeableConcept;
     const key = conditionKey(condCcc);
-    const iri = mintInterpretationIri(resource, key, ctx);
+    const idWarnings: string[] = [];
+    const iri = mintInterpretationIri(resource, key, ctx, idWarnings);
+    for (const m of idWarnings) warnings.push({ message: m });
     const quads: Quad[] = [];
 
     quads.push(tripleType(iri, GENOMICS_NS + 'VariantInterpretation'));

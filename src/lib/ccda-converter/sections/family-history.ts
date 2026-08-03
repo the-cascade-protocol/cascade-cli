@@ -54,7 +54,7 @@ export function extractFamilyHistoryQuads(
         relation: relation || undefined,
         condition: displayName || undefined,
         code: code || undefined,
-      }, sourceId || undefined);
+      }, sourceId || undefined, entry);
 
       const subj = namedNode(uri);
       quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.health + 'FamilyHistoryRecord')));

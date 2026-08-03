@@ -118,7 +118,7 @@ export function extractVitalQuads(
         displayName: displayName || undefined,
         date: dateStr || undefined,
         value: value || undefined,
-      }, sourceId || undefined);
+      }, sourceId || undefined, obs);
 
       const subj = namedNode(uri);
       quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'VitalSign')));

@@ -113,7 +113,7 @@ function extractObservationQuads(
     loincCode: isLoinc ? code : undefined,
     testName: displayName || undefined,
     date: dateStr || undefined,
-  }, sourceId || undefined);
+  }, sourceId || undefined, obs);
 
   const subj = namedNode(uri);
   const quads: Quad[] = [];
@@ -187,7 +187,7 @@ function buildPanelQuads(
     panelCode: code || undefined,
     date: clinicalDate || undefined,
     panelId: sourceId || undefined,
-  }, sourceId || undefined);
+  }, sourceId || undefined, organizer);
 
   const subj = namedNode(uri);
   const quads: Quad[] = [];

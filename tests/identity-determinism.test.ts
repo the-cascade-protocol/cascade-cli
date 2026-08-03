@@ -374,6 +374,111 @@ describe('id-less FHIR clinical resources mint a stable IRI', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The salvage tier: never merge records that a narrative tells apart
+// ---------------------------------------------------------------------------
+
+/**
+ * This is the regression that matters most in this file, because the bug it
+ * pins was introduced BY the first version of this fix rather than by the
+ * original defect.
+ *
+ * An earlier revision excluded FHIR Narrative from the content hash (correctly:
+ * it is derivative and servers regenerate it) and then, when nothing else
+ * remained, collapsed the resource onto a per-type sentinel. The result was
+ * that two Conditions whose only content was `text.div` — one saying "Type 2
+ * diabetes mellitus", the other "Metastatic breast cancer" — minted the SAME
+ * IRI, with no warning. The exclusion list manufactured the indistinguishability
+ * and the sentinel then acted on it, so one of the two records was destroyed.
+ *
+ * The governing rule, now encoded in the cascade: when identity is uncertain,
+ * PREFER A SPLIT. A duplicate is recoverable because all the data is still
+ * there; a merge is not, because the second record's content is gone.
+ */
+describe('narrative-only records must never merge', () => {
+  const narrativeOnly = (div: string) => ({
+    resourceType: 'Condition',
+    text: { status: 'generated', div },
+  });
+
+  it('two Conditions distinguished ONLY by narrative get different IRIs', () => {
+    const diabetes = subjectOf(
+      convertFhirResourceToQuads(narrativeOnly('<div>Type 2 diabetes mellitus</div>')),
+    );
+    const cancer = subjectOf(
+      convertFhirResourceToQuads(narrativeOnly('<div>Metastatic breast cancer</div>')),
+    );
+    expect(diabetes).not.toBe(cancer);
+  });
+
+  it('and each is still STABLE across repeated conversion', () => {
+    // Splitting is only acceptable if it does not also reintroduce the original
+    // bug: the same narrative must keep minting the same IRI.
+    for (const div of ['<div>Type 2 diabetes mellitus</div>', '<div>Metastatic breast cancer</div>']) {
+      const a = subjectOf(convertFhirResourceToQuads(narrativeOnly(div)));
+      const b = subjectOf(convertFhirResourceToQuads(narrativeOnly(div)));
+      expect(a).toBe(b);
+    }
+  });
+
+  it('salvage does not fire when structured content exists', () => {
+    // With real fields present, narrative stays excluded, so a server that
+    // re-renders the prose does not move the IRI.
+    const withCode = (div: string) => ({
+      resourceType: 'Condition',
+      code: { coding: [{ system: 'http://snomed.info/sct', code: '44054006' }] },
+      subject: { reference: 'Patient/synthetic-1' },
+      text: { status: 'generated', div },
+    });
+    expect(subjectOf(convertFhirResourceToQuads(withCode('<div>rendered Monday</div>')))).toBe(
+      subjectOf(convertFhirResourceToQuads(withCode('<div>rendered Friday</div>'))),
+    );
+  });
+
+  it('a narrative-only record is not warned about — it has identity', () => {
+    const r = convertFhirResourceToQuads(narrativeOnly('<div>Type 2 diabetes mellitus</div>'));
+    expect(r!.warnings).toEqual([]);
+  });
+});
+
+describe('a truly empty record collapses, but never silently', () => {
+  it('warns, naming what happened', () => {
+    const r = convertFhirResourceToQuads({ resourceType: 'Condition' });
+    expect(r!.warnings.length).toBe(1);
+    expect(r!.warnings[0]).toContain('no identifier and no identity-bearing content');
+    expect(r!.warnings[0]).toContain('MERGE');
+    expect(r!.warnings[0]).toContain('Condition');
+  });
+
+  it('warns even when only volatile server metadata is present', () => {
+    const r = convertFhirResourceToQuads({
+      resourceType: 'Condition',
+      meta: { lastUpdated: '2026-01-01T00:00:00Z', versionId: '3' },
+    });
+    expect(r!.warnings.length).toBe(1);
+    expect(r!.warnings[0]).toContain('no identity-bearing content');
+  });
+
+  it('collapses deterministically — merging empties destroys nothing', () => {
+    // The split-over-merge rule has no force here: there is no content to lose,
+    // and splitting would mint a fresh IRI on every sync, which is the original
+    // defect. So this case, and only this case, merges.
+    const a = subjectOf(convertFhirResourceToQuads({ resourceType: 'Condition' }));
+    const b = subjectOf(
+      convertFhirResourceToQuads({
+        resourceType: 'Condition',
+        meta: { lastUpdated: '2027-09-09T00:00:00Z', versionId: '9' },
+      }),
+    );
+    expect(a).toBe(b);
+  });
+
+  it('a resource WITH content is never warned about', () => {
+    const r = convertFhirResourceToQuads(clone(ID_LESS_VITAL));
+    expect(r!.warnings).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Genomics path
 // ---------------------------------------------------------------------------
 

@@ -52,14 +52,18 @@ describe('the volatile-field exclusion list', () => {
     }
   });
 
-  it('is exactly the list this test was written against', () => {
-    // Pinned so that adding or removing an exclusion is a deliberate act with a
-    // test change attached, not a drive-by edit.
-    expect(VOLATILE_FIELDS.map((r) => `${r.under ?? '*'}.${r.field}`).sort()).toEqual([
-      '*.text',
-      'meta.lastUpdated',
-      'meta.source',
-      'meta.versionId',
+  it('is exactly the list this test was written against, kinds included', () => {
+    // Pinned so that adding or removing an exclusion — or, just as importantly,
+    // RECLASSIFYING one — is a deliberate act with a test change attached.
+    // The kind is what decides whether a field can still rescue an otherwise
+    // empty record at tier 3, so a silent volatile/derivative swap would be a
+    // data-loss change that looked like a rename.
+    expect(VOLATILE_FIELDS.map((r) => `${r.kind}:${r.under ?? '*'}.${r.field}`).sort()).toEqual([
+      'derivative:*.text',
+      'scaffold:*.resourceType',
+      'volatile:meta.lastUpdated',
+      'volatile:meta.source',
+      'volatile:meta.versionId',
     ]);
   });
 
@@ -108,6 +112,24 @@ describe('the volatile-field exclusion list', () => {
     expect(contentFingerprint(a)).toBe(contentFingerprint(b));
   });
 
+  it('resourceType is scaffold: it does not change the FINGERPRINT...', () => {
+    // ...because every call site already splices it into the key template, so
+    // hashing it too is redundant. See the IRI-level test below for why that
+    // does not let two types collide.
+    const a = clone(BASE) as any;
+    a.resourceType = 'DiagnosticReport';
+    expect(contentFingerprint(a)).toBe(contentFingerprint(BASE));
+  });
+
+  it('...but it must not count as CONTENT, or salvage can never run', () => {
+    // The bug this encodes: while resourceType counted as content, a
+    // narrative-only resource stripped down to {"resourceType":"Condition"} —
+    // identical for every Condition in existence — so tier 2 "succeeded" with a
+    // constant and two different records merged.
+    expect(stripVolatile({ resourceType: 'Condition' })).toBeUndefined();
+    expect(identitySeed({ content: { resourceType: 'Condition' } }).source).toBe('empty');
+  });
+
   it('meta.profile is NOT stripped — it is structural, and it routes genomics', () => {
     const plain = clone(BASE) as any;
     const genomic = clone(BASE) as any;
@@ -139,7 +161,6 @@ describe('the volatile-field exclusion list', () => {
       (r) => { r.effectiveDateTime = '2026-02-02T00:00:00Z'; },
       (r) => { r.code.coding[0].code = '8480-6'; },
       (r) => { r.code.coding[0].system = 'http://snomed.info/sct'; },
-      (r) => { r.resourceType = 'DiagnosticReport'; },
     ];
     const base = contentFingerprint(BASE);
     for (const mutate of variants) {
@@ -198,6 +219,51 @@ describe('the cascade has no third tier', () => {
     const b = identitySeed({ content: { meta: { lastUpdated: '2027-09-09T00:00:00Z', versionId: '9' } } });
     expect(a).toEqual({ seed: EMPTY_SEED, source: 'empty' });
     expect(b).toEqual(a);
+  });
+
+  it('TIER 3 SALVAGE: a derivative field rescues an otherwise-empty record', () => {
+    const a = identitySeed({ content: { resourceType: 'Condition', text: { div: '<div>Type 2 diabetes mellitus</div>' } } });
+    const b = identitySeed({ content: { resourceType: 'Condition', text: { div: '<div>Metastatic breast cancer</div>' } } });
+    expect(a.source).toBe('salvage');
+    expect(b.source).toBe('salvage');
+    expect(a.seed).not.toBe(b.seed);
+    expect(a.seed).not.toBe(EMPTY_SEED);
+  });
+
+  it('salvage is stable for the same content', () => {
+    const mk = () => ({ resourceType: 'Condition', text: { div: '<div>Type 2 diabetes mellitus</div>' } });
+    expect(identitySeed({ content: mk() })).toEqual(identitySeed({ content: mk() }));
+  });
+
+  it('a VOLATILE field never rescues — using it IS the original bug', () => {
+    // If meta.lastUpdated could salvage, an empty resource would mint a new IRI
+    // on every EHR sync. Volatile fields are excluded at every tier for exactly
+    // this reason, which is why they are a separate kind from derivative ones.
+    const a = identitySeed({ content: { resourceType: 'X', meta: { lastUpdated: '2026-01-01T00:00:00Z' } } });
+    const b = identitySeed({ content: { resourceType: 'X', meta: { lastUpdated: '2026-08-02T00:00:00Z' } } });
+    expect(a.source).toBe('empty');
+    expect(a.seed).toBe(b.seed);
+  });
+
+  it('a tier-3 seed can never equal a tier-2 seed (domain separation)', () => {
+    const salvage = identitySeed({ content: { resourceType: 'C', text: { div: 'x' } } });
+    const content = identitySeed({ content: { resourceType: 'C', text: { div: 'x' }, code: 'k' } });
+    expect(salvage.source).toBe('salvage');
+    expect(content.source).toBe('content');
+    expect(salvage.seed).not.toBe(content.seed);
+  });
+
+  it('tier 4 emits a warning; tiers 1-3 do not', () => {
+    const w: string[] = [];
+    identitySeed({ explicitId: 'abc', content: {}, warnings: w, label: 'T1' });
+    identitySeed({ content: { code: 'k' }, warnings: w, label: 'T2' });
+    identitySeed({ content: { text: { div: 'x' } }, warnings: w, label: 'T3' });
+    expect(w).toEqual([]);
+
+    identitySeed({ content: { resourceType: 'Condition' }, warnings: w, label: 'Condition (no id)' });
+    expect(w.length).toBe(1);
+    expect(w[0]).toContain('Condition (no id)');
+    expect(w[0]).toContain('no identity-bearing content');
   });
 
   it('stripping prunes containers that become empty', () => {

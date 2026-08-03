@@ -235,7 +235,7 @@ function convertSingleCcda(
         ? `${docIdEl.root ?? ''}:${docIdEl.extension}`
         : (docIdEl?.['@_root'] ?? docIdEl?.root)
           ? `${docIdEl['@_root'] ?? docIdEl.root}`
-          : `doc:${identityKey(undefined, ccdaDoc)}`;
+          : `doc:${identityKey(undefined, ccdaDoc, warnings, 'C-CDA ClinicalDocument (no <id>)')}`;
 
   const allQuads: any[] = [];
   let count = 0;

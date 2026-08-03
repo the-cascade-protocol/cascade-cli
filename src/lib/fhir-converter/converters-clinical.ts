@@ -64,7 +64,7 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
     rxNormCode: resource.medicationCodeableConcept?.coding?.find((c: any) => c.system?.includes('rxnorm'))?.code,
     medicationName: medName,
     startDate: (resource.authoredOn ?? resource.effectivePeriod?.start)?.split('T')[0],
-  }, resource.id);
+  }, resource.id, resource);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'Medication'));
@@ -171,7 +171,7 @@ export function convertCondition(resource: any): ConversionResult & { _quads: Qu
     snomedCode: resource.code?.coding?.find((c: any) => c.system?.includes('snomed'))?.code,
     icd10Code: resource.code?.coding?.find((c: any) => c.system?.includes('icd'))?.code,
     onsetDate: (resource.onsetDateTime ?? resource.onsetPeriod?.start)?.split('T')[0],
-  }, resource.id);
+  }, resource.id, resource);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'ConditionRecord'));
@@ -252,7 +252,7 @@ export function convertAllergyIntolerance(resource: any): ConversionResult & { _
     patient: patientRef,
     allergenCode: resource.code?.coding?.[0]?.code,
     allergenName: resource.code?.text,
-  }, resource.id);
+  }, resource.id, resource);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'AllergyRecord'));
@@ -345,7 +345,7 @@ export function convertObservationLab(resource: any): ConversionResult & { _quad
     patient: patientRef,
     loincCode: resource.code?.coding?.find((c: any) => c.system?.includes('loinc'))?.code,
     date: (resource.effectiveDateTime ?? resource.effectivePeriod?.start)?.split('T')[0],
-  }, resource.id);
+  }, resource.id, resource);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'LabResultRecord'));

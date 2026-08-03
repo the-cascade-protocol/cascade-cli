@@ -36,7 +36,9 @@ export function extractNarrativeQuads(
     section: sectionLoincCode,
     document: documentId,
     source: sourceSystem,
-  });
+    // The narrative itself is the salvage-tier content for a section document
+    // that somehow carries no section code, document id or source system.
+  }, undefined, sectionText);
 
   const subj = namedNode(uri);
   const quads: Quad[] = [

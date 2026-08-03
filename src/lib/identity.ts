@@ -27,38 +27,102 @@
  * This module owns the rule, and `tests/identity-chokepoint.test.ts` is the
  * lock on every other way in.
  *
- * THE CASCADE, in strict order, with no fourth tier
- * ------------------------------------------------
+ * THE GOVERNING PRINCIPLE: WHEN IDENTITY IS UNCERTAIN, PREFER A SPLIT
+ * ------------------------------------------------------------------
+ * The two failure modes are not symmetric, and the asymmetry decides every
+ * judgement call in this module:
+ *
+ *   A SPLIT (one record minting two identities) is RECOVERABLE. All the data is
+ *   still present; the duplicates can be reconciled later, by a tool or a
+ *   person, because both copies are there to compare.
+ *
+ *   A MERGE (two records minting one identity) is NOT RECOVERABLE. The second
+ *   record's content is simply gone — overwritten by the first, or dropped as a
+ *   duplicate — and nothing downstream can know it existed.
+ *
+ * So an uncertain identity must err toward splitting.
+ *
+ * THE CASCADE, in strict order
+ * ---------------------------
  *   1. EXPLICIT ID — the source assigned an identifier. Use it verbatim.
  *      This tier is byte-for-byte what every call site did before this module
  *      existed, which is deliberate: changing an IRI that a source id already
  *      determines would break every pod in the field.
  *
  *   2. CONTENT HASH — the source assigned nothing, so identity comes from what
- *      the record IS. The resource is stripped of volatile fields (see
- *      {@link VOLATILE_FIELDS}), serialized with sorted keys at every level so
- *      source key order cannot perturb the digest, and hashed. Two byte-equal
- *      resources get one identity no matter how many times, from how many
- *      directories, or in what bundle position they are imported.
+ *      the record IS. The resource is stripped of volatile, derivative and
+ *      scaffold fields (see {@link VOLATILE_FIELDS}), serialized with sorted
+ *      keys at every level so source key order cannot perturb the digest, and
+ *      hashed. Two byte-equal resources get one identity no matter how many
+ *      times, from how many directories, or in what bundle position they are
+ *      imported.
  *
- *   3. THERE IS NO TIER 3. Not `randomUUID()`, not `Math.random()`, not
- *      `Date.now()`, not `ctx.importedAt`. A resource whose every
- *      identity-bearing field is empty is a resource that carries no identity,
- *      and the honest answer is a deterministic sentinel ({@link EMPTY_SEED})
- *      that collapses such records together — plus a `source: 'empty'` signal
- *      the caller can surface — NOT a fresh random IRI that splits them apart
- *      forever. Collapsing indistinguishable records is a decision a user can
- *      see and argue with. Duplicating them on every sync is not.
+ *   3. SALVAGE — nothing survived tier 2, but a DERIVATIVE field did. Hash the
+ *      resource again with the derivative fields put BACK. In practice this is
+ *      a narrative-only resource: no structured content, but prose that plainly
+ *      distinguishes it from the next one.
  *
- * WHY VOLATILE FIELDS ARE STRIPPED
- * --------------------------------
+ *      This tier exists because without it the exclusion list MANUFACTURES the
+ *      indistinguishability it then acts on. Two Conditions whose only content
+ *      is `text.div` — "Type 2 diabetes mellitus" and "Metastatic breast
+ *      cancer" — are trivially distinguishable to any reader, and an earlier
+ *      revision of this module collapsed them into one IRI because it had
+ *      thrown away the only field that told them apart. That is data
+ *      destruction dressed up as deduplication.
+ *
+ *      The cost of this tier is bounded and recoverable: a server that
+ *      regenerates a narrative can produce a DUPLICATE of a narrative-only
+ *      record. Per the principle above, that is the failure to prefer.
+ *
+ *   4. COLLAPSE, LOUDLY — there is nothing left at all: no id, no structured
+ *      content, no narrative. Such a record cannot be told apart from any other
+ *      record of its type by any means, so it lands on a deterministic sentinel
+ *      ({@link EMPTY_SEED}) and merges. Crucially, merging here destroys
+ *      NOTHING, because there is no content to destroy — the split-over-merge
+ *      rule has no force when both records are empty, while splitting them
+ *      would recreate the original defect (a fresh IRI on every sync, forever).
+ *
+ *      This tier MUST NOT be silent. It emits a warning naming what happened
+ *      (see {@link identityCollapseWarning}); a caller that passes a `warnings`
+ *      array to {@link identitySeed} receives it.
+ *
+ *   There is no tier 5. Not `randomUUID()`, not `Math.random()`, not
+ *   `Date.now()`, not `ctx.importedAt`.
+ *
+ * WHY FIELDS ARE EXCLUDED, AND THE THREE KINDS OF EXCLUSION
+ * --------------------------------------------------------
  * A content hash is only as stable as its least stable input. `meta.lastUpdated`
  * and `meta.versionId` are assigned by the FHIR server and change every time a
  * resource is re-fetched, so hashing them would mint a fresh IRI on every EHR
  * sync — this exact bug, reintroduced in a subtler and much harder-to-see form,
  * since it would look deterministic in any test that imports the same file
- * twice from disk. See {@link VOLATILE_FIELDS} for the full list and the reason
- * each entry is on it.
+ * twice from disk.
+ *
+ * But not every exclusion is excluded for that reason, and conflating them is
+ * what produced the data-destroying collapse described in tier 3. So each rule
+ * declares its `kind`:
+ *
+ *   'volatile'   — differs between two encounters with the SAME logical record.
+ *                  Never usable for identity at any tier, because using it IS
+ *                  the bug. Server metadata. Stripped at tiers 2 and 3.
+ *
+ *   'derivative' — stable for a given record, and content-bearing, but not the
+ *                  PREFERRED identity signal because the structured fields
+ *                  already say it. Stripped at tier 2, RESTORED at tier 3.
+ *
+ *   'scaffold'   — structural boilerplate present on every record of a kind,
+ *                  and already spliced into the call site's key template.
+ *                  Stripped at tiers 2 and 3, and — the part that matters — it
+ *                  must not count toward "does this resource have content".
+ *                  `resourceType` is the whole reason this kind exists: while it
+ *                  counted as content, a narrative-only Condition hashed to
+ *                  `{"resourceType":"Condition"}`, tier 2 "succeeded" with a
+ *                  value identical for every Condition in existence, and the
+ *                  salvage tier never ran. Tier 2 succeeding with a constant is
+ *                  indistinguishable from tier 2 failing, except that it merges.
+ *
+ * See {@link VOLATILE_FIELDS} for the full list and the reason each entry is on
+ * it.
  *
  * ANONYMOUS SEEDS CANNOT COLLIDE WITH REAL IDS
  * --------------------------------------------
@@ -93,11 +157,24 @@ export const VOLATILE_FIELDS: ReadonlyArray<{
   under: string | null;
   /** Only strip when the value has this shape. Guards against name collisions. */
   shape?: 'object';
+  /**
+   * 'volatile'   — changes for the same logical record; never an identity input.
+   * 'derivative' — stable and content-bearing, just not preferred; restored by
+   *                the tier-3 salvage pass so it can still tell records apart.
+   * 'scaffold'   — structural boilerplate that every record of a kind carries,
+   *                and that the call site ALREADY puts in its key template.
+   *                Never hashed, at any tier. Critically, it must not count
+   *                toward "does this resource have content", or a resource
+   *                whose only real content is narrative looks non-empty and
+   *                never reaches the salvage tier.
+   */
+  kind: 'volatile' | 'derivative' | 'scaffold';
   why: string;
 }> = [
   {
     field: 'lastUpdated',
     under: 'meta',
+    kind: 'volatile',
     why:
       'Server-assigned write timestamp. Changes on every re-fetch of an unchanged resource, so ' +
       'hashing it mints a new IRI on every EHR sync — the defect this module exists to end.',
@@ -105,6 +182,7 @@ export const VOLATILE_FIELDS: ReadonlyArray<{
   {
     field: 'versionId',
     under: 'meta',
+    kind: 'volatile',
     why:
       'Server-assigned version counter. Increments on any server-side touch, including ones that ' +
       'change nothing a patient would recognize as a different record.',
@@ -112,6 +190,7 @@ export const VOLATILE_FIELDS: ReadonlyArray<{
   {
     field: 'source',
     under: 'meta',
+    kind: 'volatile',
     why:
       'Meta.source is a pointer at the system/message a resource arrived through, not at what the ' +
       'resource says. It differs between a bulk export and a live FHIR read of the same resource, ' +
@@ -122,17 +201,38 @@ export const VOLATILE_FIELDS: ReadonlyArray<{
     field: 'text',
     under: null,
     shape: 'object',
+    kind: 'derivative',
     why:
-      'FHIR Narrative. Derivative by definition — the spec requires it to convey the same ' +
-      'information as the structured data, so it adds no identity the structured fields do not ' +
-      'already carry — and volatile in practice, because servers regenerate it with their own ' +
-      'formatting and can render timestamps into it. Restricted to object values so that ' +
+      'FHIR Narrative. Derivative rather than volatile — the spec requires it to convey the same ' +
+      'information as the structured data, so where structured fields exist it adds no identity ' +
+      'they do not already carry, and servers regenerate it with their own formatting. So it is ' +
+      'kept OUT of the preferred hash. But it is real content, and it is restored by the tier-3 ' +
+      'salvage pass, because for a narrative-only resource it is the only thing that tells one ' +
+      'record from another: dropping it there collapsed "Type 2 diabetes mellitus" and ' +
+      '"Metastatic breast cancer" into a single IRI. Restricted to object values so that ' +
       'CodeableConcept.text (a string, and often the ONLY human-meaningful content on a coding) ' +
-      'is preserved. Consequence accepted deliberately: a resource whose only content is narrative ' +
-      'hashes to EMPTY_SEED rather than to its prose, because a rendered timestamp inside prose ' +
-      'would reintroduce exactly the bug being fixed, one layer down where no test would see it.',
+      'is never stripped at any tier.',
+  },
+  {
+    field: 'resourceType',
+    under: null,
+    kind: 'scaffold',
+    why:
+      'The FHIR type discriminator. Every call site already splices the resource type into its ' +
+      'key template — `${resourceType}:${seed}`, `${resourceType}::${seed}`, ' +
+      '`genomics:Variant:${sys}:${seed}` — so hashing it as well is redundant and type separation ' +
+      'is preserved without it. It has to be stripped rather than merely deprioritized, because ' +
+      'while it is present EVERY resource looks like it has content: a Condition whose only real ' +
+      'content is narrative hashed to `{"resourceType":"Condition"}`, which is identical for every ' +
+      'Condition on earth, so tier 2 "succeeded" with a constant and the salvage tier never ran. ' +
+      'That is what silently merged two different diagnoses.',
   },
 ];
+
+/** Kinds stripped at tier 2 (the preferred hash) and at tier 3 (salvage). */
+type ExclusionKind = 'volatile' | 'derivative' | 'scaffold';
+const TIER2_STRIP: ReadonlyArray<ExclusionKind> = ['volatile', 'derivative', 'scaffold'];
+const TIER3_STRIP: ReadonlyArray<ExclusionKind> = ['volatile', 'scaffold'];
 
 /** Prefix on every content-derived seed. See the module header for why it cannot collide with a FHIR id. */
 export const ANON_PREFIX = 'anon-';
@@ -148,7 +248,7 @@ export const ANON_PREFIX = 'anon-';
 export const EMPTY_SEED = `${ANON_PREFIX}empty`;
 
 /** Which tier of the cascade produced a seed. */
-export type IdentitySource = 'explicit' | 'content' | 'empty';
+export type IdentitySource = 'explicit' | 'content' | 'salvage' | 'empty';
 
 export interface IdentitySeed {
   /** The seed to splice into a call site's key template. */
@@ -180,10 +280,16 @@ export function stableStringify(value: unknown): string {
   return `{${inner}}`;
 }
 
-/** True when a volatile rule matches this (parentKey, key, value) position. */
-function isVolatile(parentKey: string | null, key: string, value: unknown): boolean {
+/** True when a rule of one of `kinds` matches this (parentKey, key, value) position. */
+function isExcluded(
+  parentKey: string | null,
+  key: string,
+  value: unknown,
+  kinds: ReadonlyArray<ExclusionKind>,
+): boolean {
   for (const rule of VOLATILE_FIELDS) {
     if (rule.field !== key) continue;
+    if (!kinds.includes(rule.kind)) continue;
     if (rule.under !== null && rule.under !== parentKey) continue;
     if (rule.shape === 'object' && (value === null || typeof value !== 'object' || Array.isArray(value))) continue;
     return true;
@@ -199,17 +305,21 @@ function isVolatile(parentKey: string | null, key: string, value: unknown): bool
  * recognized as carrying no identity instead of hashing to the same
  * accidental-looking digest under different circumstances.
  */
-export function stripVolatile(value: unknown, parentKey: string | null = null): unknown {
+export function stripVolatile(
+  value: unknown,
+  parentKey: string | null = null,
+  kinds: ReadonlyArray<ExclusionKind> = TIER2_STRIP,
+): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) {
-    const items = value.map((v) => stripVolatile(v, parentKey)).filter((v) => v !== undefined);
+    const items = value.map((v) => stripVolatile(v, parentKey, kinds)).filter((v) => v !== undefined);
     return items.length > 0 ? items : undefined;
   }
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
     if (v === undefined) continue;
-    if (isVolatile(parentKey, k, v)) continue;
-    const kept = stripVolatile(v, k);
+    if (isExcluded(parentKey, k, v, kinds)) continue;
+    const kept = stripVolatile(v, k, kinds);
     if (kept === undefined) continue;
     out[k] = kept;
   }
@@ -224,15 +334,35 @@ export function stripVolatile(value: unknown, parentKey: string | null = null): 
  * key, so there is no cross-SDK UUID-v5 compatibility constraint on it and no
  * reason to pick the weaker digest.
  */
-export function contentFingerprint(content: unknown): string {
-  const stripped = stripVolatile(content);
+export function contentFingerprint(
+  content: unknown,
+  kinds: ReadonlyArray<ExclusionKind> = TIER2_STRIP,
+): string {
+  const stripped = stripVolatile(content, null, kinds);
   if (stripped === undefined) return EMPTY_SEED;
   const serialized = stableStringify(stripped);
   // `{}` / `[]` / `null` / `""` carry no more identity than nothing at all.
   if (serialized === '{}' || serialized === '[]' || serialized === 'null' || serialized === '""') {
     return EMPTY_SEED;
   }
-  return ANON_PREFIX + createHash('sha256').update(serialized, 'utf8').digest('hex');
+  // Domain-separate the two passes so a tier-3 seed can never equal a tier-2
+  // seed, even for an input where the two serializations coincide.
+  const domain = kinds === TIER3_STRIP ? 'salvage:' : 'content:';
+  return ANON_PREFIX + createHash('sha256').update(domain + serialized, 'utf8').digest('hex');
+}
+
+/**
+ * The sentence emitted when tier 4 fires. Exported so tests can assert on it
+ * rather than on a string literal copied into three places.
+ */
+export function identityCollapseWarning(label: string): string {
+  return (
+    `${label}: this record carries no identifier and no identity-bearing content (no structured ` +
+    `fields and no narrative), so it cannot be distinguished from any other empty record of its ` +
+    `type. It has been given a shared, deterministic IRI, which means such records MERGE rather ` +
+    `than accumulating duplicates. Nothing is lost — there is no content to lose — but if you ` +
+    `expected separate records here, the source data is not carrying what would separate them.`
+  );
 }
 
 /**
@@ -248,21 +378,36 @@ export function contentFingerprint(content: unknown): string {
  *                   `null`, `0` or `"   "` is not an identifier.
  * @param content    the source object to hash when there is no explicit id.
  */
-export function identitySeed(opts: { explicitId?: unknown; content?: unknown }): IdentitySeed {
-  const { explicitId, content } = opts;
+export function identitySeed(opts: {
+  explicitId?: unknown;
+  content?: unknown;
+  /** Collected warnings. Tier 4 pushes {@link identityCollapseWarning} here. */
+  warnings?: string[];
+  /** How to name this record in a tier-4 warning. */
+  label?: string;
+}): IdentitySeed {
+  const { explicitId, content, warnings, label } = opts;
 
   // Tier 1 — explicit id.
   if (typeof explicitId === 'string' && explicitId.trim().length > 0) {
     return { seed: explicitId, source: 'explicit' };
   }
 
-  // Tier 2 — content hash.
-  const fingerprint = contentFingerprint(content);
+  // Tier 2 — content hash, derivative and scaffold fields excluded.
+  const fingerprint = contentFingerprint(content, TIER2_STRIP);
   if (fingerprint !== EMPTY_SEED) {
     return { seed: fingerprint, source: 'content' };
   }
 
-  // Tier 3 does not exist. See the module header.
+  // Tier 3 — salvage. Nothing structured survived, so put the derivative fields
+  // back rather than merging records that a narrative plainly tells apart.
+  const salvaged = contentFingerprint(content, TIER3_STRIP);
+  if (salvaged !== EMPTY_SEED) {
+    return { seed: salvaged, source: 'salvage' };
+  }
+
+  // Tier 4 — nothing at all. Collapse, but never silently.
+  warnings?.push(identityCollapseWarning(label ?? 'Record'));
   return { seed: EMPTY_SEED, source: 'empty' };
 }
 
@@ -270,6 +415,11 @@ export function identitySeed(opts: { explicitId?: unknown; content?: unknown }):
  * Convenience for the common call-site shape: resolve a seed and return only
  * the string. Use {@link identitySeed} where the tier is worth reporting.
  */
-export function identityKey(explicitId: unknown, content: unknown): string {
-  return identitySeed({ explicitId, content }).seed;
+export function identityKey(
+  explicitId: unknown,
+  content: unknown,
+  warnings?: string[],
+  label?: string,
+): string {
+  return identitySeed({ explicitId, content, warnings, label }).seed;
 }

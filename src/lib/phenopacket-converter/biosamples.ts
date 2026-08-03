@@ -195,7 +195,9 @@ export function parseBiosample(
   // none. This used to seed on `${ctx.importedAt}:${Math.random()}` — and note
   // that dropping only the Math.random() would have left it non-deterministic,
   // because importedAt is a fresh timestamp on every invocation.
-  const sourceId: string = identityKey(bs.id, bs);
+  const idWarnings: string[] = [];
+  const sourceId: string = identityKey(bs.id, bs, idWarnings, `${contextLabel}.biosample`);
+  for (const m of idWarnings) warnings.push({ message: m });
   const iri = mintSpecimenIri(sourceId, ctx);
   const sQuads: Quad[] = [];
 

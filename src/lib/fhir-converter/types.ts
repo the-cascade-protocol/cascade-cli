@@ -445,6 +445,8 @@ export function contentHashedUri(
 export function medicationUri(
   fields: { rxNormCode?: string; medicationName?: string; startDate?: string; patient?: string },
   fallbackId?: string,
+  /** Raw source resource, forwarded to `contentHashedUri`'s salvage tier. */
+  source?: unknown,
 ): string {
   return contentHashedUri(
     'MedicationRequest',
@@ -455,6 +457,7 @@ export function medicationUri(
       patient: fields.patient,
     },
     fallbackId,
+    source,
   );
 }
 

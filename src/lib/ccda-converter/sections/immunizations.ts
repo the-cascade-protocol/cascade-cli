@@ -56,7 +56,7 @@ export function extractImmunizationQuads(
       cvxCode: codeSystem.includes('292') || codeSystem === cvxOid ? code : undefined,
       vaccineName: displayName !== 'Unknown Vaccine' ? displayName.toLowerCase() : undefined,
       date: dateStr,
-    }, sourceId || undefined);
+    }, sourceId || undefined, entry);
 
     const subj = namedNode(uri);
     quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.health + 'ImmunizationRecord')));

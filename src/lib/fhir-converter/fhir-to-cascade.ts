@@ -51,6 +51,7 @@ import {
 } from './converters-passthrough.js';
 
 import { appendProvenanceQuads } from './provenance.js';
+import { identitySeed, identityCollapseWarning } from '../identity.js';
 
 // ---------------------------------------------------------------------------
 // Main dispatcher: single FHIR resource -> Cascade
@@ -62,6 +63,19 @@ export function convertFhirResourceToQuads(fhirResource: any, passthroughMinimal
   // converters historically dropped for most types ("Cascade does not drop
   // data"). Additive + idempotent; see provenance.ts.
   if (result) appendProvenanceQuads(fhirResource, result._quads);
+  // One place to catch the identity door's tier-4 collapse for the WHOLE FHIR
+  // clinical path: every per-type converter routes through either mintSubjectUri
+  // or contentHashedUri, and both bottom out in identitySeed on this same
+  // resource. Checking here means a collapse can never be silent regardless of
+  // which of the dozen converters produced it.
+  if (result) {
+    const { source } = identitySeed({ explicitId: fhirResource?.id, content: fhirResource });
+    if (source === 'empty') {
+      result.warnings.push(
+        identityCollapseWarning(`${(fhirResource?.resourceType as string) ?? 'Resource'} (no id)`),
+      );
+    }
+  }
   return result;
 }
 

@@ -62,12 +62,13 @@ export function mintSubjectIri(
   subject: any,
   parentId: string | undefined,
   ctx: ImportContext,
+  idWarnings: string[] = [],
 ): string {
   const sys = ctx.sourceSystem ?? 'phenopacket';
   const sid: string =
     (typeof subject?.id === 'string' && subject.id) ||
     (typeof parentId === 'string' && parentId) ||
-    identityKey(undefined, subject);
+    identityKey(undefined, subject, idWarnings, 'phenopacket subject');
   return `urn:uuid:${deterministicUuid(`PatientProfile:${sys}:${sid}`)}`;
 }
 
@@ -87,7 +88,10 @@ export function parseSubject(
   const gaps: VocabularyGap[] = [];
   const quads: Quad[] = [];
 
-  const iri = mintSubjectIri(subject, parentId, ctx);
+  // Surface a tier-4 identity collapse as an import warning.
+  const idWarnings: string[] = [];
+  const iri = mintSubjectIri(subject, parentId, ctx, idWarnings);
+  for (const m of idWarnings) warnings.push({ message: m });
   const sourceId: string =
     (typeof subject?.id === 'string' && subject.id) ||
     (typeof parentId === 'string' && parentId) ||
