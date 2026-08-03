@@ -250,6 +250,7 @@ function convertSingleCcda(
   const { quads: patientQuads, patientUri } = extractPatientQuads(
     Array.isArray(recordTarget) ? recordTarget : [recordTarget],
     sourceSystem,
+    warnings,
   );
   allQuads.push(...patientQuads);
   count++;

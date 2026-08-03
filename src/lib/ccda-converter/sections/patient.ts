@@ -33,6 +33,14 @@ function mapBiologicalSex(code: string): string | undefined {
 export function extractPatientQuads(
   recordTarget: any,
   sourceSystem: string,
+  /**
+   * Collects a tier-4 identity-collapse notice. This is the ONE C-CDA site that
+   * can reach tier 4: every other section keys on `patient: patientUri`, which is
+   * always a non-empty `urn:uuid:` string, so their content tier always fires.
+   * Here the key is the demographics themselves, and a recordTarget can carry
+   * none of them.
+   */
+  warnings?: string[],
 ): { quads: Quad[]; patientUri: string } {
   // recordTarget may be an array (Epic wraps it)
   const rt = Array.isArray(recordTarget) ? recordTarget[0] : recordTarget;
@@ -92,7 +100,7 @@ export function extractPatientQuads(
     sex: sex,
     family: familyStr.toLowerCase(),
     given: givenStr.toLowerCase(),
-  }, undefined, patientRole);
+  }, undefined, patientRole, warnings);
 
   const subj = namedNode(patientUri);
   const quads: Quad[] = [

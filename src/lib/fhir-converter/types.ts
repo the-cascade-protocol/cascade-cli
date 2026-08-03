@@ -349,8 +349,18 @@ export function deterministicUuid(input: string): string {
  * content seed can never be mistaken for an id a source assigned, and no IRI
  * that a source id already determines moves.
  */
-export function mintSubjectUri(resource: any): string {
-  const { seed } = identitySeed({ explicitId: resource?.id, content: resource });
+export function mintSubjectUri(resource: any, warnings?: string[]): string {
+  const resourceTypeForLabel = (resource?.resourceType as string) ?? 'Resource';
+  const { seed } = identitySeed({
+    explicitId: resource?.id,
+    content: resource,
+    // Optional so that a caller with nothing to report stays source-compatible.
+    // Every production converter has a warnings array and passes it, because a
+    // tier-4 collapse the user never hears about is the failure this whole
+    // module exists to prevent.
+    warnings,
+    label: `${resourceTypeForLabel} (no id)`,
+  });
   if (UUID_V4_REGEX.test(seed)) return `urn:uuid:${seed}`;
   const resourceType = (resource?.resourceType as string) ?? 'Unknown';
   return `urn:uuid:${deterministicUuid(`${resourceType}:${seed}`)}`;
@@ -405,6 +415,8 @@ export function contentHashedUri(
    * instead of landing on the per-type sentinel.
    */
   source?: unknown,
+  /** Collects a tier-4 collapse notice. See `mintSubjectUri` for why it is optional. */
+  warnings?: string[],
 ): string {
   // Filter out undefined/empty values and sort keys for stability. Values are
   // coerced to string before trimming: the type says string, but real-world
@@ -425,7 +437,11 @@ export function contentHashedUri(
   // Last tier: the identity door. Deterministic whether or not `source` was
   // supplied — with it, a hash of the resource's non-volatile content; without
   // it, the per-type sentinel. Never random.
-  const { seed } = identitySeed({ content: source });
+  const { seed } = identitySeed({
+    content: source,
+    warnings,
+    label: `${resourceType} (no id)`,
+  });
   return `urn:uuid:${deterministicUuid(`${resourceType}::${seed}`)}`;
 }
 
@@ -447,6 +463,8 @@ export function medicationUri(
   fallbackId?: string,
   /** Raw source resource, forwarded to `contentHashedUri`'s salvage tier. */
   source?: unknown,
+  /** Forwarded to `contentHashedUri`; collects a tier-4 collapse notice. */
+  warnings?: string[],
 ): string {
   return contentHashedUri(
     'MedicationRequest',
@@ -458,6 +476,7 @@ export function medicationUri(
     },
     fallbackId,
     source,
+    warnings,
   );
 }
 

@@ -64,7 +64,7 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
     rxNormCode: resource.medicationCodeableConcept?.coding?.find((c: any) => c.system?.includes('rxnorm'))?.code,
     medicationName: medName,
     startDate: (resource.authoredOn ?? resource.effectivePeriod?.start)?.split('T')[0],
-  }, resource.id, resource);
+  }, resource.id, resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'Medication'));
@@ -171,7 +171,7 @@ export function convertCondition(resource: any): ConversionResult & { _quads: Qu
     snomedCode: resource.code?.coding?.find((c: any) => c.system?.includes('snomed'))?.code,
     icd10Code: resource.code?.coding?.find((c: any) => c.system?.includes('icd'))?.code,
     onsetDate: (resource.onsetDateTime ?? resource.onsetPeriod?.start)?.split('T')[0],
-  }, resource.id, resource);
+  }, resource.id, resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'ConditionRecord'));
@@ -252,7 +252,7 @@ export function convertAllergyIntolerance(resource: any): ConversionResult & { _
     patient: patientRef,
     allergenCode: resource.code?.coding?.[0]?.code,
     allergenName: resource.code?.text,
-  }, resource.id, resource);
+  }, resource.id, resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'AllergyRecord'));
@@ -345,7 +345,7 @@ export function convertObservationLab(resource: any): ConversionResult & { _quad
     patient: patientRef,
     loincCode: resource.code?.coding?.find((c: any) => c.system?.includes('loinc'))?.code,
     date: (resource.effectiveDateTime ?? resource.effectivePeriod?.start)?.split('T')[0],
-  }, resource.id, resource);
+  }, resource.id, resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'LabResultRecord'));
@@ -490,7 +490,7 @@ const VITAL_TYPE_TO_SHACL: Record<string, string> = {
 
 export function convertObservationVital(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   const codings = extractCodings(resource.code);
@@ -615,7 +615,7 @@ export function convertObservationVital(resource: any): ConversionResult & { _qu
 
 export function convertProcedure(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'Procedure'));
@@ -677,7 +677,7 @@ export function convertProcedure(resource: any): ConversionResult & { _quads: Qu
 
 export function convertClinicalDocument(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'ClinicalDocument'));
@@ -746,7 +746,7 @@ export function convertClinicalDocument(resource: any): ConversionResult & { _qu
 
 export function convertEncounter(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'Encounter'));
@@ -822,7 +822,7 @@ export function convertEncounter(resource: any): ConversionResult & { _quads: Qu
 
 export function convertLaboratoryReport(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'LaboratoryReport'));
@@ -911,7 +911,7 @@ export function convertLaboratoryReport(resource: any): ConversionResult & { _qu
 
 export function convertMedicationAdministration(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'MedicationAdministration'));
@@ -975,7 +975,7 @@ export function convertMedicationAdministration(resource: any): ConversionResult
 
 export function convertDevice(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'ImplantedDevice'));
@@ -1028,7 +1028,7 @@ export function convertDevice(resource: any): ConversionResult & { _quads: Quad[
 
 export function convertImagingStudy(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'ImagingStudy'));

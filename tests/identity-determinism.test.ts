@@ -29,6 +29,30 @@
 import { describe, it, expect } from 'vitest';
 
 import { convertFhirResourceToQuads } from '../src/lib/fhir-converter/fhir-to-cascade.js';
+import {
+  convertMedicationStatement,
+  convertCondition,
+  convertAllergyIntolerance,
+  convertObservationLab,
+  convertObservationVital,
+  convertProcedure,
+  convertClinicalDocument,
+  convertEncounter,
+  convertLaboratoryReport,
+  convertMedicationAdministration,
+  convertDevice,
+  convertImagingStudy,
+} from '../src/lib/fhir-converter/converters-clinical.js';
+import {
+  convertPatient,
+  convertImmunization,
+  convertCoverage,
+} from '../src/lib/fhir-converter/converters-demographics.js';
+import {
+  convertClaim,
+  convertExplanationOfBenefit,
+} from '../src/lib/fhir-converter/converters-clinical-admin.js';
+import { convertFhirPassthrough } from '../src/lib/fhir-converter/converters-passthrough.js';
 import { convertGenomicsBundle } from '../src/lib/fhir-genomics-converter/index.js';
 import { convertPhenopacket } from '../src/lib/phenopacket-converter/index.js';
 import { convertCcda } from '../src/lib/ccda-converter/index.js';
@@ -475,6 +499,115 @@ describe('a truly empty record collapses, but never silently', () => {
   it('a resource WITH content is never warned about', () => {
     const r = convertFhirResourceToQuads(clone(ID_LESS_VITAL));
     expect(r!.warnings).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The warning has to arrive in the CONVERTER's own output
+// ---------------------------------------------------------------------------
+
+/**
+ * These call the per-type converters DIRECTLY, not through the dispatcher, and
+ * that distinction is the entire point of this block.
+ *
+ * An earlier revision emitted the tier-4 warning from `convertFhirResourceToQuads`,
+ * which looked like the right single chokepoint. It was not: it only reached
+ * callers who came through the dispatcher, so `convertCondition(...)` returned an
+ * empty `warnings` array and the module's "this tier MUST NOT be silent" contract
+ * was true on the genomics and C-CDA paths and FALSE on the most reachable path in
+ * the repo.
+ *
+ * The identity unit test did not catch that, because it hands `identitySeed` a
+ * warnings array itself — which no production caller on that path was doing. A
+ * test that supplies the very wiring it is meant to be checking proves nothing.
+ * So these assert on what a real consumer receives: the converter's own
+ * `ConversionResult.warnings`.
+ */
+describe('the tier-4 warning reaches the converter API, not just the identity unit', () => {
+  const COLLAPSE = 'no identifier and no identity-bearing content';
+
+  const converters: ReadonlyArray<{ name: string; fn: (r: any) => { warnings: string[] } | null; bare: any }> = [
+    { name: 'convertCondition', fn: convertCondition, bare: { resourceType: 'Condition' } },
+    { name: 'convertAllergyIntolerance', fn: convertAllergyIntolerance, bare: { resourceType: 'AllergyIntolerance' } },
+    { name: 'convertObservationLab', fn: convertObservationLab, bare: { resourceType: 'Observation' } },
+    { name: 'convertObservationVital', fn: convertObservationVital, bare: { resourceType: 'Observation' } },
+    { name: 'convertProcedure', fn: convertProcedure, bare: { resourceType: 'Procedure' } },
+    { name: 'convertEncounter', fn: convertEncounter, bare: { resourceType: 'Encounter' } },
+    { name: 'convertDevice', fn: convertDevice, bare: { resourceType: 'Device' } },
+    { name: 'convertImagingStudy', fn: convertImagingStudy, bare: { resourceType: 'ImagingStudy' } },
+    { name: 'convertClinicalDocument', fn: convertClinicalDocument, bare: { resourceType: 'DocumentReference' } },
+    { name: 'convertLaboratoryReport', fn: convertLaboratoryReport, bare: { resourceType: 'DiagnosticReport' } },
+    { name: 'convertMedicationAdministration', fn: convertMedicationAdministration, bare: { resourceType: 'MedicationAdministration' } },
+    { name: 'convertPatient', fn: convertPatient, bare: { resourceType: 'Patient' } },
+    { name: 'convertImmunization', fn: convertImmunization, bare: { resourceType: 'Immunization' } },
+    { name: 'convertCoverage', fn: convertCoverage, bare: { resourceType: 'Coverage' } },
+    { name: 'convertClaim', fn: convertClaim, bare: { resourceType: 'Claim' } },
+    { name: 'convertExplanationOfBenefit', fn: convertExplanationOfBenefit, bare: { resourceType: 'ExplanationOfBenefit' } },
+    { name: 'convertFhirPassthrough', fn: convertFhirPassthrough, bare: { resourceType: 'NutritionOrder' } },
+  ];
+
+  for (const { name, fn, bare } of converters) {
+    it(`${name} reports the collapse in its own warnings`, () => {
+      const result = fn(clone(bare));
+      expect(result).not.toBeNull();
+      const collapse = result!.warnings.filter((w) => w.includes(COLLAPSE));
+      expect(collapse.length, `${name} swallowed the tier-4 collapse`).toBe(1);
+      expect(collapse[0]).toContain(bare.resourceType);
+    });
+  }
+
+  it('the dispatcher does not duplicate the warning', () => {
+    // The converters emit it now, so re-deriving it in the dispatcher would
+    // report the same collapse twice.
+    const r = convertFhirResourceToQuads({ resourceType: 'Condition' });
+    expect(r!.warnings.filter((w) => w.includes(COLLAPSE)).length).toBe(1);
+  });
+
+  it('converters with real content emit no collapse warning', () => {
+    for (const { name, fn } of converters) {
+      const withContent = fn(clone(ID_LESS_VITAL));
+      if (withContent === null) continue;
+      expect(
+        withContent.warnings.filter((w) => w.includes(COLLAPSE)),
+        `${name} warned about a resource that has content`,
+      ).toEqual([]);
+    }
+  });
+
+  it('a narrative-only resource is not warned about at the converter API either', () => {
+    const r = convertCondition({ resourceType: 'Condition', text: { status: 'generated', div: '<div>Type 2 diabetes mellitus</div>' } });
+    expect(r.warnings.filter((w) => w.includes(COLLAPSE))).toEqual([]);
+  });
+
+  /**
+   * DOCUMENTED EXCEPTION, pinned rather than fixed.
+   *
+   * `convertMedicationStatement` is the one FHIR converter that cannot reach
+   * tier 4, so it is deliberately absent from the list above. It defaults
+   * `medName` to the literal 'Unknown Medication' before minting, so the
+   * identity key always has a non-empty field and the content tier always
+   * "succeeds" — with a value identical for every content-free medication.
+   *
+   * That is the same shape as the `resourceType` scaffold bug this module fixed
+   * (tier 2 succeeding with a constant is indistinguishable from tier 2 failing,
+   * except that it merges), but the constant is supplied by the CONVERTER's
+   * choice of identity fields rather than by the identity door, so it is not
+   * this module's to fix. It belongs with the converter identity-field review
+   * that is deliberately sequenced after this change, and it is filed there.
+   *
+   * This test pins today's behavior so the follow-up has a starting point and so
+   * nobody reads the absence above as an oversight.
+   */
+  it('convertMedicationStatement does NOT reach tier 4 — placeholder constant, filed separately', () => {
+    const bare = convertMedicationStatement({ resourceType: 'MedicationStatement' });
+    const withNote = convertMedicationStatement({
+      resourceType: 'MedicationStatement',
+      note: [{ text: 'a different medication entirely' }],
+    });
+    expect(bare.warnings.filter((w) => w.includes(COLLAPSE))).toEqual([]);
+    // Documenting the consequence rather than asserting it is correct: two
+    // content-free medications currently share one identity, silently.
+    expect(subjectOf(bare)).toBe(subjectOf(withNote));
   });
 });
 

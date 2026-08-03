@@ -40,7 +40,7 @@ export function convertPatient(resource: any): ConversionResult & { _quads: Quad
     // A Patient with no name, no birthDate, no gender and no id used to fall
     // through to a random UUID. Passing the resource gives the last tier the
     // rest of the demographics (address, telecom, identifier) to key on.
-  }, resource.id, resource);
+  }, resource.id, resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.cascade + 'PatientProfile'));
@@ -127,7 +127,7 @@ export function convertImmunization(resource: any): ConversionResult & { _quads:
     patient: patientRef,
     cvxCode: resource.vaccineCode?.coding?.[0]?.code,
     date: resource.occurrenceDateTime?.split('T')[0],
-  }, resource.id, resource);
+  }, resource.id, resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'ImmunizationRecord'));
@@ -212,7 +212,7 @@ export function convertImmunization(resource: any): ConversionResult & { _quads:
 
 export function convertCoverage(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.coverage + 'InsurancePlan'));

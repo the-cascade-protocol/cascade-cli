@@ -86,6 +86,30 @@
  *      (see {@link identityCollapseWarning}); a caller that passes a `warnings`
  *      array to {@link identitySeed} receives it.
  *
+ *      That obligation is on the CALL SITE, so it is worth being precise about
+ *      where it is met, because a comment like the one above is exactly what a
+ *      future reader will trust:
+ *
+ *        * FHIR clinical — met. `mintSubjectUri` and `contentHashedUri` both
+ *          take an optional `warnings` array, and all 18 converter call sites
+ *          pass the one they already build. It is emitted where the identity is
+ *          MINTED, not at the dispatcher: an earlier revision emitted it from
+ *          `convertFhirResourceToQuads`, which looked like the right single
+ *          chokepoint but meant `convertCondition(...)` called directly
+ *          reported nothing.
+ *        * Genomics (6 sites), phenopacket subject + biosample, C-CDA document
+ *          id, C-CDA patient demographics — met, each threading its own array.
+ *        * C-CDA sections other than the patient — tier 4 is UNREACHABLE, not
+ *          unreported: every one keys on `patient: patientUri`, always a
+ *          non-empty `urn:uuid:`, so the content tier always fires.
+ *        * `convertMedicationStatement` — tier 4 is unreachable for a different
+ *          and less comfortable reason: it defaults the drug name to the literal
+ *          'Unknown Medication' before minting, so the content tier "succeeds"
+ *          with a constant. Same shape as the `resourceType` scaffold bug below,
+ *          but originating in the converter's choice of identity fields rather
+ *          than here. Pinned by a test and filed for the converter
+ *          identity-field review; deliberately NOT fixed in this module.
+ *
  *   There is no tier 5. Not `randomUUID()`, not `Math.random()`, not
  *   `Date.now()`, not `ctx.importedAt`.
  *
