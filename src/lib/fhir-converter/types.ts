@@ -7,7 +7,7 @@
 import { DataFactory, Writer, type Quad } from 'n3';
 import { createHash } from 'node:crypto';
 import { normalizeMedName } from '../medication-normalize.js';
-import { identitySeed } from '../identity.js';
+import { contentFingerprint, EMPTY_SEED, identitySeed } from '../identity.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -453,6 +453,150 @@ export function contentHashedUri(
     label: `${label ?? resourceType} (no id)`,
   });
   return `urn:uuid:${deterministicUuid(`${resourceType}::${seed}`)}`;
+}
+
+// ---------------------------------------------------------------------------
+// The rule: a present `resource.id` wins
+// ---------------------------------------------------------------------------
+
+/**
+ * Mint a subject IRI for a converter that carries its own curated content key:
+ * THE SOURCE'S OWN IDENTIFIER DECIDES, and the curated key is what answers the
+ * question when there is no identifier.
+ *
+ * WHY THIS EXISTS RATHER THAN `contentHashedUri(type, fields, resource.id, …)`
+ * ---------------------------------------------------------------------------
+ * That call reads as "identify by content, and fall back to the id", but
+ * `contentHashedUri` consults `fallbackId` ONLY when every content field is
+ * empty. On a real record they never are. So the id was not a fallback, it was
+ * DEAD, and a distinct, stable, server-assigned identifier was discarded on
+ * every record that carried one.
+ *
+ * That is how two records the source had deliberately kept apart ended up on
+ * one IRI. It was measured first for lab results — a fasting glucose of 95 and
+ * a post-prandial of 310, each with its own id, minting a single subject — and
+ * the same call shape was in four more converters, so the same thing happened
+ * to Conditions, allergies, immunizations and patients.
+ *
+ * THE RULE
+ * --------
+ * Identity answers "is this that record?", and the source's identifier is the
+ * source answering it. Deciding that two records are the same THING is a
+ * different judgement: it needs both records side by side and a trail saying it
+ * happened, so it belongs to the reconciler, which has both, and not to the
+ * identity layer, which sees one record at a time and can only overwrite.
+ *
+ * The merges this stops being silent are NOT lost. Every type routed through
+ * here has a reconciler matcher that still finds them — a Condition on its
+ * SNOMED code, an allergy on the allergen, an immunization on CVX plus date, a
+ * patient on date of birth plus sex — all well above the match threshold. What
+ * changes is that the merge now happens where it can be seen, counted, and
+ * argued with, instead of in a hash.
+ *
+ * `convertObservationVital`, `convertProcedure`, `convertEncounter` and nine
+ * other converters already did exactly this via `mintSubjectUri`. This is not a
+ * new strategy; it is the end of a second one.
+ *
+ * WHAT THE CURATED KEY IS FOR
+ * ---------------------------
+ * Without an id, `mintSubjectUri` would hash the whole resource, which splits
+ * on any incidental difference between two renderings of the same record. A
+ * curated key is deliberately narrower and therefore tolerant — but only of
+ * things that do not distinguish two records. Every field a converter
+ * SERIALIZES and leaves out of its key is a field on which two records sharing
+ * an IRI can disagree, which is the lab defect restated. So a key is widened
+ * until that set is empty, and no further.
+ *
+ * @param resourceType the identity key's type prefix. Both tiers feed the same
+ *                     template (`{type}:{id}` and `{type}::{fields}`), and an
+ *                     anonymous content seed is 69 characters where FHIR caps
+ *                     `Resource.id` at 64, so the two tiers cannot collide.
+ */
+export function idOrContentUri(
+  resourceType: string,
+  resource: any,
+  contentFields: Record<string, string | undefined>,
+  warnings?: string[],
+): string {
+  // Tier 1 — the source assigned an identifier. `mintSubjectUri` routes it
+  // through the identity door, so the explicit-id tier is the same code path
+  // every other converter in this file uses.
+  if (typeof resource?.id === 'string' && resource.id.trim().length > 0) {
+    return mintSubjectUri(resource, warnings);
+  }
+  // No `fallbackId`: this branch runs only when there is no id to fall back to.
+  // Passing one here is what hid the defect above for so long.
+  return contentHashedUri(resourceType, contentFields, undefined, resource, warnings);
+}
+
+/**
+ * A stable token for a FHIR CodeableConcept, or `undefined` when it carries
+ * nothing.
+ *
+ * Every coding is included as `system|code`, not just `coding[0].code`, because
+ * reading one coding without its system is how a key stops telling two records
+ * apart: two different code systems reusing the same digits collide, and a
+ * resource whose first coding happens to be the local EHR's own numbering keys
+ * on that instead of the standard code. Sorted, because `coding` is a set in
+ * practice and two servers may enumerate it in different order — sorting can
+ * only remove spurious SPLITS, never cause a merge, since a differing set still
+ * sorts to a differing string.
+ *
+ * `text` is included because it is frequently the ONLY thing a record carries:
+ * a Condition with `code.text: "Asthma"` and no coding would otherwise
+ * contribute nothing to its own identity and merge with every other uncoded
+ * condition for that patient.
+ *
+ * NOTE FOR CALLERS: pass the RAW concept. Do not pass a converter's display
+ * value, which is typically `codeableConceptText(x) ?? 'Unknown …'`. A
+ * placeholder in an identity key turns "we do not know" into "these are the
+ * same record", and a content hash that succeeds with a constant is
+ * indistinguishable from one that fails except that it merges.
+ */
+export function codeableConceptKey(cc: any): string | undefined {
+  if (cc == null || typeof cc !== 'object') return undefined;
+  const parts: string[] = [];
+  if (Array.isArray(cc.coding)) {
+    for (const c of cc.coding) {
+      if (c?.code) parts.push(`${c.system ?? ''}|${c.code}`);
+    }
+  }
+  if (typeof cc.text === 'string' && cc.text.trim().length > 0) parts.push(cc.text.trim());
+  return parts.length > 0 ? parts.sort().join(',') : undefined;
+}
+
+/**
+ * The same, for a repeating CodeableConcept element (`Condition.category`,
+ * `Immunization.programEligibility`, …), and tolerating the plain-string
+ * members FHIR uses for `AllergyIntolerance.category`.
+ */
+export function codeableConceptSetKey(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const parts: string[] = [];
+  for (const item of value) {
+    if (typeof item === 'string') {
+      if (item.trim().length > 0) parts.push(item.trim());
+      continue;
+    }
+    const key = codeableConceptKey(item);
+    if (key) parts.push(key);
+  }
+  return parts.length > 0 ? parts.sort().join(';') : undefined;
+}
+
+/**
+ * A fixed-length token standing for an arbitrary sub-object of a resource
+ * (`AllergyIntolerance.reaction`, `Immunization.doseQuantity`, a `name` array).
+ *
+ * Reduced to a fingerprint rather than embedded raw for two reasons: the
+ * identity string stays a fixed length however large the structure is, and free
+ * text inside it cannot smuggle the `|` and `=` characters that
+ * `contentHashedUri` uses as its own field separators into the key.
+ */
+export function structuredKey(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const fingerprint = contentFingerprint(value);
+  return fingerprint === EMPTY_SEED ? undefined : fingerprint;
 }
 
 /**
