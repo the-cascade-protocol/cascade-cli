@@ -37,7 +37,10 @@ import {
   commonTriples,
   quadsToJsonLd,
   mintSubjectUri,
-  contentHashedUri,
+  idOrContentUri,
+  codeableConceptKey,
+  codeableConceptSetKey,
+  structuredKey,
 } from './types.js';
 import {
   referencePlaceholder,
@@ -45,7 +48,6 @@ import {
   pushIndicationEdges,
   pushParsedIndicationCandidates,
 } from './reference-resolution.js';
-import { contentFingerprint, EMPTY_SEED } from '../identity.js';
 
 // ---------------------------------------------------------------------------
 // Medication converter
@@ -181,15 +183,104 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
 // Condition converter
 // ---------------------------------------------------------------------------
 
+/**
+ * The subject IRI for a Condition.
+ *
+ * WHY THIS IS NO LONGER
+ * `contentHashedUri('Condition', {patient, snomedCode, icd10Code, onsetDate}, resource.id)`
+ * -----------------------------------------------------------------------------------------
+ * Two separate defects, the same pair the lab converter had:
+ *
+ *   1. The `resource.id` was passed as `fallbackId`, which `contentHashedUri`
+ *      consults only when every content field is empty — never true of a real
+ *      Condition. Measured: the same problem carrying id `server-id-A` and id
+ *      `server-id-B` minted ONE IRI. See {@link idOrContentUri}.
+ *
+ *   2. The key was a strict subset of the record. Only two of the codings were
+ *      read (SNOMED and ICD), by substring match on the system URL, so a
+ *      Condition coded in any other system — or in `code.text` alone, which is
+ *      ordinary in portal exports — contributed NOTHING to its own identity and
+ *      merged with every other such Condition for that patient. And onset was
+ *      truncated to a calendar day.
+ *
+ * THE PART WORTH READING BEFORE CALLING THIS HARMLESS
+ * --------------------------------------------------
+ * This was originally judged low severity on the grounds that the merged pairs
+ * "really are the same clinical fact, and no data is lost". That is half right,
+ * and the wrong half is the dangerous one: the IDENTITY fields agreed, but the
+ * NON-identity fields did not have to. Two Conditions sharing patient, code and
+ * onset can disagree on `clinicalStatus` and `verificationStatus` — one saying
+ * ACTIVE and CONFIRMED, the other RESOLVED and REFUTED — and under the old key
+ * they merged, with the winner decided by which file was read first. That is
+ * the glucose bug wearing different clothes.
+ *
+ * What kept it from being an emergency is not that the merges were harmless: it
+ * is that a differing-content collision is now SPLIT and raised as a conflict
+ * rather than silently overwritten. Visible, not safe.
+ *
+ * WITHOUT AN ID the key carries everything that can make two Conditions for one
+ * patient genuinely different records: the full code (all codings, plus text),
+ * onset AT FULL PRECISION, abatement, both status fields, the category, and the
+ * encounter it was recorded at.
+ *
+ * `conditionName` is deliberately NOT a key field: the converter defaults it to
+ * the literal 'Unknown Condition', and a placeholder default in an identity key
+ * is a content hash that succeeds with a constant. `codeableConceptKey` reads
+ * the raw concept instead, and yields `undefined` where the placeholder would
+ * have appeared.
+ *
+ * `recordedDate` is also deliberately excluded. It says when a system wrote the
+ * record down, not what the record says, and it differs between two systems
+ * holding the same problem — so keying on it would split a genuine duplicate
+ * rather than separate two different problems.
+ *
+ * THE COMPLETENESS RULE THESE KEYS ARE BUILT TO, AND ITS LIMIT
+ * -----------------------------------------------------------
+ * A curated key is narrower than the record on purpose, so "which fields" is a
+ * judgement rather than a formula. The one it is held to here: EVERY FIELD THE
+ * CONVERTER SERIALIZES IS EITHER IN THE KEY OR EXCLUDED IN WRITING ABOVE.
+ * Anything else is a field on which two records sharing an IRI can disagree,
+ * which is the lab defect restated — and it is not hypothetical drafting
+ * caution: writing this key without `note` left two id-less Conditions reading
+ * "Provisional" and "Ruled out" on one IRI, and only the mechanical audit in
+ * `clinical-identity.test.ts` found it. That test walks every serialized field
+ * of all four types and fails on the next one anybody forgets.
+ */
+function conditionSubjectUri(resource: any, warnings: string[]): string {
+  return idOrContentUri('Condition', resource, {
+    patient: resource?.subject?.reference,
+    code: codeableConceptKey(resource?.code),
+    // Full precision. `.split('T')[0]` merged two problems recorded hours apart.
+    onset: resource?.onsetDateTime
+      ?? resource?.onsetPeriod?.start
+      ?? resource?.onsetString
+      ?? structuredKey(resource?.onsetAge ?? resource?.onsetRange),
+    abatement: resource?.abatementDateTime
+      ?? resource?.abatementPeriod?.start
+      ?? resource?.abatementString
+      ?? (resource?.abatementBoolean !== undefined ? String(resource.abatementBoolean) : undefined)
+      ?? structuredKey(resource?.abatementAge ?? resource?.abatementRange),
+    // "active" and "resolved" are two different claims about a patient.
+    clinicalStatus: codeableConceptKey(resource?.clinicalStatus),
+    // "confirmed" and "refuted" are opposite claims. This converter does not
+    // serialize it yet, so today two records differing only here produce
+    // identical quads — but identity must describe the SOURCE record, not the
+    // subset this converter happens to write, or adding a field to the
+    // serializer later silently changes which records merge.
+    verificationStatus: codeableConceptKey(resource?.verificationStatus),
+    category: codeableConceptSetKey(resource?.category),
+    // An encounter-diagnosis recorded at each of two visits is two records.
+    encounter: resource?.encounter?.reference,
+    // See the note on completeness below: `note` is serialized as health:notes,
+    // so two Conditions differing only in it are two DIFFERENT records in the
+    // pod, and an identity that cannot see it merges them.
+    note: structuredKey(resource?.note),
+  }, warnings);
+}
+
 export function convertCondition(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const patientRef = resource.subject?.reference ?? '';
-  const subjectUri = contentHashedUri('Condition', {
-    patient: patientRef,
-    snomedCode: resource.code?.coding?.find((c: any) => c.system?.includes('snomed'))?.code,
-    icd10Code: resource.code?.coding?.find((c: any) => c.system?.includes('icd'))?.code,
-    onsetDate: (resource.onsetDateTime ?? resource.onsetPeriod?.start)?.split('T')[0],
-  }, resource.id, resource, warnings);
+  const subjectUri = conditionSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'ConditionRecord'));
@@ -263,14 +354,62 @@ export function convertCondition(resource: any): ConversionResult & { _quads: Qu
 // AllergyIntolerance converter
 // ---------------------------------------------------------------------------
 
+/**
+ * The subject IRI for an AllergyIntolerance.
+ *
+ * WHY THIS IS NO LONGER
+ * `contentHashedUri('AllergyIntolerance', {patient, allergenCode, allergenName}, resource.id)`
+ * ---------------------------------------------------------------------------------------------
+ * Same two defects as Condition, plus a third the shape of the key made worse:
+ *
+ *   1. `resource.id` was dead as a `fallbackId`. Measured: the same allergen
+ *      carrying id `server-id-A` and id `server-id-B` minted ONE IRI.
+ *
+ *   2. `allergenCode` read `code.coding[0].code` — the FIRST coding, WITHOUT its
+ *      system. Two different code systems that reuse the same digits therefore
+ *      collided outright, and a resource whose first coding is the local EHR's
+ *      own numbering keyed on that rather than on the RxNorm or SNOMED code
+ *      sitting beside it.
+ *
+ *   3. The key held NOTHING about the reaction. A "mild rash on penicillin" and
+ *      an "anaphylaxis on penicillin" merged, and which of the two survived was
+ *      decided by input order. An allergy record's severity is the part a
+ *      clinician acts on, so this is the merge with the sharpest consequence in
+ *      this file: it can report a life-threatening allergy as mild.
+ *
+ * WITHOUT AN ID the key carries the full code, both status fields, the type
+ * (allergy vs intolerance), the category, the criticality, the onset, and a
+ * fingerprint of the whole `reaction` array — manifestations, severity,
+ * substance and all.
+ *
+ * `allergen` (the serialized display value) is NOT a key field: it defaults to
+ * the literal 'Unknown Allergen'.
+ */
+function allergySubjectUri(resource: any, warnings: string[]): string {
+  return idOrContentUri('AllergyIntolerance', resource, {
+    patient: resource?.patient?.reference,
+    code: codeableConceptKey(resource?.code),
+    clinicalStatus: codeableConceptKey(resource?.clinicalStatus),
+    verificationStatus: codeableConceptKey(resource?.verificationStatus),
+    type: typeof resource?.type === 'string' ? resource.type : codeableConceptKey(resource?.type),
+    category: codeableConceptSetKey(resource?.category),
+    criticality: resource?.criticality,
+    onset: resource?.onsetDateTime
+      ?? resource?.onsetPeriod?.start
+      ?? resource?.onsetString
+      ?? structuredKey(resource?.onsetAge ?? resource?.onsetRange),
+    // The whole array, fingerprinted: manifestation, severity, substance,
+    // exposure route and description. A key that omitted these merged a mild
+    // rash into an anaphylaxis.
+    reaction: structuredKey(resource?.reaction),
+    // Serialized as health:notes; see the completeness rule on `conditionSubjectUri`.
+    note: structuredKey(resource?.note),
+  }, warnings);
+}
+
 export function convertAllergyIntolerance(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const patientRef = resource.patient?.reference ?? '';
-  const subjectUri = contentHashedUri('AllergyIntolerance', {
-    patient: patientRef,
-    allergenCode: resource.code?.coding?.[0]?.code,
-    allergenName: resource.code?.text,
-  }, resource.id, resource, warnings);
+  const subjectUri = allergySubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'AllergyRecord'));
@@ -376,7 +515,8 @@ const VALUE_X_PREFIX = 'value';
  * Reduced to a fingerprint rather than embedded raw so that the identity string
  * stays a fixed length regardless of how many components a panel has, and so
  * that a free-text `valueString` cannot smuggle the `|` and `=` characters that
- * `contentHashedUri` uses as its own field separators into the key.
+ * `contentHashedUri` uses as its own field separators into the key. That is
+ * `structuredKey`, now shared with the four sibling converters.
  */
 function labMeasuredValueKey(resource: any): string | undefined {
   if (resource == null || typeof resource !== 'object') return undefined;
@@ -388,8 +528,7 @@ function labMeasuredValueKey(resource: any): string | undefined {
     }
   }
   if (Object.keys(measured).length === 0) return undefined;
-  const fingerprint = contentFingerprint(measured);
-  return fingerprint === EMPTY_SEED ? undefined : fingerprint;
+  return structuredKey(measured);
 }
 
 /**
@@ -456,14 +595,16 @@ function labCategoryKey(resource: any): string | undefined {
  * `testName` is deliberately NOT a key field. The converter defaults it to the
  * literal 'Unknown Lab Test', and a placeholder default in an identity key is
  * the same defect in a different costume.
+ *
+ * The two-tier gate itself now lives in {@link idOrContentUri}, shared with
+ * Condition, AllergyIntolerance, Immunization and Patient. It was written here
+ * first, and having one copy per converter is how the rule ends up applied in
+ * some of them and not others — which is precisely what happened: this
+ * converter was fixed while four siblings kept the dead-`fallbackId` shape. The
+ * IRIs are unchanged by the move; the lab suites pin that.
  */
 function labSubjectUri(resource: any, warnings: string[]): string {
-  // Tier 1 — the source assigned an identifier. Same door, same key template,
-  // and the same answer `convertObservationVital` gives for this resource.
-  if (typeof resource?.id === 'string' && resource.id.trim().length > 0) {
-    return mintSubjectUri(resource, warnings);
-  }
-  return contentHashedUri('Observation', {
+  return idOrContentUri('Observation', resource, {
     patient: resource?.subject?.reference,
     loincCode: resource?.code?.coding?.find((c: any) => c.system?.includes('loinc'))?.code,
     // Full precision. `.split('T')[0]` merged a 07:00 draw with an 11:00 draw.
@@ -471,9 +612,7 @@ function labSubjectUri(resource: any, warnings: string[]): string {
     value: labMeasuredValueKey(resource),
     specimen: resource?.specimen?.reference,
     category: labCategoryKey(resource),
-    // No `fallbackId`: this branch runs only when there is no id to fall back
-    // to. Passing one here is what hid the defect above for so long.
-  }, undefined, resource, warnings);
+  }, warnings);
 }
 
 export function convertObservationLab(resource: any): ConversionResult & { _quads: Quad[] } {

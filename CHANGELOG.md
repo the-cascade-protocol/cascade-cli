@@ -9,9 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-> **Version number not yet chosen.** This section contains an IRI-breaking change for lab
-> results (see the first upgrade note), so it is not a patch release. Decide between a minor
-> and a major bump before cutting it.
+> **Version number not yet chosen.** This section contains IRI-breaking changes for lab
+> results, conditions, allergies, immunizations and patient profiles (see the first upgrade
+> note), so it is not a patch release. Decide between a minor and a major bump before cutting
+> it.
 
 **This release is about record identity — the IRI each record gets, which decides whether a
 re-import updates a record or duplicates it, and whether two records stay two records.** Two
@@ -21,11 +22,12 @@ which:
 1. **Records the source never identified used to get a RANDOM IRI**, so re-importing the same
    document duplicated them, forever. They now get an IRI derived from their own content, so
    they reconcile. **No IRI that a source identifier already determined moves because of this.**
-2. **Lab results used to be identified too coarsely** — by patient, test code and calendar day,
-   ignoring the measured value, the time of day, and the source's own identifier — so two
-   genuinely different results on one day merged into one and a value was silently lost. Fixing
-   that necessarily moves lab IRIs. **This is the only IRI-breaking change in the release**, and
-   the upgrade note below says what to do about it.
+2. **Five kinds of record were identified too coarsely, and ignored the identifier their own
+   source assigned them** — lab results by patient, test code and calendar day; conditions,
+   allergies, immunizations and patient profiles by a similarly short list. So two genuinely
+   different records merged into one and one of them was silently lost. Fixing that necessarily
+   moves those IRIs. **These are the release's IRI-breaking changes**, and the upgrade note
+   below says what to do about them.
 
 ### Upgrade notes
 
@@ -66,11 +68,11 @@ which:
   After this change no lab observation collides with another; the only records that still
   share an IRI are the same record appearing in two files, which is correct.
 
-  **Nothing but lab results moves.** Vital signs, conditions, allergies, medications,
-  procedures, encounters, documents, immunizations, coverage and claims all keep the IRIs they
-  had. Verified twice: across the FHIR conformance corpus, 46 of 91 converted resources were
-  unchanged and every one of the 45 that moved was a lab observation; across the C-CDA corpus,
-  40 of 43 identities were unchanged and all 3 that moved were lab results.
+  **What this particular change moved.** Across the FHIR conformance corpus, 46 of 91 converted
+  resources were unchanged by it and every one of the 45 that moved was a lab observation;
+  across the C-CDA corpus, 40 of 43 identities were unchanged and all 3 that moved were lab
+  results. Four more record types move for their own reason, described in the next note; those
+  are the only other IRIs in the release that change.
 
   **Lab PANELS keep their IRIs, with one narrow exception.** A panel read from a C-CDA document
   whose source gave it neither an identifier nor a test code was previously indistinguishable
@@ -78,6 +80,68 @@ which:
   different panels shared one record and pooled their results. Such a panel now takes its
   identity from its full timestamp and the set of results it contains, and so moves. A panel
   that carries an identifier — the common case — is unchanged.
+
+- **Breaking for conditions, allergies, immunizations and patient profiles, from FHIR
+  sources.** These four kinds of record change IRI in this release, for the same reason lab
+  results do and as part of the same one-time change. If you have imported them with an earlier
+  version, records imported by this one will not match them.
+
+  What was wrong: each was identified by a short list of fields and by nothing else — a
+  condition by patient, one SNOMED code, one ICD code and a calendar day; an allergy by
+  patient and a single code read WITHOUT the coding system it came from; an immunization by
+  patient, a similarly system-blind vaccine code and a calendar day; a patient by birth date,
+  sex, surname and FIRST given name. And in all four, the identifier the source's own system
+  had assigned the record was passed in a position the code only reads when every one of those
+  fields is empty, which never happens on a real record. So the identifier was discarded on
+  every record that carried one, and two records the source had deliberately kept apart became
+  one.
+
+  What that cost, concretely:
+
+  - A penicillin allergy recorded as a **mild rash** and one recorded as an **anaphylaxis**
+    were one record, and which survived depended on the order the files were read in. Nothing
+    about the reaction was part of the identity at all.
+  - A condition marked **active and confirmed** and the same code marked **resolved and
+    refuted** were one record, on the same terms.
+  - Two immunizations of the same vaccine on one day — a **left-arm** and a **right-arm**
+    injection, or a dose that was **given** and an entry saying one was **not done** — were one
+    record. Lot number, dose, site, route and status were all outside the identity.
+  - Two people sharing a first name, a surname, a sex and a birthday were one patient profile,
+    and every record belonging to either of them hung off it. Medical record numbers, middle
+    names and suffixes were not consulted.
+
+  Each of these takes its identity from the source's identifier now. Where a record carries
+  none, the identity is built from everything the importer stores about it, so two records that
+  differ in anything the pod will show also differ in identity.
+
+  **What to do.** The same as for lab results: re-import the sources into a fresh pod and use
+  that, or accept that records imported before and after this release sit side by side.
+
+  **The merge that was wanted still happens, one layer up.** Two exports of one person from two
+  different systems now arrive as two records rather than one, and the reconciler merges them —
+  matching a condition on its SNOMED code, an allergy on the allergen, an immunization on the
+  vaccine code and date, and a patient on date of birth and sex. The difference is that the
+  merge is now counted in the import summary, attributed to the sources it came from, and
+  raised as a conflict when the two disagree, instead of happening inside a hash where nothing
+  could see it. Measured: importing one person's records from two EHRs into one pod previously
+  left TWO patient profiles and an unresolved conflict that `cascade pod conflicts` reported as
+  an identity collision — a question invented by the identity layer about two records that were
+  never ambiguous. It now leaves one profile and no conflict.
+
+  Measured across the conformance fixture corpus, 121 FHIR resources: **18 moved** (7 patients,
+  5 conditions, 3 allergies, 3 immunizations) and 103 were byte-identical. Groups of records
+  sharing an IRI with a record they differ from fell from **9 covering 21 records to 6 covering
+  13**, and all 6 that remain are the same record appearing in two fixture files, which is
+  correct. The worst case in the corpus was in published HL7 example data: one stock example
+  patient appears in three Genomics IG bundles under three different server-assigned ids, one
+  of them carrying a donor-registry identifier the others do not, and all three collapsed onto
+  a single profile — a merge across three documents decided by four demographic fields and
+  nothing else, which no test noticed.
+
+  **Nothing else moves.** Vital signs, medications, procedures, encounters, documents, coverage
+  and claims all keep the IRIs they had. Verified across the same corpus: every one of the 18
+  resources that moved was one of the four types named here, and across the C-CDA corpus
+  identities are unchanged.
 
 ### Fixed
 
@@ -94,6 +158,22 @@ which:
   under a single shared key regardless of which FHIR resource they arrived as, and the notice
   reported that shared key — telling someone who imported a `MedicationStatement` to go
   looking for a `MedicationRequest`.
+
+- **A code the importer did not recognize no longer erases a record's identity.** A condition
+  coded in anything other than SNOMED or ICD — a local hospital code, or nothing but the
+  problem's name in `code.text`, which is ordinary in portal exports — contributed nothing at
+  all to its own identity, so every such condition recorded for one patient on one day was one
+  record. Allergies and immunizations had a narrower version of the same fault: they read only
+  the FIRST code on the record and read it WITHOUT the coding system it came from, so two
+  systems that happen to reuse a number were indistinguishable. All the codes now count, each
+  paired with the system it belongs to.
+
+- **A placeholder name is no longer part of what a record IS.** "Unknown Condition", "Unknown
+  Allergen" and "Unknown Vaccine" are still what a record with no name DISPLAYS. Widening the
+  identity keys above could have pulled them into identity, where a placeholder turns "we do
+  not know" into "these are the same record"; the keys read the source's own fields instead,
+  and a test now holds each of the three to displaying the placeholder while still telling the
+  records apart.
 - **Two records that share one subject IRI but disagree on content are no longer silently
   reduced to one.**
 

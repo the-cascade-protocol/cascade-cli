@@ -22,7 +22,9 @@ import {
   commonTriples,
   quadsToJsonLd,
   mintSubjectUri,
-  contentHashedUri,
+  idOrContentUri,
+  codeableConceptKey,
+  structuredKey,
 } from './types.js';
 import { pushEncounterEdge } from './reference-resolution.js';
 
@@ -30,17 +32,72 @@ import { pushEncounterEdge } from './reference-resolution.js';
 // Patient converter
 // ---------------------------------------------------------------------------
 
+/**
+ * The subject IRI for a Patient.
+ *
+ * WHY THIS IS NO LONGER
+ * `contentHashedUri('Patient', {dob, sex, family, given}, resource.id)`
+ * --------------------------------------------------------------------
+ * The `resource.id` was passed as `fallbackId`, which is dead on any Patient
+ * carrying a name or a birth date. Measured: the same demographics under id
+ * `server-id-A` and id `server-id-B` minted ONE IRI.
+ *
+ * And the key was four fields: birth date, gender, `name[0].family` and
+ * `name[0].given[0]`. It read the FIRST given name only and no other name
+ * entry, so middle names, suffixes, maiden names and every `identifier` — the
+ * medical record number, the member id, the fields an EHR itself uses to tell
+ * two patients apart — contributed nothing. Two different people sharing a
+ * first name, a surname, a sex and a date of birth therefore merged into one
+ * profile, and every record belonging to either of them then hung off it. In a
+ * store whose whole premise is that the record is about one person, that is the
+ * worst merge available.
+ *
+ * WHAT DOES NOT CHANGE: THE SAME PERSON FROM TWO SOURCES STILL RECONCILES.
+ * -----------------------------------------------------------------------
+ * Two exports of one person from two EHRs carry two server ids and so now mint
+ * two profile IRIs where they previously minted one. They do not stay two
+ * records: `matchPatientProfiles` in the reconciler matches on date of birth
+ * plus sex at 0.95 confidence, far above the 0.65 threshold, and merges them —
+ * with a merge trail, and with a conflict raised where the two disagree. The
+ * merge moves from a hash nobody can inspect to the layer built to make it
+ * reviewable. That is the whole of the change.
+ *
+ * WITHOUT AN ID the key adds the complete `name` array (every entry, every
+ * given name, prefixes and suffixes) and the complete `identifier` array, both
+ * fingerprinted.
+ *
+ * `address` is in the key even though it changes for the same person, because
+ * it is SERIALIZED (as `cascade:addressCity` and its siblings) and the rule
+ * these keys are built to — stated in full on `conditionSubjectUri` — is that a
+ * serialized field outside the key is a field two records sharing an IRI can
+ * disagree on. The cost is the recoverable direction: an id-less patient whose
+ * address changed splits, and `matchPatientProfiles` puts the two back together
+ * on date of birth plus sex while raising the differing address as a conflict,
+ * which is the outcome a person can actually act on. Excluding it would instead
+ * merge two same-named people at two addresses, and that is unrecoverable.
+ *
+ * `telecom` is excluded, and can be: this converter does not serialize it, so
+ * two Patients differing only there produce identical records.
+ */
+function patientSubjectUri(resource: any, warnings: string[]): string {
+  return idOrContentUri('Patient', resource, {
+    dob: resource?.birthDate,
+    sex: resource?.gender,
+    // The whole name array, not `name[0].family` + `name[0].given[0]`.
+    name: structuredKey(resource?.name),
+    // The strongest discriminator a Patient resource carries, and it was
+    // absent from the key entirely.
+    identifier: structuredKey(resource?.identifier),
+    maritalStatus: codeableConceptKey(resource?.maritalStatus),
+    address: structuredKey(resource?.address),
+    deceased: resource?.deceasedDateTime
+      ?? (resource?.deceasedBoolean !== undefined ? String(resource.deceasedBoolean) : undefined),
+  }, warnings);
+}
+
 export function convertPatient(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = contentHashedUri('Patient', {
-    dob: resource.birthDate,
-    sex: resource.gender,
-    family: resource.name?.[0]?.family,
-    given: resource.name?.[0]?.given?.[0],
-    // A Patient with no name, no birthDate, no gender and no id used to fall
-    // through to a random UUID. Passing the resource gives the last tier the
-    // rest of the demographics (address, telecom, identifier) to key on.
-  }, resource.id, resource, warnings);
+  const subjectUri = patientSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.cascade + 'PatientProfile'));
@@ -120,14 +177,67 @@ export function convertPatient(resource: any): ConversionResult & { _quads: Quad
 // Immunization converter
 // ---------------------------------------------------------------------------
 
+/**
+ * The subject IRI for an Immunization.
+ *
+ * WHY THIS IS NO LONGER
+ * `contentHashedUri('Immunization', {patient, cvxCode, date}, resource.id)`
+ * ------------------------------------------------------------------------
+ * The `resource.id` was dead as a `fallbackId`. Measured: the same dose under
+ * id `server-id-A` and id `server-id-B` minted ONE IRI.
+ *
+ * The key itself was defended on the grounds that two flu shots recorded on one
+ * day really are one dose. That is true of two RECORDS OF one dose and false of
+ * two doses, and the key could not tell those apart, because it read
+ * `vaccineCode.coding[0].code` — the first coding, without its system, so a CVX
+ * code and an NDC or local code sharing digits collided — and truncated the
+ * occurrence to a calendar day. Everything that distinguishes two same-day
+ * administrations was outside it: the LOT NUMBER, the dose quantity, the body
+ * SITE, the route, the manufacturer, and the status. A left-arm and a right-arm
+ * injection given in one visit were one record; so were a `completed` dose and
+ * a `not-done` entry for the same vaccine on the same day, which is the pair
+ * whose merge tells a reader a dose was given when the source says it was not.
+ *
+ * That was the standing assumption this entry was filed to remove: the safety
+ * of `{patient, code, date}` was a claim about the data, not a property of the
+ * key, and it expired the moment any discriminating field was looked at.
+ *
+ * WITHOUT AN ID the key carries the full vaccine code, the occurrence at FULL
+ * precision, the status, the lot number, the dose, the site, the route, the
+ * manufacturer and the encounter.
+ *
+ * `vaccineName` is NOT a key field: the converter defaults it to 'Unknown
+ * Vaccine'. Neither is the serialized status, which defaults to 'completed' —
+ * the key reads `resource.status` raw, so an absent status stays absent instead
+ * of arriving as a constant.
+ */
+function immunizationSubjectUri(resource: any, warnings: string[]): string {
+  return idOrContentUri('Immunization', resource, {
+    patient: resource?.patient?.reference,
+    vaccine: codeableConceptKey(resource?.vaccineCode),
+    // Full precision, and `occurrenceString` where the source gives prose.
+    occurrence: resource?.occurrenceDateTime ?? resource?.occurrenceString,
+    // Raw, not the serialized `?? 'completed'`.
+    status: resource?.status,
+    lotNumber: resource?.lotNumber,
+    dose: structuredKey(resource?.doseQuantity),
+    site: codeableConceptKey(resource?.site),
+    route: codeableConceptKey(resource?.route),
+    manufacturer: resource?.manufacturer?.display ?? resource?.manufacturer?.reference,
+    encounter: resource?.encounter?.reference,
+    // Serialized as health:administeringProvider / administeringLocation /
+    // notes. See the completeness rule on `conditionSubjectUri`: a serialized
+    // field outside the key is a field two records sharing an IRI can disagree
+    // on.
+    performer: structuredKey(resource?.performer),
+    location: resource?.location?.display ?? resource?.location?.reference,
+    note: structuredKey(resource?.note),
+  }, warnings);
+}
+
 export function convertImmunization(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const patientRef = resource.patient?.reference ?? '';
-  const subjectUri = contentHashedUri('Immunization', {
-    patient: patientRef,
-    cvxCode: resource.vaccineCode?.coding?.[0]?.code,
-    date: resource.occurrenceDateTime?.split('T')[0],
-  }, resource.id, resource, warnings);
+  const subjectUri = immunizationSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'ImmunizationRecord'));
