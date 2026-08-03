@@ -27,8 +27,9 @@ import * as path from 'path';
 import * as os from 'os';
 import { spawn, type ChildProcess } from 'child_process';
 import crypto from 'crypto';
-import { parseTurtleFile, getProperties, CASCADE_NAMESPACES } from '../../lib/turtle-parser.js';
+import { getProperties, CASCADE_NAMESPACES } from '../../lib/turtle-parser.js';
 import { resolvePodDir, fileExists } from './helpers.js';
+import { openPod, PodUnreadableError, type PodReader } from '../../lib/pod-read.js';
 
 // ── LOINC section code → CDA section string (used by /extract API) ───────────
 
@@ -321,6 +322,32 @@ export function registerExtractSubcommand(pod: Command): void {
 
       // ── 1. Find narrative blocks in documents.ttl ─────────────────────────
 
+      // Open the pod ONCE before touching a file. This read used to be a
+      // plaintext `parseTurtleFile`, so on an encrypted pod it parsed
+      // ciphertext, found no narrative blocks, and said the pod had none.
+      let reader: PodReader;
+      try {
+        reader = await openPod(podDir);
+      } catch (e: unknown) {
+        console.error(e instanceof PodUnreadableError ? e.message : String(e));
+        process.exitCode = 2;
+        return;
+      }
+
+      // The extraction WRITE path (ai-extracted.ttl, the review queue, the
+      // discard log, the index append) is still plaintext-only, so running it
+      // against a sealed pod would drop readable files into an encrypted one.
+      // Refuse rather than corrupt; `--dry-run` is read-only and still works.
+      if (reader.encrypted && !opts.dryRun) {
+        console.error(
+          'This pod is encrypted, and `pod extract` cannot yet write its results back ' +
+            'to an encrypted pod (the extraction outputs would be written in the clear). ' +
+            'Re-run with --dry-run to see what would be extracted.',
+        );
+        process.exitCode = 1;
+        return;
+      }
+
       const documentsPath = path.join(podDir, 'clinical', 'documents.ttl');
       if (!(await fileExists(documentsPath))) {
         console.error('No clinical/documents.ttl found in pod. Import a C-CDA document first.');
@@ -329,12 +356,18 @@ export function registerExtractSubcommand(pod: Command): void {
         return;
       }
 
-      const parsed = await parseTurtleFile(documentsPath);
-      if (!parsed.success) {
-        console.error(`Failed to parse clinical/documents.ttl: ${parsed.errors.join(', ')}`);
-        process.exitCode = 1;
+      const read = reader.parseFile(documentsPath);
+      if (!read.ok) {
+        // Exit 2: the file exists and could not be read. Exiting 1 with
+        // "no narrative blocks" would be the same lie in a quieter voice.
+        console.error(
+          `Could not read clinical/documents.ttl in ${podDir}: ${read.failure.reason}. ` +
+            'This is NOT the same as the pod having no narrative blocks.',
+        );
+        process.exitCode = 2;
         return;
       }
+      const parsed = read.value;
 
       const NS_CASCADE    = CASCADE_NAMESPACES.cascade;
       const NS_CLINICAL   = CASCADE_NAMESPACES.clinical;

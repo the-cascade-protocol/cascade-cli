@@ -75,6 +75,15 @@ Both are additive and deterministic: `--all` without `--edges` is unchanged, and
 the same invocation always produces byte-identical output. The JSON contract is
 documented in [docs/2026-07-16-graph-query-json-shapes.md](docs/2026-07-16-graph-query-json-shapes.md).
 
+## Exit codes
+
+Every command answers with one of three codes: `0` success, `1` user or input
+error, and `2` **could not read what exists** — the pod, or a file inside it,
+could not be opened, decrypted, or parsed. The third is the one that matters if
+you script against this tool: an unreadable pod must never be mistaken for an
+empty one. The codes, the `--json` error envelope, and the MCP equivalents are
+documented in [docs/exit-codes.md](docs/exit-codes.md).
+
 ## Development
 
 ```bash

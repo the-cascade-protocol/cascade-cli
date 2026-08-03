@@ -27,11 +27,9 @@
  */
 
 import * as path from 'path';
-import * as fs from 'fs/promises';
 import { Store, DataFactory } from 'n3';
-import { parseTurtle, shortenIRI, getProperties, extractLabel } from '../../lib/turtle-parser.js';
-import { readResource } from '../../lib/pod-encryption.js';
-import { discoverTtlFiles } from './helpers.js';
+import { shortenIRI, getProperties, extractLabel } from '../../lib/turtle-parser.js';
+import { discoverTtlFiles, type PodReader, type PodReadFailure } from '../../lib/pod-read.js';
 
 const { namedNode } = DataFactory;
 
@@ -58,8 +56,8 @@ export interface PodGraph {
   recordSubjects: Set<string>;
   /** Pod-relative paths the graph covers (the files `--all` reads). */
   files: string[];
-  /** Files that could not be read/parsed (decrypt failure, bad Turtle). */
-  parseErrors: Array<{ file: string; error: string; kind: 'decrypt' | 'parse' }>;
+  /** Files that could not be read (decrypt failure, bad Turtle, I/O). */
+  readFailures: PodReadFailure[];
 }
 
 export interface RecordEdge {
@@ -113,38 +111,30 @@ function graphExcludePaths(absDir: string): Set<string> {
 
 /**
  * Load every graph-covered data file into a single store and index its record
- * subjects. Encrypted pods decrypt with `dek` exactly like `query --all`.
+ * subjects.
+ *
+ * Takes an already-open {@link PodReader} rather than a pod path and an optional
+ * key: the DEK is resolved once per invocation, up in the command, and a graph
+ * built from a keyless read of a sealed pod is exactly the "empty pod" lie this
+ * layer exists to prevent. Read failures are collected, never thrown — the
+ * caller weighs them with the read layer's ledger.
  */
-export async function loadPodGraph(absDir: string, dek?: Buffer): Promise<PodGraph> {
+export async function loadPodGraph(reader: PodReader): Promise<PodGraph> {
+  const absDir = reader.podDir;
   const exclude = graphExcludePaths(absDir);
   const discovered = await discoverTtlFiles(absDir); // already sorted
   const files = discovered.filter((f) => !exclude.has(f));
 
   const store = new Store();
-  const parseErrors: Array<{ file: string; error: string; kind: 'decrypt' | 'parse' }> = [];
+  const readFailures: PodReadFailure[] = [];
 
   for (const file of files) {
-    const rel = path.relative(absDir, file);
-    let content: string;
-    try {
-      // readResource decrypts when a dek is supplied, else reads plaintext.
-      content = dek ? readResource(file, dek) : await fs.readFile(file, 'utf-8');
-    } catch (err: unknown) {
-      parseErrors.push({
-        file: rel,
-        error: err instanceof Error ? err.message : String(err),
-        // Only a DEK-backed read can fail for key reasons; a plain read that
-        // fails is an I/O problem, weighed with the parse failures.
-        kind: dek ? 'decrypt' : 'parse',
-      });
+    const parsed = reader.parseFile(file);
+    if (!parsed.ok) {
+      readFailures.push(parsed.failure);
       continue;
     }
-    const result = parseTurtle(content, `file://${file}`);
-    if (!result.success) {
-      parseErrors.push({ file: rel, error: result.errors.join('; '), kind: 'parse' });
-      continue;
-    }
-    store.addQuads(result.quads);
+    store.addQuads(parsed.value.quads);
   }
 
   const recordSubjects = new Set<string>();
@@ -157,8 +147,8 @@ export async function loadPodGraph(absDir: string, dek?: Buffer): Promise<PodGra
   return {
     store,
     recordSubjects,
-    files: files.map((f) => path.relative(absDir, f)),
-    parseErrors,
+    files: files.map((f) => reader.relativePath(f)),
+    readFailures,
   };
 }
 

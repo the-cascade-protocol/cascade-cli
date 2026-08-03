@@ -25,6 +25,7 @@ import { Parser, Writer, DataFactory } from 'n3';
 import { NS, TURTLE_PREFIXES } from './fhir-converter/types.js';
 import { randomUUID } from 'node:crypto';
 import { readResource, writeResource, PodDecryptError } from './pod-encryption.js';
+import { decryptFailureReason } from './pod-read.js';
 
 export { randomUUID };
 
@@ -66,8 +67,12 @@ async function readStoreFile(filePath: string, dek?: Buffer): Promise<string | n
     } catch (err) {
       if (isNotFound(err)) return null;
       if (err instanceof PodDecryptError) {
+        // Through the read layer's shared explanation, so the conflicts store
+        // tells a plaintext-in-a-sealed-pod file apart from a wrong key in the
+        // same words every other read does. Both raise the same GCM failure,
+        // and only one of them is about the passphrase.
         throw new ConflictStoreError(
-          `Could not decrypt ${filePath}: ${err.message}`,
+          `Could not decrypt ${filePath}: ${decryptFailureReason(filePath, err)}`,
           filePath,
           err,
         );

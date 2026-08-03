@@ -19,16 +19,9 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import {
-  isPodEncrypted,
-  resolveDek,
-  readResource,
-  writeResource,
-  PodDecryptError,
-} from './pod-encryption.js';
-import { obtainPassphrase } from './passphrase.js';
+import { readResource, writeResource } from './pod-encryption.js';
+import { openPod, fileExists } from './pod-read.js';
 import { loadShapes, validateTurtle } from './shacl-validator.js';
-import { fileExists } from '../commands/pod/helpers.js';
 
 /** The pod-relative directory holding append-only overlay resources. */
 export const ANNOTATIONS_DIR = 'annotations';
@@ -43,19 +36,15 @@ export const OVERLAY_PREFIXES = `@prefix workbench: <https://ns.cascadeprotocol.
 
 /**
  * Resolve the DEK for an encrypted pod, or `undefined` for a plaintext pod.
- * Throws a clean Error when the pod is encrypted but the passphrase is wrong
- * or unavailable.
+ *
+ * Delegates to the read layer's {@link openPod} rather than resolving a key of
+ * its own: one place decides how a passphrase is obtained and what a failure to
+ * obtain it means, so the overlay writers cannot drift from the read verbs.
+ *
+ * @throws {PodUnreadableError} when the pod is encrypted and unopenable.
  */
 export async function resolvePodDek(podDir: string): Promise<Buffer | undefined> {
-  if (!isPodEncrypted(podDir)) return undefined;
-  try {
-    const passphrase = await obtainPassphrase();
-    return resolveDek(podDir, passphrase);
-  } catch (e: unknown) {
-    const msg =
-      e instanceof PodDecryptError ? e.message : e instanceof Error ? e.message : String(e);
-    throw new Error(`Cannot access encrypted pod: ${msg}`);
-  }
+  return (await openPod(podDir)).dek;
 }
 
 /** Escape a value for use inside a Turtle "..." string literal. */

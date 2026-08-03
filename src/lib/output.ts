@@ -69,6 +69,27 @@ export function printError(message: string, opts: OutputOptions): void {
 }
 
 /**
+ * Print an error to stderr WITH machine-readable detail alongside it.
+ *
+ * In `--json` mode the extra fields are merged into the same `{ error }`
+ * envelope, so a consumer can branch on a state (`readable: false`) instead of
+ * pattern-matching English. In text mode the prose message is all there is —
+ * the message must therefore stand on its own, and the detail is strictly
+ * additive.
+ */
+export function printErrorDetail(
+  message: string,
+  detail: Record<string, unknown>,
+  opts: OutputOptions,
+): void {
+  if (opts.json) {
+    console.error(JSON.stringify({ error: message, ...detail }));
+  } else {
+    console.error(`ERROR: ${message}`);
+  }
+}
+
+/**
  * Print a warning to stderr, ALWAYS. Not gated on --verbose.
  *
  * For facts a user needs even when the command succeeds: "this ran, and here is

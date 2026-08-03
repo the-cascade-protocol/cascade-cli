@@ -44,13 +44,16 @@ function buildProgram(): Command {
   return program;
 }
 
-async function runCli(args: string[]): Promise<{ stdout: string; exitCode: number }> {
+async function runCli(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const program = buildProgram();
   const chunks: string[] = [];
+  const errChunks: string[] = [];
   const logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
     chunks.push(a.map(String).join(' '));
   });
-  const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const errSpy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+    errChunks.push(a.map(String).join(' '));
+  });
   const writeSpy = vi
     .spyOn(process.stdout, 'write')
     .mockImplementation((chunk: unknown): boolean => {
@@ -69,7 +72,7 @@ async function runCli(args: string[]): Promise<{ stdout: string; exitCode: numbe
   }
   const exitCode = typeof process.exitCode === 'number' ? process.exitCode : 0;
   process.exitCode = 0;
-  return { stdout: chunks.join('\n'), exitCode };
+  return { stdout: chunks.join('\n'), stderr: errChunks.join('\n'), exitCode };
 }
 
 /** Extract the identity block (header through the blank line before Discovery). */
@@ -301,12 +304,24 @@ describe('encrypted pods (V1 + V2)', () => {
     expect(JSON.parse(info.stdout).patient.name).toBe('Blair Encrypted');
   }, TEST_TIMEOUT_MS);
 
-  it('pod info omits the name (no crash) when the passphrase is unavailable', async () => {
+  it('pod info refuses to summarize a pod it cannot open', async () => {
+    // This used to assert the opposite — exit 0 with the name simply omitted —
+    // and that "graceful degradation" was the bug. With no passphrase every
+    // data file also failed to parse, so the omitted name came with empty
+    // arrays and `"patient": {}`, which is indistinguishable from an empty pod.
+    // An unreadable pod now says so, and says which state it is in.
     const dir = path.join(mkTmpDir(), 'pod');
     await runCli(['pod', 'init', dir, '--encrypt', '--owner-name', 'Alex Encrypted']);
     delete process.env.CASCADE_POD_PASSPHRASE;
     const info = await runCli(['--json', 'pod', 'info', dir]);
-    expect(info.exitCode).toBe(0);
-    expect(JSON.parse(info.stdout).patient.name).toBeUndefined();
+    expect(info.exitCode).toBe(2);
+    expect(info.stdout.trim()).toBe('');
+    const envelope = JSON.parse(
+      info.stderr.split('\n').find((l) => l.trim().startsWith('{')) as string,
+    ) as { error: string; encrypted?: boolean; readable?: boolean; reason?: string };
+    expect(envelope.encrypted).toBe(true);
+    expect(envelope.readable).toBe(false);
+    expect(envelope.reason).toBe('passphrase-missing');
+    expect(envelope.error).toContain('passphrase was not provided');
   }, TEST_TIMEOUT_MS);
 });

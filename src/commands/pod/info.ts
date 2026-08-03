@@ -3,73 +3,122 @@
  *
  * Show pod metadata and statistics, including patient profile,
  * data file summary, and provenance information.
+ *
+ * Exit codes:
+ *   0 — the pod was read and the summary below is of its actual contents
+ *   1 — usage error (no such directory)
+ *   2 — the pod, or a file inside it, could NOT be read
+ *
+ * The third one is the point. This command used to parse every data file as
+ * PLAINTEXT and resolve a DEK for the owner's name only, non-interactively and
+ * best-effort. On an encrypted pod that meant every parse failed silently, and
+ * `pod info` printed "This pod has no data files yet" — with `"patient": {}`
+ * and empty arrays at exit 0 in `--json` — over a pod holding hundreds of
+ * records. An unreadable pod and an empty one must not share an answer.
+ *
+ * Two deliberate behavior changes come with that:
+ *   - the passphrase now resolves the shared way (`CASCADE_POD_PASSPHRASE`, or
+ *     a hidden prompt when interactive), the same as `pod query`, instead of
+ *     env-only;
+ *   - a pod that cannot be opened or read exits 2 and says which state it is
+ *     in, rather than degrading to a summary of nothing.
  */
 
 import type { Command } from 'commander';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
 import {
-  parseTurtleFile,
-  getSubjectsByType,
-  getProperties,
-  shortenIRI,
-} from '../../lib/turtle-parser.js';
+  printResult,
+  printError,
+  printErrorDetail,
+  printVerbose,
+  printWarning,
+  type OutputOptions,
+} from '../../lib/output.js';
+import { getSubjectsByType, getProperties, shortenIRI } from '../../lib/turtle-parser.js';
+import { DATA_TYPES, CASCADE_NAMESPACES, normalizeProvenanceLabel } from './helpers.js';
 import {
-  DATA_TYPES,
-  CASCADE_NAMESPACES,
+  openPod,
   resolvePodDir,
   isDirectory,
   fileExists,
   discoverTtlFiles,
-  readPatientProfile,
-  normalizeProvenanceLabel,
-} from './helpers.js';
-import { isPodEncrypted, resolveDek } from '../../lib/pod-encryption.js';
-import { passphraseFromEnv } from '../../lib/passphrase.js';
+  unreadableFilesMessage,
+  skippedFilesMessage,
+  PodReadLedger,
+  PodUnreadableError,
+  type PodReader,
+} from '../../lib/pod-read.js';
 
 // ── Extraction pipeline status helper ─────────────────────────────────────────
 
-async function getExtractionStatus(podDir: string): Promise<{
+/**
+ * Count the extraction pipeline's three quantities.
+ *
+ * Every read goes through the reader, including `analysis/review-queue.json`:
+ * that file is inside the encrypted set (only the manifest, the README and the
+ * egress log are plaintext by design), so reading it with a plain `fs.readFile`
+ * on a sealed pod yielded ciphertext, a swallowed JSON parse error, and a
+ * silent zero.
+ */
+async function getExtractionStatus(reader: PodReader, ledger: PodReadLedger): Promise<{
   narrativeBlocks: number;
   aiExtracted: number;
   pendingReview: number;
 }> {
+  const podDir = reader.podDir;
   let narrativeBlocks = 0;
   let aiExtracted = 0;
   let pendingReview = 0;
 
-  // Count narrative blocks in documents.ttl
+  // Count narrative blocks in documents.ttl (a marker count, not a parse).
   const documentsPath = path.join(podDir, 'clinical', 'documents.ttl');
   if (await fileExists(documentsPath)) {
-    try {
-      const content = await fs.readFile(documentsPath, 'utf-8');
-      narrativeBlocks = (content.match(/cascade:requiresLLMExtraction/g) ?? []).length;
-    } catch { /* non-fatal */ }
+    ledger.attempt();
+    const text = reader.readText(documentsPath);
+    if (text.ok) {
+      narrativeBlocks = (text.value.match(/cascade:requiresLLMExtraction/g) ?? []).length;
+    } else {
+      ledger.record(text.failure);
+    }
   }
 
-  // Count AI-extracted entities
+  // Count AI-extracted entities.
   const aiExtractedPath = path.join(podDir, 'clinical', 'ai-extracted.ttl');
   if (await fileExists(aiExtractedPath)) {
-    try {
-      const result = await parseTurtleFile(aiExtractedPath);
-      if (result.success) {
-        // Count subjects that aren't AIExtractionActivity (those are provenance nodes)
-        aiExtracted = result.subjects.filter(
-          (s) => !s.types.some((t) => t.includes('AIExtractionActivity')),
-        ).length;
-      }
-    } catch { /* non-fatal */ }
+    ledger.attempt();
+    const parsed = reader.parseFile(aiExtractedPath);
+    if (parsed.ok) {
+      // Subjects that aren't AIExtractionActivity (those are provenance nodes).
+      aiExtracted = parsed.value.subjects.filter(
+        (s) => !s.types.some((t) => t.includes('AIExtractionActivity')),
+      ).length;
+    } else {
+      ledger.record(parsed.failure);
+    }
   }
 
-  // Count pending review items
+  // Count pending review items.
   const reviewPath = path.join(podDir, 'analysis', 'review-queue.json');
   if (await fileExists(reviewPath)) {
-    try {
-      const raw = await fs.readFile(reviewPath, 'utf-8');
-      const items = JSON.parse(raw) as Array<{ status?: string }>;
-      pendingReview = items.filter((i) => !i.status || i.status === 'pending').length;
-    } catch { /* non-fatal */ }
+    ledger.attempt();
+    const text = reader.readText(reviewPath);
+    if (!text.ok) {
+      ledger.record(text.failure);
+    } else {
+      try {
+        const items = JSON.parse(text.value) as Array<{ status?: string }>;
+        pendingReview = items.filter((i) => !i.status || i.status === 'pending').length;
+      } catch {
+        // Not Turtle and not this command's record picture: a malformed review
+        // queue costs a count, not the whole summary.
+        ledger.record({
+          file: reader.relativePath(reviewPath),
+          kind: 'parse',
+          reason: 'review queue is not valid JSON',
+        });
+      }
+    }
   }
 
   return { narrativeBlocks, aiExtracted, pendingReview };
@@ -93,25 +142,35 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
         return;
       }
 
+      // Open the pod ONCE. A sealed pod this invocation cannot unlock stops
+      // here: the alternative is the summary-of-nothing this command used to
+      // print, which reads exactly like an empty pod.
+      let reader: PodReader;
       try {
-        // On an encrypted pod, resolve the DEK from CASCADE_POD_PASSPHRASE so the
-        // owner name is decryptable for the display chain. Best-effort and
-        // non-interactive: no env var (or a wrong one) simply omits the name
-        // rather than prompting or failing this read-only command.
-        let profileDek: Buffer | undefined;
-        if (isPodEncrypted(absDir)) {
-          const pass = passphraseFromEnv();
-          if (pass) {
-            try {
-              profileDek = resolveDek(absDir, pass);
-            } catch {
-              /* wrong/absent key: proceed without the name */
-            }
-          }
+        reader = await openPod(absDir);
+      } catch (err: unknown) {
+        if (err instanceof PodUnreadableError) {
+          printErrorDetail(
+            err.message,
+            { pod: podDir, encrypted: true, readable: false, reason: err.reason },
+            globalOpts,
+          );
+        } else {
+          printError(err instanceof Error ? err.message : String(err), globalOpts);
         }
+        process.exitCode = 2;
+        return;
+      }
 
-        // Read patient profile info
-        const profile = await readPatientProfile(absDir, profileDek);
+      try {
+        const ledger = new PodReadLedger();
+
+        // Read patient profile info.
+        const { profile, failures: profileFailures } = await reader.readPatientProfile();
+        for (const failure of profileFailures) {
+          ledger.attempt();
+          ledger.record(failure);
+        }
 
         // Scan data files
         const clinicalSummary: Array<{ file: string; records: number; provenance: string; label: string }> = [];
@@ -134,8 +193,16 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
           const filePath = path.join(absDir, typeInfo.directory, typeInfo.filename);
           if (!(await fileExists(filePath))) continue;
 
-          const result = await parseTurtleFile(filePath);
-          if (!result.success) continue;
+          ledger.attempt();
+          // A registered record file that will not read leaves its count
+          // unknown. Reporting the file as absent (the old `continue`) is the
+          // same lie in a quieter voice, so the ledger makes it fatal.
+          const parsed = reader.parseFile(filePath);
+          if (!parsed.ok) {
+            ledger.record(parsed.failure);
+            continue;
+          }
+          const result = parsed.value;
 
           // Count records by type
           let recordCount = 0;
@@ -226,12 +293,39 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
           }
         }
 
-        const extractionStatus = await getExtractionStatus(absDir);
+        const extractionStatus = await getExtractionStatus(reader, ledger);
+
+        // Anything fatal means the numbers below are not the pod's numbers.
+        // Print no summary at all rather than a partial one that reads whole.
+        if (ledger.hasFatal) {
+          printErrorDetail(
+            unreadableFilesMessage(absDir, ledger.fatal, ledger.attempted),
+            {
+              pod: podDir,
+              encrypted: reader.encrypted,
+              readable: false,
+              reason: 'files-unreadable',
+              files: ledger.fatal.map((f) => f.file),
+            },
+            globalOpts,
+          );
+          process.exitCode = 2;
+          return;
+        }
+
+        // Not fatal, never silent.
+        if (ledger.skipped.length > 0) {
+          printWarning(skippedFilesMessage(ledger.skipped), globalOpts);
+        }
 
         if (globalOpts.json) {
           printResult(
             {
               pod: podDir,
+              // Stated positively so a consumer can branch on the state instead
+              // of inferring "it read fine" from the absence of an error.
+              encrypted: reader.encrypted,
+              readable: true,
               patient: {
                 name: profile.name,
                 age: profile.age,

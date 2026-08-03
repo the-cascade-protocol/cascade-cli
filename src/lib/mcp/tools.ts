@@ -15,14 +15,16 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { DATA_TYPES } from '../../commands/pod/helpers.js';
 import {
-  DATA_TYPES,
+  openPod,
   resolvePodDir,
   isDirectory,
   fileExists,
-  parseDataFile,
-  readPatientProfile,
-} from '../../commands/pod/helpers.js';
+  PodReadLedger,
+  PodUnreadableError,
+  PodFilesUnreadableError,
+} from '../pod-read.js';
 import { loadShapes, validateTurtle, validateFile, findTurtleFiles } from '../shacl-validator.js';
 import { convert } from '../fhir-converter/index.js';
 import { writeAuditEntry, createAuditEntry } from './audit.js';
@@ -71,14 +73,25 @@ function toolResponse(data: unknown): { content: Array<{ type: 'text'; text: str
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
 }
 
-/** Format an error tool response. */
-function toolError(message: string): { content: Array<{ type: 'text'; text: string }> } {
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }] };
+/** Format an error tool response, optionally with machine-readable detail. */
+function toolError(
+  message: string,
+  detail: Record<string, unknown> = {},
+): { content: Array<{ type: 'text'; text: string }> } {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify({ error: message, ...detail }) }],
+  };
 }
 
 /**
  * Wrapper for tool handlers that need Pod directory resolution.
  * Handles: pod path resolution, directory check, error catching, response formatting.
+ *
+ * A pod that could not be opened or read comes back as a typed ERROR, never as
+ * a successful result whose counts happen to be zero. These tools feed an agent
+ * that will restate whatever it is handed, so "totalRecords: 0" over a sealed
+ * pod is not a soft failure — it is a confident false statement about someone's
+ * health record.
  */
 function withPodHandler(
   handler: (absDir: string, args: Record<string, unknown>) => Promise<unknown>,
@@ -92,6 +105,21 @@ function withPodHandler(
       const result = await handler(absDir, args);
       return toolResponse(result);
     } catch (err: unknown) {
+      if (err instanceof PodUnreadableError) {
+        return toolError(err.message, {
+          code: 'pod-unreadable',
+          reason: err.reason,
+          encrypted: true,
+          readable: false,
+        });
+      }
+      if (err instanceof PodFilesUnreadableError) {
+        return toolError(err.message, {
+          code: 'pod-files-unreadable',
+          readable: false,
+          files: err.failures.map((f) => f.file),
+        });
+      }
       const message = err instanceof Error ? err.message : String(err);
       return toolError(message);
     }
@@ -114,6 +142,55 @@ export function registerTools(server: McpServer): void {
 
 // ─── cascade_pod_read ────────────────────────────────────────────────────────
 
+/**
+ * The `cascade_pod_read` handler, exported so the read-conformance battery can
+ * put it through the same failure matrix as the CLI verbs.
+ */
+export const podReadHandler = withPodHandler(async (absDir) => {
+  // One DEK for the whole handler. Reading a sealed pod keyless is what made
+  // this tool report an encrypted pod as an empty one.
+  const reader = await openPod(absDir);
+  const ledger = new PodReadLedger();
+
+  const { profile, failures: profileFailures } = await reader.readPatientProfile();
+  for (const failure of profileFailures) {
+    ledger.attempt();
+    ledger.record(failure);
+  }
+
+  const recordCounts: Record<string, number> = {};
+  const provenanceSources = new Set<string>();
+  let totalRecords = 0;
+
+  for (const [typeName, typeInfo] of Object.entries(DATA_TYPES)) {
+    const filePath = path.join(absDir, typeInfo.directory, typeInfo.filename);
+    if (!(await fileExists(filePath))) continue;
+
+    ledger.attempt();
+    const read = reader.readRecords(filePath);
+    if (!read.ok) {
+      ledger.record(read.failure);
+      continue;
+    }
+    const { records } = read.value;
+    if (records.length > 0) {
+      recordCounts[typeName] = records.length;
+      totalRecords += records.length;
+
+      for (const rec of records) {
+        const prov = rec.properties['cascade:dataProvenance'];
+        if (prov) provenanceSources.add(prov);
+      }
+    }
+  }
+
+  // Before the audit entry and before the response: a partial count returned as
+  // a whole one is the failure this tool is being fixed for.
+  ledger.throwIfFatal(absDir);
+
+  return buildPodReadResult(absDir, profile, recordCounts, provenanceSources, totalRecords);
+});
+
 function registerPodRead(server: McpServer): void {
   server.tool(
     'cascade_pod_read',
@@ -121,59 +198,93 @@ function registerPodRead(server: McpServer): void {
     {
       path: z.string().optional().describe('Path to the Pod directory. Uses CASCADE_POD_PATH if omitted.'),
     },
-    withPodHandler(async (absDir) => {
-      const profile = await readPatientProfile(absDir);
-
-      const recordCounts: Record<string, number> = {};
-      const provenanceSources = new Set<string>();
-      let totalRecords = 0;
-
-      for (const [typeName, typeInfo] of Object.entries(DATA_TYPES)) {
-        const filePath = path.join(absDir, typeInfo.directory, typeInfo.filename);
-        if (!(await fileExists(filePath))) continue;
-
-        const { records } = await parseDataFile(filePath);
-        if (records.length > 0) {
-          recordCounts[typeName] = records.length;
-          totalRecords += records.length;
-
-          for (const rec of records) {
-            const prov = rec.properties['cascade:dataProvenance'];
-            if (prov) provenanceSources.add(prov);
-          }
-        }
-      }
-
-      await writeAuditEntry(
-        absDir,
-        createAuditEntry('pod_read', ['all'], totalRecords),
-      );
-
-      return {
-        pod: absDir,
-        patient: {
-          name: profile.name ?? 'Unknown',
-          dateOfBirth: profile.dateOfBirth,
-          age: profile.age,
-          schemaVersion: profile.schemaVersion,
-        },
-        totalRecords,
-        recordCounts,
-        provenanceSources: Array.from(provenanceSources),
-        directories: {
-          clinical: Object.entries(recordCounts)
-            .filter(([k]) => DATA_TYPES[k]?.directory === 'clinical')
-            .map(([k, v]) => ({ type: k, count: v })),
-          wellness: Object.entries(recordCounts)
-            .filter(([k]) => DATA_TYPES[k]?.directory === 'wellness')
-            .map(([k, v]) => ({ type: k, count: v })),
-        },
-      };
-    }),
+    podReadHandler,
   );
 }
 
+/** Assemble the `cascade_pod_read` payload and write its audit entry. */
+async function buildPodReadResult(
+  absDir: string,
+  profile: { name?: string; dateOfBirth?: string; age?: string; schemaVersion?: string },
+  recordCounts: Record<string, number>,
+  provenanceSources: Set<string>,
+  totalRecords: number,
+): Promise<unknown> {
+  await writeAuditEntry(absDir, createAuditEntry('pod_read', ['all'], totalRecords));
+
+  return {
+    pod: absDir,
+    patient: {
+      name: profile.name ?? 'Unknown',
+      dateOfBirth: profile.dateOfBirth,
+      age: profile.age,
+      schemaVersion: profile.schemaVersion,
+    },
+    totalRecords,
+    recordCounts,
+    provenanceSources: Array.from(provenanceSources),
+    directories: {
+      clinical: Object.entries(recordCounts)
+        .filter(([k]) => DATA_TYPES[k]?.directory === 'clinical')
+        .map(([k, v]) => ({ type: k, count: v })),
+      wellness: Object.entries(recordCounts)
+        .filter(([k]) => DATA_TYPES[k]?.directory === 'wellness')
+        .map(([k, v]) => ({ type: k, count: v })),
+    },
+  };
+}
+
 // ─── cascade_pod_query ───────────────────────────────────────────────────────
+
+/**
+ * The `cascade_pod_query` handler, exported for the read-conformance battery.
+ */
+export const podQueryHandler = withPodHandler(async (absDir, args) => {
+  const dataType = args.dataType as string;
+  const typesToQuery = dataType === 'all' ? Object.keys(DATA_TYPES) : [dataType];
+  const results: Record<string, { count: number; file: string; records: Array<{ id: string; type: string; label?: string; properties: Record<string, string> }> }> = {};
+  let totalRecords = 0;
+
+  // One DEK for the whole handler, resolved before the first read.
+  const reader = await openPod(absDir);
+  const ledger = new PodReadLedger();
+
+  for (const typeName of typesToQuery) {
+    const typeInfo = DATA_TYPES[typeName];
+    if (!typeInfo) continue;
+
+    const filePath = path.join(absDir, typeInfo.directory, typeInfo.filename);
+    if (!(await fileExists(filePath))) continue;
+
+    ledger.attempt();
+    const read = reader.readRecords(filePath);
+    if (!read.ok) {
+      ledger.record(read.failure);
+      continue;
+    }
+    const { records } = read.value;
+    if (records.length > 0) {
+      results[typeName] = {
+        count: records.length,
+        file: `${typeInfo.directory}/${typeInfo.filename}`,
+        records: records.map((r) => ({
+          id: r.id,
+          type: r.type,
+          label: r.label,
+          properties: r.properties,
+        })),
+      };
+      totalRecords += records.length;
+    }
+  }
+
+  // A count drawn from the files that happened to open is not the pod's count.
+  ledger.throwIfFatal(absDir);
+
+  await writeAuditEntry(absDir, createAuditEntry('pod_query', typesToQuery, totalRecords));
+
+  return { pod: absDir, dataType, dataTypes: results, totalRecords };
+});
 
 function registerPodQuery(server: McpServer): void {
   server.tool(
@@ -190,42 +301,7 @@ function registerPodQuery(server: McpServer): void {
         ])
         .describe('Data type to query, or "all" for everything.'),
     },
-    withPodHandler(async (absDir, args) => {
-      const dataType = args.dataType as string;
-      const typesToQuery = dataType === 'all' ? Object.keys(DATA_TYPES) : [dataType];
-      const results: Record<string, { count: number; file: string; records: Array<{ id: string; type: string; label?: string; properties: Record<string, string> }> }> = {};
-      let totalRecords = 0;
-
-      for (const typeName of typesToQuery) {
-        const typeInfo = DATA_TYPES[typeName];
-        if (!typeInfo) continue;
-
-        const filePath = path.join(absDir, typeInfo.directory, typeInfo.filename);
-        if (!(await fileExists(filePath))) continue;
-
-        const { records } = await parseDataFile(filePath);
-        if (records.length > 0) {
-          results[typeName] = {
-            count: records.length,
-            file: `${typeInfo.directory}/${typeInfo.filename}`,
-            records: records.map((r) => ({
-              id: r.id,
-              type: r.type,
-              label: r.label,
-              properties: r.properties,
-            })),
-          };
-          totalRecords += records.length;
-        }
-      }
-
-      await writeAuditEntry(
-        absDir,
-        createAuditEntry('pod_query', typesToQuery, totalRecords),
-      );
-
-      return { pod: absDir, dataType, dataTypes: results, totalRecords };
-    }),
+    podQueryHandler,
   );
 }
 

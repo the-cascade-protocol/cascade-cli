@@ -1,193 +1,30 @@
 /**
  * Shared helpers for pod subcommands.
  *
- * Includes file-system utilities, the data type registry, parsing helpers,
- * and display-formatting functions used by multiple pod subcommands.
+ * Identity, display-formatting and export utilities used by several pod
+ * subcommands. The record-reading half of this module now lives in
+ * `lib/pod-read.ts` — one door, one DEK, one rule about what a read failure
+ * means — and this file only re-exports the pieces whose import path many
+ * modules and tests already depend on.
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import {
-  parseTurtleFile,
-  parseTurtle,
-  getProperties,
-  shortenIRI,
-  extractLabel,
-  CASCADE_NAMESPACES,
-} from '../../lib/turtle-parser.js';
-import { readResource, isPodEncrypted, resolveDek } from '../../lib/pod-encryption.js';
-import { obtainPassphrase } from '../../lib/passphrase.js';
+import { CASCADE_NAMESPACES } from '../../lib/turtle-parser.js';
+import { openPod } from '../../lib/pod-read.js';
 
-// ─── Data Type Registry ──────────────────────────────────────────────────────
+// ─── Re-exports ──────────────────────────────────────────────────────────────
+//
+// The registry of record files and the pod file-system helpers moved into
+// `lib/` so the read layer can use them without importing a command module.
 
-/**
- * Known data file types and the rdf:type IRIs that identify records in them.
- */
-export interface DataTypeInfo {
-  label: string;
-  rdfTypes: string[];
-  directory: 'clinical' | 'wellness';
-  filename: string;
-  /** If true, type detection uses prefix-matching instead of exact IRI matching */
-  isFhirPassthroughBucket?: boolean;
-}
-
-export const DATA_TYPES: Record<string, DataTypeInfo> = {
-  medications: {
-    label: 'Medications',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'Medication'],
-    directory: 'clinical',
-    filename: 'medications.ttl',
-  },
-  conditions: {
-    label: 'Conditions',
-    rdfTypes: [CASCADE_NAMESPACES.health + 'ConditionRecord'],
-    directory: 'clinical',
-    filename: 'conditions.ttl',
-  },
-  allergies: {
-    label: 'Allergies',
-    rdfTypes: [CASCADE_NAMESPACES.health + 'AllergyRecord'],
-    directory: 'clinical',
-    filename: 'allergies.ttl',
-  },
-  'lab-results': {
-    label: 'Lab Results',
-    rdfTypes: [CASCADE_NAMESPACES.health + 'LabResultRecord'],
-    directory: 'clinical',
-    filename: 'lab-results.ttl',
-  },
-  immunizations: {
-    label: 'Immunizations',
-    rdfTypes: [CASCADE_NAMESPACES.health + 'ImmunizationRecord'],
-    directory: 'clinical',
-    filename: 'immunizations.ttl',
-  },
-  'vital-signs': {
-    label: 'Vital Signs',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'VitalSign'],
-    directory: 'clinical',
-    filename: 'vital-signs.ttl',
-  },
-  insurance: {
-    label: 'Insurance',
-    rdfTypes: [CASCADE_NAMESPACES.coverage + 'InsurancePlan'],
-    directory: 'clinical',
-    filename: 'insurance.ttl',
-  },
-  'patient-profile': {
-    label: 'Patient Profile',
-    rdfTypes: [CASCADE_NAMESPACES.cascade + 'PatientProfile'],
-    directory: 'clinical',
-    filename: 'patient-profile.ttl',
-  },
-  'heart-rate': {
-    label: 'Heart Rate',
-    rdfTypes: [CASCADE_NAMESPACES.health + 'DailyVitalReading', CASCADE_NAMESPACES.health + 'HeartRateData'],
-    directory: 'wellness',
-    filename: 'heart-rate.ttl',
-  },
-  'blood-pressure': {
-    label: 'Blood Pressure',
-    rdfTypes: [
-      'http://hl7.org/fhir/Observation',
-      CASCADE_NAMESPACES.health + 'BloodPressureData',
-    ],
-    directory: 'wellness',
-    filename: 'blood-pressure.ttl',
-  },
-  activity: {
-    label: 'Activity',
-    rdfTypes: [CASCADE_NAMESPACES.health + 'DailyActivitySnapshot', CASCADE_NAMESPACES.health + 'ActivityData'],
-    directory: 'wellness',
-    filename: 'activity.ttl',
-  },
-  sleep: {
-    label: 'Sleep',
-    rdfTypes: [CASCADE_NAMESPACES.health + 'DailySleepSnapshot', CASCADE_NAMESPACES.health + 'SleepData'],
-    directory: 'wellness',
-    filename: 'sleep.ttl',
-  },
-  supplements: {
-    label: 'Supplements',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'Supplement'],
-    directory: 'wellness',
-    filename: 'supplements.ttl',
-  },
-  procedures: {
-    label: 'Procedures',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'Procedure'],
-    directory: 'clinical',
-    filename: 'procedures.ttl',
-  },
-  encounters: {
-    label: 'Encounters',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'Encounter'],
-    directory: 'clinical',
-    filename: 'encounters.ttl',
-  },
-  documents: {
-    label: 'Clinical Documents',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'ClinicalDocument'],
-    directory: 'clinical',
-    filename: 'documents.ttl',
-  },
-  'lab-reports': {
-    label: 'Lab Reports',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'LaboratoryReport'],
-    directory: 'clinical',
-    filename: 'lab-reports.ttl',
-  },
-  'medication-administrations': {
-    label: 'Medication Administrations',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'MedicationAdministration'],
-    directory: 'clinical',
-    filename: 'medication-administrations.ttl',
-  },
-  devices: {
-    label: 'Implanted Devices',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'ImplantedDevice'],
-    directory: 'clinical',
-    filename: 'devices.ttl',
-  },
-  imaging: {
-    label: 'Imaging Studies',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'ImagingStudy'],
-    directory: 'clinical',
-    filename: 'imaging.ttl',
-  },
-  claims: {
-    label: 'Claims',
-    rdfTypes: ['https://ns.cascadeprotocol.org/coverage/v1#ClaimRecord'],
-    directory: 'clinical',
-    filename: 'claims.ttl',
-  },
-  benefits: {
-    label: 'Benefit Statements',
-    rdfTypes: ['https://ns.cascadeprotocol.org/coverage/v1#BenefitStatement'],
-    directory: 'clinical',
-    filename: 'benefits.ttl',
-  },
-  'social-history': {
-    label: 'Social History',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'SocialHistoryRecord'],
-    directory: 'clinical',
-    filename: 'social-history.ttl',
-  },
-  'ai-extraction-activities': {
-    label: 'AI Extraction Activities',
-    rdfTypes: [CASCADE_NAMESPACES.cascade + 'AIExtractionActivity'],
-    directory: 'clinical',
-    filename: 'ai-extraction-activities.ttl',
-  },
-  'fhir-passthrough': {
-    label: 'FHIR Passthrough',
-    rdfTypes: ['http://hl7.org/fhir/'],
-    directory: 'clinical',
-    filename: 'fhir-passthrough.ttl',
-    isFhirPassthroughBucket: true,
-  },
-};
+export { DATA_TYPES, type DataTypeInfo } from '../../lib/pod-data-types.js';
+export {
+  resolvePodDir,
+  isDirectory,
+  fileExists,
+  discoverTtlFiles,
+} from '../../lib/pod-read.js';
 
 // Re-export CASCADE_NAMESPACES for convenience
 export { CASCADE_NAMESPACES };
@@ -265,236 +102,21 @@ export function stripCardIdentityName(cardTurtle: string): string {
   );
 }
 
-// ─── File-System Helpers ─────────────────────────────────────────────────────
-
-/**
- * Resolve a pod directory path to an absolute path.
- */
-export function resolvePodDir(podDir: string): string {
-  return path.resolve(process.cwd(), podDir);
-}
+// ─── Pod Access ──────────────────────────────────────────────────────────────
 
 /**
  * Resolve a pod's DEK when the pod is encrypted, or `undefined` when it is not.
  *
- * Obtains the passphrase from `CASCADE_POD_PASSPHRASE` or a hidden prompt. Every
- * failure THROWS: a command that cannot get the key must say so rather than
- * carry on keyless, which on an encrypted pod means reading ciphertext and
- * calling the result empty.
+ * A thin front for {@link openPod}, kept for the write-path commands that need
+ * the key itself rather than a reader (conflict-store reads/writes, overlay
+ * appends). Every failure THROWS a {@link PodUnreadableError}: a command that
+ * cannot get the key must say so rather than carry on keyless, which on an
+ * encrypted pod means reading ciphertext and calling the result empty.
  *
- * @throws {PodDecryptError} on a wrong passphrase.
- * @throws {Error} when no passphrase is available at all.
+ * @throws {PodUnreadableError} when the pod is encrypted and unopenable.
  */
 export async function resolvePodDekIfEncrypted(podDir: string): Promise<Buffer | undefined> {
-  if (!isPodEncrypted(podDir)) return undefined;
-  const passphrase = await obtainPassphrase();
-  return resolveDek(podDir, passphrase);
-}
-
-/**
- * Check if a path exists and is a directory.
- */
-export async function isDirectory(dirPath: string): Promise<boolean> {
-  try {
-    const stat = await fs.stat(dirPath);
-    return stat.isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Check if a file exists.
- */
-export async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Discover all TTL files in a pod directory recursively.
- */
-export async function discoverTtlFiles(podDir: string): Promise<string[]> {
-  const files: string[] = [];
-
-  async function walk(dir: string): Promise<void> {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory() && !entry.name.startsWith('.')) {
-        await walk(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith('.ttl')) {
-        files.push(fullPath);
-      }
-    }
-  }
-
-  await walk(podDir);
-  return files.sort();
-}
-
-// ─── Parsing Helpers ─────────────────────────────────────────────────────────
-
-/**
- * WHY a read of a pod file failed, which is not the same question as whether it
- * failed.
- *
- *  - `decrypt` — the bytes would not open under this pod's DEK. The pod's key is
- *    wrong for this file, and nothing about its contents is known.
- *  - `parse`   — the bytes opened (or were plaintext) and are not valid Turtle.
- *
- * Callers weigh them differently on purpose: a file that will not decrypt is a
- * key problem and taints the whole read, while a stray `.ttl` that is not valid
- * Turtle is one bad file among readable ones.
- */
-export type DataFileErrorKind = 'decrypt' | 'parse';
-
-/**
- * Parse a single TTL file and extract typed records.
- *
- * When `dek` is supplied, the on-disk resource is decrypted (combined
- * AES-256-GCM layout) before parsing; otherwise it is read as plaintext.
- */
-export async function parseDataFile(filePath: string, dek?: Buffer): Promise<{
-  records: Array<{
-    id: string;
-    type: string;
-    label: string | undefined;
-    properties: Record<string, string>;
-  }>;
-  totalQuads: number;
-  error?: string;
-  /** Set whenever `error` is: which of the two failures this was. */
-  errorKind?: DataFileErrorKind;
-}> {
-  let result;
-  if (dek) {
-    let content: string;
-    try {
-      content = readResource(filePath, dek);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { records: [], totalQuads: 0, error: message, errorKind: 'decrypt' };
-    }
-    result = parseTurtle(content, `file://${filePath}`);
-  } else {
-    result = await parseTurtleFile(filePath);
-  }
-  if (!result.success) {
-    return {
-      records: [],
-      totalQuads: 0,
-      error: result.errors.join('; '),
-      errorKind: 'parse',
-    };
-  }
-
-  const records: Array<{
-    id: string;
-    type: string;
-    label: string | undefined;
-    properties: Record<string, string>;
-  }> = [];
-
-  for (const subject of result.subjects) {
-    // Skip blank nodes that are just structural (e.g., nested blank nodes for provenance)
-    // Keep named subjects (URNs, URIs) and typed blank nodes with meaningful types
-    const meaningfulTypes = subject.types.filter(
-      (t) =>
-        !t.startsWith('http://www.w3.org/ns/prov#') &&
-        t !== 'http://www.w3.org/ns/solid/terms#TypeRegistration' &&
-        t !== 'http://www.w3.org/ns/solid/terms#TypeIndex' &&
-        t !== 'http://www.w3.org/ns/solid/terms#ListedDocument' &&
-        t !== 'http://www.w3.org/ns/solid/terms#UnlistedDocument' &&
-        t !== 'http://www.w3.org/ns/ldp#BasicContainer',
-    );
-
-    if (meaningfulTypes.length === 0) continue;
-
-    const props = getProperties(result.store, subject.uri);
-    const label = extractLabel(props);
-
-    // Flatten properties for display (take first value of each, shorten IRIs)
-    const flatProps: Record<string, string> = {};
-    for (const [pred, values] of Object.entries(props)) {
-      const shortPred = shortenIRI(pred);
-      // Skip rdf:type since we have it separately
-      if (pred === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type') continue;
-      flatProps[shortPred] = values.length === 1 ? values[0] : values.join(', ');
-    }
-
-    records.push({
-      id: subject.uri,
-      type: shortenIRI(meaningfulTypes[0]),
-      label,
-      properties: flatProps,
-    });
-  }
-
-  return { records, totalQuads: result.quadCount };
-}
-
-/**
- * Read the patient profile from a pod to extract name, age, schema version.
- *
- * When `dek` is supplied, the profile resources are decrypted (combined
- * AES-256-GCM layout) before parsing, so the owner name is resolvable on
- * encrypted pods; otherwise they are read as plaintext.
- */
-export async function readPatientProfile(podDir: string, dek?: Buffer): Promise<{
-  name?: string;
-  age?: string;
-  schemaVersion?: string;
-  dateOfBirth?: string;
-}> {
-  // Try clinical/patient-profile.ttl first, then profile/card.ttl
-  const profilePaths = [
-    path.join(podDir, 'clinical', 'patient-profile.ttl'),
-    path.join(podDir, 'profile', 'card.ttl'),
-  ];
-
-  let name: string | undefined;
-  let age: string | undefined;
-  let schemaVersion: string | undefined;
-  let dateOfBirth: string | undefined;
-
-  for (const profilePath of profilePaths) {
-    if (!(await fileExists(profilePath))) continue;
-
-    let result;
-    if (dek) {
-      try {
-        result = parseTurtle(readResource(profilePath, dek), `file://${profilePath}`);
-      } catch {
-        continue;
-      }
-    } else {
-      result = await parseTurtleFile(profilePath);
-    }
-    if (!result.success) continue;
-
-    for (const subject of result.subjects) {
-      const props = getProperties(result.store, subject.uri);
-      if (!name) {
-        name = props['http://xmlns.com/foaf/0.1/name']?.[0];
-      }
-      if (!age) {
-        age = props[CASCADE_NAMESPACES.cascade + 'computedAge']?.[0];
-      }
-      if (!schemaVersion) {
-        schemaVersion = props[CASCADE_NAMESPACES.cascade + 'schemaVersion']?.[0];
-      }
-      if (!dateOfBirth) {
-        dateOfBirth = props[CASCADE_NAMESPACES.cascade + 'dateOfBirth']?.[0];
-      }
-    }
-  }
-
-  return { name, age, schemaVersion, dateOfBirth };
+  return (await openPod(podDir)).dek;
 }
 
 // ─── Display Helpers ─────────────────────────────────────────────────────────
@@ -637,10 +259,23 @@ export async function copyDirectory(src: string, dest: string): Promise<void> {
 
 /**
  * Create a ZIP archive of the pod directory using adm-zip.
+ *
+ * `extraFiles` are added alongside the pod's own contents, under the same top
+ * folder. `pod export` uses it to stamp an encrypted export with the note that
+ * explains why the files inside look like noise — a zip of ciphertext handed to
+ * a clinician with no explanation is a brick.
  */
-export async function createZipArchive(sourceDir: string, outputPath: string): Promise<void> {
+export async function createZipArchive(
+  sourceDir: string,
+  outputPath: string,
+  extraFiles: Array<{ name: string; content: string }> = [],
+): Promise<void> {
   const AdmZip = (await import('adm-zip')).default;
   const zip = new AdmZip();
-  zip.addLocalFolder(sourceDir, path.basename(sourceDir));
+  const top = path.basename(sourceDir);
+  zip.addLocalFolder(sourceDir, top);
+  for (const extra of extraFiles) {
+    zip.addFile(`${top}/${extra.name}`, Buffer.from(extra.content, 'utf-8'));
+  }
   zip.writeZip(outputPath);
 }
