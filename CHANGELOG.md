@@ -9,14 +9,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-> **Version number not yet chosen.** This section contains IRI-breaking changes for lab
-> results, conditions, allergies, immunizations and patient profiles from FHIR sources, and for
-> EVERY record type read from a C-CDA document (see the upgrade notes), so it is not a patch
-> release. Decide between a minor and a major bump before cutting it.
+## [0.11.0] - 2026-08-03
 
 **This release is about record identity — the IRI each record gets, which decides whether a
-re-import updates a record or duplicates it, and whether two records stay two records.** Two
-things changed, and they pull in opposite directions, so it is worth being clear which is
+re-import updates a record or duplicates it, and whether two records stay two records.** Three
+things changed. The first two pull in opposite directions, so it is worth being clear which is
 which:
 
 1. **Records the source never identified used to get a RANDOM IRI**, so re-importing the same
@@ -30,6 +27,12 @@ which:
    records merged into one and one of them was silently lost. Fixing that necessarily moves
    those IRIs. **These are the release's IRI-breaking changes**, and the upgrade notes below
    say what to do about them.
+3. **Some records were never imported at all**, and this is not an identity change. An allergy
+   written in C-CDA's standard nesting, and any family history, produced no record whatsoever
+   from a standards-conformant document. Both are fixed here. **So expect your record count to
+   go UP after re-importing, not merely to see IRIs move** — if you import a portal export that
+   contains allergies or family history, records will appear that no previous version of this
+   tool ever wrote. See Fixed, below.
 
 ### Upgrade notes
 
@@ -147,7 +150,10 @@ which:
 
 - **Breaking for EVERY record type read from a C-CDA document.** If you have imported a
   downloaded portal export — a MyChart or HealtheLife C-CDA, or an IHE XDM zip of them — every
-  record from it changes IRI in this release. Not one type: all of them.
+  record from it changes IRI in this release. Not one type: all of them. **Re-importing such a
+  document will also produce MORE records than before**, because allergies and family history
+  were previously dropped outright from standards-conformant documents; that is the third
+  change above, and it is a recovery rather than a break.
 
   What was wrong, and why it was all of them at once: every C-CDA section built its record's
   identity from a list of fields that began with the DOCUMENT'S PATIENT, and passed the source
@@ -562,6 +568,7 @@ Previous release — see git history.
 
 ---
 
+[0.11.0]: https://github.com/the-cascade-protocol/cascade-cli/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/the-cascade-protocol/cascade-cli/compare/v0.5.10...v0.10.0
 [0.4.0]: https://github.com/the-cascade-protocol/cli/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/the-cascade-protocol/cli/releases/tag/v0.3.6

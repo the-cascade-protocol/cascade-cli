@@ -4,3 +4,6 @@ dist/
 .DS_Store
 coverage/
 *.log
+
+# Agent worktrees and local agent state
+.claude/
