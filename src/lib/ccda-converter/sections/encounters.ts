@@ -95,7 +95,7 @@ export function buildEncounterRecord(
     patient: patientUri,
     displayName: displayName || undefined,
     date: dateStr || undefined,
-  }, sourceId || undefined);
+  }, sourceId || undefined, enc);
 
   const subj = namedNode(uri);
   const quads: Quad[] = [];

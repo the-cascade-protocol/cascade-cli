@@ -30,7 +30,7 @@ import { referencePlaceholder } from './reference-resolution.js';
 
 export function convertClaim(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.coverage + 'ClaimRecord'));
@@ -108,7 +108,7 @@ export function convertClaim(resource: any): ConversionResult & { _quads: Quad[]
 
 export function convertExplanationOfBenefit(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.coverage + 'BenefitStatement'));

@@ -48,7 +48,7 @@ export function extractDeviceQuads(
       patient: patientUri,
       displayName: displayName.toLowerCase(),
       date: dateStr || undefined,
-    }, sourceId || undefined);
+    }, sourceId || undefined, entry);
 
     const subj = namedNode(uri);
     quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'ImplantedDevice')));

@@ -39,6 +39,7 @@ import { extractDeviceQuads, DEVICES_TEMPLATE_ID } from './sections/devices.js';
 import { extractSocialHistoryQuads, SOCIAL_HISTORY_TEMPLATE_ID } from './sections/social-history.js';
 import { extractNarrativeQuads } from './narrative.js';
 import { deriveSourceEhr, ensureProvenanceQuads, ensureSourceEhrQuads } from './provenance.js';
+import { identityKey } from '../identity.js';
 
 // Map templateId → extractor function and LOINC code
 const SECTION_HANDLERS: Record<string, {
@@ -216,9 +217,17 @@ function convertSingleCcda(
   // Document ID for narrative linking
   const docIdEl = Array.isArray(ccdaDoc?.id) ? ccdaDoc.id[0] : ccdaDoc?.id;
   // HL7 II semantics: root+extension when both present; root alone IS the
-  // globally unique document id when extension is absent. Only fall back to
-  // the import timestamp when the document carries no id at all (that
-  // fallback makes re-imports mint new URIs, i.e. duplicate documents).
+  // globally unique document id when extension is absent. When the document
+  // carries no id at all, identity comes from the document's own parsed,
+  // vendor-normalized content.
+  //
+  // That last tier used to be `doc:${importedAt}`, and the comment here used to
+  // record the consequence without fixing it: "that fallback makes re-imports
+  // mint new URIs, i.e. duplicate documents". It did — documentId feeds the
+  // ClinicalDocument subject through `contentHashedUri`, so every section of an
+  // id-less C-CDA became a new document node on every single import. Hashing the
+  // parsed object rather than the raw XML keeps the identity insensitive to
+  // reformatting and to vendor-specific whitespace.
   const documentId =
     docIdEl?.['@_extension']
       ? `${docIdEl['@_root'] ?? ''}:${docIdEl['@_extension']}`
@@ -226,7 +235,7 @@ function convertSingleCcda(
         ? `${docIdEl.root ?? ''}:${docIdEl.extension}`
         : (docIdEl?.['@_root'] ?? docIdEl?.root)
           ? `${docIdEl['@_root'] ?? docIdEl.root}`
-          : `doc:${importedAt}`;
+          : `doc:${identityKey(undefined, ccdaDoc, warnings, 'C-CDA ClinicalDocument (no <id>)')}`;
 
   const allQuads: any[] = [];
   let count = 0;
@@ -241,6 +250,7 @@ function convertSingleCcda(
   const { quads: patientQuads, patientUri } = extractPatientQuads(
     Array.isArray(recordTarget) ? recordTarget : [recordTarget],
     sourceSystem,
+    warnings,
   );
   allQuads.push(...patientQuads);
   count++;

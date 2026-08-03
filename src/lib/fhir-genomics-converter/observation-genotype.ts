@@ -41,6 +41,7 @@ import {
   tripleRef,
   deterministicUuid,
 } from '../fhir-converter/types.js';
+import { identityKey } from '../identity.js';
 import { emitPhasedWithLink } from './observation-variant.js';
 
 export interface GenotypeParseOutput {
@@ -49,8 +50,11 @@ export interface GenotypeParseOutput {
   gaps: VocabularyGap[];
 }
 
-function mintDiplotypeIri(resource: any, ctx: ImportContext): string {
-  const id = resource?.id ?? Math.random().toString(36);
+function mintDiplotypeIri(resource: any, ctx: ImportContext, idWarnings: string[]): string {
+  // Identity comes from the source id, or from the resource's own content
+  // when it has none. It used to come from Math.random(), so re-importing
+  // the same bundle minted a second record every time.
+  const id = identityKey(resource?.id, resource, idWarnings, 'Diplotype');
   const sys = ctx.sourceSystem ?? 'fhir-genomics';
   return `urn:uuid:${deterministicUuid(`genomics:Diplotype:${sys}:${id}`)}`;
 }
@@ -97,10 +101,14 @@ export function parseGenotypeObservation(
   if (!resource || resource.resourceType !== 'Observation') return null;
 
   const sourceId: string = resource.id ?? '<no-id>';
-  const iri = mintDiplotypeIri(resource, ctx);
   const quads: Quad[] = [];
   const warnings: ImportWarning[] = [];
   const gaps: VocabularyGap[] = [];
+  // The identity door reports a tier-4 collapse (no id, no content, no
+  // narrative) as a plain string; surface it as an import warning.
+  const idWarnings: string[] = [];
+  const iri = mintDiplotypeIri(resource, ctx, idWarnings);
+  for (const m of idWarnings) warnings.push({ message: m });
 
   quads.push(tripleType(iri, GENOMICS_NS + 'Diplotype'));
   quads.push(tripleRef(iri, NS.cascade + 'dataProvenance', NS.cascade + 'ClinicalGenerated'));

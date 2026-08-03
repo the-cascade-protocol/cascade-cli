@@ -59,7 +59,7 @@ export function extractAllergyQuads(
       const uri = contentHashedUri('Allergy', {
         patient: patientUri,
         allergenName: allergenName.toLowerCase(),
-      }, sourceId || undefined);
+      }, sourceId || undefined, entry);
 
       const subj = namedNode(uri);
       quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.health + 'AllergyRecord')));

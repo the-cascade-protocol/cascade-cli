@@ -62,6 +62,15 @@ export function convertFhirResourceToQuads(fhirResource: any, passthroughMinimal
   // converters historically dropped for most types ("Cascade does not drop
   // data"). Additive + idempotent; see provenance.ts.
   if (result) appendProvenanceQuads(fhirResource, result._quads);
+  // NOTE: the identity door's tier-4 collapse warning is NOT re-derived here.
+  // An earlier revision did exactly that, and it looked right — the dispatcher
+  // is one place covering every converter — but it only reached callers who came
+  // through the dispatcher. `convertCondition(...)` called directly returned an
+  // empty `warnings`, so the "this tier must not be silent" contract was true on
+  // the genomics and C-CDA paths and false on the most reachable one in the repo.
+  // The warning now originates where the identity is actually minted, inside
+  // `mintSubjectUri` / `contentHashedUri`, so it reaches every caller of every
+  // converter. Re-deriving it here as well would duplicate it.
   return result;
 }
 

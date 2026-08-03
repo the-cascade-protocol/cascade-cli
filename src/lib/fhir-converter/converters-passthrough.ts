@@ -53,7 +53,7 @@ export const EXCLUDED_REASONS: Record<string, string> = {
 export function convertFhirPassthrough(resource: any, minimal = false): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const resourceType = resource.resourceType as string ?? 'Unknown';
-  const subjectUri = mintSubjectUri(resource);
+  const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.fhir + resourceType));

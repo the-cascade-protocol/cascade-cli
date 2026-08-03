@@ -1197,12 +1197,29 @@ describe('mintSubjectUri', () => {
     expect(r1).not.toBe(r2);
   });
 
-  it('should return random UUID when no id present', () => {
-    const r1 = mintSubjectUri({ resourceType: 'Patient' });
-    const r2 = mintSubjectUri({ resourceType: 'Patient' });
-    expect(r1).toMatch(/^urn:uuid:/);
-    // Two calls with no id should produce different URIs
+  // This test used to assert the opposite — "should return random UUID when no
+  // id present", with `expect(r1).not.toBe(r2)`. It was pinning the defect: a
+  // random IRI for an id-less resource means re-importing the same document
+  // mints a second copy of every id-less record in it, forever, with no signal
+  // that anything happened. `Resource.id` is optional in FHIR, so this is a case
+  // real payloads hit. Identity now comes from the resource's own content.
+  it('should return a CONTENT-derived URI when no id is present', () => {
+    const r1 = mintSubjectUri({ resourceType: 'Patient', birthDate: '1985-06-15', gender: 'female' });
+    const r2 = mintSubjectUri({ resourceType: 'Patient', birthDate: '1985-06-15', gender: 'female' });
+    expect(r1).toMatch(/^urn:uuid:[0-9a-f-]{36}$/);
+    expect(r1).toBe(r2);
+  });
+
+  it('should still distinguish two DIFFERENT id-less resources', () => {
+    const r1 = mintSubjectUri({ resourceType: 'Patient', birthDate: '1985-06-15', gender: 'female' });
+    const r2 = mintSubjectUri({ resourceType: 'Patient', birthDate: '1990-01-02', gender: 'male' });
     expect(r1).not.toBe(r2);
+  });
+
+  it('should not let an id-less resource collide with an id-bearing one', () => {
+    const withId = mintSubjectUri({ resourceType: 'Patient', id: 'patient-1', gender: 'female' });
+    const withoutId = mintSubjectUri({ resourceType: 'Patient', gender: 'female' });
+    expect(withId).not.toBe(withoutId);
   });
 });
 

@@ -36,6 +36,7 @@ import {
   tripleDateTime,
   deterministicUuid,
 } from '../fhir-converter/types.js';
+import { identityKey } from '../identity.js';
 
 export interface ServiceRequestParseOutput {
   record: ParsedRecord;
@@ -43,8 +44,11 @@ export interface ServiceRequestParseOutput {
   gaps: VocabularyGap[];
 }
 
-function mintOrderIri(resource: any, ctx: ImportContext): string {
-  const id = resource?.id ?? Math.random().toString(36);
+function mintOrderIri(resource: any, ctx: ImportContext, idWarnings: string[]): string {
+  // Identity comes from the source id, or from the resource's own content
+  // when it has none. It used to come from Math.random(), so re-importing
+  // the same bundle minted a second record every time.
+  const id = identityKey(resource?.id, resource, idWarnings, 'GeneticTestOrder');
   const sys = ctx.sourceSystem ?? 'fhir-genomics';
   return `urn:uuid:${deterministicUuid(`genomics:GeneticTestOrder:${sys}:${id}`)}`;
 }
@@ -77,10 +81,14 @@ export function parseServiceRequest(
   if (!resource || resource.resourceType !== 'ServiceRequest') return null;
 
   const sourceId: string = resource.id ?? '<no-id>';
-  const iri = mintOrderIri(resource, ctx);
   const quads: Quad[] = [];
   const warnings: ImportWarning[] = [];
   const gaps: VocabularyGap[] = [];
+  // The identity door reports a tier-4 collapse (no id, no content, no
+  // narrative) as a plain string; surface it as an import warning.
+  const idWarnings: string[] = [];
+  const iri = mintOrderIri(resource, ctx, idWarnings);
+  for (const m of idWarnings) warnings.push({ message: m });
 
   quads.push(tripleType(iri, GENOMICS_NS + 'GeneticTestOrder'));
   quads.push(tripleRef(iri, NS.cascade + 'dataProvenance', NS.cascade + 'ClinicalGenerated'));

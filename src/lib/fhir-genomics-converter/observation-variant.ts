@@ -63,6 +63,7 @@ import {
   tripleRef,
   deterministicUuid,
 } from '../fhir-converter/types.js';
+import { identityKey } from '../identity.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -75,16 +76,19 @@ export interface VariantParseOutput {
 /**
  * Mint a Cascade IRI for a Variant. Inputs:
  *   - sourceSystem (optional ctx tag)
- *   - bundle/resource id (FHIR Observation id)
- * Falls back to bundle-relative deterministic minting if no id.
+ *   - bundle/resource id (FHIR Observation id), or the Observation's own
+ *     non-volatile content when it carries no id.
+ *
+ * The id-less branch used to seed on `${ctx.importedAt}:${Math.random()}`. Both
+ * halves of that were fatal, and removing only the visible one would not have
+ * helped: `importedAt` is a per-run timestamp, so hashing it is randomness with
+ * extra steps. A genome is the last place a re-import should mint a second
+ * identity, so identity now comes from the variant itself.
  */
-function mintVariantIri(resource: any, ctx: ImportContext): string {
-  const id = resource?.id as string | undefined;
+function mintVariantIri(resource: any, ctx: ImportContext, idWarnings: string[]): string {
   const sys = ctx.sourceSystem ?? 'fhir-genomics';
-  if (id) {
-    return `urn:uuid:${deterministicUuid(`genomics:Variant:${sys}:${id}`)}`;
-  }
-  return `urn:uuid:${deterministicUuid(`genomics:Variant:${sys}:${ctx.importedAt}:${Math.random()}`)}`;
+  const id = identityKey(resource?.id, resource, idWarnings, 'Variant');
+  return `urn:uuid:${deterministicUuid(`genomics:Variant:${sys}:${id}`)}`;
 }
 
 /**
@@ -174,11 +178,14 @@ export function parseVariantObservation(
   if (!resource || resource.resourceType !== 'Observation') return null;
 
   const sourceId: string = resource.id ?? '<no-id>';
-  const iri = mintVariantIri(resource, ctx);
-  const subject = namedNode(iri);
   const quads: Quad[] = [];
   const warnings: ImportWarning[] = [];
   const gaps: VocabularyGap[] = [];
+  // Surface a tier-4 identity collapse as an import warning.
+  const idWarnings: string[] = [];
+  const iri = mintVariantIri(resource, ctx, idWarnings);
+  for (const m of idWarnings) warnings.push({ message: m });
+  const subject = namedNode(iri);
 
   // ---- Type + provenance ----
   quads.push(tripleType(iri, GENOMICS_NS + 'Variant'));
