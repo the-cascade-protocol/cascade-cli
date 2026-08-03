@@ -3,6 +3,7 @@
  */
 
 import { NS } from '../../fhir-converter/types.js';
+import { firstOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { DataFactory } from 'n3';
@@ -25,7 +26,17 @@ export function extractProcedureQuads(
   const cptOid = '2.16.840.1.113883.6.12';
 
   for (const entry of entries) {
-    const proc = entry?.procedure ?? entry?.act ?? entry;
+    // `<procedure>` and `<act>` are both repeatable elements and are therefore
+    // ARRAYS. This used to be `entry?.procedure ?? entry?.act ?? entry`, which
+    // yielded the array, so `proc.code`, `proc.effectiveTime` and `proc.id` were
+    // all `undefined`. Nothing guarded against that, so every procedure still
+    // minted a record — carrying only its type and source system, with the
+    // procedure NAME, DATE and CODE all silently dropped, and its identity
+    // falling through to a content hash of the raw entry. Empty records reported
+    // as a successful import is the same absence-as-success failure as the
+    // zero-record sections; here it was harder to see because the count looked
+    // right.
+    const proc = firstOf<any>(entry?.procedure) ?? firstOf<any>(entry?.act) ?? entry;
     if (!proc) continue;
 
     const codeEl = proc?.code ?? {};

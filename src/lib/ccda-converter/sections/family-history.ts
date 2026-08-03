@@ -4,6 +4,7 @@
  */
 
 import { NS } from '../../fhir-converter/types.js';
+import { firstOf, listOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { DataFactory } from 'n3';
@@ -41,7 +42,12 @@ export function extractFamilyHistoryQuads(
   const snomedOid = '2.16.840.1.113883.6.96';
 
   for (const entry of entries) {
-    const organizer = entry?.organizer ?? entry;
+    // `<organizer>` is a repeatable element and is therefore an ARRAY (see
+    // `multivalued.ts`). This used to be `entry?.organizer ?? entry`, which
+    // yielded the array itself, so `organizer.subject` and `organizer.component`
+    // were both `undefined` and the whole section produced NOTHING. Measured on
+    // a two-relative section: 0 quads before, 12 after.
+    const organizer = firstOf<any>(entry?.organizer) ?? entry;
     if (!organizer) continue;
 
     // Family member relationship
@@ -56,13 +62,8 @@ export function extractFamilyHistoryQuads(
     // history organizer yielded zero `health:FamilyHistoryRecord`s. The
     // conformance corpus carries no family history section, which is why the
     // section handler was never exercised against real parser output.
-    const components = Array.isArray(organizer?.component)
-      ? organizer.component
-      : organizer?.component ? [organizer.component] : [];
-    const observations = components.flatMap((comp: any) => {
-      const o = comp?.observation;
-      return Array.isArray(o) ? o : (o ? [o] : []);
-    });
+    const components = listOf<any>(organizer?.component);
+    const observations = components.flatMap((comp: any) => listOf<any>(comp?.observation));
     for (const obs of observations) {
       if (!obs) continue;
 

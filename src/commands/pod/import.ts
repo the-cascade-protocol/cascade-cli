@@ -23,7 +23,7 @@ import { Parser } from 'n3';
 import type { Quad } from 'n3';
 import { printResult, printError, printVerbose, printWarning, type OutputOptions } from '../../lib/output.js';
 import { convert } from '../../lib/fhir-converter/index.js';
-import { quadsToTurtle } from '../../lib/fhir-converter/types.js';
+import { quadsToTurtle, type SectionCensusEntry } from '../../lib/fhir-converter/types.js';
 import {
   resolveReferenceEdges,
   buildResourceRefsFromQuads,
@@ -132,6 +132,14 @@ interface ImportReport {
    * routinely in another file of the same import or already in the pod.
    */
   literalLifting: LiteralLiftSummary;
+  /**
+   * Per-section entries-read vs records-written, for sectioned source documents
+   * (C-CDA). A section that offered structured entries and produced no records
+   * appears here with `recordsOut: 0` and is also named in `warnings`. Without
+   * it an import that dropped three whole clinical sections printed a record
+   * count, omitted the empty buckets, and read as a success.
+   */
+  sectionCensus: SectionCensusEntry[];
   warnings: string[];
   dryRun: boolean;
 }
@@ -471,6 +479,10 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       const reconcilerInputs: ReconcilerInput[] = [];
       const sourceReport: ImportReport['sources'] = [];
       const allWarnings: string[] = [...sourceSkips];
+      // Accumulate per-section entries-read vs records-written across every
+      // sectioned input, so the summary can state what each section yielded
+      // rather than silently omitting the sections that yielded nothing.
+      const sectionCensus: SectionCensusEntry[] = [];
       // Accumulate cross-record edge resolution across every converted FHIR input.
       const edgeResolution: ImportReport['edgeResolution'] = {
         resolved: 0,
@@ -571,6 +583,16 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           resourceCount = result.resourceCount;
           warnings.push(...result.warnings);
           allWarnings.push(...result.warnings.map(w => `${filePath}: ${w}`));
+          for (const s of result.sectionCensus ?? []) {
+            const acc = sectionCensus.find((e) => e.label === s.label && e.loinc === s.loinc);
+            if (acc) {
+              acc.entriesIn += s.entriesIn;
+              acc.recordsOut += s.recordsOut;
+              acc.handled = acc.handled || s.handled;
+            } else {
+              sectionCensus.push({ ...s });
+            }
+          }
           // C-CDA lab panels write clinical:hasLabResult edges; fold their tally
           // into the same import-summary accounting as the FHIR path.
           if (result.edgeResolution) {
@@ -1079,6 +1101,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         recordsAlreadyPresent,
         edgeResolution,
         literalLifting,
+        sectionCensus,
         warnings: allWarnings,
         dryRun,
       };
@@ -1126,6 +1149,19 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             const ok = c.recovered >= c.total ? 'OK' : 'partial';
             console.log(`    - ${c.label}: ${c.recovered}/${c.total} (${ok})`);
             if (c.note) console.log(`        ${c.note}`);
+          }
+        }
+        // Every structured section the source offered, including the ones that
+        // produced nothing. The previous summary listed only non-empty record
+        // buckets, so a section read in full and imported as zero was invisible.
+        if (sectionCensus.length > 0) {
+          console.log(`  Structured sections (entries read -> records imported):`);
+          for (const s of [...sectionCensus].sort((a, b) => a.label.localeCompare(b.label))) {
+            const flag =
+              s.recordsOut === 0 && s.entriesIn > 0
+                ? s.handled ? '  <-- NOTHING IMPORTED' : '  <-- NOTHING IMPORTED (section type not supported)'
+                : '';
+            console.log(`    - ${s.label}: ${s.entriesIn} -> ${s.recordsOut}${flag}`);
           }
         }
         const edgeTotal =

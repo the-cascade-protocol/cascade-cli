@@ -3,6 +3,7 @@
  */
 
 import { NS } from '../../fhir-converter/types.js';
+import { firstOf } from '../multivalued.js';
 import { ccdaMedicationRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { lookupRxNormName } from '../rxnorm-lookup.js';
@@ -89,18 +90,21 @@ export function extractMedicationQuads(
   const narrativeIdMap = buildNarrativeIdMap(sectionText);
 
   for (const entry of entries) {
-    // entry.substanceAdministration is always an array from fast-xml-parser's isArray config — unwrap first element
-    const saRaw = entry?.substanceAdministration;
-    const sa = Array.isArray(saRaw) ? saRaw[0] : (saRaw ?? entry);
+    const sa = firstOf<any>(entry?.substanceAdministration) ?? entry;
     if (!sa) continue;
 
     const material = sa?.consumable?.manufacturedProduct?.manufacturedMaterial;
     const codeEl = material?.code ?? {};
     const code = codeEl?.['@_code'] ?? codeEl?.code ?? '';
     const codeSystem = codeEl?.['@_codeSystem'] ?? codeEl?.codeSystem ?? '';
+    // `<name>` is a repeatable element and is therefore an ARRAY, so the old
+    // `material?.name?.['#text']` was `undefined` and a drug named only in
+    // `<manufacturedMaterial><name>` fell through to the narrative/RxNorm tiers
+    // below instead of using the name the source wrote.
+    const materialName = firstOf<any>(material?.name);
     const rawDisplayName =
       codeEl?.['@_displayName'] ?? codeEl?.displayName ??
-      (typeof material?.name === 'string' ? material.name : material?.name?.['#text'] ?? '');
+      (typeof materialName === 'string' ? materialName : materialName?.['#text'] ?? '');
     const isRxNorm = codeSystem.includes('6.88') || codeSystem === rxNormOid;
     // Drug name resolution order:
     //   1. structured code @displayName (rare in Epic exports)

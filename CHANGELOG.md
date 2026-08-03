@@ -27,12 +27,14 @@ which:
    records merged into one and one of them was silently lost. Fixing that necessarily moves
    those IRIs. **These are the release's IRI-breaking changes**, and the upgrade notes below
    say what to do about them.
-3. **Some records were never imported at all**, and this is not an identity change. An allergy
-   written in C-CDA's standard nesting, and any family history, produced no record whatsoever
-   from a standards-conformant document. Both are fixed here. **So expect your record count to
-   go UP after re-importing, not merely to see IRIs move** — if you import a portal export that
-   contains allergies or family history, records will appear that no previous version of this
-   tool ever wrote. See Fixed, below.
+3. **Whole clinical sections were never imported at all**, and this is not an identity change.
+   On a C-CDA document whose custodian organization named a recognized EHR vendor — which is
+   what a downloaded portal export is — **lab results, vital signs, family history and
+   implanted devices each imported as ZERO records**, and the import reported success. On every
+   document, vendor-recognized or not, an allergy written in C-CDA's standard nesting produced
+   no record, and a procedure produced a record with no name, date or code. All of these are
+   fixed here. **So expect your record count to go UP after re-importing, not merely to see
+   IRIs move.** See Fixed, below, and the note on what is still not imported.
 
 ### Upgrade notes
 
@@ -151,9 +153,10 @@ which:
 - **Breaking for EVERY record type read from a C-CDA document.** If you have imported a
   downloaded portal export — a MyChart or HealtheLife C-CDA, or an IHE XDM zip of them — every
   record from it changes IRI in this release. Not one type: all of them. **Re-importing such a
-  document will also produce MORE records than before**, because allergies and family history
-  were previously dropped outright from standards-conformant documents; that is the third
-  change above, and it is a recovery rather than a break.
+  document will also produce MORE records than before** — substantially more, if your export
+  came from a recognized vendor, because its lab results, vital signs, family history and
+  implanted devices were previously dropped in their entirety; that is the third change above,
+  and it is a recovery rather than a break.
 
   What was wrong, and why it was all of them at once: every C-CDA section built its record's
   identity from a list of fields that began with the DOCUMENT'S PATIENT, and passed the source
@@ -208,7 +211,68 @@ which:
   than per document, 17 of 44 move. **The FHIR import path is untouched by this change**: 266
   distinct IRIs across the same fixtures, 0 moved.
 
+### Added
+
+- **The import summary now states, per section, how many structured entries it read and how many
+  records it wrote.**
+
+  ```
+  Structured sections (entries read -> records imported):
+    - Allergies: 1 -> 0  <-- NOTHING IMPORTED
+    - Family History: 2 -> 2
+    - Results: 2 -> 9
+    - Vital Signs: 1 -> 8
+  ```
+
+  A section that offers structured entries and produces no records is also named in the
+  warnings, whatever the cause — a nesting the importer cannot read, a section type it does not
+  support, or entries that were genuinely empty. Previously the summary printed a record count
+  and a per-type breakdown that simply OMITTED the empty buckets, so an import that dropped four
+  entire clinical sections was indistinguishable from one that dropped none. The numbers are in
+  `--json` output and in `--report` as `sectionCensus`.
+
+  This is reported on its own merits and independently of every fix below: had it existed, the
+  section losses fixed in this release would have been visible the first time anyone imported a
+  portal export.
+
+### Known limitations in this release
+
+- **An allergy whose allergen is named only in the section narrative is still not imported —
+  but it is now reported.** Some exports code the allergen as absent (`<value nullFlavor="NI"/>`
+  with a `<code nullFlavor=…>` whose `<originalText><reference value="#…"/>` points into the
+  section's narrative table) and write the substance in words in the narrative only. The
+  importer reads structured data, finds no allergen, and writes no record.
+
+  That was silent. It is not any more: the entry is named in the warnings, with its source
+  identifier, and the section census shows the section as `1 -> 0`. Recovering the substance
+  itself — by resolving the narrative reference, and/or by emitting the record with a
+  data-absent reason — is a separate change and is not in this release. **If your export
+  records allergies this way, check the import warnings; those allergies are not in your pod.**
+
 ### Fixed
+
+- **Lab results, vital signs, family history and implanted devices imported as ZERO records
+  from any document whose custodian named a recognized EHR vendor.** This is the largest data
+  loss fixed in this release and it affected the most common real input there is: a C-CDA
+  downloaded from a patient portal.
+
+  A repeatable C-CDA element — one the CDA R2.1 schema declares `0..*` — is an array when the
+  importer forces it to be one and a plain object otherwise, and that forcing was decided in
+  two places that did not agree. The XML parser forced thirteen element names on every
+  document. Each vendor shim then forced a DIFFERENT set, on documents from that vendor only.
+  `<organizer>` and `<supply>` were in the vendor lists and not the parser's.
+
+  So `entry.organizer` was an object on most documents and an array on documents from a
+  recognized vendor, and four section handlers read it as an object. Reading a property of an
+  array yields nothing, so on those documents the results section, the vital signs section, the
+  family history section and the medical equipment section each produced no records at all —
+  and nothing said so. **The same document imported 30 records when its custodian was
+  unrecognized and 10 when it named a vendor.**
+
+  There is now ONE list of repeatable elements, applied by the parser to every document. Vendor
+  normalization can no longer change the shape of anything, a test asserts that it does not,
+  and a second test fails the build if any handler reads a property off one of these containers
+  again. That last one is the point: this was the third time the same mistake shipped.
 
 - **Allergies written in C-CDA's standard nesting were dropped entirely.** An allergy in a
   C-CDA document is normally recorded as a concern act wrapping the allergy observation
@@ -216,10 +280,38 @@ which:
   importer only walked the looser `act` → `observation` shape, so on a standard document it
   produced NO allergy records at all — not a wrong allergy, none. Both shapes are read now.
 
-- **Family history was dropped entirely, for the same class of reason.** The section handler
+- **Family history was dropped entirely, for two independent reasons.** The section handler
   read an organizer's component observations as a single object where the parser always
-  produces a list, so every field came back empty and no family history record was ever
-  emitted from a real document.
+  produces a list, so every field came back empty. On a vendor-recognized document the
+  organizer itself was also unreadable, for the reason above. Both are fixed; on such a
+  document the first fix alone recovered nothing.
+
+- **Procedure records were written with no name, no date and no code.** The handler read
+  `entry.procedure` (and its `entry.act` fallback) as an object where both are always lists, so
+  every field it went on to read came back empty — but nothing stopped it writing the record.
+  A procedure therefore imported as a bare typed node with none of its content, on EVERY
+  document. This was harder to see than the zero-record sections precisely because the record
+  count looked right.
+
+- **A resolved problem imported as active, on every document.** A problem's status sits in a
+  status observation under `<entryRelationship>`, which is always a list; the handler read it as
+  an object, so the status the source stated was never read and the displayed status fell back
+  to the "active" default every time. A problem your provider marked resolved is now imported as
+  resolved.
+
+- **An allergy's severity, and the allergen name the source wrote for a human, were both
+  discarded.** The severity observation sits under `<entryRelationship>` and the allergen name
+  in `<playingEntity><name>`; both are lists and both were read as objects. The allergen fell
+  back to the coded concept's display name, which names the same substance but is not the string
+  your provider chose to show you, and the severity was simply lost. Measured across the C-CDA
+  conformance fixtures: every allergy in the corpus had a severity in its source (mild, moderate
+  and severe) and NONE of them reached the pod. Both are read now. Severity is part of an
+  allergy's identity — a mild rash and an anaphylaxis to one substance are two claims — so an
+  allergy that carries no `<id>` of its own moves; every allergy in the corpus carries one, and
+  none of their IRIs move.
+
+- **A drug named only in `<manufacturedMaterial><name>` fell through to the narrative and RxNorm
+  fallbacks.** Same cause: `<name>` is a list and was read as an object.
 
 - **A root-only `<id>` is no longer discarded, so `cascade:sourceRecordId` survives.** Nine of
   ten C-CDA sections read a record's identifier only when it carried an `extension` attribute,

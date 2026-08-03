@@ -39,6 +39,29 @@ export interface EdgeResolutionSummary {
   byPredicate: Record<string, { resolved: number; unresolved: number }>;
 }
 
+/**
+ * One structured section of a source document: how many entries it offered, and
+ * how many records the importer actually wrote.
+ *
+ * These two numbers were never compared, and three entire clinical sections
+ * imported as zero records while the summary reported success and simply omitted
+ * the empty buckets. A section that reads N structured entries and writes 0
+ * records has to say so, whatever the cause — a handler defect, an unsupported
+ * nesting, or genuinely empty entries.
+ */
+export interface SectionCensusEntry {
+  /** Section title from the document, or the LOINC code when it has none. */
+  label: string;
+  /** Section-level LOINC code, where the document states one. */
+  loinc?: string;
+  /** `<entry>` elements the section offered. */
+  entriesIn: number;
+  /** Distinct record subjects the handler produced from them. */
+  recordsOut: number;
+  /** False when the section's templateId matches no structured handler. */
+  handled: boolean;
+}
+
 export interface BatchConversionResult {
   success: boolean;
   output: string;
@@ -48,6 +71,11 @@ export interface BatchConversionResult {
   warnings: string[];
   errors: string[];
   results: ConversionResult[];
+  /**
+   * Per-section entries-read vs records-written, for import paths that read a
+   * sectioned document (C-CDA). Absent for formats without sections.
+   */
+  sectionCensus?: SectionCensusEntry[];
   /** Present for FHIR -> Cascade conversions; tallies cross-record edges. */
   edgeResolution?: EdgeResolutionSummary;
   /**

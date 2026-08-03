@@ -10,6 +10,7 @@
  */
 
 import { NS } from '../../fhir-converter/types.js';
+import { listOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
@@ -126,11 +127,7 @@ export function extractEncounterQuads(
     // LIST of encounters — the old code read the array as a single object, so
     // every field came back undefined and all encounters in the export collapsed
     // into one bare, content-hash-identical record. Iterate the list instead.
-    const encList = Array.isArray(entry?.encounter)
-      ? entry.encounter
-      : entry?.encounter
-        ? [entry.encounter]
-        : [entry];
+    const encList = entry?.encounter ? listOf<any>(entry.encounter) : [entry];
     for (const enc of encList) {
       const built = buildEncounterRecord(enc, sourceSystem, warnings);
       if (built) quads.push(...built.quads);

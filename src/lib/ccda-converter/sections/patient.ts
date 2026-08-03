@@ -3,6 +3,7 @@
  */
 
 import { NS, structuredKey } from '../../fhir-converter/types.js';
+import { firstOf, listOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
@@ -49,8 +50,7 @@ export function extractPatientQuads(
   // const patientRole = rt?.patientRole ?? rt ?? {};
 
   // Extract demographics
-  const nameArr = Array.isArray(patient.name) ? patient.name : (patient.name ? [patient.name] : []);
-  const nameEl = nameArr[0] ?? {};
+  const nameEl = firstOf<any>(patient.name) ?? {};
   const given = Array.isArray(nameEl.given) ? nameEl.given[0] : nameEl.given ?? '';
   const family = Array.isArray(nameEl.family) ? nameEl.family[0] : nameEl.family ?? '';
   const givenStr = typeof given === 'string' ? given : given?.['#text'] ?? '';
@@ -61,8 +61,7 @@ export function extractPatientQuads(
 
   // Extract address from patientRole
   const patientRole = rt?.patientRole ?? rt ?? {};
-  const addrArr = Array.isArray(patientRole.addr) ? patientRole.addr : (patientRole.addr ? [patientRole.addr] : []);
-  const addr = addrArr[0] ?? {};
+  const addr = firstOf<any>(patientRole.addr) ?? {};
   const street = (() => {
     const sl = addr.streetAddressLine;
     if (!sl) return '';
@@ -74,7 +73,7 @@ export function extractPatientQuads(
   const postalCode = addr.postalCode != null ? String(addr.postalCode) : '';
 
   // Extract phone and email from patientRole telecom
-  const telecomArr = Array.isArray(patientRole.telecom) ? patientRole.telecom : (patientRole.telecom ? [patientRole.telecom] : []);
+  const telecomArr = listOf<any>(patientRole.telecom);
   const phone = (() => {
     const t = telecomArr.find((t: any) => {
       const val: string = t?.['@_value'] ?? t?.value ?? '';

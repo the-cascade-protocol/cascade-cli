@@ -4,6 +4,7 @@
  */
 
 import { NS } from '../../fhir-converter/types.js';
+import { firstOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
@@ -23,12 +24,16 @@ export function extractDeviceQuads(
   const quads: Quad[] = [];
 
   for (const entry of entries) {
-    const supply = entry?.supply ?? entry;
+    // `<supply>` is a repeatable element and is therefore an ARRAY (see
+    // `multivalued.ts`). This used to be `entry?.supply ?? entry`, which yielded
+    // the array, so `supply.participant` and `supply.effectiveTime` were both
+    // `undefined`, the device had no name, and the `if (!displayName) continue`
+    // below dropped EVERY implanted device without a word. Measured on a
+    // one-device section: 0 quads before, 5 after.
+    const supply = firstOf<any>(entry?.supply) ?? entry;
     if (!supply) continue;
 
-    const participant = Array.isArray(supply?.participant)
-      ? supply.participant[0]
-      : supply?.participant;
+    const participant = firstOf<any>(supply?.participant);
     const device = participant?.participantRole?.playingDevice ?? {};
     const codeEl = device?.code ?? {};
     const displayName = codeEl?.['@_displayName'] ?? codeEl?.displayName ??

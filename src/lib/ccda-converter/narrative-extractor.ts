@@ -6,6 +6,8 @@
  * <entry> elements as requiresLLMExtraction.
  */
 
+import { listOf } from './multivalued.js';
+
 // Template ID → human-readable section name mapping
 const TEMPLATE_ID_SECTION_NAMES: Record<string, string> = {
   '2.16.840.1.113883.10.20.22.2.1.1':  'medications',
@@ -120,18 +122,14 @@ export function collectNarrativeBlocks(parsedCDA: any): NarrativeBlock[] {
   const ccdaDoc = parsedCDA?.ClinicalDocument ?? parsedCDA;
 
   // Locate structuredBody
-  const componentTopLevel = ccdaDoc?.component;
-  const componentTopArr = Array.isArray(componentTopLevel)
-    ? componentTopLevel
-    : componentTopLevel ? [componentTopLevel] : [];
+  const componentTopArr = listOf<any>(ccdaDoc?.component);
   const body =
     componentTopArr.find((c: any) => c?.structuredBody)?.structuredBody
     ?? ccdaDoc?.structuredBody;
 
   if (!body) return blocks;
 
-  const components = body?.component ?? [];
-  const componentArr = Array.isArray(components) ? components : [components];
+  const componentArr = listOf<any>(body?.component);
 
   for (const comp of componentArr) {
     const section = comp?.section ?? comp;
@@ -159,11 +157,7 @@ export function collectNarrativeBlocks(parsedCDA: any): NarrativeBlock[] {
     const narrativeText = extractNarrativeText(sectionText);
 
     // Determine if narrative-only (no <entry> children)
-    const entries = section?.entry;
-    const entryArr = Array.isArray(entries)
-      ? entries
-      : entries ? [entries] : [];
-    const requiresLLMExtraction = entryArr.length === 0;
+    const requiresLLMExtraction = listOf<any>(section?.entry).length === 0;
 
     // Only emit a block if there is text or the section is narrative-only with content
     if (narrativeText || requiresLLMExtraction) {
