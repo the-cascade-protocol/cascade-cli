@@ -329,7 +329,67 @@ describe('a record does not change identity because the patient changed nickname
 });
 
 // ---------------------------------------------------------------------------
-// 5. CONTROLS. These pass before and after, by design.
+// 5. Identity falls through to the record itself when the key has nothing
+// ---------------------------------------------------------------------------
+
+describe('a record with no usable key fields is identified by its own content', () => {
+  /** A problem entry with nothing codeable: no code, no name, no onset. */
+  const bare = (note: string) => ({
+    act: { entryRelationship: { observation: { value: { '@_nullFlavor': 'NI' }, text: note } } },
+  });
+
+  it('two key-less problems with different content are two records', async () => {
+    // Previously ONE. While `patient` was in the key it could never be empty, so
+    // `contentHashedUri` never fell through to the shared identity door and
+    // every such entry landed on the same IRI. A problem noted "left knee" and
+    // one noted "right shoulder" are plainly two problems to any reader.
+    const { extractProblemQuads } = await import('../src/lib/ccda-converter/sections/problems.js');
+    const subjectOf = (entry: any) => {
+      const q = extractProblemQuads([entry], 'SyntheticEHR');
+      const typed = q.filter((x) => x.predicate.value === RDF_TYPE);
+      return typed.length > 0 ? typed[0].subject.value : null;
+    };
+    const a = subjectOf(bare('left knee'));
+    const b = subjectOf(bare('right shoulder'));
+    expect(a).toBeTruthy();
+    expect(b).not.toBe(a);
+  });
+
+  it('a DEFAULTED field is not in the key, or the fall-through never happens', async () => {
+    // `status` is defaulted to the literal 'active' by the converter. The first
+    // draft of this change put it in the key, which made the key a non-empty
+    // CONSTANT and silently restored the merge above. A content tier that
+    // succeeds with a constant is indistinguishable from one that fails, except
+    // that it merges.
+    const src = fs.readFileSync(path.join(REPO, 'src/lib/ccda-converter/sections/problems.ts'), 'utf8');
+    const key = src.slice(src.indexOf('content: {'), src.indexOf('source: entry'));
+    expect(key, 'the problems key must use the STATED status, never the default').not.toMatch(
+      /status:\s*status\b/,
+    );
+    expect(key).toMatch(/statedStatus/);
+  });
+
+  it('but a stated status still separates an active problem from a resolved one', async () => {
+    const { extractProblemQuads } = await import('../src/lib/ccda-converter/sections/problems.js');
+    const withStatus = (state: string) => ({
+      act: {
+        entryRelationship: {
+          observation: {
+            value: { '@_code': '44054006', '@_codeSystem': '2.16.840.1.113883.6.96', '@_displayName': 'Diabetes' },
+            effectiveTime: { low: { '@_value': '20240115' } },
+            entryRelationship: { observation: { value: { '@_displayName': state } } },
+          },
+        },
+      },
+    });
+    const subjectOf = (entry: any) =>
+      extractProblemQuads([entry], 'SyntheticEHR').filter((x) => x.predicate.value === RDF_TYPE)[0].subject.value;
+    expect(subjectOf(withStatus('Active'))).not.toBe(subjectOf(withStatus('Resolved')));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. CONTROLS. These pass before and after, by design.
 // ---------------------------------------------------------------------------
 
 describe('CONTROL — a true re-import still produces one record set', () => {

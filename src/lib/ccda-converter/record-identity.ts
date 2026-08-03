@@ -55,11 +55,30 @@
  * removing it from the keys severs nothing that `pod query --neighbors` can
  * traverse.
  *
- * And removing it has a second effect worth stating, because the safety net was
- * switched off by exactly this field: while `patient` was in the key the content
- * tier could never be empty, so tiers 2–4 of the shared identity door — the
- * salvage pass and the LOUD COLLAPSE warning — were unreachable on this path.
- * `src/lib/identity.ts` documented that as a known hole. They are reachable now.
+ * And removing it has a second effect, which is worth stating PRECISELY because
+ * the obvious version of the claim is wrong. While `patient` was in the key the
+ * curated key could never be empty, so `contentHashedUri` never fell through to
+ * the shared identity door at all: two entries with no usable key fields and
+ * PLAINLY different content — a problem noted "left knee" and one noted "right
+ * shoulder", neither coded — minted one IRI. They mint two now, because identity
+ * falls through to a hash of the entry's own bytes.
+ *
+ * What does NOT follow is that the tier-4 LOUD COLLAPSE warning now fires in
+ * practice. Every section passes its raw source element as `source`, and a
+ * parsed C-CDA element is essentially never empty, so tier 2 of the door
+ * answers. Tier 4 is reachable THROUGH the door — `ccdaRecordUri` with an empty
+ * key and an empty source emits it, and the chokepoint test exercises exactly
+ * that — but from a real document it stays as unreached as
+ * `src/lib/identity.ts` says. Measured, not assumed: a problem entry whose only
+ * `<value>` is `nullFlavor="NI"` emits zero collapse warnings on this build.
+ *
+ * The other half of the same lesson, learned the expensive way while writing
+ * this: the first draft of the problems key included `status`, which the
+ * converter DEFAULTS to the literal 'active'. That made the key a non-empty
+ * CONSTANT, the fall-through above never happened, and the two differently-noted
+ * problems still merged. A placeholder default in an identity key turns "we do
+ * not know" into "these are the same record". Only the STATED status is in the
+ * key now.
  */
 
 import {

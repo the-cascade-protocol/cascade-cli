@@ -55,10 +55,17 @@ export function extractProblemQuads(
       const isSnomed = codeSystem.includes('6.96') || codeSystem === snomedOid;
       const isIcd10 = codeSystem.includes('6.90') || codeSystem === icd10Oid;
 
-      // Status from entryRelationship
+      // Status from entryRelationship. `statedStatus` and `status` are kept
+      // apart on purpose: `status` carries the 'active' DEFAULT and is what the
+      // record DISPLAYS, while only `statedStatus` — what the source actually
+      // said — may enter the identity key. A placeholder default in a key turns
+      // "we do not know" into "these are the same record", and a content tier
+      // that succeeds with a constant is indistinguishable from one that fails
+      // except that it merges.
       const statusObs = observation?.entryRelationship?.observation;
       const statusValue = (Array.isArray(statusObs) ? statusObs[0] : statusObs)?.value;
-      const status = statusValue?.['@_displayName'] ?? statusValue?.displayName ?? 'active';
+      const statedStatus = statusValue?.['@_displayName'] ?? statusValue?.displayName ?? '';
+      const status = statedStatus || 'active';
 
       // Onset date
       const effectiveTime = observation?.effectiveTime ?? act?.effectiveTime ?? {};
@@ -79,7 +86,11 @@ export function extractProblemQuads(
           icd10Code: isIcd10 ? code : undefined,
           conditionName: displayName || undefined,
           onsetDate: onsetDate || undefined,
-          status: status || undefined,
+          // Serialized as health:status, so it belongs in the key: "active" and
+          // "resolved" are two different claims about a patient, and the FHIR
+          // Condition key includes clinicalStatus for exactly that reason. The
+          // STATED value only — never the default.
+          status: statedStatus ? statedStatus.toLowerCase() : undefined,
         },
         source: entry,
         warnings,
