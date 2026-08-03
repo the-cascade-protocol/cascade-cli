@@ -13,15 +13,29 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > results (see the first upgrade note), so it is not a patch release. Decide between a minor
 > and a major bump before cutting it.
 
+**This release is about record identity — the IRI each record gets, which decides whether a
+re-import updates a record or duplicates it, and whether two records stay two records.** Two
+things changed, and they pull in opposite directions, so it is worth being clear which is
+which:
+
+1. **Records the source never identified used to get a RANDOM IRI**, so re-importing the same
+   document duplicated them, forever. They now get an IRI derived from their own content, so
+   they reconcile. **No IRI that a source identifier already determined moves because of this.**
+2. **Lab results used to be identified too coarsely** — by patient, test code and calendar day,
+   ignoring the measured value, the time of day, and the source's own identifier — so two
+   genuinely different results on one day merged into one and a value was silently lost. Fixing
+   that necessarily moves lab IRIs. **This is the only IRI-breaking change in the release**, and
+   the upgrade note below says what to do about it.
+
 ### Upgrade notes
 
-- **Breaking for lab results imported from FHIR.** Lab result IRIs change in this release for
-  anything imported through a FHIR source — a SMART on FHIR connection, a FHIR bundle, an
-  Apple Health export. If you have imported labs with an earlier version, records imported by
-  this one will not match them. Labs imported from C-CDA documents are unchanged; see the
-  known limitation below.
+- **Breaking for lab results, from EVERY import source.** Lab result IRIs change in this
+  release, whether the results came from a FHIR source (a SMART on FHIR connection, a FHIR
+  bundle, an Apple Health export) or from a downloaded C-CDA document (a MyChart-style portal
+  export). If you have imported labs with an earlier version, records imported by this one
+  will not match them.
 
-  What was wrong: a lab result's identity was built from the patient, the LOINC code and the
+  What was wrong: a lab result's identity was built from the patient, the test code and the
   calendar DAY, and from nothing else. The measured result was not part of it, the time of day
   was thrown away, and the lab's own identifier from your provider's system was ignored. So two
   different results for the same test on the same day — a fasting glucose in the morning and a
@@ -30,10 +44,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in. Serial same-day labs are ordinary medicine (glucose curves, troponin series, repeat
   potassium, before-and-after dialysis), so this did not need unusual data to happen.
 
+  **Both importers carried the same defect, in the same shape, and both are fixed here** —
+  together, deliberately, so that lab identity changes exactly once rather than once per
+  importer across two releases.
+
   A lab result now takes its identity from the identifier your provider's system assigned it,
   the same way vital signs already did. When a result carries no identifier, its identity comes
-  from the patient, the LOINC code, the FULL timestamp, the measured value, the specimen and
-  the category — everything that actually tells two results apart.
+  from the patient, the test code, the FULL timestamp and the measured value, plus the specimen
+  and category where the source records them — everything that actually tells two results
+  apart.
 
   **What to do.** Re-import the sources your labs came from, into a fresh pod, and use that.
   Alternatively, keep the pod you have and accept that labs imported before and after this
@@ -47,20 +66,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   After this change no lab observation collides with another; the only records that still
   share an IRI are the same record appearing in two files, which is correct.
 
-  Nothing outside FHIR lab results moves. Vital signs, conditions, allergies, medications,
+  **Nothing but lab results moves.** Vital signs, conditions, allergies, medications,
   procedures, encounters, documents, immunizations, coverage and claims all keep the IRIs they
-  had. Verified across the conformance corpus: 46 of 91 converted resources were unchanged, and
-  every one of the 45 that moved was a lab observation.
+  had. Verified twice: across the FHIR conformance corpus, 46 of 91 converted resources were
+  unchanged and every one of the 45 that moved was a lab observation; across the C-CDA corpus,
+  40 of 43 identities were unchanged and all 3 that moved were lab results.
 
-### Known limitations in this release
-
-- **The same defect remains on the C-CDA import path, and is not fixed here.** A lab result
-  read from a C-CDA document is still identified by patient, test code, test name and calendar
-  day, with the measured value left out and the document's own identifier for the result
-  ignored. Two different same-day results for one test therefore still collapse into one
-  record on that path. It is called out rather than quietly fixed because closing it is a
-  second IRI-breaking change for labs, and breaking lab identity twice in two releases is
-  worse for anyone holding a pod than doing both at once. Verified reproducible.
+  **Lab PANELS keep their IRIs, with one narrow exception.** A panel read from a C-CDA document
+  whose source gave it neither an identifier nor a test code was previously indistinguishable
+  from any other panel drawn for the same patient on the same day, so several genuinely
+  different panels shared one record and pooled their results. Such a panel now takes its
+  identity from its full timestamp and the set of results it contains, and so moves. A panel
+  that carries an identifier — the common case — is unchanged.
 
 ### Fixed
 
@@ -94,10 +111,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   yields the same IRI across runs, across machines, across working directories, and
   regardless of its position in a bundle. Different records still yield different IRIs.
 
-  **This particular change moves no IRI that a source `id` already determined.** Where a
-  source resource carries an identifier, the IRI it produces here is byte-for-byte what
-  previous versions minted. (The lab-result change described under Upgrade notes above IS
-  IRI-breaking, and is the only thing in this release that is.)
+  **This change moves no IRI that a source identifier already determined** — see point 1 of
+  the summary at the top of this section. Where a source resource carries an identifier, the
+  IRI it produces here is byte-for-byte what previous versions minted. The lab-result change
+  under Upgrade notes is a separate change and is the release's only IRI break.
 
   Server-assigned volatile fields are excluded from the content hash — `meta.lastUpdated`,
   `meta.versionId` and `meta.source` — so a resource re-fetched from an EHR keeps its

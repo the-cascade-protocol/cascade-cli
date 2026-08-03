@@ -3,18 +3,46 @@
  *
  * Two record families come out of this section:
  *  - health:LabResultRecord — one per member observation (standalone or inside an
- *    organizer). Subject minting is frozen (contentHashedUri('LabResult', ...)).
+ *    organizer).
  *  - clinical:LaboratoryReport — one per BATTERY organizer (a lab panel), with a
  *    clinical:hasLabResult edge to each of its member results. This mirrors the
  *    FHIR converter's convertLaboratoryReport so both import paths produce
- *    shape-compatible panel records (root backlog 3.11a / slice R2).
+ *    shape-compatible panel records.
  *
  * CLUSTER organizers in this section are left as plain member observations (no
  * panel record); results-section CLUSTER panels are a filed follow-up, not this
  * slice's scope.
+ *
+ * SUBJECT MINTING IS NO LONGER "FROZEN", AND THE FREEZE IS WHY IT HAD TO CHANGE
+ * ----------------------------------------------------------------------------
+ * This header used to say `health:LabResultRecord` minting was frozen at
+ * `contentHashedUri('LabResult', {patient, loincCode, testName, date})`. That
+ * claim is gone rather than worked around, because it was not describing a
+ * decision anyone would defend on the merits — it was describing a key set that
+ * SILENTLY MERGED DIFFERENT LAB RESULTS, and the freeze is a large part of why
+ * it survived long enough to be shipped by two importers at once.
+ *
+ * What was wrong with it, measured rather than argued: the MEASURED VALUE was
+ * extracted a few lines above the mint and never entered the key; `date` was
+ * `formatCcdaDate()`, truncated to a calendar day; and the observation's own
+ * `<id root= extension=>` was passed as `fallbackId`, which `contentHashedUri`
+ * consults only when every content field is empty — never true for a real lab,
+ * since `patient` is always populated. So a fasting glucose of 95 and a
+ * post-prandial glucose of 310, drawn the same morning with DISTINCT source
+ * ids, both minted `urn:uuid:dc68ecd7-acc0-5d61-981a-e51a3dbc0b0c`, and one of
+ * the two values was discarded downstream as a duplicate.
+ *
+ * The identical defect sat in the FHIR importer's `convertObservationLab` and
+ * is fixed in the same change, so both import paths now answer the same way.
+ *
+ * A comment is not an enforcement mechanism. If some future key set here really
+ * must not move, pin it with a golden-value test — `tests/ccda-lab-identity.test.ts`
+ * carries several, and a test states which property is protected instead of
+ * asking the next reader to guess.
  */
 
 import { NS, contentHashedUri, tripleDateTime } from '../../fhir-converter/types.js';
+import { contentFingerprint, EMPTY_SEED } from '../../identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { buildEncounterRecord } from './encounters.js';
 import { DataFactory } from 'n3';
@@ -73,8 +101,21 @@ interface LabObservation {
 }
 
 /**
- * Convert one C-CDA lab observation to a health:LabResultRecord. Subject minting
- * is frozen: contentHashedUri('LabResult', {patient, loincCode, testName, date}).
+ * Convert one C-CDA lab observation to a health:LabResultRecord.
+ *
+ * IDENTITY: a present source `<id>` wins outright. That is the same rule the
+ * FHIR importer's `convertObservationLab` applies to `resource.id`, and it makes
+ * a collision structurally impossible for any result the source identified.
+ * Identity answers "is this that record?"; deciding that two records are the
+ * same THING is a separate judgement, it needs a conflict trail, and it belongs
+ * to the layer that can see both records rather than to this one, which sees one
+ * at a time and can only overwrite.
+ *
+ * Without an id, the key carries what actually separates two results: patient,
+ * LOINC code, test name, the effective time at the FULL precision C-CDA gives
+ * (`YYYYMMDDHHMMSS±ZZZZ`, not the day-truncated `formatCcdaDate` output that is
+ * emitted as `health:performedDate`), and the measured value with its unit.
+ *
  * Returns null for an empty/absent observation.
  */
 function extractObservationQuads(
@@ -108,12 +149,26 @@ function extractObservationQuads(
 
   const sourceId = extractSourceId(obs);
 
-  const uri = contentHashedUri('LabResult', {
-    patient: patientUri,
-    loincCode: isLoinc ? code : undefined,
-    testName: displayName || undefined,
-    date: dateStr || undefined,
-  }, sourceId || undefined, obs);
+  // Tier 1 — the source identified this result. Nothing else is consulted, so
+  // two results the source kept apart can never be merged here. Passing the id
+  // as `contentHashedUri`'s `fallbackId` with an EMPTY field set produces
+  // exactly `deterministicUuid('LabResult:' + sourceId)`.
+  //
+  // Tier 2 — no id. Now the key has to do the separating, so it carries the
+  // full-precision effective time and the measured value, both of which the
+  // previous key set left out.
+  const uri = sourceId
+    ? contentHashedUri('LabResult', {}, sourceId, obs)
+    : contentHashedUri('LabResult', {
+        patient: patientUri,
+        loincCode: isLoinc ? code : undefined,
+        testName: displayName || undefined,
+        // `dateVal` raw, NOT `dateStr`. `formatCcdaDate` truncates to a calendar
+        // day, which merged a 07:00 draw with an 11:00 draw.
+        effective: dateVal || undefined,
+        value: value || undefined,
+        unit: unit || undefined,
+      }, undefined, obs);
 
   const subj = namedNode(uri);
   const quads: Quad[] = [];
@@ -182,11 +237,36 @@ function buildPanelQuads(
   // while staying deterministic (the id is stable in the source) and dedupe-safe
   // (an exact re-import mints the same id and collapses to the same subject).
   // Timestamps that vary between imports (importedAt) are deliberately excluded.
+  //
+  // THAT PRE-EXISTING FIX IS WHY THIS PATH DOES NOT CARRY THE MEMBER PATH'S
+  // "the id was discarded" DEFECT: `panelId` is a content field, so an
+  // id-bearing organizer is already separated by it, and the id-bearing key is
+  // therefore left BYTE-IDENTICAL here. Moving it would break panel IRIs for no
+  // correctness gain.
+  //
+  // What it DID carry is the other half of that defect: `clinicalDate` is
+  // `formatCcdaDate`-truncated to a calendar day, and when the organizer has
+  // neither an id nor a code — the combination the comment above says is common
+  // in real exports — the whole key degenerates to {patient, day}. Measured: two
+  // id-less code-less BATTERY organizers four hours apart on one day, holding
+  // DIFFERENT results, both minted urn:uuid:0335391b-48fb-5d69-ab87-7bbf2429e434.
+  //
+  // So the id-less branch, and only the id-less branch, additionally carries the
+  // organizer's raw full-precision effectiveTime and a fingerprint of its member
+  // subjects — which is what a panel's content actually IS, since a panel has no
+  // measured value of its own. The cost is that an id-less panel which GAINS a
+  // result in a later export mints a new IRI, i.e. a duplicate; that is a split,
+  // and a split is the recoverable failure. A merge is not.
+  const memberKey = contentFingerprint(memberSubjects);
   const uri = contentHashedUri('LaboratoryReport', {
     patient: patientUri,
     panelCode: code || undefined,
     date: clinicalDate || undefined,
     panelId: sourceId || undefined,
+    ...(sourceId ? {} : {
+      effective: orgDateRaw || undefined,
+      members: memberKey === EMPTY_SEED ? undefined : memberKey,
+    }),
   }, sourceId || undefined, organizer);
 
   const subj = namedNode(uri);
