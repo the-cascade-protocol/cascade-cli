@@ -34,14 +34,19 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/the-cascade-protocol/cli.git"
+    "url": "git+https://github.com/the-cascade-protocol/cascade-cli.git"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "homepage": "https://cascadeprotocol.org",
   "bugs": {
-    "url": "https://github.com/the-cascade-protocol/cli/issues"
+    "url": "https://github.com/the-cascade-protocol/cascade-cli/issues"
   },
   "files": [
     "dist",
+    "docs/exit-codes.md",
+    "docs/pod-encryption.md",
     "README.md",
     "LICENSE",
     "DOCKER.md"

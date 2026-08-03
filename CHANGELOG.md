@@ -9,6 +9,54 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [0.10.0] - 2026-08-02
+
+**If you are upgrading from 0.5.11, this release contains everything since.** 0.6.0, 0.6.1
+and 0.7.0 were written up below but never published to npm, and the 0.8/0.9 line was never
+cut at all, so the registry went straight from 0.5.11 to here. Their notes remain in their
+own sections; this section covers the work that had not been released under any number.
+
+From this release onward every publish is tagged `v<version>` on its release commit, so the
+registry, `package.json` and the git tags cannot drift apart again.
+
+### Upgrade notes
+
+- **Breaking for genomics data only.** VCF import now derives `genomics:SequencingRun`
+  identity from file CONTENT rather than the file's absolute path (see below). Variants and
+  runs imported by an earlier version carry path-derived IRIs and will not match records
+  imported by this one. Re-import affected VCFs, or accept that old and new records sit side
+  by side. Nothing outside the VCF path changes identity.
+- **`pod export` now refuses an encrypted pod** unless you pass `--allow-encrypted`. If you
+  script exports of encrypted pods, add the flag; the export is stamped with a note
+  explaining what the ciphertext is.
+- **Read verbs now exit 2 when they cannot read a pod** instead of exiting 0 with an empty
+  answer. If you consume this CLI programmatically, treat exit 2 as "could not read what
+  exists", which is not the same as "nothing is there". The full contract is in
+  `docs/exit-codes.md`.
+- **`pod info` prompts for a passphrase** when run interactively against an encrypted pod;
+  previously it read the environment only.
+- **`pod extract` refuses its write path on an encrypted pod** rather than writing plaintext
+  into a sealed one. Its read path works. See the known limitations below.
+
+### Known limitations in this release
+
+Stated plainly rather than discovered later:
+
+- **`pod extract` cannot write to an encrypted pod.** Its five output files and the index
+  append are still plaintext-only, so extraction is unavailable on encrypted pods and now
+  refuses rather than corrupting. Tracked as backlog 3.68.
+- **Identity minting is non-deterministic for source resources that carry no `id`.** Several
+  importer paths fall back to a random value when a FHIR resource or phenopacket element has
+  no identifier, so re-importing such a resource mints a new IRI each time instead of
+  reconciling. FHIR servers assign ids to searched resources, so this is reached mainly by
+  hand-authored, exported, or contained resources. The VCF path described below is now immune
+  to this by construction. Tracked as backlog 3.74 and being addressed next.
+- **`--json` success payloads state readability only on `pod info`.** Other read verbs report
+  the negative case in the same vocabulary but do not state the positive one. Tracked as
+  backlog 3.69.
+
 ### Added
 
 - **One pod read layer, and a test that forbids going around it** (backlog 2.33). Encryption was retrofitted onto a CLI whose read verbs each walked the pod's files and parsed them independently, so the DEK was an argument every caller had to remember rather than a property of the open pod. Every verb had to be taught about it one incident at a time, and each one that had not yet been taught shipped the same lie: an encrypted pod reported as an empty one. A new module, `src/lib/pod-read.ts`, is now the single door. `openPod()` resolves the key ONCE per invocation (`CASCADE_POD_PASSPHRASE`, then a hidden TTY prompt when interactive, then a clean typed failure) and returns a `PodReader` through which every record read flows; a verb that forgets the key cannot be written, because no read call takes one. Failures are typed (`decrypt` / `parse` / `io`), each carrying the pod-relative path and a tidied reason, and `PodReadLedger` applies the weighting settled in the previous release so no caller restates it: a decrypt failure is ALWAYS fatal (the pod's key is wrong for that file and nothing about its contents is known), a parse failure is fatal only for a REGISTERED record file (`clinical/…`, `wellness/…`) and a loud warning for any other `.ttl` a pod holds (notes, analyses, literature, app resources), and an I/O failure is fatal. The pieces that used to be three separate spellings of the same idea are absorbed into it: `parseDataFile`, `readPatientProfile`, `resolvePodDekIfEncrypted`, the graph loader's `dek ? readResource : fs.readFile` branch, and the reporting helpers. The record-file registry moved to `src/lib/pod-data-types.ts` so the layer can consult it without importing a command module; `commands/pod/helpers.ts` re-exports both, so no existing import path changed. `tests/pod-read-layer-chokepoint.test.ts` greps `src/` and FAILS if `parseTurtleFile` / `parseDataFile` — or a hand-composed `parse*(readResource(...))` record read — appears outside a short, commented allowlist, so a new verb cannot quietly take the old path.
@@ -174,5 +222,6 @@ Previous release — see git history.
 
 ---
 
+[0.10.0]: https://github.com/the-cascade-protocol/cascade-cli/compare/v0.5.10...v0.10.0
 [0.4.0]: https://github.com/the-cascade-protocol/cli/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/the-cascade-protocol/cli/releases/tag/v0.3.6
