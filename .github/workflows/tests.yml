@@ -58,6 +58,48 @@ jobs:
         working-directory: cascade-cli
         run: npm run build
 
+      # pipefail is load-bearing: without it the pipeline's status is tee's, so a
+      # failing suite would report success.
       - name: Test
         working-directory: cascade-cli
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee "${RUNNER_TEMP}/test-output.txt"
+
+      # Green is not the same as complete. This suite runs 1676 tests with zero
+      # skips locally; on a runner a subset is guarded by describe.skipIf and
+      # vanishes rather than fails, so a passing run can hide an entire suite
+      # that stopped executing.
+      #
+      # The 24 that remain are the CAP advisory suites, whose two *.ldpatch
+      # example files are not committed to any repository and so cannot be
+      # provisioned here. The reference-pod half (40) is closed: the pod now
+      # lives in conformance, which this workflow already checks out.
+      #
+      # This is a ratchet, not a tolerance. It fails in BOTH directions: growth
+      # means something stopped running, and a decrease means the gap closed and
+      # the baseline must be lowered in the same change, so the number cannot
+      # decay into a rubber stamp.
+      - name: Fail if the skip count moved
+        env:
+          EXPECTED_SKIPPED_TESTS: '24'
+        run: |
+          set -euo pipefail
+          summary="$(grep -aE '^[[:space:]]*Tests[[:space:]]' "${RUNNER_TEMP}/test-output.txt" | tail -1 || true)"
+          if [ -z "${summary}" ]; then
+            echo "::error::Could not find the vitest summary line; refusing to treat an unreadable test result as a pass."
+            exit 1
+          fi
+          echo "summary: ${summary}"
+          skipped="$(printf '%s' "${summary}" | sed -n 's/.*[^0-9]\([0-9][0-9]*\) skipped.*/\1/p')"
+          [ -n "${skipped}" ] || skipped=0
+          echo "skipped=${skipped} expected=${EXPECTED_SKIPPED_TESTS}"
+          if [ "${skipped}" -gt "${EXPECTED_SKIPPED_TESTS}" ]; then
+            echo "::error::${skipped} tests skipped, expected ${EXPECTED_SKIPPED_TESTS}. Something stopped running."
+            exit 1
+          fi
+          if [ "${skipped}" -lt "${EXPECTED_SKIPPED_TESTS}" ]; then
+            echo "::error::Only ${skipped} tests skipped, expected ${EXPECTED_SKIPPED_TESTS}. Good news: lower EXPECTED_SKIPPED_TESTS here in the same change that closed the gap."
+            exit 1
+          fi

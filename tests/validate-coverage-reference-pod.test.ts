@@ -49,7 +49,7 @@ import { resolve } from 'node:path';
 import { loadShapes, validateFile, findTurtleFiles } from '../src/lib/shacl-validator.js';
 
 const CLI_PATH = resolve(__dirname, '../dist/index.js');
-const REFERENCE_POD = resolve(__dirname, '../../reference-patient-pod');
+const REFERENCE_POD = resolve(__dirname, '../../conformance/reference-patient-pod');
 const skipIfNoPod = !existsSync(REFERENCE_POD);
 
 const CASCADE_NS = 'https://ns.cascadeprotocol.org/';
