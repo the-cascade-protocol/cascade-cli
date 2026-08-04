@@ -12,6 +12,13 @@
  *   0 = all files pass validation
  *   1 = one or more validation failures
  *   2 = errors (file not found, malformed Turtle, etc.)
+ *
+ * Subjects that no loaded shape applies to are counted and named in the output
+ * but do NOT affect the exit code. An unshaped subject means the vocabulary has
+ * no constraints for that class yet, which is a gap in the shapes rather than a
+ * defect in the data being validated, and failing on it would break every
+ * existing caller on upgrade for something they cannot fix in their own data.
+ * The count is reported on every file so the gap cannot pass unnoticed.
  */
 
 import fs from 'node:fs';
@@ -24,6 +31,7 @@ import {
   findTurtleFiles,
   type ValidationResult,
 } from '../lib/shacl-validator.js';
+import { shortenIRI } from '../lib/turtle-parser.js';
 import { isPodEncrypted, resolveDek, PodDecryptError } from '../lib/pod-encryption.js';
 import { obtainPassphrase } from '../lib/passphrase.js';
 
@@ -47,14 +55,61 @@ const severityIcons: Record<string, string> = {
 };
 
 /**
+ * Describe how much of a file the loaded shapes actually reached.
+ *
+ * Rendered on every result line, passing or failing, because a file with no
+ * applicable shape produces a conforming SHACL report while running zero
+ * constraints, and the count is the only thing that distinguishes "checked and
+ * correct" from "not checked".
+ */
+function formatCoverage(result: ValidationResult): { summary: string; detail?: string } {
+  const { totalSubjects, checkedSubjects, unshapedTypes } = result.coverage;
+
+  if (totalSubjects === 0) {
+    return { summary: 'no typed subjects' };
+  }
+
+  const unshapedCount = totalSubjects - checkedSubjects;
+  const checked = `${checkedSubjects} of ${totalSubjects} subject${totalSubjects !== 1 ? 's' : ''} checked`;
+
+  if (unshapedCount === 0) {
+    return { summary: checked };
+  }
+
+  const plural = unshapedCount !== 1 ? 's' : '';
+
+  // A single unshaped type fits on the result line; several need their own.
+  if (unshapedTypes.length === 1) {
+    const type = shortenIRI(unshapedTypes[0].type);
+    return {
+      summary: `${checked}; ${unshapedCount} subject${plural} of type ${type} had no applicable shape`,
+    };
+  }
+
+  const breakdown = unshapedTypes
+    .map((t) => `${shortenIRI(t.type)} (${t.count})`)
+    .join(', ');
+  return {
+    summary: `${checked}; ${unshapedCount} subject${plural} had no applicable shape`,
+    detail: `     No shape applies to: ${breakdown}`,
+  };
+}
+
+/**
  * Format a single validation result for human-readable output.
  */
 function formatResultHuman(result: ValidationResult, verbose: boolean): string {
   const lines: string[] = [];
   const relPath = result.file;
+  const coverage = formatCoverage(result);
 
   if (result.valid) {
-    lines.push(`${colors.green}PASS${colors.reset} ${relPath} (${result.quadCount} triples)`);
+    lines.push(
+      `${colors.green}PASS${colors.reset} ${relPath} (${result.quadCount} triples; ${coverage.summary})`,
+    );
+    if (coverage.detail) {
+      lines.push(coverage.detail);
+    }
     if (verbose && result.shapesUsed.length > 0) {
       lines.push(`     Shapes: ${result.shapesUsed.join(', ')}`);
     }
@@ -78,7 +133,13 @@ function formatResultHuman(result: ValidationResult, verbose: boolean): string {
       ? `${colors.red}FAIL${colors.reset}`
       : `${colors.yellow}WARN${colors.reset}`;
 
-    lines.push(`${statusIcon} ${relPath} (${result.quadCount} triples, ${countParts.join(', ')})`);
+    lines.push(
+      `${statusIcon} ${relPath} (${result.quadCount} triples, ${countParts.join(', ')}; ${coverage.summary})`,
+    );
+
+    if (coverage.detail) {
+      lines.push(coverage.detail);
+    }
 
     if (result.shapesUsed.length > 0) {
       lines.push(`     Shapes: ${result.shapesUsed.join(', ')}`);
@@ -153,6 +214,32 @@ function printSummary(
   if (totalInfos > 0) parts.push(`${colors.blue}${totalInfos} info${colors.reset}`);
   if (parts.length > 0) {
     console.log(`  Issues: ${parts.join(', ')}`);
+  }
+
+  const totalSubjects = results.reduce((sum, r) => sum + r.coverage.totalSubjects, 0);
+  const checkedSubjects = results.reduce((sum, r) => sum + r.coverage.checkedSubjects, 0);
+  const unshaped = totalSubjects - checkedSubjects;
+
+  if (totalSubjects > 0) {
+    const coverageLine = `  Coverage: ${checkedSubjects} of ${totalSubjects} subjects checked`;
+    if (unshaped === 0) {
+      console.log(coverageLine);
+    } else {
+      console.log(`${coverageLine}, ${colors.yellow}${unshaped} with no applicable shape${colors.reset}`);
+
+      // Roll the per-file breakdowns into one list so a repeated gap reads as
+      // one vocabulary hole rather than N unrelated file problems.
+      const byType = new Map<string, number>();
+      for (const r of results) {
+        for (const t of r.coverage.unshapedTypes) {
+          byType.set(t.type, (byType.get(t.type) ?? 0) + t.count);
+        }
+      }
+      const ranked = Array.from(byType.entries())
+        .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
+        .map(([type, count]) => `${shortenIRI(type)} (${count})`);
+      console.log(`  No shape applies to: ${ranked.join(', ')}`);
+    }
   }
 }
 
@@ -294,8 +381,15 @@ export function registerValidateCommand(program: Command): void {
               message: `Error processing file: ${msg}`,
             }],
             shapesUsed: [],
+            shapesFired: [],
             quadCount: 0,
             subjects: [],
+            coverage: {
+              totalSubjects: 0,
+              checkedSubjects: 0,
+              unshapedSubjects: [],
+              unshapedTypes: [],
+            },
           };
           results.push(errorResult);
           if (!globalOpts.json) {

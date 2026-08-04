@@ -9,6 +9,45 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+**`cascade validate` now reports how many subjects it actually checked.** Before this change it
+returned PASS on records it had no constraints for, and there was no way to tell the difference
+from the output. A file whose subjects match no `sh:targetClass` runs zero constraints, and a
+SHACL report over zero constraints conforms — so "PASS" meant "nothing was found wrong", which
+is not the same as "this was checked".
+
+Every result line now carries a count:
+
+```
+PASS clinical/medications.ttl (192 triples; 8 of 8 subjects checked)
+PASS clinical/lab-results.ttl (187 triples; 0 of 11 subjects checked; 11 subjects of type
+     health:LabResultRecord had no applicable shape)
+```
+
+and a directory validation ends with a pod-wide `Coverage:` line naming every type no loaded
+shape applies to. The same figures are available under `coverage` in `--json` output.
+
+**If your validation output changes after upgrading, the validator got more accurate — your data
+did not get worse.** Nothing that passed before now fails: unshaped subjects are counted and
+named, but they do not affect the exit code, because a class with no shape is a gap in the
+vocabulary rather than a defect in your data. On a 19-file reference pod this surfaces 292
+previously unreported subjects (122 of them carrying Cascade-namespace types) that were being
+reported as passing while nothing ran against them.
+
+### Fixed
+
+- **`Shapes:` no longer names shape files that ran nothing.** The reported shapes were derived
+  from which vocabulary prefixes a file declared, so a file using `health:` predicates printed
+  `Shapes: health.shapes.ttl` even when no shape in it targeted any subject present. Reporting is
+  now derived from the shapes that actually selected a focus node. A conditions file that
+  previously listed three shape files now correctly lists none, and `--json` gains `shapesFired`
+  naming the individual shapes that ran.
+- **Class targets now honour `rdfs:subClassOf`.** Shape applicability is resolved per
+  [SHACL 2.1.3.1](https://www.w3.org/TR/shacl/#targetClass), so a shape targeting a superclass is
+  correctly reported as covering subclass-typed subjects, transitively. Nodes reached through a
+  parent shape's `sh:node` are counted as checked rather than reported as unconstrained.
+
 ## [0.11.0] - 2026-08-03
 
 **This release is about record identity — the IRI each record gets, which decides whether a
