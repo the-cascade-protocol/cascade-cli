@@ -9,6 +9,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-04
+
+**If you are upgrading from 0.10.0, this release also contains everything described under 0.11.0
+below.** 0.11.0 was tagged in git but never published to npm, so 0.12.0 is the first release since
+0.10.0 that you can install. Read the 0.11.0 notes too: that is the release that changed how record
+IRIs are derived, and re-importing a document you have already imported will behave differently
+because of it.
+
 ### Changed
 
 **Vocabulary and shapes synced to core v3.4, health v2.5 and clinical v1.13.** health v2.5 defines

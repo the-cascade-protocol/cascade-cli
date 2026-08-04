@@ -21,17 +21,17 @@
  * had never copied `health.ttl` at all.
  *
  *                                    before    after
- *   subjects checked                  156       277   (of 448)
- *   subjects with no applicable shape  292       171
- *   Cascade-typed subjects unshaped    122         1
+ *   subjects checked                  156       278   (of 448)
+ *   subjects with no applicable shape  292       170
+ *   Cascade-typed subjects unshaped    122         0
  *
- * The 122 -> 1 line is the one that matters. 121 of those 122 were subjects the
- * validator reported PASS on while running nothing whatsoever against them. The
- * single remaining one is a `clinical:CoverageRecord` in `clinical/insurance.ttl`
- * whose retyping to `coverage:InsurancePlan` is a separate, tracked change to the
- * reference pod itself.
+ * The 122 -> 0 line is the one that matters: every one of those 122 was a subject
+ * the validator reported PASS on while running nothing whatsoever against them.
+ * The last of them was a `clinical:CoverageRecord` in `clinical/insurance.ttl`,
+ * closed by retyping it to the ratified `coverage:InsurancePlan` in the reference
+ * pod. No Cascade-typed subject in the pod validates vacuously any more.
  *
- * The 171 that remain unshaped are subjects typed only in FOREIGN vocabularies —
+ * The 170 that remain unshaped are subjects typed only in FOREIGN vocabularies —
  * `prov:Activity` (121), `fhir:Observation` (30), `solid:TypeRegistration` (13),
  * `prov:Agent`, `foaf:Person`, `ldp:BasicContainer` — which the Cascade shapes
  * were never written to constrain and which no Cascade release will shape. That
@@ -68,10 +68,10 @@ const CASCADE_NS = 'https://ns.cascadeprotocol.org/';
 const COVERAGE = {
   files: 19,
   totalSubjects: 448,
-  checkedSubjects: 277,
-  unshapedSubjects: 171,
+  checkedSubjects: 278,
+  unshapedSubjects: 170,
   cascadeTypedSubjects: 278,
-  unshapedCascadeTypedSubjects: 1,
+  unshapedCascadeTypedSubjects: 0,
 } as const;
 
 /**
@@ -94,7 +94,7 @@ const COVERAGE_BY_FILE: Record<string, { total: number; checked: number }> = {
   'clinical/allergies.ttl': { total: 3, checked: 3 },
   'clinical/conditions.ttl': { total: 5, checked: 5 },
   'clinical/immunizations.ttl': { total: 4, checked: 4 },
-  'clinical/insurance.ttl': { total: 1, checked: 0 },
+  'clinical/insurance.ttl': { total: 1, checked: 1 },
   'clinical/lab-results.ttl': { total: 11, checked: 11 },
   'clinical/medications.ttl': { total: 8, checked: 8 },
   'clinical/patient-profile.ttl': { total: 4, checked: 4 },
@@ -138,8 +138,6 @@ const REMAINING_UNSHAPED_TYPES: Record<string, number> = {
   'http://www.w3.org/ns/solid/terms#TypeRegistration': 13,
   'http://www.w3.org/ns/prov#Agent': 2,
   // The one remaining Cascade-typed holdout; retyping it to
-  // coverage:InsurancePlan is a change to the reference pod, not to the shapes.
-  'https://ns.cascadeprotocol.org/clinical/v1#CoverageRecord': 1,
   'http://www.w3.org/ns/ldp#BasicContainer': 1,
   'http://www.w3.org/ns/prov#SoftwareAgent': 1,
   'http://xmlns.com/foaf/0.1/Person': 1,
@@ -235,18 +233,36 @@ describe.skipIf(skipIfNoPod)('shape coverage over the reference patient pod', ()
   });
 
   it('does not name a shape file for a file whose subjects match no target', () => {
-    // insurance.ttl declares Cascade prefixes and uses Cascade predicates, so
-    // prefix-based reporting would name a shape file and claim constraints that
-    // never ran. Its single clinical:CoverageRecord matches no shape.
+    // The behaviour under test: a file can declare Cascade prefixes and use
+    // Cascade predicates while none of its subjects match any sh:targetClass.
+    // Prefix-based reporting named a shape file for such a file and implied
+    // constraints that never ran.
     //
-    // This assertion used to be made on conditions.ttl, which is now fully
-    // checked — the file moving out from under it is the fix working.
+    // This assertion has now been re-anchored twice: first from conditions.ttl,
+    // then from insurance.ttl, because each got a shape and stopped exercising
+    // it. Anchoring it to a Cascade-typed file is the mistake — shaping all of
+    // them is the entire point of the vocabulary work, so any such file is a
+    // temporary anchor. profile/card.ttl is typed only in foaf:, which no
+    // Cascade release will ever shape, so it cannot move out from under this.
+    const card = results.find((r) => r.file.endsWith('profile/card.ttl'));
+    expect(card).toBeDefined();
+    expect(card?.valid).toBe(true);
+    expect(card?.coverage.totalSubjects).toBeGreaterThan(0);
+    expect(card?.coverage.checkedSubjects).toBe(0);
+    expect(card?.shapesUsed).toEqual([]);
+  });
+
+  it('now checks the insurance record, which was the last unshaped Cascade subject', () => {
+    // Retyping it from the undefined clinical:CoverageRecord to the ratified
+    // coverage:InsurancePlan took the pod's vacuously-validating Cascade-typed
+    // population to zero. Asserted here so a regression in the reference pod
+    // shows up as a failure rather than as a quietly smaller number.
     const insurance = results.find((r) => r.file.endsWith('clinical/insurance.ttl'));
     expect(insurance).toBeDefined();
     expect(insurance?.valid).toBe(true);
     expect(insurance?.coverage.totalSubjects).toBe(1);
-    expect(insurance?.coverage.checkedSubjects).toBe(0);
-    expect(insurance?.shapesUsed).toEqual([]);
+    expect(insurance?.coverage.checkedSubjects).toBe(1);
+    expect(insurance?.shapesUsed).toContain('coverage.shapes.ttl');
   });
 
   it('now fully checks the clinical record files that ran zero constraints', () => {
@@ -302,15 +318,27 @@ describe.skipIf(skipIfNoPod)('cascade validate output over the reference pod', (
   });
 
   it('does not print a Shapes: line when no shape fired', () => {
+    // profile/card.ttl for the reason given above: it is typed only in foaf:,
+    // so unlike a Cascade-typed file it cannot acquire a shape later and stop
+    // exercising this.
+    const out = plain(
+      runCli(['--verbose', 'validate', resolve(REFERENCE_POD, 'profile/card.ttl')], '/'),
+    );
+    // Match the exact indented output line rather than the bare word, which
+    // also occurs in the verbose "Loaded N shape files" preamble.
+    expect(out).not.toMatch(/^ {5}Shapes: /m);
+  });
+
+  it('DOES print a Shapes: line when a shape fired', () => {
+    // Without this, the assertion above would pass just as happily against a
+    // build that never printed a Shapes: line at all.
     const out = plain(
       runCli(
         ['--verbose', 'validate', resolve(REFERENCE_POD, 'clinical/insurance.ttl')],
         '/',
       ),
     );
-    // Match the exact indented output line rather than the bare word, which
-    // also occurs in the verbose "Loaded N shape files" preamble.
-    expect(out).not.toMatch(/^ {5}Shapes: /m);
+    expect(out).toMatch(/^ {5}Shapes: /m);
   });
 
   it('prints a pod-wide coverage summary', () => {
@@ -355,24 +383,28 @@ describe.skipIf(skipIfNoPod)('cascade validate output over the reference pod', (
   });
 
   it('reports zero coverage distinctly from full coverage', () => {
-    // Both files above are now fully checked, so they no longer contrast a
-    // checked file against an unchecked one. This pair does, which is the
-    // distinctness claim that actually matters: the reporting must not collapse
+    // The distinctness claim that matters: reporting must not collapse
     // "everything checked" and "nothing checked" into the same output.
-    const insurance = plain(
-      runCli(['--json', 'validate', resolve(REFERENCE_POD, 'clinical/insurance.ttl')], '/'),
+    //
+    // The unchecked side of this pair has been re-anchored twice already, from
+    // conditions.ttl and then insurance.ttl, because each acquired a shape.
+    // profile/card.ttl is typed only in foaf:, which no Cascade release will
+    // shape, so it is a stable contrast rather than a temporary one.
+    const card = plain(
+      runCli(['--json', 'validate', resolve(REFERENCE_POD, 'profile/card.ttl')], '/'),
     );
     const labs = plain(
       runCli(['--json', 'validate', resolve(REFERENCE_POD, 'clinical/lab-results.ttl')], '/'),
     );
 
-    const insuranceCoverage = JSON.parse(insurance)[0].coverage;
+    const cardCoverage = JSON.parse(card)[0].coverage;
     const labsCoverage = JSON.parse(labs)[0].coverage;
 
-    expect(insuranceCoverage.checkedSubjects).toBe(0);
-    expect(insuranceCoverage.totalSubjects).toBe(1);
+    expect(cardCoverage.checkedSubjects).toBe(0);
+    expect(cardCoverage.totalSubjects).toBeGreaterThan(0);
     expect(labsCoverage.checkedSubjects).toBe(11);
-    expect(insuranceCoverage).not.toEqual(labsCoverage);
+    expect(labsCoverage.checkedSubjects).toBe(labsCoverage.totalSubjects);
+    expect(cardCoverage).not.toEqual(labsCoverage);
   });
 
   it('exposes coverage in the JSON output', () => {
