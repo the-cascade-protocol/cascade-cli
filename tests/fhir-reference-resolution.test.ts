@@ -1,5 +1,5 @@
 /**
- * Tests for cross-record reference resolution (root backlog 2.6, slice R1).
+ * Tests for cross-record reference resolution (slice R1).
  *
  * The FHIR converters emit each cross-record edge (clinical:hasLabResult,
  * coverage:relatedClaim) as a placeholder that the batch loop rewrites to the
@@ -144,7 +144,7 @@ describe('cross-record edge resolution over a trimmed bundle (R1)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildResourceRefsFromQuads (R5, root 2.11): rebuild the resolution index from
+// buildResourceRefsFromQuads: rebuild the resolution index from
 // serialized pod quads for the end-of-import (once-per-invocation) pass.
 // ---------------------------------------------------------------------------
 

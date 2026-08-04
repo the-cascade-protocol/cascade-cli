@@ -3,12 +3,12 @@
  *
  * Covers two defects:
  *
- *   root 2.8 — routing was by filename suffix only, so an extension-less IHE
+ * — routing was by filename suffix only, so an extension-less IHE
  *   XDM zip (what a real portal download looks like) fell through to the Turtle
  *   parser and died with `Unexpected "PK..."`. The bytes now decide when the
  *   extension is missing or unrecognized.
  *
- *   root 4.23 — every input was read as plaintext, so a bundle written to
+ * — every input was read as plaintext, so a bundle written to
  *   `<pod>/analysis/<id>.ttl` on an ENCRYPTED pod could not be imported back.
  *   An input that resolves inside the destination pod is now read through the
  *   pod DEK the command already holds.
@@ -258,9 +258,9 @@ afterEach(() => {
   tmpDirs = [];
 });
 
-// ─── Unit: byte sniffing (root 2.8) ───────────────────────────────────────────
+// ─── Unit: byte sniffing ───────────────────────────────────────────
 
-describe('import input sniffing (root 2.8)', () => {
+describe('import input sniffing', () => {
   it('recognizes the three ZIP signatures and nothing else', () => {
     expect(looksLikeZip(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14]))).toBe(true);
     expect(looksLikeZip(Buffer.from([0x50, 0x4b, 0x05, 0x06]))).toBe(true); // empty archive
@@ -294,7 +294,7 @@ describe('import input sniffing (root 2.8)', () => {
   });
 });
 
-describe('import input classification (root 2.8)', () => {
+describe('import input classification', () => {
   const zipBytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]);
   const xmlBytes = Buffer.from(syntheticCcdaXml(), 'utf-8');
   const jsonBytes = Buffer.from(syntheticFhirBundle(), 'utf-8');
@@ -332,9 +332,9 @@ describe('import input classification (root 2.8)', () => {
   });
 });
 
-// ─── Unit: pod containment (root 4.23) ────────────────────────────────────────
+// ─── Unit: pod containment ────────────────────────────────────────
 
-describe('pod containment detection (root 4.23)', () => {
+describe('pod containment detection', () => {
   it('says inside for a real descendant and outside for a sibling', () => {
     const root = mkTmpDir();
     const pod = path.join(root, 'pod');
@@ -415,9 +415,9 @@ describe('pod containment detection (root 4.23)', () => {
   });
 });
 
-// ─── Integration: extension-less inputs (root 2.8) ────────────────────────────
+// ─── Integration: extension-less inputs ────────────────────────────
 
-describe('pod import: extension-less inputs (root 2.8)', () => {
+describe('pod import: extension-less inputs', () => {
   it('imports an extension-less IHE XDM zip instead of failing in the Turtle parser', async () => {
     const root = mkTmpDir();
     const pod = path.join(root, 'pod');
@@ -479,9 +479,9 @@ describe('pod import: extension-less inputs (root 2.8)', () => {
   }, TEST_TIMEOUT_MS);
 });
 
-// ─── Integration: pod-internal encrypted input (root 4.23) ────────────────────
+// ─── Integration: pod-internal encrypted input ────────────────────
 
-describe('pod import: pod-internal resources on an encrypted pod (root 4.23)', () => {
+describe('pod import: pod-internal resources on an encrypted pod', () => {
   it('round-trips an encrypted bundle written into <pod>/analysis and imported back', async () => {
     process.env.CASCADE_POD_PASSPHRASE = PASSPHRASE;
     const root = mkTmpDir();
@@ -539,7 +539,7 @@ describe('pod import: pod-internal resources on an encrypted pod (root 4.23)', (
   }, TEST_TIMEOUT_MS);
 
   it('imports a pod-internal file that is still PLAINTEXT on an encrypted pod', async () => {
-    // `pod encrypt` seals only some containers today (root 4.25), so a pod can
+    // `pod encrypt` seals only some containers today, so a pod can
     // hold a plaintext analysis bundle. It must not become unimportable.
     process.env.CASCADE_POD_PASSPHRASE = PASSPHRASE;
     const root = mkTmpDir();

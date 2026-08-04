@@ -283,7 +283,7 @@ describe('the split IRI is reproducible off this machine', () => {
    * A separate process and a different working directory together rule out the
    * two things an in-process assertion cannot: module-level state carried
    * between calls, and any dependence on where the tool was invoked from (the
-   * exact defect root 3.7 shipped, where an IRI hashed an absolute path).
+   * exact defect shipped, where an IRI hashed an absolute path).
    */
   function subjectsFromChild(cwd: string): string[] {
     const script = `

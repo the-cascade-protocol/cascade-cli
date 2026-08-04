@@ -100,7 +100,7 @@ export { convertCascadeToFhir } from './cascade-to-fhir.js';
  *                            `clinical:indicationReference`, `coverage:relatedClaim`)
  *                            in the returned quads for a caller that will run
  *                            `resolveReferenceEdges` itself over a WIDER scope
- *                            (root backlog 2.11). Same rationale as
+ *. Same rationale as
  *                            `deferLiteralLifting`: a reference's target is
  *                            routinely in another file of the same import or
  *                            already in the pod, so `pod import` accumulates the
@@ -287,7 +287,7 @@ export async function convert(
     // Unless the caller defers (see `deferReferenceResolution`): then the
     // placeholders are left intact for `pod import` to resolve once over the
     // merged, reconciled result, because a reference's target is routinely in
-    // another file of the same import (root backlog 2.11). On the standalone
+    // another file of the same import. On the standalone
     // path the default resolves here and drops what does not match, so no
     // placeholder ever reaches serialized output.
     let resolvedQuads = allQuads;

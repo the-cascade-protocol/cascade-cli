@@ -1,5 +1,5 @@
 /**
- * Re-import acceptance (integration, root backlog 1.5 symptom 3): re-importing a
+ * Re-import acceptance (integration, symptom 3): re-importing a
  * portal export is the normal monthly update path. The converter stamps a fresh
  * `clinical:importedAt` each run while the document/panel subjects are
  * content-hash-stable, so before this fix a second import gave every document and
@@ -43,7 +43,7 @@ async function clinicalQuads(podDir: string): Promise<Quad[]> {
   return quads;
 }
 
-describe('pod import: re-import keeps exactly one importedAt (root 1.5 symptom 3)', () => {
+describe('pod import: re-import keeps exactly one importedAt (symptom 3)', () => {
   let tempDir: string;
   let podDir: string;
 

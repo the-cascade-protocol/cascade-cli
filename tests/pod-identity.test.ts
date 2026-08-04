@@ -1,7 +1,7 @@
 /**
  * Pod identity surface: `pod init --owner-name`, `pod profile set-name`,
  * the shared card.ttl identity-block helper, and the DEK-aware owner-name
- * resolution in `pod info` (root backlog 2.9).
+ * resolution in `pod info`.
  *
  * Drives the commander actions programmatically against temp dirs. Encrypted
  * cases supply the passphrase via CASCADE_POD_PASSPHRASE (the sidecar spawn has

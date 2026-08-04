@@ -1,5 +1,5 @@
 /**
- * Reconciler edge re-dangling repair (root backlog 3.13a, slice R4).
+ * Reconciler edge re-dangling repair (slice R4).
  *
  * R1 resolved every record-to-record edge (clinical:hasLabResult,
  * clinical:indicationReference, ...) at conversion time, BEFORE reconciliation.

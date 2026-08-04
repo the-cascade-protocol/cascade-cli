@@ -1,5 +1,5 @@
 /**
- * R4 acceptance (integration, root backlog 3.13a): a record-to-record edge must
+ * R4 acceptance (integration): a record-to-record edge must
  * survive reconciliation. Drives the real `cascade pod import --reconcile-existing`
  * path end to end: bundle A carries a lab panel report whose clinical:hasLabResult
  * points at a lab result; bundle B (imported second) carries a near-duplicate of

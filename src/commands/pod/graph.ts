@@ -1,5 +1,5 @@
 /**
- * Graph-aware pod query support (root backlog 4.6, slice Q1).
+ * Graph-aware pod query support (slice Q1).
  *
  * Loads every data file `pod query --all` discovers into a single `n3.Store`,
  * indexes the pod's record subjects, and serves two read-only views over the

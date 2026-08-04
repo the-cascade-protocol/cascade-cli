@@ -1,5 +1,5 @@
 /**
- * Cross-record reference resolution for FHIR batch conversion (root backlog 2.6).
+ * Cross-record reference resolution for FHIR batch conversion.
  *
  * FHIR resources point at each other with `Reference.reference` strings
  * ("Observation/<id>", "urn:uuid:<id>", or an absolute URL). Cascade record
@@ -48,7 +48,7 @@ const URN_UUID_PREFIX = 'urn:uuid:';
  * arrive as resolvable placeholders from a converter; `clinical:linkedCondition`
  * is minted by the M1 literal lift. Used to count the edges a pod actually holds
  * — the "K of N and J linked" number — which must stay stable when an import
- * re-states edges the pod already had rather than dropping to zero (root 3.53).
+ * re-states edges the pod already had rather than dropping to zero.
  */
 export const RECORD_EDGE_PREDICATES: ReadonlySet<string> = new Set<string>([
   NS.clinical + 'hasEncounter',
@@ -251,7 +251,7 @@ const SOURCE_TYPE_PREDICATES = new Set([
 /**
  * Rebuild the `(resourceType, id) -> subject` resolution index from a set of
  * already-minted record quads, for a caller that resolves reference edges ONCE
- * per import invocation rather than per conversion batch (root backlog 2.11).
+ * per import invocation rather than per conversion batch.
  *
  * The per-batch path passes the conversion-time `ConvertedResourceRef[]`
  * directly. `pod import`, by contrast, converts each file separately (an Apple
@@ -309,7 +309,7 @@ export function buildResourceRefsFromQuads(quads: Quad[]): ConvertedResourceRef[
  * without rewriting anything can ask the same question `resolveReferenceEdges`
  * answers. The reconciler uses it to recognize that an already-resolved edge in
  * the pod and a fresh placeholder edge naming the same target are the SAME
- * statement, so a re-import does not land a second copy of it (root 2.22).
+ * statement, so a re-import does not land a second copy of it.
  */
 export function buildReferenceResolver(
   resources: ConvertedResourceRef[],

@@ -19,7 +19,7 @@
 #   both StanceValue (per-link) and DirectionValue (aggregate); evidence:None
 #   is both a DirectionValue and a BasisValue; evidence:NeedsLiterature is both
 #   a deprecated VerdictValue and a NeedsEvidenceReasonValue. Local names match
-#   the code mirror (@cascade-workbench/contracts grounding.ts) exactly.
+#   the consuming application's code mirror exactly.
 # v1-draft.0.1 (2026-06-16) — Initial draft: Assertion / EvidenceLink /
 #   Citation / GroundingActivity, flat VerdictValue + StanceValue enumerations,
 #   grounding invariant.

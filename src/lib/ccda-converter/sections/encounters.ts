@@ -6,7 +6,7 @@
  * from a C-CDA <encounter> element and is reused by the Results-section walk
  * (sections/labs.ts), which links each lab panel to the visit it was collected
  * in via clinical:hasEncounter. Both paths therefore produce identical,
- * dedupe-safe encounter records (root 3.11 encounter completeness).
+ * dedupe-safe encounter records (encounter completeness).
  */
 
 import { NS } from '../../fhir-converter/types.js';

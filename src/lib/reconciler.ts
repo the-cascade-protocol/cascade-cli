@@ -98,7 +98,7 @@ export interface ReconcilerResult {
       /**
        * Record-to-record edge objects redirected from a merged-away (discarded)
        * subject to its surviving canonical subject during serialization
-       * (R4, root backlog 3.13a). Zero when no referenced record was merged, e.g.
+       *. Zero when no referenced record was merged, e.g.
        * a fresh single import. Excludes lineage predicates (dangling by design).
        */
       edgeObjectsRewritten: number;
@@ -266,7 +266,7 @@ function relabelQuadBlankNodes(q: Quad, inputIndex: number): Quad {
 }
 
 // ---------------------------------------------------------------------------
-// Single-cardinality passthrough repair (root backlog 1.5, symptom 3)
+// Single-cardinality passthrough repair
 // ---------------------------------------------------------------------------
 //
 // Passthrough subjects (clinical:ClinicalDocument, clinical:LaboratoryReport,
@@ -325,7 +325,7 @@ function collapseSingleCardinalityPassthrough(quads: Quad[]): Quad[] {
 }
 
 // ---------------------------------------------------------------------------
-// Stated-edge re-import idempotence (root backlog 2.22)
+// Stated-edge re-import idempotence
 // ---------------------------------------------------------------------------
 //
 // Record-to-record edges (clinical:hasEncounter, clinical:indicationReference,
@@ -335,7 +335,7 @@ function collapseSingleCardinalityPassthrough(quads: Quad[]): Quad[] {
 //
 //   * already RESOLVED, as the pod holds it:  <proc> hasEncounter <urn:uuid:86ed…>
 //   * still a PLACEHOLDER, as a fresh convert emits it (reference resolution is
-//     deferred to once per import invocation, R5 / root 2.11):
+//     deferred to once per import invocation, R5):
 //                                             <proc> hasEncounter <urn:cascade:unresolved-ref:Encounter%2Fenc-1>
 //
 // On a re-import the pod contributes the first and the new input the second.
@@ -1181,7 +1181,7 @@ function resolveGroup(
 }
 
 // ---------------------------------------------------------------------------
-// Edge re-dangling repair (R4, root backlog 3.13a)
+// Edge re-dangling repair
 // ---------------------------------------------------------------------------
 //
 // R1 resolved every record-to-record edge (clinical:hasLabResult,
@@ -1198,7 +1198,7 @@ function resolveGroup(
  * subjects: they record the merge itself, so rewriting them to the survivor would
  * erase the provenance they exist to capture (mergedFrom → self-loop). Excluded
  * from the edge rewrite and dangling BY DESIGN per the ratified lineage decision
- * (root backlog 3.13: exclude, do not tombstone). Any graph-query surface should
+ * (exclude, do not tombstone). Any graph-query surface should
  * treat these as references to historical, non-materialized subjects.
  */
 const LINEAGE_PREDICATES: ReadonlySet<string> = new Set<string>([
@@ -1397,7 +1397,7 @@ export async function runReconciliation(
   const seenPassthrough = new Set<string>();
   const passthroughSubjectKeys = new Set<string>();
   // Every quad of every input, for the reference-resolution index that the
-  // stated-edge collapse below keys on (root 2.22).
+  // stated-edge collapse below keys on.
   const allInputQuads: Quad[] = [];
 
   for (let i = 0; i < inputs.length; i++) {
@@ -1420,13 +1420,13 @@ export async function runReconciliation(
   // A re-import stamps a fresh clinical:importedAt while the subject is
   // content-hash-stable, so quad-identity dedup keeps every run's value and the
   // record fails SHACL maxCount 1. Collapse single-cardinality passthrough
-  // predicates to one value per subject (root backlog 1.5, symptom 3).
+  // predicates to one value per subject.
   const singleValuedPassthroughQuads = collapseSingleCardinalityPassthrough(passthroughQuads);
 
   // A stated edge arrives resolved from the pod and as a placeholder from the new
   // input, so quad-identity dedup keeps both and the caller's resolution pass
   // turns them into two copies of one statement. Collapse on where each object
-  // RESOLVES TO (root backlog 2.22).
+  // RESOLVES TO.
   const referenceResolver = buildReferenceResolver(buildResourceRefsFromQuads(allInputQuads));
   const dedupedPassthroughQuads = collapseResolvedEquivalentEdges(
     singleValuedPassthroughQuads,
@@ -1611,7 +1611,7 @@ export async function runReconciliation(
   // so a second arrival of the same IRI is a re-import of the same record, and
   // the loops above silently pass over it (`assigned.has(...)`). Counting it is
   // what makes a 100%-duplicate import stop reporting "0 duplicates" while
-  // quietly deduplicating everything (root backlog 3.53). Measured on record
+  // quietly deduplicating everything. Measured on record
   // OBJECT identity, so it never double-counts a record the matcher already
   // reported as a merge.
   const groupedRecords = new Set<ParsedRecord>();
@@ -1622,7 +1622,7 @@ export async function runReconciliation(
   const allowCrossProvenanceMerge = options?.allowCrossProvenanceMerge ?? true;
   const resolutions = groups.map(g => resolveGroup(g, trustScores, defaultTrust, allowCrossProvenanceMerge));
 
-  // Edge re-dangling repair (R4, root backlog 3.13a): map every subject discarded
+  // Edge re-dangling repair: map every subject discarded
   // in a merge to its survivor, then rewrite matching edge objects at serialization.
   const discardedToCanonical = buildDiscardedToCanonical(groups, resolutions);
 

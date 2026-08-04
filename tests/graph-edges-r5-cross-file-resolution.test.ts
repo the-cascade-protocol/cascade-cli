@@ -1,5 +1,5 @@
 /**
- * Regression tests for cross-file reference resolution (root backlog 2.11, slice R5).
+ * Regression tests for cross-file reference resolution (slice R5).
  *
  * `resolveReferenceEdges` used to run per CONVERSION BATCH. An Apple Health
  * export is one FHIR resource per file, so a reference's target was almost never
@@ -86,7 +86,7 @@ function rawPodTtl(podDir: string): string {
   return chunks.join('\n');
 }
 
-describe('R5 cross-file reference resolution (root 2.11)', () => {
+describe('R5 cross-file reference resolution', () => {
   let podDir: string;
   let report: ImportReport;
 
@@ -112,7 +112,7 @@ describe('R5 cross-file reference resolution (root 2.11)', () => {
   });
 
   it('resolves each edge family across files', () => {
-    // `totalInPod` is the edges the pod HOLDS afterwards (root 3.53): on this
+    // `totalInPod` is the edges the pod HOLDS afterwards: on this
     // fresh-pod import it equals `resolved`, since nothing was already stated and
     // a dropped reference writes no edge (hence hasEncounter 4, not 5).
     const bp = report.edgeResolution.byPredicate;

@@ -1,6 +1,6 @@
 /**
  * Full-scale bundle == split equivalence for cross-file reference resolution
- * (root backlog 3.22; builds on R5 / root 2.11).
+ * (builds on R5).
  *
  * R5 moved reference resolution from per-CONVERSION-BATCH to once per IMPORT
  * INVOCATION so an Apple Health export (one FHIR resource per file) resolves the
@@ -103,7 +103,7 @@ function normalizedPodData(podDir: string): string {
   return chunks.join('\n').replace(/"20\d\d-\d\d-\d\dT[0-9:.]+Z"\^\^xsd:dateTime/g, '"TS"^^xsd:dateTime');
 }
 
-describe('Synthea bundle == split equivalence (root 3.22)', () => {
+describe('Synthea bundle == split equivalence', () => {
   let root: string;
   let splitDir: string;
   let bundlePod: string;
@@ -145,7 +145,7 @@ describe('Synthea bundle == split equivalence (root 3.22)', () => {
   });
 
   it('resolves each of the four edge families identically across layouts', () => {
-    // `totalInPod` (the edges the pod holds afterwards, root 3.53) equals
+    // `totalInPod` (the edges the pod holds afterwards) equals
     // `resolved` here: both layouts import into a fresh pod, so every edge in the
     // pod is one this run resolved.
     const expected = {

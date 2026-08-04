@@ -1,5 +1,5 @@
 /**
- * Tests for the slice R3 edge families (root backlog 3.11 b/c): the FHIR
+ * Tests for the slice R3 edge families (b/c): the FHIR
  * converters wire `resource.encounter` / `DocumentReference.context.encounter`
  * into `clinical:hasEncounter` and `reasonReference` into
  * `clinical:indicationReference`, both routed through R1's end-of-batch

@@ -58,7 +58,7 @@ const { namedNode, literal, quad: makeQuad } = DataFactory;
  * (classCode ENC) nested at varying depths — directly under the organizer or
  * deep inside a member observation's entryRelationship chain. Each is a full
  * encounter definition (id + type + effectiveTime), so the organizer's results
- * can be linked to their visit (root 3.11 encounter completeness).
+ * can be linked to their visit (encounter completeness).
  */
 function collectEncounters(node: any, out: any[]): void {
   if (node == null || typeof node !== 'object') return;

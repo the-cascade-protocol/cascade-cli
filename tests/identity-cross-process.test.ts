@@ -7,7 +7,7 @@
  * `process.cwd()`. A defect that keys on ANY of those is invisible to it.
  *
  * That is not hypothetical here. The previous defect in this family (the VCF
- * `SequencingRun` IRI, root 3.7) was path-dependent, and it stayed invisible for
+ * `SequencingRun` IRI) was path-dependent, and it stayed invisible for
  * months for exactly this reason: everything ran from one directory, so the
  * oracle reproduced and the suite was green. It only surfaced when CI ran from
  * a different absolute path.

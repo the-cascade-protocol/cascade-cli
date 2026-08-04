@@ -1,7 +1,7 @@
 # Survey: single-cardinality passthrough predicates and re-import duplication
 
 **Date:** 2026-07-16
-**Context:** root backlog 1.5, symptom 3. Companion to the `clinical:importedAt` fix in `src/lib/reconciler.ts` (`collapseSingleCardinalityPassthrough`).
+**Context:** single-cardinality passthrough, symptom 3. Companion to the `clinical:importedAt` fix in `src/lib/reconciler.ts` (`collapseSingleCardinalityPassthrough`).
 
 ## The mechanism
 
@@ -33,11 +33,11 @@ Each row is a single-cardinality (`sh:maxCount 1`) property that can appear on a
 | `clinical:sourceBundleId` | `ClinicalDocumentShape` (`sh:maxCount 1`, optional) | source (iOS bundle id) | No (same-source identical) | Cross-source only | Same as `sourceEHR`. |
 | `clinical:documentDate` and other event dates (`performedDate`, `effectiveDate`, ...) | various (`sh:maxCount 1`) | **stable** (derived from clinical content; same value every run) | No | No | Not at risk. One narrow exception: `documentDate` falls back to `importedAt` when a document carries no date at all (`sections/labs.ts`), making it per-run in that degenerate case; not observed in the specimens. |
 
-## Sibling family: the same trap one resolution stage further out (root 2.22)
+## Sibling family: the same trap one resolution stage further out
 
 The mechanism above is "the object legitimately changes between runs, so quad-identity dedup keeps both." A second family has the same shape without any value changing: the object is the SAME target written two different ways.
 
-Record-to-record edges (`clinical:hasEncounter`, `clinical:indicationReference`, `clinical:hasLabResult`, `coverage:relatedClaim`) are emitted by a converter as a *placeholder* carrying the raw FHIR reference, and resolved to the target's real subject IRI once per import invocation (R5, root 2.11). So on a re-import the pod contributes the RESOLVED spelling and the new input the PLACEHOLDER spelling of one statement. Quad identity keeps both, the resolution pass rewrites the placeholder to the same target, and the subject states the edge twice. Unlike `importedAt` this fails no shape (these predicates have no `sh:maxCount`), which is why it went unnoticed while pods grew on every re-sync.
+Record-to-record edges (`clinical:hasEncounter`, `clinical:indicationReference`, `clinical:hasLabResult`, `coverage:relatedClaim`) are emitted by a converter as a *placeholder* carrying the raw FHIR reference, and resolved to the target's real subject IRI once per import invocation. So on a re-import the pod contributes the RESOLVED spelling and the new input the PLACEHOLDER spelling of one statement. Quad identity keeps both, the resolution pass rewrites the placeholder to the same target, and the subject states the edge twice. Unlike `importedAt` this fails no shape (these predicates have no `sh:maxCount`), which is why it went unnoticed while pods grew on every re-sync.
 
 Fixed alongside this survey's predicate list, in the same serialization path: `collapseResolvedEquivalentEdges` keys each passthrough edge on where its object *resolves to* and keeps one quad per `(subject, predicate, resolved-target)`. Note the shape of the fix, because it generalizes: a blanket "drop the placeholder when the predicate already has a resolved value" would silently lose an edge that is genuinely new (a lab report gaining a third result), so equivalence has to be decided per target, not per predicate.
 
