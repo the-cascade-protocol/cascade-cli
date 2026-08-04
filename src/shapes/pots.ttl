@@ -1,0 +1,411 @@
+@prefix pots: <https://ns.cascadeprotocol.org/pots/v1#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+@prefix fhir: <http://hl7.org/fhir/> .
+@prefix sct: <http://snomed.info/sct/> .
+@prefix loinc: <http://loinc.org/rdf#> .
+@prefix ucum: <http://unitsofmeasure.org/> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+
+# ============================================================================
+# Ontology Metadata
+# ============================================================================
+
+<https://ns.cascadeprotocol.org/pots/v1#> a owl:Ontology ;
+    owl:imports <https://ns.cascadeprotocol.org/core/v1#> ;
+    dct:title "Cascade Protocol POTS Check Ontology"@en ;
+    dct:description "Vocabulary for POTS (Postural Orthostatic Tachycardia Syndrome) home screening checks using the NASA Lean Test protocol"@en ;
+    dct:creator "Cascade Agentic Labs" ;
+    dct:created "2025-10-31"^^xsd:date ;
+    dct:modified "2026-02-26"^^xsd:date ;
+    owl:versionInfo "1.4" ;
+    rdfs:comment "Layer 2 domain-specific vocabulary for POTS Check app. Defines the POTS screening test protocol, raw measurement classes, and computed results. Describes consumer-generated wellness data from guided orthostatic screening checks performed with Apple Watch and iPhone."@en ;
+    rdfs:seeAlso <https://cascadeprotocol.org/docs/pots/v1.4/> .
+
+# ============================================================================
+# Core Classes
+# ============================================================================
+
+pots:POTSCheckResult a owl:Class ;
+    rdfs:label "POTS Check Result"@en ;
+    rdfs:comment "Complete result bundle from a guided home orthostatic screening check using Apple Watch heart rate monitoring and iPhone posture detection"@en ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty pots:date ;
+        owl:cardinality 1
+    ] ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty pots:protocol ;
+        owl:cardinality 1
+    ] ;
+    rdfs:subClassOf prov:Entity .
+
+pots:HeartRateMeasurement a owl:Class ;
+    rdfs:label "Heart Rate Measurement"@en ;
+    rdfs:comment "Timed heart rate observation captured during standing phase"@en ;
+    rdfs:subClassOf fhir:Observation .
+
+pots:BloodPressureMeasurement a owl:Class ;
+    rdfs:label "Blood Pressure Measurement"@en ;
+    rdfs:comment "Timed blood pressure observation (systolic/diastolic) captured during check"@en ;
+    rdfs:subClassOf fhir:Observation .
+
+pots:SymptomEvent a owl:Class ;
+    rdfs:label "Symptom Event"@en ;
+    rdfs:comment "User-reported symptom captured during the standing phase of the check"@en .
+
+pots:PostureStability a owl:Class ;
+    rdfs:label "Posture Stability Sample"@en ;
+    rdfs:comment "Posture quality measurement from Core Motion sensors during standing phase"@en .
+
+# ============================================================================
+# Test Protocol Classes
+# ============================================================================
+
+pots:TestProtocol a owl:Class ;
+    rdfs:label "Test Protocol"@en ;
+    rdfs:comment "Standardized orthostatic test protocol"@en .
+
+pots:NASALean a pots:TestProtocol ;
+    rdfs:label "NASA Lean Test"@en ;
+    rdfs:comment "10 minutes supine followed by 10 minutes standing against wall, as specified by NASA research protocols"@en ;
+    rdfs:seeAlso <https://ntrs.nasa.gov/citations/20150001725> .
+
+# ============================================================================
+# Data Properties - Test Metadata
+# ============================================================================
+
+pots:date a owl:DatatypeProperty ;
+    rdfs:label "Check Date"@en ;
+    rdfs:comment "ISO 8601 timestamp when the check was performed"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:dateTime .
+
+pots:protocol a owl:DatatypeProperty ;
+    rdfs:label "Test Protocol"@en ;
+    rdfs:comment "Protocol used for the check (currently only 'nasaLean')"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:string .
+
+pots:baselineDurationSeconds a owl:DatatypeProperty ;
+    rdfs:label "Baseline Duration (seconds)"@en ;
+    rdfs:comment "Duration of the supine baseline phase in seconds (typically 600 for 10 minutes)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:integer .
+
+pots:uprightDurationSeconds a owl:DatatypeProperty ;
+    rdfs:label "Upright Duration (seconds)"@en ;
+    rdfs:comment "Duration of the standing phase in seconds (typically 600 for 10 minutes)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:integer .
+
+# ============================================================================
+# Data Properties - Heart Rate
+# ============================================================================
+
+pots:supineHeartRate a owl:ObjectProperty ;
+    rdfs:label "Supine Heart Rate"@en ;
+    rdfs:comment "Baseline heart rate observation from final 2 minutes of supine phase"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range pots:HeartRateMeasurement ;
+    owl:equivalentProperty sct:78564009 .  # Heart rate at rest
+
+pots:standingHeartRates a owl:ObjectProperty ;
+    rdfs:label "Standing Heart Rates"@en ;
+    rdfs:comment "Ordered list of heart rate measurements captured during standing phase"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range rdf:List .
+
+pots:recoveryHeartRate a owl:DatatypeProperty ;
+    rdfs:label "Recovery Heart Rate"@en ;
+    rdfs:comment "Optional heart rate measurement after returning to supine position (v1.1+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:double .
+
+pots:maxHeartRateDelta a owl:DatatypeProperty ;
+    rdfs:label "Maximum Heart Rate Delta"@en ;
+    rdfs:comment "Pre-computed maximum heart rate increase from baseline using 30-second rolling window average during standing phase (v1.2+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:double .
+
+# ============================================================================
+# Data Properties - Blood Pressure
+# ============================================================================
+
+pots:supineBloodPressure a owl:ObjectProperty ;
+    rdfs:label "Supine Blood Pressure"@en ;
+    rdfs:comment "Blood pressure measurement taken during or just before supine phase"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range pots:BloodPressureMeasurement .
+
+pots:standingBloodPressures a owl:ObjectProperty ;
+    rdfs:label "Standing Blood Pressures"@en ;
+    rdfs:comment "List of blood pressure measurements captured at specific minutes during standing phase (typically minutes 1, 3, 5, 7, 10)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range rdf:List .
+
+# ============================================================================
+# Data Properties - Symptoms
+# ============================================================================
+
+pots:symptomEvents a owl:ObjectProperty ;
+    rdfs:label "Symptom Events"@en ;
+    rdfs:comment "List of symptoms reported by user during the check"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range rdf:List .
+
+pots:symptom a owl:DatatypeProperty ;
+    rdfs:label "Symptom Type"@en ;
+    rdfs:comment "Type of symptom experienced (e.g., 'Dizziness', 'Palpitations')"@en ;
+    rdfs:domain pots:SymptomEvent ;
+    rdfs:range xsd:string .
+
+pots:notes a owl:DatatypeProperty ;
+    rdfs:label "Symptom Notes"@en ;
+    rdfs:comment "Optional user-provided notes describing the symptom (max 100 characters)"@en ;
+    rdfs:domain pots:SymptomEvent ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Clinical Flags
+# ============================================================================
+
+pots:potsThresholdMet a owl:DatatypeProperty ;
+    rdfs:label "POTS Threshold Met"@en ;
+    rdfs:comment "True if heart rate increase meets POTS screening criteria (age-adjusted: >=30 bpm for adults 20+, >=40 bpm for pediatric 13-19)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:boolean .
+
+pots:orthostaticHypotensionSuspected a owl:DatatypeProperty ;
+    rdfs:label "Orthostatic Hypotension Suspected"@en ;
+    rdfs:comment "True if blood pressure drop suggests orthostatic hypotension (systolic >=20 mmHg or diastolic >=10 mmHg drop)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:boolean .
+
+pots:orthostaticHypertensionSuspected a owl:DatatypeProperty ;
+    rdfs:label "Orthostatic Hypertension Suspected"@en ;
+    rdfs:comment "True if blood pressure increase suggests orthostatic hypertension (systolic >=20 mmHg increase) (v1.1+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:boolean .
+
+pots:isIncomplete a owl:DatatypeProperty ;
+    rdfs:label "Is Incomplete"@en ;
+    rdfs:comment "True if the check was terminated early or did not complete all phases"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:boolean .
+
+pots:earlyTerminationReason a owl:DatatypeProperty ;
+    rdfs:label "Early Termination Reason"@en ;
+    rdfs:comment "Human-readable reason why the check was terminated early (v1.1+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Data Properties - Posture Quality (v1.1+)
+# ============================================================================
+
+pots:postureQualityScore a owl:DatatypeProperty ;
+    rdfs:label "Posture Quality Score"@en ;
+    rdfs:comment "Letter grade (A-D) indicating overall posture stability during standing phase (v1.1+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:string .
+
+pots:movementArtifactPercentage a owl:DatatypeProperty ;
+    rdfs:label "Movement Artifact Percentage"@en ;
+    rdfs:comment "Percentage of standing phase with excessive movement artifacts (0.0 to 100.0) (v1.1+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:double .
+
+pots:postureStability a owl:ObjectProperty ;
+    rdfs:label "Posture Stability"@en ;
+    rdfs:comment "List of posture stability measurements from Core Motion during standing phase (v1.1+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range rdf:List .
+
+pots:isStable a owl:DatatypeProperty ;
+    rdfs:label "Is Stable"@en ;
+    rdfs:comment "Boolean indicating whether posture was stable at this timestamp"@en ;
+    rdfs:domain pots:PostureStability ;
+    rdfs:range xsd:boolean .
+
+pots:stabilityScore a owl:DatatypeProperty ;
+    rdfs:label "Stability Score"@en ;
+    rdfs:comment "Numerical stability score from 0.0 (unstable) to 1.0 (perfectly stable)"@en ;
+    rdfs:domain pots:PostureStability ;
+    rdfs:range xsd:double .
+
+# ============================================================================
+# Data Properties - User Context (v1.2+)
+# ============================================================================
+
+pots:userAgeAtTest a owl:DatatypeProperty ;
+    rdfs:label "User Age at Test"@en ;
+    rdfs:comment "User's age in years at the time of the check, used for age-based threshold calculation (v1.2+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:integer .
+
+# ============================================================================
+# Data Properties - Timing
+# ============================================================================
+
+pots:atSeconds a owl:DatatypeProperty ;
+    rdfs:label "Seconds Since Standing"@en ;
+    rdfs:comment "Time offset in seconds from the start of the standing phase"@en ;
+    rdfs:range xsd:integer .
+
+pots:secondsSinceStand a owl:DatatypeProperty ;
+    rdfs:label "Seconds Since Stand"@en ;
+    rdfs:comment "Time offset in seconds from the moment the user stood up. Used in standingHeartRates and standingBloodPressures list items for temporal positioning."@en ;
+    rdfs:range xsd:double .
+
+pots:timestampSeconds a owl:DatatypeProperty ;
+    rdfs:label "Timestamp Seconds"@en ;
+    rdfs:comment "Absolute timestamp in seconds, used in SymptomEvent items for precise event timing."@en ;
+    rdfs:range xsd:double .
+
+# ============================================================================
+# Apple Health Import Properties (v1.3)
+# ============================================================================
+
+pots:importedBloodPressureHistory a owl:ObjectProperty ;
+    rdfs:label "Imported Blood Pressure History"@en ;
+    rdfs:comment "Collection of blood pressure readings imported from Apple Health for longitudinal context. Each item is a fhir:Observation with systolic/diastolic components."@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range rdf:List .
+
+pots:importedHRVHistory a owl:ObjectProperty ;
+    rdfs:label "Imported HRV History"@en ;
+    rdfs:comment "Collection of HRV readings imported from Apple Health for longitudinal context. Each item is a fhir:Observation with value in milliseconds."@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range rdf:List .
+
+pots:averageImportedBloodPressure a owl:DatatypeProperty ;
+    rdfs:label "Average Imported Blood Pressure"@en ;
+    rdfs:comment "Computed average of imported blood pressure readings from Apple Health, formatted as 'systolic/diastolic' string."@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:string .
+
+pots:averageImportedHRV a owl:DatatypeProperty ;
+    rdfs:label "Average Imported HRV"@en ;
+    rdfs:comment "Computed average of imported HRV readings from Apple Health (ms)."@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:double .
+
+# ============================================================================
+# V2 Test Configuration & Patient Context (v1.4+)
+# ============================================================================
+
+pots:baselineDurationMinutes a owl:DatatypeProperty ;
+    rdfs:label "Baseline Duration (minutes)"@en ;
+    rdfs:comment "User-selected supine baseline duration in whole minutes. One of: 5, 10, or 15. Captures the deliberate configuration choice (distinct from pots:baselineDurationSeconds which records actual elapsed time). Values below 10 minutes carry a clinical advisory per Bateman Horne Center guidance. (v1.4+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:integer .
+
+pots:testNotes a owl:DatatypeProperty ;
+    rdfs:label "Test Notes"@en ;
+    rdfs:comment "Optional free-text notes entered by the patient about this check session (e.g., current symptoms, recent activity, medication timing). Maximum 500 characters. Distinct from pots:notes which is scoped to individual pots:SymptomEvent items. (v1.4+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:string .
+
+pots:bpProvided a owl:DatatypeProperty ;
+    rdfs:label "Blood Pressure Provided"@en ;
+    rdfs:comment "True if blood pressure cuff data was entered during this check session. False if the user proceeded without a blood pressure cuff. Used by result views and PDF generator to gate BP-dependent sections and display appropriate limitation warnings. (v1.4+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:boolean .
+
+# ============================================================================
+# Proportional Pulse Pressure — Per-Minute Values (v1.4+)
+# ============================================================================
+# PPP = (SBP - DBP) / SBP. Values stored as ratios (0.0 to 1.0).
+# Clinical reference: PPP < 0.25 (25%) may indicate failure to constrict
+# on standing (Bateman Horne Center clinical guidance).
+# Predicates are absent when no BP reading exists at that timepoint.
+# Timepoints mirror the standing BP collection schedule: 1, 3, 5, 7, 10 minutes.
+
+pots:pppMinute1 a owl:DatatypeProperty ;
+    rdfs:label "Proportional Pulse Pressure at 1 Minute"@en ;
+    rdfs:comment "Proportional Pulse Pressure ratio (SBP-DBP)/SBP at 1 minute of standing. Stored as a decimal ratio 0.0-1.0. Absent if no blood pressure reading was taken at this timepoint. Reference: values >= 0.25 (25%) are considered normal per Bateman Horne Center clinical guidance. (v1.4+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:decimal .
+
+pots:pppMinute3 a owl:DatatypeProperty ;
+    rdfs:label "Proportional Pulse Pressure at 3 Minutes"@en ;
+    rdfs:comment "Proportional Pulse Pressure ratio (SBP-DBP)/SBP at 3 minutes of standing. Stored as a decimal ratio 0.0-1.0. Absent if no blood pressure reading was taken at this timepoint. (v1.4+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:decimal .
+
+pots:pppMinute5 a owl:DatatypeProperty ;
+    rdfs:label "Proportional Pulse Pressure at 5 Minutes"@en ;
+    rdfs:comment "Proportional Pulse Pressure ratio (SBP-DBP)/SBP at 5 minutes of standing. Stored as a decimal ratio 0.0-1.0. Absent if no blood pressure reading was taken at this timepoint. (v1.4+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:decimal .
+
+pots:pppMinute7 a owl:DatatypeProperty ;
+    rdfs:label "Proportional Pulse Pressure at 7 Minutes"@en ;
+    rdfs:comment "Proportional Pulse Pressure ratio (SBP-DBP)/SBP at 7 minutes of standing. Stored as a decimal ratio 0.0-1.0. Absent if no blood pressure reading was taken at this timepoint. (v1.4+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:decimal .
+
+pots:pppMinute10 a owl:DatatypeProperty ;
+    rdfs:label "Proportional Pulse Pressure at 10 Minutes"@en ;
+    rdfs:comment "Proportional Pulse Pressure ratio (SBP-DBP)/SBP at 10 minutes of standing. Stored as a decimal ratio 0.0-1.0. Absent if no blood pressure reading was taken at this timepoint. (v1.4+)"@en ;
+    rdfs:domain pots:POTSCheckResult ;
+    rdfs:range xsd:decimal .
+
+# ============================================================================
+# Alignment with Healthcare Standards
+# ============================================================================
+
+# SNOMED CT Mappings
+# - Heart rate: sct:364075005 (Heart rate)
+# - Supine position: sct:40199007 (Supine body position)
+# - Standing position: sct:10904000 (Orthostatic body position)
+# - POTS: sct:703273007 (Postural orthostatic tachycardia syndrome)
+# - Orthostatic hypotension: sct:28651003
+
+# LOINC Mappings
+# - Heart rate: loinc:8867-4 (Heart rate)
+# - Systolic BP: loinc:8480-6 (Systolic blood pressure)
+# - Diastolic BP: loinc:8462-4 (Diastolic blood pressure)
+
+# FHIR Observation Pattern
+# All heart rate and blood pressure measurements use fhir:Observation structure
+# with fhir:code, fhir:valueQuantity, and ucum: units
+
+# ============================================================================
+# Notes
+# ============================================================================
+
+# Data Classification: Consumer wellness data (non-diagnostic)
+# Target Age Range: 13+ (COPPA compliant)
+# Devices: Apple Watch (heart rate), iPhone (posture tracking, UI)
+# Protocol: NASA Lean Test (10 min supine + 10 min standing against wall)
+# Diagnostic Disclaimer: Results are for informational purposes only and should
+# be discussed with a healthcare provider. This is NOT a medical diagnostic tool.
+
+# ============================================================================
+# Changelog
+# ============================================================================
+# v1.4 (2026-02-26): Added pots:baselineDurationMinutes (user-selected baseline
+#     duration in whole minutes, distinct from pots:baselineDurationSeconds).
+#     Added pots:testNotes (free-text patient notes on the result, distinct from
+#     per-symptom pots:notes). Added pots:bpProvided (boolean flag for BP cuff
+#     presence). Added per-minute PPP predicates pots:pppMinute1, pots:pppMinute3,
+#     pots:pppMinute5, pots:pppMinute7, pots:pppMinute10 for Proportional Pulse
+#     Pressure values (ratio 0.0-1.0) at each standard BP timepoint.
+# v1.3 (2026-02-10): Added timing properties (secondsSinceStand, timestampSeconds)
+#     for fine-grained temporal resolution in measurement lists. Added Apple Health
+#     import properties (importedBloodPressureHistory, importedHRVHistory,
+#     averageImportedBloodPressure, averageImportedHRV) for longitudinal context.
+#     Renamed postureStabilitySamples to postureStability to match app serializer.
+# v1.2 (2025-12-15): Added userAgeAtTest, maxHeartRateDelta.
+# v1.1 (2025-11-15): Added recoveryHeartRate, orthostaticHypertensionSuspected,
+#     earlyTerminationReason, posture quality (postureQualityScore,
+#     movementArtifactPercentage, PostureStability class).
+# v1.0 (2025-10-31): Initial release. POTSCheckResult, HeartRateMeasurement,
+#     BloodPressureMeasurement, SymptomEvent, TestProtocol, NASALean.

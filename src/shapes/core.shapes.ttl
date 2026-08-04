@@ -2,13 +2,16 @@
 @prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix dct: <http://purl.org/dc/terms/> .
 
 # ============================================================================
 # Cascade Protocol -- Core Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.0 (Phase 4, 2026-02-18)
+# Version: 1.1 (2026-08-03)
 # Validates: cascade:PatientProfile, cascade:Address, cascade:EmergencyContact,
-#            cascade:PharmacyInfo, cascade:AdvanceDirectives
+#            cascade:PharmacyInfo, cascade:AdvanceDirectives, cascade:ProxyAgent,
+#            cascade:ExportManifest, cascade:RecordSummary,
+#            cascade:InteractionScenario
 #
 # Severity levels:
 #   sh:Violation -- Must fix (blocks operations)
@@ -656,3 +659,168 @@ cascade:ProxyAgentShape a sh:NodeShape ;
                   sh:message "A ProxyAgent must declare the patient it acts for (cascade:actsForPatient)." ] ;
     sh:property [ sh:path cascade:proxyRelationship ; sh:minCount 1 ; sh:datatype xsd:string ] ;
     sh:property [ sh:path cascade:proxyGrantedAt ; sh:minCount 1 ; sh:datatype xsd:dateTime ] .
+
+# ============================================================================
+# Pod Export Manifest Shapes (v1.1 -- core v3.4)
+# ============================================================================
+#
+# The manifest is the first thing a consuming agent reads and the thing it
+# trusts to decide whether an export is complete. Until core v3.4 none of its
+# classes was defined, so nothing targeted them and validating a manifest
+# checked nothing at all.
+
+cascade:ExportManifestShape a sh:NodeShape ;
+    sh:targetClass cascade:ExportManifest ;
+    rdfs:label "Export Manifest Shape"@en ;
+    rdfs:comment "Validation constraints for a pod export manifest. cascade:ExportManifest is a dcat:Dataset, so the DCAT-standard descriptive terms are the required ones."@en ;
+
+    # REQUIRED: a title. An untitled dataset cannot be presented to a user.
+    sh:property [
+        sh:path dct:title ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Title"@en ;
+        sh:message "Export manifest must carry exactly one non-empty dct:title"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: creation timestamp. Without it a consumer cannot tell whether
+    # the export is current, which is the manifest's main job.
+    sh:property [
+        sh:path dct:created ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Created"@en ;
+        sh:message "Export manifest must carry exactly one dct:created timestamp"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: schema version, so a consumer can refuse an export it cannot read
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:message "Export manifest must declare exactly one schemaVersion in major.minor form"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:patientProfileVersion ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Patient Profile Version"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:clinicalSummary ;
+        sh:maxCount 1 ;
+        sh:name "Clinical Summary"@en ;
+        sh:message "Export manifest must not carry more than one clinical summary"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:wellnessSummary ;
+        sh:maxCount 1 ;
+        sh:name "Wellness Summary"@en ;
+        sh:message "Export manifest must not carry more than one wellness summary"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path dct:description ;
+        sh:maxCount 1 ;
+        sh:name "Description"@en ;
+        sh:severity sh:Violation
+    ] .
+
+cascade:RecordSummaryShape a sh:NodeShape ;
+    sh:targetClass cascade:RecordSummary ;
+    rdfs:label "Record Summary Shape"@en ;
+    rdfs:comment "Validation constraints for per-domain record counts. Every count must be a single non-negative integer: a negative or repeated count silently corrupts any completeness check built on it."@en ;
+
+    sh:property [
+        sh:path cascade:domain ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Domain"@en ;
+        sh:message "Record summary must name exactly one domain"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [ sh:path cascade:conditionCount ;     sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:name "Condition Count"@en ;      sh:message "conditionCount must be a single non-negative integer"@en ;      sh:severity sh:Violation ] ;
+    sh:property [ sh:path cascade:medicationCount ;    sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:name "Medication Count"@en ;     sh:message "medicationCount must be a single non-negative integer"@en ;     sh:severity sh:Violation ] ;
+    sh:property [ sh:path cascade:allergyCount ;       sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:name "Allergy Count"@en ;        sh:message "allergyCount must be a single non-negative integer"@en ;        sh:severity sh:Violation ] ;
+    sh:property [ sh:path cascade:labResultCount ;     sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:name "Lab Result Count"@en ;     sh:message "labResultCount must be a single non-negative integer"@en ;      sh:severity sh:Violation ] ;
+    sh:property [ sh:path cascade:immunizationCount ;  sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:name "Immunization Count"@en ;   sh:message "immunizationCount must be a single non-negative integer"@en ;   sh:severity sh:Violation ] ;
+    sh:property [ sh:path cascade:coverageCount ;      sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:name "Coverage Count"@en ;       sh:message "coverageCount must be a single non-negative integer"@en ;       sh:severity sh:Violation ] ;
+    sh:property [ sh:path cascade:supplementCount ;    sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:name "Supplement Count"@en ;     sh:message "supplementCount must be a single non-negative integer"@en ;     sh:severity sh:Violation ] ;
+
+    # Day counts are bounded above as well: a "days covered" figure larger than
+    # a decade of daily readings is a unit error, not a long history.
+    sh:property [ sh:path cascade:vitalSignDays ;      sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:maxInclusive 36500 ; sh:name "Vital Sign Days"@en ;      sh:message "vitalSignDays must be a single integer between 0 and 36500"@en ;      sh:severity sh:Violation ] ;
+    sh:property [ sh:path cascade:heartRateDays ;      sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:maxInclusive 36500 ; sh:name "Heart Rate Days"@en ;      sh:message "heartRateDays must be a single integer between 0 and 36500"@en ;      sh:severity sh:Violation ] ;
+    sh:property [ sh:path cascade:bloodPressureDays ;  sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:maxInclusive 36500 ; sh:name "Blood Pressure Days"@en ;  sh:message "bloodPressureDays must be a single integer between 0 and 36500"@en ;  sh:severity sh:Violation ] ;
+    sh:property [ sh:path cascade:activityDays ;       sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:maxInclusive 36500 ; sh:name "Activity Days"@en ;       sh:message "activityDays must be a single integer between 0 and 36500"@en ;       sh:severity sh:Violation ] ;
+    sh:property [ sh:path cascade:sleepDays ;          sh:datatype xsd:integer ; sh:maxCount 1 ; sh:minInclusive 0 ; sh:maxInclusive 36500 ; sh:name "Sleep Days"@en ;          sh:message "sleepDays must be a single integer between 0 and 36500"@en ;          sh:severity sh:Violation ] ;
+
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:severity sh:Violation
+    ] .
+
+cascade:InteractionScenarioShape a sh:NodeShape ;
+    sh:targetClass cascade:InteractionScenario ;
+    rdfs:label "Interaction Scenario Shape"@en ;
+    rdfs:comment "Validation constraints for a flagged cross-provenance interaction. A scenario that names no resources is not actionable, so involvedResources is required."@en ;
+
+    sh:property [
+        sh:path dct:title ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Title"@en ;
+        sh:message "Interaction scenario must carry exactly one non-empty dct:title"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: the resources to correlate. Without them the scenario states a
+    # risk exists but gives a consumer nothing to check it against.
+    sh:property [
+        sh:path cascade:involvedResources ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Involved Resources"@en ;
+        sh:message "Interaction scenario must name exactly one list of involved resources"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:severity ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("low" "moderate" "high" "critical") ;
+        sh:name "Severity"@en ;
+        sh:message "Interaction scenario severity must be low, moderate, high or critical"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:requiresCrossProvenance ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:name "Requires Cross-Provenance"@en ;
+        sh:message "requiresCrossProvenance must be a single boolean"@en ;
+        sh:severity sh:Violation
+    ] .

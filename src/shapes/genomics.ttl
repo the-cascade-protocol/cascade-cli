@@ -1,0 +1,1224 @@
+@prefix genomics: <https://ns.cascadeprotocol.org/genomics/v1#> .
+@prefix cascade:  <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix owl:      <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:      <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:     <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:      <http://www.w3.org/2001/XMLSchema#> .
+@prefix dct:      <http://purl.org/dc/terms/> .
+@prefix prov:     <http://www.w3.org/ns/prov#> .
+@prefix fhir:     <http://hl7.org/fhir/> .
+@prefix sct:      <http://snomed.info/sct/> .
+@prefix loinc:    <http://loinc.org/rdf#> .
+@prefix hpo:      <http://purl.obolibrary.org/obo/HP_> .
+@prefix mondo:    <http://purl.obolibrary.org/obo/MONDO_> .
+@prefix so:       <http://purl.obolibrary.org/obo/SO_> .
+@prefix hgnc:     <https://identifiers.org/hgnc:> .
+@prefix omim:     <https://omim.org/entry/> .
+@prefix orpha:    <http://www.orpha.net/ORDO/Orphanet_> .
+@prefix clinvar:  <https://www.ncbi.nlm.nih.gov/clinvar/variation/> .
+
+# ============================================================================
+# Ontology Metadata
+# ============================================================================
+
+<https://ns.cascadeprotocol.org/genomics/v1#> a owl:Ontology ;
+    owl:imports <https://ns.cascadeprotocol.org/core/v1#> ,
+                <https://ns.cascadeprotocol.org/clinical/v1#> ;
+    dct:title "Cascade Protocol Genomics Ontology"@en ;
+    dct:description "Layer 2 vocabulary for sequence variants, variant interpretations, haplotypes/diplotypes, copy number variants, sequencing-run metadata, raw-file pointers, pedigrees, and genetic test reports/orders. Bridges Layer 1 standards (HGVS, ClinVar, VRS, HGNC, Sequence Ontology, HPO, MONDO/OMIM/ORDO, ACMG/AMP via LOINC answer codes, ClinGen review-status taxonomy) to Layer 3 patient-facing genetic counseling summaries in checkup:."@en ;
+    dct:creator "Cascade Agentic Labs" ;
+    dct:created "2026-05-05"^^xsd:date ;
+    dct:modified "2026-06-16"^^xsd:date ;
+    owl:versionInfo "1.0-draft" ;
+    rdfs:comment """DRAFT — pre-stable v1 ontology. Property names, ranges, and structure may change before v1.0 stable release.
+        Three-layer ontology for genomics:
+          Layer 1 (Established): HGVS nomenclature, VRS, ClinVar, HGNC, Sequence Ontology,
+                                 HPO, MONDO/OMIM/ORDO, ACMG/AMP (encoded via LOINC),
+                                 ClinGen review-status taxonomy, GA4GH htsget streaming.
+          Layer 2 (genomics:):   Variant, VariantInterpretation, SubmitterAssertion,
+                                 Haplotype, Diplotype, CopyNumberVariant, SequencingRun,
+                                 RawFile, GeneticTest, GeneticTestOrder, Pedigree,
+                                 PedigreeMember — RDF resources binding Layer 1 codes
+                                 to a patient and family with provenance and quality tier.
+          Layer 3 (checkup:):    GeneticCounselingSummary, VariantNarrative — patient-facing
+                                 aggregations and regeneratable narrative (authored separately
+                                 in the checkup vocabulary)."""@en ;
+    rdfs:seeAlso <https://cascadeprotocol.org/docs/genomics/v1/> .
+
+# Changelog:
+# v1.0-draft.0.2 (2026-05-05): Phase 1 evolution candidates landed after the FHIR
+#     Genomics IG importer session surfaced gaps. All four are additive (no breaking
+#     changes):
+#       - genomics:reportedRecord — generic GeneticTest → record predicate (no
+#         rdfs:range, deliberately broad). Resolves the HLA tie-break (TASK-1.9):
+#         existing genomics:variantsObserved has rdfs:range genomics:Variant and
+#         cannot represent non-Variant report links (Diplotypes, Haplotypes, PGx
+#         implications).
+#       - genomics:refAllele, genomics:altAllele, genomics:genomicStartEnd —
+#         VCF-style coordinate properties for FHIR Genomics IG variants that lack
+#         HGVS but carry LOINC 69547-8 / 69551-0 / 81254-5 directly. Required for
+#         the Phase 3 VCF importer.
+#       - genomics:somaticStatus ObjectProperty + genomics:SomaticStatus enum
+#         (Germline / Somatic / UnknownSomaticStatus). Maps LOINC 48002-0.
+#       - genomics:variantAlleleFrequency (xsd:decimal, SHACL-bounded 0.0–1.0).
+#         Distinct from genomics:mosaicismFraction: VAF is a sequencing-evidence
+#         fraction; mosaicism is the clinical conclusion that the variant is
+#         present in only a subset of cells. Phase 1 importer was shoehorning
+#         VAF into mosaicismFraction; importers should now emit VAF here.
+# v1.0-draft (2026-05-05): Initial production version of genomics/v1-draft authored
+#     in spec/ from the v0.1 sketch (cascadeprotocol.org/drafts/genomics-v1/genomics.ttl).
+#     Folds in 9 gaps from GAP-ANALYSIS.md (Haplotype, Diplotype, CopyNumberVariant,
+#     SubmitterAssertion, GeneticTestOrder, mosaicismFraction, interpretationStatus +
+#     CausalityStatus, reviewStatus + 7-value ReviewStatus), directory-session additions
+#     (SequencingRun, RawFile, sequencing/coverage/laboratory metadata, dataProvenance
+#     enum), and the data-quality tier model per D-QUALITY-TIER (dataQualityTier enum +
+#     requiresConfirmation property). Per D-PATH, this draft is NOT yet registered in
+#     spec/VOCAB_VERSIONS — it lands there at v1.0 graduation.
+
+# ============================================================================
+# Core Classes — Variant Identity
+# ============================================================================
+
+genomics:Variant a owl:Class ;
+    rdfs:label "Sequence Variant"@en ;
+    rdfs:comment "A specific sequence variant observed in a patient sample. Carries the four parallel descriptions of variant identity (HGVS for human readability, ClinVar/VRS for stable computable identity, Sequence Ontology for consequence type, gene for biological context). Distinct from VariantInterpretation, which assigns clinical significance."@en ;
+    rdfs:subClassOf fhir:Observation ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:subClassOf [
+        a owl:Restriction ;
+        owl:onProperty genomics:geneSymbol ;
+        owl:cardinality 1
+    ] .
+
+genomics:VariantInterpretation a owl:Class ;
+    rdfs:label "Variant Interpretation"@en ;
+    rdfs:comment "A clinical-significance assertion linking a Variant to a single condition (per D-Q5 — multi-condition cases produce multiple Interpretation instances), with ACMG/AMP classification, supporting criteria, and an interpreting laboratory or expert panel. Reclassifications produce new Interpretation instances linked to the prior via prov:wasRevisionOf — interpretations are versioned, not edited. SHACL enforces genomics:condition and genomics:variantInterpreted both at cardinality 1..1 (see genomics.shapes.ttl, TASK-0.2)."@en ;
+    rdfs:subClassOf fhir:Observation ;
+    rdfs:subClassOf prov:Entity .
+
+genomics:GeneticTest a owl:Class ;
+    rdfs:label "Genetic Test Report"@en ;
+    rdfs:comment "Result envelope from a clinical genetic test (panel, exome, single-gene). Aggregates Variant observations, gene panel scope, methodology, and ordering provider. Maps to FHIR DiagnosticReport. For test orders that have not yet resulted, see genomics:GeneticTestOrder."@en ;
+    rdfs:subClassOf fhir:DiagnosticReport ;
+    rdfs:subClassOf prov:Entity .
+
+genomics:GeneticTestOrder a owl:Class ;
+    rdfs:label "Genetic Test Order"@en ;
+    rdfs:comment "An order/request for a genetic test, distinct from the resulting GeneticTest. Maps to FHIR ServiceRequest. Counseling workflows track 'ordered but not yet resulted' state via this class. Once the order is fulfilled, link the resulting GeneticTest via genomics:resultedIn."@en ;
+    rdfs:subClassOf fhir:ServiceRequest ;
+    rdfs:subClassOf prov:Entity .
+
+genomics:Gene a owl:Class ;
+    rdfs:label "Gene"@en ;
+    rdfs:comment "A gene reference, identified by HGNC approved symbol and ID. Used as the target of variant observations and gene-disease associations."@en .
+
+# ============================================================================
+# Haplotype, Diplotype, Copy Number Variants
+# ============================================================================
+# Haplotype/Diplotype superClass decision (resolved 2026-05-05):
+# FHIR Genomics IG ships `haplotype` and `genotype` profiles, both extending
+# `Observation` (verified against Bundle-bundle-pgxexample.json — both
+# resourceType "Observation"). We adopt the same anchor for consistency with
+# Variant. See RATIONALE.md.
+
+genomics:Haplotype a owl:Class ;
+    rdfs:label "Haplotype"@en ;
+    rdfs:comment "A multi-variant unit travelling together on one chromosome — the unit of clinical interpretation in pharmacogenomics (PharmVar star alleles like CYP2C19*2, CYP2D6*4) and HLA typing (HLA-DQB1*02:01). Cannot be expressed as a single Variant. Anchored on fhir:Observation per FHIR Genomics IG haplotype profile."@en ;
+    rdfs:subClassOf fhir:Observation ;
+    rdfs:subClassOf prov:Entity .
+
+genomics:Diplotype a owl:Class ;
+    rdfs:label "Diplotype"@en ;
+    rdfs:comment "A pair of haplotypes (e.g., '*1/*2'), required for any pharmacogenomics or HLA typing use case. Anchored on fhir:Observation per FHIR Genomics IG genotype profile."@en ;
+    rdfs:subClassOf fhir:Observation ;
+    rdfs:subClassOf prov:Entity .
+
+genomics:CopyNumberVariant a owl:Class ;
+    rdfs:label "Copy Number Variant"@en ;
+    rdfs:comment "A structural variant defined by deletion or duplication of a genomic interval, expressed as integer copy number plus interval coordinates rather than HGVS. Required for structural-variant cases (e.g., 13q14 deletion in retinoblastoma). subClassOf genomics:Variant — inherits stable-ID and zygosity properties where applicable."@en ;
+    rdfs:subClassOf genomics:Variant .
+
+# ============================================================================
+# Sequencing Run & Raw File Metadata (per D-DIRECTORY)
+# ============================================================================
+# Cascade pods do NOT ingest raw genomic file bytes (BAM/CRAM/FASTQ at
+# 50–100GB+). RawFile carries pointer-and-hash metadata only — bytes live
+# wherever the user keeps them (lab cloud, local disk, NAS, htsget-served).
+# See Critical conventions #9 in the Genomics & Advisory implementation plan.
+
+genomics:SequencingRun a owl:Class ;
+    rdfs:label "Sequencing Run"@en ;
+    rdfs:comment "Metadata for a single sequencing run that produced one or more variants. Captures coverage depth, technology, variant-caller version, laboratory certification, and key dates (sample collection, sequencing, file generation). Used to populate the data-quality tier on derived Variants and to trace provenance back to lab process."@en ;
+    rdfs:subClassOf prov:Activity .
+
+genomics:RawFile a owl:Class ;
+    rdfs:label "Raw Genomic File"@en ;
+    rdfs:comment "Pointer-and-hash record for a raw genomic file (BAM, CRAM, FASTQ, gVCF, VCF, BCF). Cascade does NOT ingest the bytes — only the manifest. The bytes live wherever the user keeps them (lab cloud, local disk, NAS, htsget-served). genomics:fileLocation may be opaque (s3://, https://, file://, or a vendor-specific URI) and is not validated by Cascade."@en ;
+    rdfs:subClassOf prov:Entity .
+
+# ============================================================================
+# Variant Identity Properties — HGVS Nomenclature
+# ============================================================================
+# Per HGVS: a description is incomplete without its reference sequence. Always
+# store the full reference:type.position+change string, never a bare position.
+
+genomics:hgvsCDot a owl:DatatypeProperty ;
+    rdfs:label "HGVS Coding-DNA Description"@en ;
+    rdfs:comment "Variant described against a coding-sequence (transcript) reference, e.g. 'NM_000059.4:c.5946delT'. Includes transcript accession with version. This is the form most often cited in clinical reports."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string ;
+    genomics:loincCode loinc:48004-6 .  # DNA change (c.HGVS)
+
+genomics:hgvsPDot a owl:DatatypeProperty ;
+    rdfs:label "HGVS Protein Description"@en ;
+    rdfs:comment "Variant described at the protein level, e.g. 'NP_000050.3:p.Ser1982Argfs*22'. Use parentheses (p.(Ser1982Argfs*22)) when the protein consequence is predicted from the DNA change rather than directly observed."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string ;
+    genomics:loincCode loinc:48005-3 .  # Amino acid change (p.HGVS)
+
+genomics:hgvsGDot a owl:DatatypeProperty ;
+    rdfs:label "HGVS Genomic Description"@en ;
+    rdfs:comment "Variant described against a genomic reference, e.g. 'NC_000013.11:g.32340301del'. Required for cross-transcript joins and for variants outside coding regions."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string ;
+    genomics:loincCode loinc:81290-9 .  # Genomic ref allele
+
+# Added in v1-draft.0.2: VCF-style coordinate properties. FHIR Genomics IG
+# variants frequently carry the LOINC 69547-8 / 69551-0 / 81254-5 components
+# without HGVS strings; the Phase 3 VCF importer relies on these directly.
+genomics:refAllele a owl:DatatypeProperty ;
+    rdfs:label "Reference Allele"@en ;
+    rdfs:comment "The reference base sequence at the variant position, as defined by the reference genome assembly. ATCG[N], typically 1–N bases. Per VCF REF / FHIR Genomics IG LOINC 69547-8."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string ;
+    genomics:loincCode loinc:69547-8 .  # Genomic ref allele [ID]
+
+genomics:altAllele a owl:DatatypeProperty ;
+    rdfs:label "Alternate Allele"@en ;
+    rdfs:comment "The variant allele sequence at the variant position. ATCG[N] for substitutions/insertions; '-' or empty for deletions; structured forms like '<DEL>'/'<DUP>' for symbolic alleles. Per VCF ALT / FHIR Genomics IG LOINC 69551-0."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string ;
+    genomics:loincCode loinc:69551-0 .  # Genomic alt allele [ID]
+
+genomics:genomicStartEnd a owl:DatatypeProperty ;
+    rdfs:label "Genomic Start-End Coordinates"@en ;
+    rdfs:comment "The 1-based inclusive start-end coordinates of the variant on the reference assembly, formatted as 'chrN:start-end' (e.g., 'chr17:43124027-43124028'). Pair with genomics:referenceGenome for full anchoring. Per FHIR Genomics IG LOINC 81254-5."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string ;
+    genomics:loincCode loinc:81254-5 .  # Genomic allele start-end
+
+genomics:hgvsProteinObserved a owl:DatatypeProperty ;
+    rdfs:label "Protein Consequence Directly Observed"@en ;
+    rdfs:comment "True when the p.HGVS description was directly observed at the protein level (e.g. mass spec, functional assay). False or absent means the protein consequence was predicted from the DNA change. Conventionally encoded in HGVS by parentheses around the p. description."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:boolean .
+
+genomics:transcriptRef a owl:DatatypeProperty ;
+    rdfs:label "Reference Transcript"@en ;
+    rdfs:comment "RefSeq transcript accession with version, e.g. 'NM_000059.4'. Stored separately from the HGVS string so that downstream tools can reason about transcript version drift, the most common source of variant ambiguity in clinical handoffs."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string .
+
+genomics:genomeAssembly a owl:DatatypeProperty ;
+    rdfs:label "Reference Genome Assembly"@en ;
+    rdfs:comment "Reference genome build, e.g. 'GRCh38' or 'GRCh37'. Required when interpreting g.HGVS coordinates."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Variant Identity Properties — Stable Identifiers
+# ============================================================================
+# HGVS strings are descriptive but normalization-fragile. Stable IDs are what
+# join across databases. Carry as many as the source provides.
+
+genomics:clinvarVariationId a owl:DatatypeProperty ;
+    rdfs:label "ClinVar Variation ID"@en ;
+    rdfs:comment "ClinVar VCV accession identifying the variant (not the variant-condition pair). Example: 'VCV000051062' for BRCA2 c.5946delT."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string ;
+    genomics:loincCode loinc:81252-9 .  # Discrete genetic variant
+
+genomics:clinvarRcvId a owl:DatatypeProperty ;
+    rdfs:label "ClinVar RCV ID"@en ;
+    rdfs:comment "ClinVar RCV accession identifying a variant-condition assertion. Multiple RCVs typically attach to one VCV. Lives on VariantInterpretation, not Variant."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range xsd:string .
+
+genomics:dbsnpRsId a owl:DatatypeProperty ;
+    rdfs:label "dbSNP rsID"@en ;
+    rdfs:comment "NCBI dbSNP reference SNP identifier, e.g. 'rs80359550'. Primary join key for consumer-array (23andMe / AncestryDNA / etc.) imports."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string .
+
+genomics:caId a owl:DatatypeProperty ;
+    rdfs:label "ClinGen Allele Registry CAid"@en ;
+    rdfs:comment "ClinGen Allele Registry canonical allele identifier. Stable across HGVS reformulations and assembly changes — the recommended primary join key when available."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string .
+
+genomics:vrsId a owl:DatatypeProperty ;
+    rdfs:label "GA4GH VRS Identifier"@en ;
+    rdfs:comment "Deterministic computable hash identifier per GA4GH Variation Representation Spec. Computed from the normalized sequence-location-state object; identical variants always hash to the same VRS ID regardless of how they were originally described."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string .
+
+genomics:vrsObject a owl:DatatypeProperty ;
+    rdfs:label "VRS Allele Object (JSON-LD)"@en ;
+    rdfs:comment "Full VRS Allele JSON-LD payload as serialized string. Carries sequence reference, location interval, and state. Permits round-trip to other VRS-aware systems without re-parsing the HGVS."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Gene & Consequence Properties
+# ============================================================================
+
+genomics:geneSymbol a owl:DatatypeProperty ;
+    rdfs:label "Gene Symbol (HGNC Approved)"@en ;
+    rdfs:comment "HGNC approved gene symbol, e.g. 'BRCA2'. Always use the approved symbol, never an alias."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string ;
+    genomics:loincCode loinc:48018-6 .  # Gene studied
+
+genomics:hgncId a owl:DatatypeProperty ;
+    rdfs:label "HGNC ID"@en ;
+    rdfs:comment "HGNC numeric identifier with prefix, e.g. 'HGNC:1101' for BRCA2. Stable across symbol changes."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string .
+
+genomics:consequenceTerm a owl:ObjectProperty ;
+    rdfs:label "Sequence Ontology Consequence"@en ;
+    rdfs:comment "Sequence Ontology term URI describing the molecular consequence of the variant, e.g. so:0001589 (frameshift_variant), so:0001583 (missense_variant), so:0001587 (stop_gained)."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range owl:Class .
+
+genomics:consequenceLabel a owl:DatatypeProperty ;
+    rdfs:label "Consequence Label"@en ;
+    rdfs:comment "Human-readable consequence label paired with the SO URI for legibility, e.g. 'frameshift_variant'."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:string .
+
+genomics:zygosity a owl:ObjectProperty ;
+    rdfs:label "Zygosity"@en ;
+    rdfs:comment "Zygosity of the observed variant. Named-individual values: genomics:Heterozygous, Homozygous, Hemizygous, CompoundHeterozygous, MosaicLow, MosaicHigh. For mosaic variants, also populate genomics:mosaicismFraction with the actual VAF."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range genomics:ZygosityValue ;
+    genomics:loincCode loinc:53034-5 .  # Allelic state
+
+genomics:mosaicismFraction a owl:DatatypeProperty ;
+    rdfs:label "Mosaicism Fraction (VAF)"@en ;
+    rdfs:comment "Variant allele fraction (0.0–1.0) for mosaic variants. Distinct from zygosity, which is categorical. The continuous VAF is the load-bearing number for clinical decisions in somatic mosaicism scenarios. NOTE (v1-draft.0.2): for the broader 'fraction of reads supporting alt allele' use genomics:variantAlleleFrequency; mosaicismFraction is reserved for the clinical conclusion that the variant is present in only a subset of cells."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:decimal .
+
+# Added in v1-draft.0.2: VAF as a distinct property from mosaicismFraction.
+# VAF is the broader concept (any sequencing read fraction supporting the alt
+# allele); mosaicism is the specific clinical interpretation. Phase 1 importer
+# was shoehorning LOINC 81258-6 into mosaicismFraction; the correct fix is
+# authoring VAF as its own property.
+genomics:variantAlleleFrequency a owl:DatatypeProperty ;
+    rdfs:label "Variant Allele Frequency"@en ;
+    rdfs:comment "Fraction of sequencing reads at the variant position that support the alternate allele. Range 0.0–1.0. Per FHIR Genomics IG LOINC 81258-6. Distinct from genomics:mosaicismFraction — VAF is a sequencing-evidence fraction; mosaicism is the clinical conclusion that the variant is present in only a subset of cells (which often, but not always, manifests as low VAF)."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range xsd:decimal ;
+    genomics:loincCode loinc:81258-6 .  # Sample variant allelic frequency [NFr]
+
+# Added in v1-draft.0.2: variant origin (germline vs. somatic). LOINC 48002-0
+# is one of the most clinically important variant attributes. Critical for
+# cancer interpretation and inheritance reasoning.
+genomics:somaticStatus a owl:ObjectProperty ;
+    rdfs:label "Somatic Status"@en ;
+    rdfs:comment "Whether the variant is germline (inherited / present in all cells) or somatic (acquired / tissue-specific). Critical for cancer interpretation and inheritance reasoning. Per FHIR Genomics IG LOINC 48002-0."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range genomics:SomaticStatus ;
+    genomics:loincCode loinc:48002-0 .  # Genomic source class
+
+genomics:phase a owl:ObjectProperty ;
+    rdfs:label "Allelic Phase"@en ;
+    rdfs:comment "For compound heterozygous calls in the same gene: whether the two variants are in cis (same chromosome) or trans (opposite chromosomes). Values: genomics:Cis, Trans, PhaseUnknown. Critical for autosomal recessive inheritance interpretation."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range genomics:PhaseValue .
+
+genomics:phasedWith a owl:ObjectProperty ;
+    rdfs:label "Phased With Variant"@en ;
+    rdfs:comment "Links to the partner Variant when phase has been determined for a compound-heterozygous pair. Symmetric (each variant phasedWith the other)."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range genomics:Variant .
+
+# ============================================================================
+# Haplotype & Diplotype Properties
+# ============================================================================
+
+genomics:hasComponent a owl:ObjectProperty ;
+    rdfs:label "Haplotype Component Variant"@en ;
+    rdfs:comment "Links a Haplotype to one of its component Variants. A haplotype is composed of multiple variants that travel together on one chromosome."@en ;
+    rdfs:domain genomics:Haplotype ;
+    rdfs:range genomics:Variant .
+
+genomics:starAlleleSymbol a owl:DatatypeProperty ;
+    rdfs:label "Star Allele Symbol"@en ;
+    rdfs:comment "PharmVar/HLA-style nomenclature, e.g. 'CYP2C19*2', 'HLA-DQB1*02:01'. The clinically actionable identifier in pharmacogenomics and HLA typing."@en ;
+    rdfs:domain genomics:Haplotype ;
+    rdfs:range xsd:string .
+
+genomics:diplotypeNotation a owl:DatatypeProperty ;
+    rdfs:label "Diplotype Notation"@en ;
+    rdfs:comment "Compact paired-haplotype notation, e.g. '*1/*2'. Computed from hapA + hapB; carried as a string for human readability and direct match against PGx guideline tables."@en ;
+    rdfs:domain genomics:Diplotype ;
+    rdfs:range xsd:string .
+
+genomics:hapA a owl:ObjectProperty ;
+    rdfs:label "Haplotype A"@en ;
+    rdfs:comment "First haplotype of a diplotype pair. Order (A vs B) is arbitrary but must be stable within a record."@en ;
+    rdfs:domain genomics:Diplotype ;
+    rdfs:range genomics:Haplotype .
+
+genomics:hapB a owl:ObjectProperty ;
+    rdfs:label "Haplotype B"@en ;
+    rdfs:comment "Second haplotype of a diplotype pair."@en ;
+    rdfs:domain genomics:Diplotype ;
+    rdfs:range genomics:Haplotype .
+
+# ============================================================================
+# Copy Number Variant Properties
+# ============================================================================
+
+genomics:copyNumber a owl:DatatypeProperty ;
+    rdfs:label "Copy Number"@en ;
+    rdfs:comment "Integer copy number observed for the genomic interval, e.g. 1 (heterozygous deletion), 0 (homozygous deletion), 3 (single duplication), 4+ (amplification). Distinct from zygosity."@en ;
+    rdfs:domain genomics:CopyNumberVariant ;
+    rdfs:range xsd:integer .
+
+genomics:cnvIntervalStart a owl:DatatypeProperty ;
+    rdfs:label "CNV Interval Start"@en ;
+    rdfs:comment "Start coordinate (1-based, inclusive) of the CNV interval on the reference indicated by cnvIntervalRef."@en ;
+    rdfs:domain genomics:CopyNumberVariant ;
+    rdfs:range xsd:integer .
+
+genomics:cnvIntervalEnd a owl:DatatypeProperty ;
+    rdfs:label "CNV Interval End"@en ;
+    rdfs:comment "End coordinate (1-based, inclusive) of the CNV interval."@en ;
+    rdfs:domain genomics:CopyNumberVariant ;
+    rdfs:range xsd:integer .
+
+genomics:cnvIntervalRef a owl:DatatypeProperty ;
+    rdfs:label "CNV Interval Reference"@en ;
+    rdfs:comment "Genomic reference for the interval coordinates, e.g. 'NC_000013.11' (chromosome 13 in GRCh38) or a chromosome name. Required for downstream analyses to locate the interval."@en ;
+    rdfs:domain genomics:CopyNumberVariant ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Variant Interpretation Properties (ACMG/AMP)
+# ============================================================================
+
+genomics:variantInterpreted a owl:ObjectProperty ;
+    rdfs:label "Variant Interpreted"@en ;
+    rdfs:comment "The Variant being assessed by this VariantInterpretation. SHACL enforces cardinality 1..1 (per D-Q5)."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range genomics:Variant .
+
+genomics:acmgClassification a owl:ObjectProperty ;
+    rdfs:label "ACMG/AMP Classification"@en ;
+    rdfs:comment "Five-tier ACMG/AMP classification. Named-individual values map 1:1 to LOINC answer codes: Pathogenic (LA6668-3), LikelyPathogenic (LA26332-9), VUS (LA26333-7), LikelyBenign (LA26334-5), Benign (LA6675-8)."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range genomics:AcmgClass ;
+    genomics:loincCode loinc:53037-8 .  # Genetic variation clinical significance
+
+genomics:acmgCriteria a owl:DatatypeProperty ;
+    rdfs:label "ACMG Evidence Criteria"@en ;
+    rdfs:comment "Space-separated ACMG/AMP evidence criteria codes applied in this classification, e.g. 'PVS1 PM2 PP5'. Order is not significant."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range xsd:string .
+
+genomics:condition a owl:ObjectProperty ;
+    rdfs:label "Associated Condition"@en ;
+    rdfs:comment "Disease or condition associated with this interpretation. Range is a MONDO/OMIM/ORDO term URI. Per D-Q5, each VariantInterpretation has cardinality 1..1 on this property — multi-condition cases produce multiple interpretation instances."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range owl:Class .
+
+genomics:mondoId a owl:DatatypeProperty ;
+    rdfs:label "MONDO Disease ID"@en ;
+    rdfs:comment "MONDO disease ontology ID, e.g. 'MONDO:0007254' for Hereditary breast carcinoma."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range xsd:string .
+
+genomics:omimId a owl:DatatypeProperty ;
+    rdfs:label "OMIM Phenotype/Gene ID"@en ;
+    rdfs:comment "OMIM identifier (six-digit) for a Mendelian phenotype or gene, e.g. '604370' for Breast-ovarian cancer, familial, susceptibility to, 2."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range xsd:string .
+
+genomics:orphaCode a owl:DatatypeProperty ;
+    rdfs:label "Orphanet Code"@en ;
+    rdfs:comment "Orphanet rare disease code, e.g. 'ORPHA:145' for Hereditary breast and ovarian cancer syndrome."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range xsd:string .
+
+genomics:inheritanceMode a owl:ObjectProperty ;
+    rdfs:label "Mode of Inheritance"@en ;
+    rdfs:comment "GenCC-aligned mode of inheritance for the gene-disease relationship. Named-individual values: AutosomalDominant, AutosomalRecessive, XLinkedDominant, XLinkedRecessive, Mitochondrial, YLinked, MultifactorialPolygenic, UnknownInheritance."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range genomics:InheritanceMode .
+
+genomics:allelicRequirement a owl:ObjectProperty ;
+    rdfs:label "Allelic Requirement"@en ;
+    rdfs:comment "GenCC allelic requirement: monoallelic, biallelic, etc. Captures whether one or two copies of a pathogenic variant are required for the disease phenotype."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range genomics:AllelicRequirement .
+
+genomics:interpretedBy a owl:DatatypeProperty ;
+    rdfs:label "Interpreting Laboratory or Expert Panel"@en ;
+    rdfs:comment "Name of the lab, ClinGen Variant Curation Expert Panel (VCEP), or curator who issued this interpretation. Free-text for now; will be replaced with a fhir:Organization reference in v1.0."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range xsd:string .
+
+genomics:interpretedDate a owl:DatatypeProperty ;
+    rdfs:label "Interpretation Date"@en ;
+    rdfs:comment "Date this interpretation was issued. Reclassifications create new Interpretation instances; the date here is the date of THIS classification, not the original."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range xsd:date .
+
+# Reclassifications — use prov:wasRevisionOf to chain interpretation versions.
+# Example: a VUS that becomes Likely Pathogenic links the new Interpretation
+# to the old via prov:wasRevisionOf. Past patient-facing narratives generated
+# from the old interpretation remain valid as historical record.
+
+# ============================================================================
+# Submitter Assertions (ClinVar SCV pattern)
+# ============================================================================
+# A VariantInterpretation's authoritative classification can aggregate dozens
+# of individual submitter assertions (ClinVar SCVs). Track per-submitter
+# detail here so disagreement and review-status arithmetic is preserved.
+
+genomics:SubmitterAssertion a owl:Class ;
+    rdfs:label "Submitter Assertion"@en ;
+    rdfs:comment "A single submitter's assertion about a variant-condition pair, e.g. one ClinVar SCV record. Aggregated assertions roll up into a VariantInterpretation via genomics:aggregatedFrom. Individual submissions may disagree with the aggregate (most agree, but ENIGMA, Mayo, Ambry, etc. can each carry distinct opinions)."@en ;
+    rdfs:subClassOf prov:Entity .
+
+genomics:aggregatedFrom a owl:ObjectProperty ;
+    rdfs:label "Aggregated From"@en ;
+    rdfs:comment "Links a VariantInterpretation to the SubmitterAssertions it aggregates. The aggregate classification is computed from these per-submitter records; preserving the constituents lets downstream tools recompute or audit the rollup."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range genomics:SubmitterAssertion .
+
+genomics:assertedClassification a owl:ObjectProperty ;
+    rdfs:label "Asserted ACMG Classification"@en ;
+    rdfs:comment "The ACMG class assigned by this individual submitter. May differ from the aggregate classification on the parent VariantInterpretation."@en ;
+    rdfs:domain genomics:SubmitterAssertion ;
+    rdfs:range genomics:AcmgClass .
+
+genomics:submitter a owl:DatatypeProperty ;
+    rdfs:label "Submitter Name"@en ;
+    rdfs:comment "Name of the submitting laboratory, consortium, or expert panel, e.g. 'ENIGMA', 'Ambry Genetics', 'Mayo Clinic'."@en ;
+    rdfs:domain genomics:SubmitterAssertion ;
+    rdfs:range xsd:string .
+
+genomics:submitterOrgId a owl:DatatypeProperty ;
+    rdfs:label "Submitter Organization ID"@en ;
+    rdfs:comment "ClinVar OrgID (or equivalent submitter registry identifier) for the submitting organization."@en ;
+    rdfs:domain genomics:SubmitterAssertion ;
+    rdfs:range xsd:string .
+
+genomics:submitterCategory a owl:ObjectProperty ;
+    rdfs:label "Submitter Category"@en ;
+    rdfs:comment "Class of submitter: laboratory, consortium, expert-panel, research-group, single-clinician, etc. Drives review-status weighting."@en ;
+    rdfs:domain genomics:SubmitterAssertion ;
+    rdfs:range genomics:SubmitterCategory .
+
+genomics:scvAccession a owl:DatatypeProperty ;
+    rdfs:label "SCV Accession"@en ;
+    rdfs:comment "ClinVar SCV (Submission) accession identifying this individual submission, e.g. 'SCV000123456'."@en ;
+    rdfs:domain genomics:SubmitterAssertion ;
+    rdfs:range xsd:string .
+
+genomics:contributesToAggregate a owl:DatatypeProperty ;
+    rdfs:label "Contributes to Aggregate"@en ;
+    rdfs:comment "True when this submission is included in the aggregate classification. Some submissions are excluded (withdrawn, superseded, flagged) but retained for audit."@en ;
+    rdfs:domain genomics:SubmitterAssertion ;
+    rdfs:range xsd:boolean .
+
+genomics:assertionEvidenceLevel a owl:ObjectProperty ;
+    rdfs:label "Assertion Evidence Level"@en ;
+    rdfs:comment "Strength-of-evidence label per the submitter's review process. Range is a vocabulary-extensible class — no fixed enum to allow lab-specific gradings."@en ;
+    rdfs:domain genomics:SubmitterAssertion .
+
+# ============================================================================
+# Review Status (ClinGen / ClinVar 7-tier taxonomy)
+# ============================================================================
+# Mirrors the de-facto industry standard 0–4 star rating users see in ClinVar
+# UI. Author 7 named individuals (the rating is shared across two pairs).
+
+genomics:reviewStatus a owl:ObjectProperty ;
+    rdfs:label "Review Status"@en ;
+    rdfs:comment "ClinGen / ClinVar review-status classification of this VariantInterpretation, mapping to the 0–4 star confidence rating. Drives advisory engine trust decisions."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range genomics:ReviewStatus .
+
+genomics:starRating a owl:DatatypeProperty ;
+    rdfs:label "Star Rating"@en ;
+    rdfs:comment "Integer 0–4 star rating associated with a ReviewStatus, matching ClinVar UI."@en ;
+    rdfs:domain genomics:ReviewStatus ;
+    rdfs:range xsd:integer .
+
+# ============================================================================
+# Causality Status (Phenopacket interpretationStatus)
+# ============================================================================
+
+genomics:interpretationStatus a owl:ObjectProperty ;
+    rdfs:label "Interpretation Status (Causality)"@en ;
+    rdfs:comment "Whether this variant explains THIS patient's phenotype. Distinct from ACMG classification: ACMG classifies the variant; interpretationStatus classifies the variant's role in the patient's clinical picture. Aligned with GA4GH Phenopackets v2 InterpretationStatus enum."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range genomics:CausalityStatus .
+
+# ============================================================================
+# Genetic Test Properties
+# ============================================================================
+
+genomics:testType a owl:ObjectProperty ;
+    rdfs:label "Genetic Test Type"@en ;
+    rdfs:comment "Test methodology category. Named-individual values: SingleGeneTest, GenePanelTest, ExomeSequencing, GenomeSequencing, ChromosomalMicroarray, KaryotypeAnalysis, MLPA, RepeatExpansionTest, MethylationStudy, RNASequencing."@en ;
+    rdfs:domain genomics:GeneticTest ;
+    rdfs:range genomics:TestType .
+
+genomics:genePanel a owl:DatatypeProperty ;
+    rdfs:label "Gene Panel Members"@en ;
+    rdfs:comment "Space-separated HGNC symbols for the genes included in this test's analytical scope. Used to distinguish 'no variant found in BRCA1/2' from 'no variant found across a 47-gene cancer panel'."@en ;
+    rdfs:domain genomics:GeneticTest ;
+    rdfs:range xsd:string .
+
+genomics:variantsObserved a owl:ObjectProperty ;
+    rdfs:label "Variants Observed"@en ;
+    rdfs:comment "Variants reported by this test. Empty list with non-empty genePanel = clinically meaningful negative result."@en ;
+    rdfs:domain genomics:GeneticTest ;
+    rdfs:range genomics:Variant .
+
+# Added in v1-draft.0.2: generic GeneticTest → record predicate. Resolves the
+# HLA tie-break (cascade-coordination/tie-breaks/2026-05-05-task-1.9-hla-variantsObserved.md):
+# genomics:variantsObserved has rdfs:range genomics:Variant and cannot
+# represent non-Variant report links (Diplotypes, Haplotypes, PGx
+# implications). Importers should still emit the most specific predicate
+# available (variantsObserved for Variants).
+genomics:reportedRecord a owl:ObjectProperty ;
+    rdfs:label "Reported Record"@en ;
+    rdfs:comment "A genomics record (Variant, Haplotype, Diplotype, VariantInterpretation, or other genomics:* class) referenced by this GeneticTest. Use this predicate when the test result is a Diplotype, Haplotype, or PGx implication that has no Variant-typed range. For point-Variant references, prefer the type-specific genomics:variantsObserved (rdfs:range genomics:Variant)."@en ;
+    rdfs:domain genomics:GeneticTest .
+    # No rdfs:range — deliberately broad. SHACL won't constrain the object class
+    # so any genomics: record can be referenced.
+
+genomics:orderingProvider a owl:DatatypeProperty ;
+    rdfs:label "Ordering Provider"@en ;
+    rdfs:comment "Name of clinician who ordered the test. Will become a fhir:Practitioner reference in v1.0."@en ;
+    rdfs:domain genomics:GeneticTest ;
+    rdfs:range xsd:string .
+
+genomics:performingLab a owl:DatatypeProperty ;
+    rdfs:label "Performing Laboratory"@en ;
+    rdfs:comment "Name of the laboratory that performed the analysis. Free-text for now; fhir:Organization reference in v1.0."@en ;
+    rdfs:domain genomics:GeneticTest ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Genetic Test Order Properties
+# ============================================================================
+
+genomics:orderedAt a owl:DatatypeProperty ;
+    rdfs:label "Ordered At"@en ;
+    rdfs:comment "Timestamp when the test was ordered."@en ;
+    rdfs:domain genomics:GeneticTestOrder ;
+    rdfs:range xsd:dateTime .
+
+genomics:orderStatus a owl:ObjectProperty ;
+    rdfs:label "Order Status"@en ;
+    rdfs:comment "Status of the test order: Pending, InProgress, Resulted, Cancelled."@en ;
+    rdfs:domain genomics:GeneticTestOrder ;
+    rdfs:range genomics:OrderStatus .
+
+genomics:resultedIn a owl:ObjectProperty ;
+    rdfs:label "Resulted In"@en ;
+    rdfs:comment "Links a fulfilled GeneticTestOrder to the resulting GeneticTest."@en ;
+    rdfs:domain genomics:GeneticTestOrder ;
+    rdfs:range genomics:GeneticTest .
+
+# ============================================================================
+# Sequencing Run Properties (per D-DIRECTORY)
+# ============================================================================
+
+genomics:coverageDepth a owl:DatatypeProperty ;
+    rdfs:label "Coverage Depth"@en ;
+    rdfs:comment "Mean coverage depth across the targeted region, e.g. 30.0 for typical clinical WGS. ClinicalGrade tier requires >=30x for WGS or validated panel-specific equivalents."@en ;
+    rdfs:domain genomics:SequencingRun ;
+    rdfs:range xsd:decimal .
+
+genomics:sequencingTechnology a owl:ObjectProperty ;
+    rdfs:label "Sequencing Technology"@en ;
+    rdfs:comment "Sequencing platform/technology category. Named-individual values: ShortReadIllumina, LongReadONT, LongReadPacBio, Mixed, GenotypingArray."@en ;
+    rdfs:domain genomics:SequencingRun ;
+    rdfs:range genomics:SequencingTechnology .
+
+genomics:variantCallerVersion a owl:DatatypeProperty ;
+    rdfs:label "Variant Caller Version"@en ;
+    rdfs:comment "Variant caller name and version, e.g. 'GATK 4.5.0', 'DeepVariant 1.6'. Important for reproducibility and for distinguishing caller-driven differences from biological ones."@en ;
+    rdfs:domain genomics:SequencingRun ;
+    rdfs:range xsd:string .
+
+genomics:laboratoryCertification a owl:ObjectProperty ;
+    rdfs:label "Laboratory Certification"@en ;
+    rdfs:comment "Regulatory certification of the performing laboratory. Named-individual values: CLIA, CAP, ISO15189, Uncertified."@en ;
+    rdfs:domain genomics:SequencingRun ;
+    rdfs:range genomics:LaboratoryCertification .
+
+genomics:sampleCollectionDate a owl:DatatypeProperty ;
+    rdfs:label "Sample Collection Date"@en ;
+    rdfs:comment "Date the biological sample was collected from the patient."@en ;
+    rdfs:domain genomics:SequencingRun ;
+    rdfs:range xsd:date .
+
+genomics:sequencingDate a owl:DatatypeProperty ;
+    rdfs:label "Sequencing Date"@en ;
+    rdfs:comment "Date sequencing was performed on the sample."@en ;
+    rdfs:domain genomics:SequencingRun ;
+    rdfs:range xsd:date .
+
+genomics:fileGenerationDate a owl:DatatypeProperty ;
+    rdfs:label "File Generation Date"@en ;
+    rdfs:comment "Date the raw genomic file (BAM/CRAM/VCF/etc.) was generated. May post-date sequencingDate by re-alignments or re-calls."@en ;
+    rdfs:domain genomics:SequencingRun ;
+    rdfs:range xsd:date .
+
+# ============================================================================
+# Raw File Properties (pointer-and-hash representation)
+# ============================================================================
+
+genomics:fileFormat a owl:ObjectProperty ;
+    rdfs:label "File Format"@en ;
+    rdfs:comment "Raw genomic file format. Named-individual values: BAM, CRAM, FASTQ, gVCF, VCF, BCF, Other. Hot tier (in-pod, encrypted): VCF, gVCF, BCF. Cold tier (out-of-pod, referenced): BAM, CRAM, FASTQ."@en ;
+    rdfs:domain genomics:RawFile ;
+    rdfs:range genomics:FileFormat .
+
+genomics:fileSizeBytes a owl:DatatypeProperty ;
+    rdfs:label "File Size (Bytes)"@en ;
+    rdfs:comment "Size of the raw file in bytes. xsd:long because BAM/CRAM/FASTQ files routinely exceed 2^31 bytes (50–100 GB+)."@en ;
+    rdfs:domain genomics:RawFile ;
+    rdfs:range xsd:long .
+
+genomics:fileHashSHA256 a owl:DatatypeProperty ;
+    rdfs:label "File SHA-256 Hash"@en ;
+    rdfs:comment "Lowercase hex-encoded SHA-256 digest of the file contents. Integrity check enabling the pod to verify the bytes-on-disk match the manifest."@en ;
+    rdfs:domain genomics:RawFile ;
+    rdfs:range xsd:string .
+
+genomics:fileLocation a owl:DatatypeProperty ;
+    rdfs:label "File Location URI"@en ;
+    rdfs:comment "Opaque pointer to where the bytes live (s3://, https://, file://, vendor-specific). Cascade does NOT validate or fetch this URI; the bytes live wherever the user keeps them. See Critical conventions #9."@en ;
+    rdfs:domain genomics:RawFile ;
+    rdfs:range xsd:anyURI .
+
+genomics:referenceGenome a owl:DatatypeProperty ;
+    rdfs:label "Reference Genome"@en ;
+    rdfs:comment "Reference assembly the file is aligned against, e.g. 'GRCh38', 'GRCh37', 'T2T-CHM13'. Required for any downstream coordinate-based analysis."@en ;
+    rdfs:domain genomics:RawFile ;
+    rdfs:range xsd:string .
+
+genomics:htsgetEndpoint a owl:DatatypeProperty ;
+    rdfs:label "htsget Endpoint"@en ;
+    rdfs:comment "Optional GA4GH htsget endpoint URI for streaming BAM/CRAM regions on demand without ingesting the full file. Letters labs and cloud-genomics services typically expose htsget; consumer providers usually do not."@en ;
+    rdfs:domain genomics:RawFile ;
+    rdfs:range xsd:anyURI .
+
+# ============================================================================
+# Data Provenance (genomics-specific enum)
+# ============================================================================
+# Note: distinct from cascade:dataProvenance (which classifies consumer vs
+# clinical data sources). genomics:dataProvenance captures the genomics-
+# specific origin lane that drives importer routing and quality-tier inference.
+
+genomics:dataProvenance a owl:ObjectProperty ;
+    rdfs:label "Genomic Data Provenance"@en ;
+    rdfs:comment "Origin lane of the genomic data, driving importer routing and quality-tier inference. Named-individual values: ConsumerArray, ClinicalSequencing, ResearchSequencing, Imported, AIExtracted. Distinct from the broader cascade:dataProvenance (consumer-vs-clinical classification) — this is genomics-specific because consumer-array imports (Phase 2C) need a distinct lane that auto-tags ConsumerGrade quality."@en ;
+    rdfs:range genomics:DataProvenance .
+
+# ============================================================================
+# Data Quality Tier (per D-QUALITY-TIER)
+# ============================================================================
+# Quality is a first-class vocabulary citizen. Every Variant carries a
+# dataQualityTier; SHACL (TASK-0.2) enforces that any Pathogenic /
+# LikelyPathogenic VariantInterpretation must either reference a
+# ClinicalGrade Variant OR carry requiresConfirmation true. This is a
+# safety constraint, not a quality nudge.
+
+genomics:dataQualityTier a owl:ObjectProperty ;
+    rdfs:label "Data Quality Tier"@en ;
+    rdfs:comment "Quality tier of the genomic data underlying this Variant, driving downstream advisory and narrative subsystems. Named-individual values: ClinicalGrade, ResearchGrade, ConsumerGrade, UnknownQuality. Aligns with cascadeprotocol.org sequencing-provider directory's three quality criteria (>=30x coverage + raw files + CLIA-certified)."@en ;
+    rdfs:domain genomics:Variant ;
+    rdfs:range genomics:DataQualityTier .
+
+genomics:requiresConfirmation a owl:DatatypeProperty ;
+    rdfs:label "Requires Confirmation"@en ;
+    rdfs:comment "True when this VariantInterpretation requires confirmatory clinical-grade re-testing before it can drive care decisions. SHACL (TASK-0.2): any Pathogenic / LikelyPathogenic interpretation MUST either reference a ClinicalGrade Variant OR carry requiresConfirmation true. The advisory engine MUST NOT auto-apply care recommendations to confirmation-required interpretations regardless of issuer trust."@en ;
+    rdfs:domain genomics:VariantInterpretation ;
+    rdfs:range xsd:boolean .
+
+# ============================================================================
+# Phenotype Properties (HPO)
+# ============================================================================
+
+genomics:hpoTerm a owl:DatatypeProperty ;
+    rdfs:label "HPO Phenotype Term"@en ;
+    rdfs:comment "Human Phenotype Ontology term identifier, e.g. 'HP:0003002' (Breast carcinoma). Multiple HPO terms per patient or relative are expected."@en ;
+    rdfs:range xsd:string .
+
+genomics:phenotypeOnsetAge a owl:DatatypeProperty ;
+    rdfs:label "Phenotype Onset Age"@en ;
+    rdfs:comment "Age in years when the phenotype was first observed. Use HPO onset terms (HP:0011462 Young adult onset, etc.) when only categorical onset is known."@en ;
+    rdfs:range xsd:integer .
+
+# ============================================================================
+# Pedigree Classes
+# ============================================================================
+
+genomics:Pedigree a owl:Class ;
+    rdfs:label "Pedigree"@en ;
+    rdfs:comment "A family pedigree: structured representation of relatives with conditions, ages of onset, and (where available) genotypes. Designed to round-trip with HL7 v3 Family History/Pedigree IG and FHIR FamilyMemberHistory while normalizing to Cascade's three-layer model."@en ;
+    rdfs:subClassOf prov:Entity .
+
+genomics:PedigreeMember a owl:Class ;
+    rdfs:label "Pedigree Member"@en ;
+    rdfs:comment "A single relative within a pedigree. Distinct from checkup:FamilyHistoryEntry, which is the patient-facing Layer 3 summary; PedigreeMember is the Layer 2 structured record carrying full HPO phenotype set, MONDO disease codes, age of onset/death, sex, and (optionally) carrier or affected status for specific variants."@en ;
+    rdfs:subClassOf fhir:FamilyMemberHistory ;
+    rdfs:subClassOf prov:Entity .
+
+# ============================================================================
+# Pedigree Properties
+# ============================================================================
+
+genomics:proband a owl:ObjectProperty ;
+    rdfs:label "Proband"@en ;
+    rdfs:comment "The index patient — the family member who brought the family to clinical attention. Required on every Pedigree."@en ;
+    rdfs:domain genomics:Pedigree ;
+    rdfs:range genomics:PedigreeMember .
+
+genomics:hasMember a owl:ObjectProperty ;
+    rdfs:label "Pedigree Member"@en ;
+    rdfs:comment "A relative included in the pedigree. Includes the proband."@en ;
+    rdfs:domain genomics:Pedigree ;
+    rdfs:range genomics:PedigreeMember .
+
+genomics:relativeRole a owl:ObjectProperty ;
+    rdfs:label "Relationship to Proband"@en ;
+    rdfs:comment "HL7 v3 RoleCode-aligned relationship, e.g. MTH (mother), FTH (father), SIS (sister), MGRMTH (maternal grandmother). Cardinal relations are first-class; complex relations expressed via nested PedigreeMember chains."@en ;
+    rdfs:domain genomics:PedigreeMember ;
+    rdfs:range genomics:RelationshipRole .
+
+genomics:relativeSex a owl:DatatypeProperty ;
+    rdfs:label "Biological Sex"@en ;
+    rdfs:comment "Biological sex of the relative as relevant to inheritance: 'male', 'female', 'unknown'. Distinct from gender identity, which is not modeled here."@en ;
+    rdfs:domain genomics:PedigreeMember ;
+    rdfs:range xsd:string .
+
+genomics:isDeceased a owl:DatatypeProperty ;
+    rdfs:label "Deceased"@en ;
+    rdfs:domain genomics:PedigreeMember ;
+    rdfs:range xsd:boolean .
+
+genomics:ageAtDeath a owl:DatatypeProperty ;
+    rdfs:label "Age at Death"@en ;
+    rdfs:domain genomics:PedigreeMember ;
+    rdfs:range xsd:integer .
+
+genomics:carrierStatus a owl:ObjectProperty ;
+    rdfs:label "Carrier Status for Variant"@en ;
+    rdfs:comment "Tested status of this relative for a specific variant (typically the family's known pathogenic variant). Named-individual values: PositiveAffected, PositiveUnaffected, Negative, NotTested, Obligate."@en ;
+    rdfs:domain genomics:PedigreeMember ;
+    rdfs:range genomics:CarrierStatus .
+
+genomics:testedForVariant a owl:ObjectProperty ;
+    rdfs:label "Tested for Variant"@en ;
+    rdfs:comment "The specific Variant for which this relative's carrierStatus is reported. Allows a relative to have distinct statuses for different variants in the same family."@en ;
+    rdfs:domain genomics:PedigreeMember ;
+    rdfs:range genomics:Variant .
+
+# ============================================================================
+# Named Individuals — ACMG Classification
+# ============================================================================
+
+genomics:Pathogenic a genomics:AcmgClass ;
+    rdfs:label "Pathogenic"@en ;
+    genomics:loincAnswerCode "LA6668-3" .
+
+genomics:LikelyPathogenic a genomics:AcmgClass ;
+    rdfs:label "Likely Pathogenic"@en ;
+    genomics:loincAnswerCode "LA26332-9" .
+
+genomics:VUS a genomics:AcmgClass ;
+    rdfs:label "Uncertain Significance"@en ;
+    genomics:loincAnswerCode "LA26333-7" .
+
+genomics:LikelyBenign a genomics:AcmgClass ;
+    rdfs:label "Likely Benign"@en ;
+    genomics:loincAnswerCode "LA26334-5" .
+
+genomics:Benign a genomics:AcmgClass ;
+    rdfs:label "Benign"@en ;
+    genomics:loincAnswerCode "LA6675-8" .
+
+# ============================================================================
+# Named Individuals — Zygosity, Phase, Inheritance
+# ============================================================================
+
+genomics:Heterozygous          a genomics:ZygosityValue ; rdfs:label "Heterozygous"@en .
+genomics:Homozygous            a genomics:ZygosityValue ; rdfs:label "Homozygous"@en .
+genomics:Hemizygous            a genomics:ZygosityValue ; rdfs:label "Hemizygous"@en .
+genomics:CompoundHeterozygous  a genomics:ZygosityValue ; rdfs:label "Compound Heterozygous"@en .
+genomics:MosaicLow             a genomics:ZygosityValue ; rdfs:label "Mosaic (low VAF)"@en .
+genomics:MosaicHigh            a genomics:ZygosityValue ; rdfs:label "Mosaic (high VAF)"@en .
+
+genomics:Cis           a genomics:PhaseValue ; rdfs:label "Cis (same chromosome)"@en .
+genomics:Trans         a genomics:PhaseValue ; rdfs:label "Trans (opposite chromosomes)"@en .
+genomics:PhaseUnknown  a genomics:PhaseValue ; rdfs:label "Phase Unknown"@en .
+
+genomics:AutosomalDominant       a genomics:InheritanceMode ; rdfs:label "Autosomal Dominant"@en .
+genomics:AutosomalRecessive      a genomics:InheritanceMode ; rdfs:label "Autosomal Recessive"@en .
+genomics:XLinkedDominant         a genomics:InheritanceMode ; rdfs:label "X-Linked Dominant"@en .
+genomics:XLinkedRecessive        a genomics:InheritanceMode ; rdfs:label "X-Linked Recessive"@en .
+genomics:Mitochondrial           a genomics:InheritanceMode ; rdfs:label "Mitochondrial"@en .
+genomics:YLinked                 a genomics:InheritanceMode ; rdfs:label "Y-Linked"@en .
+genomics:MultifactorialPolygenic a genomics:InheritanceMode ; rdfs:label "Multifactorial / Polygenic"@en .
+genomics:UnknownInheritance      a genomics:InheritanceMode ; rdfs:label "Unknown Inheritance"@en .
+
+genomics:Monoallelic a genomics:AllelicRequirement ; rdfs:label "Monoallelic"@en .
+genomics:Biallelic   a genomics:AllelicRequirement ; rdfs:label "Biallelic"@en .
+
+# ============================================================================
+# Named Individuals — Test Type, Carrier Status, Order Status
+# ============================================================================
+
+genomics:SingleGeneTest         a genomics:TestType ; rdfs:label "Single Gene Test"@en .
+genomics:GenePanelTest          a genomics:TestType ; rdfs:label "Gene Panel"@en .
+genomics:ExomeSequencing        a genomics:TestType ; rdfs:label "Whole Exome Sequencing"@en .
+genomics:GenomeSequencing       a genomics:TestType ; rdfs:label "Whole Genome Sequencing"@en .
+genomics:ChromosomalMicroarray  a genomics:TestType ; rdfs:label "Chromosomal Microarray"@en .
+genomics:KaryotypeAnalysis      a genomics:TestType ; rdfs:label "Karyotype"@en .
+genomics:MLPA                   a genomics:TestType ; rdfs:label "MLPA"@en .
+genomics:RepeatExpansionTest    a genomics:TestType ; rdfs:label "Repeat Expansion Test"@en .
+genomics:MethylationStudy       a genomics:TestType ; rdfs:label "Methylation Study"@en .
+genomics:RNASequencing          a genomics:TestType ; rdfs:label "RNA Sequencing"@en .
+
+genomics:PositiveAffected   a genomics:CarrierStatus ; rdfs:label "Positive — Affected"@en .
+genomics:PositiveUnaffected a genomics:CarrierStatus ; rdfs:label "Positive — Unaffected"@en .
+genomics:Negative           a genomics:CarrierStatus ; rdfs:label "Negative"@en .
+genomics:NotTested          a genomics:CarrierStatus ; rdfs:label "Not Tested"@en .
+genomics:Obligate           a genomics:CarrierStatus ; rdfs:label "Obligate Carrier"@en .
+
+genomics:OrderPending    a genomics:OrderStatus ; rdfs:label "Pending"@en .
+genomics:OrderInProgress a genomics:OrderStatus ; rdfs:label "In Progress"@en .
+genomics:OrderResulted   a genomics:OrderStatus ; rdfs:label "Resulted"@en .
+genomics:OrderCancelled  a genomics:OrderStatus ; rdfs:label "Cancelled"@en .
+
+# ============================================================================
+# Named Individuals — Pedigree Relationship Roles (HL7 v3 RoleCode-aligned)
+# ============================================================================
+# Cardinal first-degree, second-degree, and proband-marker relations are
+# first-class. Complex relations are expressed via nested PedigreeMember
+# chains. Codes follow HL7 v3 PersonalRelationshipRoleType (RoleCode).
+
+genomics:Proband a genomics:RelationshipRole ;
+    rdfs:label "Proband"@en ;
+    rdfs:comment "The index patient who brought the family to clinical attention. Marker, not a kinship relation."@en .
+
+genomics:MTH a genomics:RelationshipRole ; rdfs:label "Mother"@en .
+genomics:FTH a genomics:RelationshipRole ; rdfs:label "Father"@en .
+genomics:SIS a genomics:RelationshipRole ; rdfs:label "Sister"@en .
+genomics:BRO a genomics:RelationshipRole ; rdfs:label "Brother"@en .
+genomics:DAU a genomics:RelationshipRole ; rdfs:label "Daughter"@en .
+genomics:SON a genomics:RelationshipRole ; rdfs:label "Son"@en .
+genomics:MAUNT a genomics:RelationshipRole ; rdfs:label "Maternal Aunt"@en .
+genomics:MUNCLE a genomics:RelationshipRole ; rdfs:label "Maternal Uncle"@en .
+genomics:PAUNT a genomics:RelationshipRole ; rdfs:label "Paternal Aunt"@en .
+genomics:PUNCLE a genomics:RelationshipRole ; rdfs:label "Paternal Uncle"@en .
+genomics:MGRMTH a genomics:RelationshipRole ; rdfs:label "Maternal Grandmother"@en .
+genomics:MGRFTH a genomics:RelationshipRole ; rdfs:label "Maternal Grandfather"@en .
+genomics:PGRMTH a genomics:RelationshipRole ; rdfs:label "Paternal Grandmother"@en .
+genomics:PGRFTH a genomics:RelationshipRole ; rdfs:label "Paternal Grandfather"@en .
+genomics:MCOUSN a genomics:RelationshipRole ; rdfs:label "Maternal Cousin"@en .
+genomics:PCOUSN a genomics:RelationshipRole ; rdfs:label "Paternal Cousin"@en .
+genomics:NIECE a genomics:RelationshipRole ; rdfs:label "Niece"@en .
+genomics:NEPHEW a genomics:RelationshipRole ; rdfs:label "Nephew"@en .
+
+# ============================================================================
+# Named Individuals — Submitter Categories
+# ============================================================================
+
+genomics:SubmitterLaboratory  a genomics:SubmitterCategory ; rdfs:label "Clinical Laboratory"@en .
+genomics:SubmitterConsortium  a genomics:SubmitterCategory ; rdfs:label "Consortium"@en ;
+    rdfs:comment "Multi-institution curation consortium (e.g., ENIGMA for BRCA1/2)."@en .
+genomics:SubmitterExpertPanel a genomics:SubmitterCategory ; rdfs:label "Expert Panel"@en ;
+    rdfs:comment "ClinGen Variant Curation Expert Panel (VCEP)."@en .
+genomics:SubmitterResearch    a genomics:SubmitterCategory ; rdfs:label "Research Group"@en .
+genomics:SubmitterClinician   a genomics:SubmitterCategory ; rdfs:label "Single Clinician"@en .
+
+# ============================================================================
+# Named Individuals — Review Status (ClinGen/ClinVar 7-tier taxonomy)
+# ============================================================================
+
+genomics:NoAssertionProvided a genomics:ReviewStatus ;
+    rdfs:label "No Assertion Provided"@en ;
+    genomics:starRating 0 .
+
+genomics:CriteriaNotProvided a genomics:ReviewStatus ;
+    rdfs:label "Criteria Not Provided"@en ;
+    genomics:starRating 0 .
+
+genomics:SingleSubmitter a genomics:ReviewStatus ;
+    rdfs:label "Single Submitter (criteria provided)"@en ;
+    genomics:starRating 1 .
+
+genomics:ConflictingSubmissions a genomics:ReviewStatus ;
+    rdfs:label "Conflicting Submissions"@en ;
+    genomics:starRating 1 .
+
+genomics:MultipleSubmittersNoConflict a genomics:ReviewStatus ;
+    rdfs:label "Multiple Submitters, No Conflict"@en ;
+    genomics:starRating 2 .
+
+genomics:ExpertPanelReviewed a genomics:ReviewStatus ;
+    rdfs:label "Expert Panel Reviewed"@en ;
+    genomics:starRating 3 .
+
+genomics:PracticeGuideline a genomics:ReviewStatus ;
+    rdfs:label "Practice Guideline"@en ;
+    genomics:starRating 4 .
+
+# ============================================================================
+# Named Individuals — Causality Status (Phenopacket-aligned)
+# ============================================================================
+
+genomics:Causative   a genomics:CausalityStatus ; rdfs:label "Causative"@en ;
+    rdfs:comment "This variant is the direct cause of the patient's phenotype."@en .
+genomics:Contributory a genomics:CausalityStatus ; rdfs:label "Contributory"@en ;
+    rdfs:comment "This variant contributes to but is not solely responsible for the phenotype."@en .
+genomics:UncertainCausality a genomics:CausalityStatus ; rdfs:label "Uncertain Causality"@en ;
+    rdfs:comment "Causal role is unclear; further investigation needed."@en .
+genomics:Rejected    a genomics:CausalityStatus ; rdfs:label "Rejected"@en ;
+    rdfs:comment "This variant has been ruled out as the cause."@en .
+
+# ============================================================================
+# Named Individuals — Somatic Status (germline vs. somatic origin)
+# ============================================================================
+# Added in v1-draft.0.2. Maps LOINC 48002-0 (Genomic source class).
+
+genomics:Germline a owl:NamedIndividual, genomics:SomaticStatus ;
+    rdfs:label "Germline"@en ;
+    rdfs:comment "Variant present in the germline; inherited or de novo at conception; present in all cells of the individual."@en .
+
+genomics:Somatic a owl:NamedIndividual, genomics:SomaticStatus ;
+    rdfs:label "Somatic"@en ;
+    rdfs:comment "Variant acquired post-conception in a specific tissue / cell lineage; not heritable. Common in tumor samples."@en .
+
+genomics:UnknownSomaticStatus a owl:NamedIndividual, genomics:SomaticStatus ;
+    rdfs:label "Unknown Somatic Status"@en ;
+    rdfs:comment "Origin not determined by the reporting workflow. Use when the source data is silent on germline-vs-somatic classification rather than guessing."@en .
+
+# ============================================================================
+# Named Individuals — Sequencing Technology
+# ============================================================================
+
+genomics:ShortReadIllumina a genomics:SequencingTechnology ;
+    rdfs:label "Short-read Illumina"@en ;
+    rdfs:comment "Illumina short-read sequencing (NovaSeq, NextSeq, etc.). Dominant clinical platform."@en .
+
+genomics:LongReadONT a genomics:SequencingTechnology ;
+    rdfs:label "Long-read Oxford Nanopore"@en ;
+    rdfs:comment "Oxford Nanopore Technologies long-read sequencing (PromethION, MinION, etc.)."@en .
+
+genomics:LongReadPacBio a genomics:SequencingTechnology ;
+    rdfs:label "Long-read PacBio HiFi"@en ;
+    rdfs:comment "Pacific Biosciences HiFi/CCS long-read sequencing (Revio, Sequel)."@en .
+
+genomics:Mixed a genomics:SequencingTechnology ;
+    rdfs:label "Mixed Technology"@en ;
+    rdfs:comment "Combined short-read + long-read or hybrid sequencing strategies."@en .
+
+genomics:GenotypingArray a genomics:SequencingTechnology ;
+    rdfs:label "Genotyping Array"@en ;
+    rdfs:comment "SNP genotyping array (Illumina Global Screening Array, Affymetrix Axiom, etc.). Used by 23andMe / AncestryDNA / MyHeritage / FTDNA — auto-tagged ConsumerGrade in the importer."@en .
+
+# ============================================================================
+# Named Individuals — Laboratory Certification
+# ============================================================================
+
+genomics:CLIA a genomics:LaboratoryCertification ;
+    rdfs:label "CLIA"@en ;
+    rdfs:comment "Clinical Laboratory Improvement Amendments — US federal regulatory certification of clinical laboratories."@en .
+
+genomics:CAP a genomics:LaboratoryCertification ;
+    rdfs:label "CAP"@en ;
+    rdfs:comment "College of American Pathologists accreditation."@en .
+
+genomics:ISO15189 a genomics:LaboratoryCertification ;
+    rdfs:label "ISO 15189"@en ;
+    rdfs:comment "ISO 15189 medical laboratory accreditation (international)."@en .
+
+genomics:Uncertified a genomics:LaboratoryCertification ;
+    rdfs:label "Uncertified"@en ;
+    rdfs:comment "Laboratory holds no clinical certification (research lab, consumer DTC service)."@en .
+
+# ============================================================================
+# Named Individuals — File Format
+# ============================================================================
+
+genomics:BAM a genomics:FileFormat ;
+    rdfs:label "BAM"@en ;
+    rdfs:comment "Binary Alignment/Map format. Cold tier (out-of-pod, referenced)."@en .
+
+genomics:CRAM a genomics:FileFormat ;
+    rdfs:label "CRAM"@en ;
+    rdfs:comment "Compressed Reference-aligned Alignment/Map format. Cold tier."@en .
+
+genomics:FASTQ a genomics:FileFormat ;
+    rdfs:label "FASTQ"@en ;
+    rdfs:comment "Raw sequencing reads with quality scores. Cold tier."@en .
+
+genomics:gVCF a genomics:FileFormat ;
+    rdfs:label "gVCF"@en ;
+    rdfs:comment "Genomic VCF — per-position records including reference-confidence blocks. Hot tier."@en .
+
+genomics:VCF a genomics:FileFormat ;
+    rdfs:label "VCF"@en ;
+    rdfs:comment "Variant Call Format. Hot tier."@en .
+
+genomics:BCF a genomics:FileFormat ;
+    rdfs:label "BCF"@en ;
+    rdfs:comment "Binary Call Format (binary VCF). Hot tier."@en .
+
+genomics:OtherFileFormat a genomics:FileFormat ;
+    rdfs:label "Other"@en ;
+    rdfs:comment "File format not enumerated above (e.g., methylation tracks, structural-variant-specific formats)."@en .
+
+# ============================================================================
+# Named Individuals — Genomic Data Provenance
+# ============================================================================
+
+genomics:ConsumerArray a genomics:DataProvenance ;
+    rdfs:label "Consumer Array"@en ;
+    rdfs:comment "Direct-to-consumer genotyping-array data (23andMe, AncestryDNA, MyHeritage, FTDNA). Phase 2C importer auto-tags every variant from this lane as genomics:ConsumerGrade with genomics:requiresConfirmation true on any pathogenic interpretation."@en .
+
+genomics:ClinicalSequencing a genomics:DataProvenance ;
+    rdfs:label "Clinical Sequencing"@en ;
+    rdfs:comment "Clinical-grade sequencing performed by a CLIA/CAP/ISO15189-certified laboratory."@en .
+
+genomics:ResearchSequencing a genomics:DataProvenance ;
+    rdfs:label "Research Sequencing"@en ;
+    rdfs:comment "Research-quality sequencing without clinical certification (university cores, biobanks, research consortia)."@en .
+
+genomics:Imported a genomics:DataProvenance ;
+    rdfs:label "Imported"@en ;
+    rdfs:comment "Variant data imported from a third-party report, bundle, or pre-existing record where the original sequencing context is incomplete."@en .
+
+genomics:AIExtractedGenomics a genomics:DataProvenance ;
+    rdfs:label "AI Extracted"@en ;
+    rdfs:comment "Variant extracted by an LLM from unstructured narrative text (e.g., scanned PDF report). Treat as Imported provenance with elevated confirmation requirement."@en .
+
+# ============================================================================
+# Named Individuals — Data Quality Tier (per D-QUALITY-TIER)
+# ============================================================================
+
+genomics:DataQualityTier a owl:Class ;
+    rdfs:label "Data Quality Tier"@en ;
+    rdfs:comment "Tier classification of the quality of genomic data, used by the advisory engine to gate auto-applied recommendations and by narrative subsystems to drive disclosure language."@en .
+
+genomics:ClinicalGrade a genomics:DataQualityTier ;
+    rdfs:label "Clinical Grade"@en ;
+    rdfs:comment "Sequencing performed by a CLIA-, CAP-, or ISO15189-certified laboratory using a clinical-grade method (>=30x mean coverage WGS, validated clinical panel, or equivalent), with raw files (BAM/CRAM/VCF) retained or accessible. The only tier from which Pathogenic / LikelyPathogenic interpretations may drive auto-applied care recommendations without confirmatory re-testing."@en .
+
+genomics:ResearchGrade a genomics:DataQualityTier ;
+    rdfs:label "Research Grade"@en ;
+    rdfs:comment "Research-quality sequencing without clinical certification — typical of university cores, biobanks, and research consortia. Adequate for hypothesis generation but requires confirmatory clinical-grade re-testing before driving care decisions."@en .
+
+genomics:ConsumerGrade a genomics:DataQualityTier ;
+    rdfs:label "Consumer Grade"@en ;
+    rdfs:comment "Direct-to-consumer genotyping arrays (23andMe, AncestryDNA, MyHeritage, FTDNA) and consumer DTC sequencing without clinical certification. Genotyping arrays in particular interrogate only ~600k–900k SNP positions and have non-trivial false-positive rates for pathogenic variant calls. ALL Phase 2C consumer-array imports auto-tag this tier; Pathogenic / LikelyPathogenic interpretations on ConsumerGrade variants MUST carry requiresConfirmation true (SHACL-enforced)."@en .
+
+genomics:UnknownQuality a genomics:DataQualityTier ;
+    rdfs:label "Unknown Quality"@en ;
+    rdfs:comment "Quality tier could not be determined from available metadata (no certification, coverage, or method information). Treated as ConsumerGrade by the downstream safety constraint — assume the worst until promoted."@en .
+
+# ============================================================================
+# Annotation Properties (parallel to health:snomedCode / health:loincCode)
+# ============================================================================
+
+genomics:loincCode a owl:AnnotationProperty ;
+    rdfs:label "LOINC Code Annotation"@en ;
+    rdfs:comment "LOINC code or answer-list URI annotated on a property or named individual to record its Layer 1 standard mapping."@en .
+
+genomics:loincAnswerCode a owl:AnnotationProperty ;
+    rdfs:label "LOINC Answer Code Annotation"@en ;
+    rdfs:comment "LOINC answer code (LA-prefixed string) for an enumerated value, e.g. LA6668-3 = Pathogenic."@en .
+
+# ============================================================================
+# Class Declarations for Named-Individual Ranges
+# ============================================================================
+
+genomics:AcmgClass             a owl:Class ; rdfs:label "ACMG Classification"@en .
+genomics:ZygosityValue         a owl:Class ; rdfs:label "Zygosity Value"@en .
+genomics:PhaseValue            a owl:Class ; rdfs:label "Allelic Phase Value"@en .
+genomics:InheritanceMode       a owl:Class ; rdfs:label "Mode of Inheritance"@en .
+genomics:AllelicRequirement    a owl:Class ; rdfs:label "Allelic Requirement"@en .
+genomics:TestType              a owl:Class ; rdfs:label "Genetic Test Type"@en .
+genomics:CarrierStatus         a owl:Class ; rdfs:label "Carrier Status"@en .
+genomics:RelationshipRole      a owl:Class ; rdfs:label "Pedigree Relationship Role"@en .
+genomics:OrderStatus           a owl:Class ; rdfs:label "Order Status"@en .
+genomics:SubmitterCategory     a owl:Class ; rdfs:label "Submitter Category"@en .
+genomics:ReviewStatus          a owl:Class ; rdfs:label "Review Status"@en .
+genomics:CausalityStatus       a owl:Class ; rdfs:label "Causality Status"@en .
+genomics:SomaticStatus         a owl:Class ;
+    rdfs:label "Somatic Status"@en ;
+    rdfs:comment "Closed enumeration of variant origin classifications (germline / somatic / unknown). Added in v1-draft.0.2."@en .
+genomics:SequencingTechnology  a owl:Class ; rdfs:label "Sequencing Technology"@en .
+genomics:LaboratoryCertification a owl:Class ; rdfs:label "Laboratory Certification"@en .
+genomics:FileFormat            a owl:Class ; rdfs:label "File Format"@en .
+genomics:DataProvenance        a owl:Class ; rdfs:label "Genomic Data Provenance"@en .
+
+# ============================================================================
+# Phenotypic Observation (v1-draft.0.4) — index-patient HPO profile
+# ============================================================================
+
+genomics:PhenotypicObservation a owl:Class ;
+    rdfs:label "Phenotypic Observation"@en ;
+    rdfs:comment "A single HPO-coded phenotypic feature observed in the index patient, captured outside the pedigree/variant context (e.g. during conversational phenotype intake). Supports negated findings (phenotype explicitly absent), essential for narrowing a differential. Provenance is typically cascade:SelfReported. Reuses genomics:hpoTerm for the HPO linkage."@en ;
+    owl:versionInfo "Added in genomics v1-draft.0.4" .
+
+genomics:PhenotypePresenceValue a owl:Class ;
+    rdfs:label "Phenotype Presence Value"@en ;
+    rdfs:comment "Closed enumeration: whether the phenotype is present, absent, or resolved."@en ;
+    owl:versionInfo "Added in genomics v1-draft.0.4" .
+
+genomics:Present  a owl:NamedIndividual, genomics:PhenotypePresenceValue ; rdfs:label "Present"@en .
+genomics:Absent   a owl:NamedIndividual, genomics:PhenotypePresenceValue ; rdfs:label "Absent"@en ;
+    rdfs:comment "Phenotype explicitly assessed and NOT present (negated finding)."@en .
+genomics:Resolved a owl:NamedIndividual, genomics:PhenotypePresenceValue ; rdfs:label "Resolved"@en .
+
+genomics:phenotypePresence a owl:ObjectProperty ;
+    rdfs:label "Phenotype Presence"@en ;
+    rdfs:domain genomics:PhenotypicObservation ;
+    rdfs:range genomics:PhenotypePresenceValue ;
+    owl:versionInfo "Added in genomics v1-draft.0.4" .
+
+genomics:phenotypeOnsetDate a owl:DatatypeProperty ;
+    rdfs:label "Phenotype Onset Date"@en ;
+    rdfs:comment "Calendar date the phenotype was first observed. Use genomics:phenotypeOnsetAge for age-based onset."@en ;
+    rdfs:domain genomics:PhenotypicObservation ;
+    rdfs:range xsd:date ;
+    owl:versionInfo "Added in genomics v1-draft.0.4" .
+
+genomics:phenotypeSeverity a owl:DatatypeProperty ;
+    rdfs:label "Phenotype Severity"@en ;
+    rdfs:comment "Optional HPO severity modifier: mild, moderate, severe, profound (HP:0012823 modifier space)."@en ;
+    rdfs:domain genomics:PhenotypicObservation ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in genomics v1-draft.0.4" .
+
+genomics:phenotypeNote a owl:DatatypeProperty ;
+    rdfs:label "Phenotype Note"@en ;
+    rdfs:domain genomics:PhenotypicObservation ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in genomics v1-draft.0.4" .

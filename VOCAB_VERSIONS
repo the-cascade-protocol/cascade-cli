@@ -41,9 +41,22 @@
 #   (2) removed the sh:class constraints from HasEncounterEdgeShape +
 #   LinkedConditionEdgeShape (unenforceable + false-positive under per-file
 #   validation; sh:nodeKind sh:IRI kept). spec tag vocab/clinical-v1.11; slice R3.
-core=3.3
-health=2.4
-clinical=1.12
+# Updated 2026-08-03: core v3.4 + health v2.5 + clinical v1.13.
+#   health v2.5 defines five record classes that were emitted but undefined
+#   (LabResultRecord, AllergyRecord, ConditionRecord, ImmunizationRecord,
+#   FamilyHistoryRecord) and shapes them; clinical v1.13 deprecates the four
+#   duplicated clinical:* equivalents and adds ConsultationNoteShape; core v3.4
+#   models the export manifest on DCAT and VoID.
+#   Synced in the same pass that fixed scripts/sync-shapes-from-spec.sh: it
+#   copied a shapes file for every vocabulary but an ontology for only three of
+#   them, so src/shapes/health.ttl had never been synced at all (928 lines
+#   against spec's 1489) and checkup/pots plus all four drafts had no ontology
+#   here. tests/shapes-sync.test.ts now pins these rows to the owl:versionInfo
+#   of the synced ontology, so a bump without a sync (or a sync without a bump)
+#   fails the suite.
+core=3.4
+health=2.5
+clinical=1.13
 coverage=1.3
 checkup=3.2
 pots=1.4

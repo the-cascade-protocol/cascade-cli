@@ -1,6 +1,7 @@
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
 @prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix fhir: <http://hl7.org/fhir/> .
@@ -8,17 +9,23 @@
 # ============================================================================
 # Cascade Protocol — Health & Wellness Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.0 (Phase 4, 2026-02-18)
+# Version: 1.2 (2026-08-03)
 # Validates: health:SelfReport, health:VO2MaxStatistics, health:HRVStatistics,
 #            health:BPStatistics, health:MetricTrend, health:ActivitySnapshot,
-#            health:SleepSnapshot, health:HealthProfile
+#            health:SleepSnapshot, health:HealthProfile,
+#            health:SocialHistoryRecord,
+#            health:LabResultRecord, health:ConditionRecord,
+#            health:AllergyRecord, health:ImmunizationRecord,
+#            health:FamilyHistoryRecord,
+#            health:DailyVitalReading, health:DailyActivitySnapshot,
+#            health:DailySleepSnapshot
 #
 # SEVERITY LEVELS:
 # - sh:Violation = Must fix (data invalid without) - e.g., missing required stats
 # - sh:Warning = Should address (important for completeness) - e.g., missing period
 # - sh:Info = Nice to have (suggested enrichment) - e.g., optional context fields
 #
-# Validates against: health.ttl v2.2 (2026-02-17)
+# Validates against: health.ttl v2.5 (2026-08-03)
 # ============================================================================
 
 # ============================================================================
@@ -568,6 +575,24 @@ health:SleepSnapshotShape a sh:NodeShape ;
 
 health:HealthProfileShape a sh:NodeShape ;
     sh:targetClass health:HealthProfile ;
+    # The six wellness containers are declared rdfs:subClassOf health:HealthProfile
+    # in health.ttl v2.5, and SHACL sh:targetClass is subclass-aware. But that
+    # aspect of targeting is evaluated against the DATA graph (SHACL 2.1.3.1
+    # defines "SHACL instance of" as rdf:type/rdfs:subClassOf* in the data
+    # graph), so it only fires for a validator that loads the vocabulary
+    # alongside the data. A validator that loads shapes only -- which is the
+    # common case, and is what the reference implementation does -- would see
+    # no target and check nothing, reproducing the vacuous PASS this release
+    # exists to remove.
+    #
+    # These six are therefore named explicitly as well. The subclass axioms
+    # remain the semantic statement; these make it effective today.
+    sh:targetClass health:ActivityData ;
+    sh:targetClass health:SleepData ;
+    sh:targetClass health:HeartRateData ;
+    sh:targetClass health:BloodPressureData ;
+    sh:targetClass health:HRVData ;
+    sh:targetClass health:BodyMeasurements ;
     rdfs:label "Health Profile Shape"@en ;
     rdfs:comment "Validation constraints for the top-level wellness profile aggregating vital signs, body measurements, activity, and sleep data from consumer devices. Stored at /wellness/ in the Cascade Pod."@en ;
 
@@ -704,6 +729,23 @@ health:SocialHistoryRecordShape a sh:NodeShape ;
 # Changelog
 # ============================================================================
 #
+# Version 1.2 (2026-08-03)
+# - Added 5 record shapes for the classes defined in health v2.5:
+#   LabResultRecordShape, ConditionRecordShape, AllergyRecordShape,
+#   ImmunizationRecordShape, FamilyHistoryRecordShape. Before this version
+#   these classes had no sh:targetClass anywhere, so validating a lab result,
+#   condition, allergy, immunization or family history record checked nothing
+#   and returned PASS.
+# - Added 3 shapes for classes that have existed since health v2.0 but were
+#   never targeted: DailyVitalReadingShape, DailyActivitySnapshotShape,
+#   DailySleepSnapshotShape.
+# - Constraint sets lifted from the corresponding clinical:* shapes and
+#   checked against FHIR R4. Where FHIR names a required value set the sh:in
+#   list is that value set verbatim.
+# - sh:Violation severity on all required fields.
+# - 29 conformance fixtures (7 lab, 7 condition, 6 allergy, 3 immunization,
+#   3 family history) become executable against real constraints.
+#
 # Version 1.1 (2026-03-27)
 # - Added SocialHistoryRecordShape for health:SocialHistoryRecord (health v2.4)
 #
@@ -722,3 +764,770 @@ health:SocialHistoryRecordShape a sh:NodeShape ;
 # - sh:in constraints match enumerated values from health.ttl ontology
 # - Range constraints (minInclusive/maxInclusive) reflect physiological bounds
 #
+
+# ============================================================================
+# Clinical Record Shapes (v1.2 — health v2.5)
+# ============================================================================
+#
+# Constraint sets are LIFTED from the corresponding clinical:* shapes in
+# clinical.shapes.ttl (AllergyShape :526, LabResultShape :607, ConditionShape
+# :685, ImmunizationShape :764) so that the two spellings of the same record
+# are held to the same standard, then checked against the FHIR R4 resource
+# definitions. Where FHIR names a required value set, the sh:in list below is
+# that value set verbatim:
+#
+#   health:allergyCategory   AllergyIntoleranceCategory     food | medication | environment | biologic
+#   health:allergySeverity   AllergyIntoleranceSeverity     mild | moderate | severe
+#   health:status (condition) ConditionClinicalStatusCodes  active | recurrence | relapse | inactive | remission | resolved
+#   health:status (immunization) ImmunizationStatusCodes    completed | entered-in-error | not-done
+#
+# health:status is deliberately constrained per-shape rather than on the
+# property: the permitted values differ by record class and a single global
+# sh:in would be wrong for both.
+#
+# Severity is sh:Violation on every required field. A Warning-severity
+# constraint on a required field reproduces the problem these shapes exist to
+# fix (a PASS that means nothing) with extra steps.
+#
+# CONSEQUENCE, STATED PLAINLY: before this release, validating a lab result,
+# condition, allergy, immunization or family-history record returned PASS
+# because no shape targeted it and nothing was checked. Those records are now
+# actually checked. A validation failure appearing after upgrade means the
+# validator improved, not that the data got worse.
+
+# ============================================================================
+# Shape 9: Lab Result Record
+# ============================================================================
+
+health:LabResultRecordShape a sh:NodeShape ;
+    sh:targetClass health:LabResultRecord ;
+    rdfs:label "Lab Result Record Shape"@en ;
+    rdfs:comment "Validation constraints for laboratory result records. Lifted from clinical:LabResultShape and checked against FHIR R4 Observation."@en ;
+
+    # REQUIRED: testName
+    sh:property [
+        sh:path health:testName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Test Name"@en ;
+        sh:message "Lab result must have exactly one non-empty testName"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED cardinality: resultValue is at most one.
+    # A single subject asserting two resultValues is the failure mode this
+    # constraint exists for: two same-day readings of the same analyte merged
+    # onto one record produce a subject with both values, which a consumer
+    # then reads as the single string "95, 310". Unconstrained, that passes.
+    sh:property [
+        sh:path health:resultValue ;
+        sh:maxCount 1 ;
+        sh:name "Result Value"@en ;
+        sh:message "Lab result must not carry more than one resultValue; two readings of the same analyte are two records"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:resultUnit ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Result Unit"@en ;
+        sh:message "Lab result must not carry more than one resultUnit"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:referenceRange ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Reference Range"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:interpretation ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("normal" "high" "low" "abnormal" "critical"
+               "Normal" "High" "Low" "Abnormal" "Critical") ;
+        sh:name "Interpretation"@en ;
+        sh:message "Interpretation must be one of normal, high, low, abnormal, critical"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:performedDate ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Performed Date"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:reportedDate ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Reported Date"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:testCode ;
+        sh:maxCount 1 ;
+        sh:name "Test Code (LOINC)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:labCategory ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Lab Category"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:specimenType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Specimen Type"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:orderingProvider ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Ordering Provider"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:performingLab ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Performing Laboratory"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:sourceRecordId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Source Record Identifier"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: provenance
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated
+               cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Lab result must declare exactly one valid cascade:dataProvenance"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:message "Lab result must declare exactly one schemaVersion in major.minor form"@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ============================================================================
+# Shape 10: Condition Record
+# ============================================================================
+
+health:ConditionRecordShape a sh:NodeShape ;
+    sh:targetClass health:ConditionRecord ;
+    rdfs:label "Condition Record Shape"@en ;
+    rdfs:comment "Validation constraints for condition and problem-list records. Lifted from clinical:ConditionShape and checked against FHIR R4 Condition."@en ;
+
+    # REQUIRED: conditionName
+    sh:property [
+        sh:path health:conditionName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Condition Name"@en ;
+        sh:message "Condition must have exactly one non-empty conditionName"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # status: FHIR R4 ConditionClinicalStatusCodes
+    sh:property [
+        sh:path health:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("active" "recurrence" "relapse" "inactive" "remission" "resolved") ;
+        sh:name "Clinical Status"@en ;
+        sh:message "Condition status must be one of the FHIR R4 ConditionClinicalStatusCodes: active, recurrence, relapse, inactive, remission, resolved"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:onsetDate ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Onset Date"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:icd10Code ;
+        sh:maxCount 1 ;
+        sh:name "ICD-10-CM Code"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:snomedCode ;
+        sh:maxCount 1 ;
+        sh:name "SNOMED CT Code"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:conditionClass ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Condition Class"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:monitoredVitalSigns ;
+        sh:maxCount 1 ;
+        sh:name "Monitored Vital Signs"@en ;
+        sh:message "Monitored vital signs must be a single rdf:List, not repeated"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:sourceRecordId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Source Record Identifier"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated
+               cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Condition must declare exactly one valid cascade:dataProvenance"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:message "Condition must declare exactly one schemaVersion in major.minor form"@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ============================================================================
+# Shape 11: Allergy Record
+# ============================================================================
+
+health:AllergyRecordShape a sh:NodeShape ;
+    sh:targetClass health:AllergyRecord ;
+    rdfs:label "Allergy Record Shape"@en ;
+    rdfs:comment "Validation constraints for allergy and intolerance records. Lifted from clinical:AllergyShape and checked against FHIR R4 AllergyIntolerance."@en ;
+
+    # REQUIRED: allergen. An allergy record without an allergen carries no
+    # safety information at all, which is worse than having no record.
+    sh:property [
+        sh:path health:allergen ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Allergen"@en ;
+        sh:message "Allergy must specify exactly one non-empty allergen"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:reaction ;
+        sh:datatype xsd:string ;
+        sh:name "Reaction"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # FHIR R4 AllergyIntoleranceSeverity
+    sh:property [
+        sh:path health:allergySeverity ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("mild" "moderate" "severe") ;
+        sh:name "Allergy Severity"@en ;
+        sh:message "Allergy severity must be one of the FHIR R4 AllergyIntoleranceSeverity codes: mild, moderate, severe"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # FHIR R4 AllergyIntoleranceCategory
+    sh:property [
+        sh:path health:allergyCategory ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("food" "medication" "environment" "biologic") ;
+        sh:name "Allergy Category"@en ;
+        sh:message "Allergy category must be one of the FHIR R4 AllergyIntoleranceCategory codes: food, medication, environment, biologic"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:onsetDate ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Onset Date"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:sourceRecordId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Source Record Identifier"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated
+               cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Allergy must declare exactly one valid cascade:dataProvenance"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:message "Allergy must declare exactly one schemaVersion in major.minor form"@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ============================================================================
+# Shape 12: Immunization Record
+# ============================================================================
+
+health:ImmunizationRecordShape a sh:NodeShape ;
+    sh:targetClass health:ImmunizationRecord ;
+    rdfs:label "Immunization Record Shape"@en ;
+    rdfs:comment "Validation constraints for immunization records. Lifted from clinical:ImmunizationShape and checked against FHIR R4 Immunization."@en ;
+
+    # REQUIRED: vaccineName
+    sh:property [
+        sh:path health:vaccineName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Vaccine Name"@en ;
+        sh:message "Immunization must have exactly one non-empty vaccineName"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # NOT required here although FHIR R4 Immunization.occurrence is 1..1.
+    # clinical:ImmunizationShape constrains no date at all, so requiring one
+    # would be a new constraint rather than a lifted one, and would newly fail
+    # existing records. Promoting this to sh:minCount 1 is a candidate for a
+    # release that is explicitly flagged as tightening.
+    sh:property [
+        sh:path health:administrationDate ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Administration Date"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # FHIR R4 ImmunizationStatusCodes
+    sh:property [
+        sh:path health:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("completed" "entered-in-error" "not-done") ;
+        sh:name "Status"@en ;
+        sh:message "Immunization status must be one of the FHIR R4 ImmunizationStatusCodes: completed, entered-in-error, not-done"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:vaccineCode ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Vaccine Code"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:manufacturer ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Manufacturer"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:lotNumber ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Lot Number"@en ;
+        sh:message "Immunization must not carry more than one lotNumber; a lot number identifies a single administered dose"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:doseQuantity ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Dose Quantity"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:route ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Route"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:site ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Administration Site"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:administeringProvider ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Administering Provider"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:administeringLocation ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Administering Location"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:sourceRecordId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Source Record Identifier"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated
+               cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Immunization must declare exactly one valid cascade:dataProvenance"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:message "Immunization must declare exactly one schemaVersion in major.minor form"@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ============================================================================
+# Shape 13: Family History Record
+# ============================================================================
+#
+# There is no clinical:FamilyHistory class and therefore no shape to lift from.
+# Constraints here are derived directly from FHIR R4 FamilyMemberHistory, whose
+# relationship element is 1..1 and whose condition.code is required within each
+# condition entry. The provenance and schemaVersion blocks follow the same
+# pattern as every other record shape.
+
+health:FamilyHistoryRecordShape a sh:NodeShape ;
+    sh:targetClass health:FamilyHistoryRecord ;
+    rdfs:label "Family History Record Shape"@en ;
+    rdfs:comment "Validation constraints for family history records. Derived from FHIR R4 FamilyMemberHistory."@en ;
+
+    # REQUIRED: conditionName (FHIR condition.code is required per entry)
+    sh:property [
+        sh:path health:conditionName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Condition Name"@en ;
+        sh:message "Family history record must name exactly one condition"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # REQUIRED: relationship (FHIR FamilyMemberHistory.relationship is 1..1).
+    # A condition with no stated relative is not family history.
+    sh:property [
+        sh:path clinical:relationship ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Relationship"@en ;
+        sh:message "Family history record must state exactly one relationship to the patient"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:onsetAge ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 130 ;
+        sh:name "Onset Age"@en ;
+        sh:message "Onset age must be a single integer between 0 and 130"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:sourceRecordId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Source Record Identifier"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated
+               cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Family history record must declare exactly one valid cascade:dataProvenance"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:message "Family history record must declare exactly one schemaVersion in major.minor form"@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ============================================================================
+# Daily Snapshot Shapes (v1.2 — health v2.5)
+# ============================================================================
+#
+# These three classes were defined in health v2.0 and have been emitted ever
+# since, but no shape targeted them, so every reading in every history
+# container validated vacuously.
+#
+# health:DailyVitalReading is emitted in TWO forms that do not share their
+# value and date predicates:
+#
+#   Pattern A (HealthProfileSerializer): health:value, health:unit, health:date
+#   Pattern B (reference pod):           fhir:valueQuantity, cascade:date
+#
+# Both are live. The shape therefore requires a date and a value through
+# sh:or rather than naming one spelling and failing the other. Reconciling the
+# two serializations is a separate change; constraining one of them here would
+# have silently invalidated the other.
+
+health:DailyVitalReadingShape a sh:NodeShape ;
+    sh:targetClass health:DailyVitalReading ;
+    rdfs:label "Daily Vital Reading Shape"@en ;
+    rdfs:comment "Validation constraints for a single day's aggregated vital sign reading inside a history container."@en ;
+
+    # REQUIRED: a timestamp, in either spelling. A reading with no date cannot
+    # be placed in the time series it lives in.
+    sh:or (
+        [ sh:property [ sh:path cascade:date ; sh:minCount 1 ] ]
+        [ sh:property [ sh:path health:date  ; sh:minCount 1 ] ]
+    ) ;
+    sh:message "Daily vital reading must carry a timestamp as either cascade:date or health:date"@en ;
+    sh:severity sh:Violation ;
+
+    sh:property [
+        sh:path cascade:date ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Date"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:date ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Date"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:sampleCount ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Sample Count"@en ;
+        sh:message "Sample count must be a single non-negative integer"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:value ;
+        sh:maxCount 1 ;
+        sh:name "Value"@en ;
+        sh:message "Daily vital reading must not carry more than one value"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:unit ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Unit"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:loincCode ;
+        sh:maxCount 1 ;
+        sh:name "LOINC Code"@en ;
+        sh:severity sh:Violation
+    ] .
+
+health:DailyActivitySnapshotShape a sh:NodeShape ;
+    sh:targetClass health:DailyActivitySnapshot ;
+    rdfs:label "Daily Activity Snapshot Shape"@en ;
+    rdfs:comment "Validation constraints for a single day's activity metrics."@en ;
+
+    sh:property [
+        sh:path cascade:date ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Date"@en ;
+        sh:message "Daily activity snapshot must carry exactly one cascade:date"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:steps ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Steps"@en ;
+        sh:message "Steps must be a single non-negative integer"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:activeEnergyKcal ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Active Energy (kcal)"@en ;
+        sh:message "Active energy must be a single non-negative decimal"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:exerciseMinutes ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 1440 ;
+        sh:name "Exercise Minutes"@en ;
+        sh:message "Exercise minutes must be a single integer between 0 and 1440"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:standHours ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 24 ;
+        sh:name "Stand Hours"@en ;
+        sh:message "Stand hours must be a single integer between 0 and 24"@en ;
+        sh:severity sh:Violation
+    ] .
+
+health:DailySleepSnapshotShape a sh:NodeShape ;
+    sh:targetClass health:DailySleepSnapshot ;
+    rdfs:label "Daily Sleep Snapshot Shape"@en ;
+    rdfs:comment "Validation constraints for a single night's sleep metrics."@en ;
+
+    sh:property [
+        sh:path cascade:date ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Date"@en ;
+        sh:message "Daily sleep snapshot must carry exactly one cascade:date"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:durationHours ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 24 ;
+        sh:name "Sleep Duration (hours)"@en ;
+        sh:message "Sleep duration must be a single decimal between 0 and 24 hours"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # No sh:datatype: health:sleepQuality is declared owl:DatatypeProperty with
+    # rdfs:range xsd:string in health.ttl, but every known emitter writes an
+    # IRI. Asserting either form here would contradict something real, so the
+    # shape constrains cardinality and the permitted individuals only.
+    sh:property [
+        sh:path health:sleepQuality ;
+        sh:maxCount 1 ;
+        sh:in (health:Excellent health:Good health:Fair health:Poor) ;
+        sh:name "Sleep Quality"@en ;
+        sh:message "Sleep quality must be one of health:Excellent, health:Good, health:Fair, health:Poor"@en ;
+        sh:severity sh:Violation
+    ] .

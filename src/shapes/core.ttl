@@ -7,6 +7,8 @@
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix foaf: <http://xmlns.com/foaf/0.1/> .
 @prefix vcard: <http://www.w3.org/2006/vcard/ns#> .
+@prefix dcat: <http://www.w3.org/ns/dcat#> .
+@prefix void: <http://rdfs.org/ns/void#> .
 
 # ============================================================================
 # Ontology Metadata
@@ -17,8 +19,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-06-16"^^xsd:date ;
-    owl:versionInfo "3.3" ;
+    dct:modified "2026-08-03"^^xsd:date ;
+    owl:versionInfo "3.4" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -675,6 +677,30 @@ cascade:forSystem a owl:DatatypeProperty ;
 
 # ============================================================================
 # Changelog
+#
+# Version 3.4 (2026-08-03)
+# - Defined the pod export manifest vocabulary. 32 cascade: terms appearing in
+#   a conforming pod had no definition in this file at all; all 32 are now
+#   defined, so a manifest is describable rather than only parseable.
+# - cascade:ExportManifest is modelled as rdfs:subClassOf dcat:Dataset (DCAT 3,
+#   https://www.w3.org/TR/vocab-dcat-3/). A pod export is a dataset with a
+#   title, a description, a creation date and a publisher, which is what DCAT
+#   already standardises; inventing a parallel set of terms for it would have
+#   been novelty for its own sake.
+# - cascade:RecordSummary is modelled as rdfs:subClassOf void:Dataset (VoID,
+#   https://www.w3.org/TR/void/). Its ~15 per-domain count properties are
+#   declared rdfs:subPropertyOf void:entities and each is paired with the
+#   void:class it counts, so a VoID-aware consumer can read Cascade record
+#   counts with no Cascade-specific code. The Cascade-specific spellings are
+#   retained because they are what is emitted.
+# - cascade:InteractionScenario is kept as genuinely novel. It describes a
+#   cross-provenance clinical interaction that an agent must correlate across
+#   several resources; no ratified vocabulary covers it, so it is defined here
+#   rather than bent onto something that does not fit.
+# - Also defined the reading-level terms cascade:date, cascade:sampleCount and
+#   cascade:loincCode, which are emitted on every history-container entry and
+#   are constrained by the health v2.5 daily-snapshot shapes.
+#
 # ============================================================================
 # v3.2 (2026-05-06): Forward reference closure for advisory applier.
 #     Added cascade:appliedTriplesCount (DatatypeProperty, range xsd:nonNegativeInteger,
@@ -1138,3 +1164,286 @@ cascade:proxyRevokedAt a owl:DatatypeProperty ;
     rdfs:domain cascade:ProxyAgent ;
     rdfs:range xsd:dateTime ;
     owl:versionInfo "Added in core v3.3" .
+
+# ============================================================================
+# Pod Export Manifest (v3.4)
+# ============================================================================
+#
+# Every term in this section is emitted by a conforming pod export and none of
+# them was defined before v3.4. Defining them is additive: no serializer
+# changes and no manifest is rewritten.
+#
+# Modelling decisions, and the reasoning, because "we invented a term" is the
+# expensive default:
+#
+#   cascade:ExportManifest  -> rdfs:subClassOf dcat:Dataset
+#       A pod export is a published dataset with a title, description,
+#       creation date and publisher. DCAT 3 standardises exactly that and is a
+#       W3C Recommendation. https://www.w3.org/TR/vocab-dcat-3/
+#
+#   cascade:RecordSummary   -> rdfs:subClassOf void:Dataset
+#       A record summary is a statistical description of a subset of a
+#       dataset: how many instances of each class it contains. That is what
+#       VoID is for. Each count property below is declared
+#       rdfs:subPropertyOf void:entities and paired with the void:class it
+#       counts, so a VoID-aware consumer gets the counts for free.
+#       https://www.w3.org/TR/void/
+#
+#   cascade:InteractionScenario -> novel, deliberately
+#       A cross-provenance clinical interaction that an agent must detect by
+#       correlating resources of different provenance. No ratified vocabulary
+#       models this. It stays Cascade-specific rather than being forced onto
+#       something that does not fit.
+
+cascade:ExportManifest a owl:Class ;
+    rdfs:label "Export Manifest"@en ;
+    rdfs:comment "Provenance and completeness metadata for a complete pod export: when it was generated, which schema versions it uses, how many records of each kind it contains, and which provenance layers are represented. Consumers should read this before processing individual resources."@en ;
+    rdfs:subClassOf dcat:Dataset ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:seeAlso <https://www.w3.org/TR/vocab-dcat-3/> ;
+    owl:versionInfo "Added in core v3.4; emitted since schema 1.3" .
+
+cascade:RecordSummary a owl:Class ;
+    rdfs:label "Record Summary"@en ;
+    rdfs:comment "Per-domain record counts for one partition of a pod export. Modelled on void:Dataset because it is a statistical description of a dataset subset; each count property is a subproperty of void:entities scoped to a particular void:class."@en ;
+    rdfs:subClassOf void:Dataset ;
+    rdfs:seeAlso <https://www.w3.org/TR/void/> ;
+    owl:versionInfo "Added in core v3.4; emitted since schema 1.3" .
+
+cascade:InteractionScenario a owl:Class ;
+    rdfs:label "Interaction Scenario"@en ;
+    rdfs:comment "A clinically significant interaction that can only be detected by correlating resources of differing provenance, for example an EHR-prescribed drug against a self-reported supplement against a lab value. Cascade-specific: no ratified vocabulary models cross-provenance correlation as a first-class thing."@en ;
+    rdfs:subClassOf prov:Entity ;
+    owl:versionInfo "Added in core v3.4; emitted since schema 1.3" .
+
+# --- Manifest structure -----------------------------------------------------
+
+cascade:patientProfileVersion a owl:DatatypeProperty ;
+    rdfs:label "Patient Profile Version"@en ;
+    rdfs:comment "Version of the patient profile structure used in this export, independent of cascade:schemaVersion."@en ;
+    rdfs:domain cascade:ExportManifest ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:provenanceLayers a owl:ObjectProperty ;
+    rdfs:label "Provenance Layers"@en ;
+    rdfs:comment "Ordered list of the cascade:DataProvenance values represented anywhere in this export. Lets a consumer tell, before reading any resource, whether the export contains device data, EHR data, self-reported data, or a mixture."@en ;
+    rdfs:domain cascade:ExportManifest ;
+    rdfs:range rdf:List ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:clinicalSummary a owl:ObjectProperty ;
+    rdfs:label "Clinical Summary"@en ;
+    rdfs:comment "Record counts for the clinical partition of this export."@en ;
+    rdfs:domain cascade:ExportManifest ;
+    rdfs:range cascade:RecordSummary ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:wellnessSummary a owl:ObjectProperty ;
+    rdfs:label "Wellness Summary"@en ;
+    rdfs:comment "Record counts for the wellness partition of this export."@en ;
+    rdfs:domain cascade:ExportManifest ;
+    rdfs:range cascade:RecordSummary ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:deviceSources a owl:ObjectProperty ;
+    rdfs:label "Device Sources"@en ;
+    rdfs:comment "Ordered list of the devices that contributed data to this export, each a prov:Agent."@en ;
+    rdfs:domain cascade:ExportManifest ;
+    rdfs:range rdf:List ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:interactionScenarios a owl:ObjectProperty ;
+    rdfs:label "Interaction Scenarios"@en ;
+    rdfs:comment "Ordered list of cascade:InteractionScenario entries flagged in this export."@en ;
+    rdfs:domain cascade:ExportManifest ;
+    rdfs:range rdf:List ;
+    owl:versionInfo "Added in core v3.4" .
+
+# --- Record summary ---------------------------------------------------------
+
+cascade:domain a owl:DatatypeProperty ;
+    rdfs:label "Domain"@en ;
+    rdfs:comment "Which partition of the export this summary describes, for example 'clinical' or 'wellness'."@en ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:notes a owl:DatatypeProperty ;
+    rdfs:label "Notes"@en ;
+    rdfs:comment "Free-text commentary on a summary or manifest section."@en ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.4" .
+
+# Counts. Each is a subproperty of void:entities paired with the void:class it
+# counts, so a VoID-aware consumer reads these without Cascade-specific code.
+
+cascade:conditionCount a owl:DatatypeProperty ;
+    rdfs:label "Condition Count"@en ;
+    rdfs:comment "Number of condition records in this partition."@en ;
+    rdfs:subPropertyOf void:entities ;
+    void:class <https://ns.cascadeprotocol.org/health/v1#ConditionRecord> ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:medicationCount a owl:DatatypeProperty ;
+    rdfs:label "Medication Count"@en ;
+    rdfs:comment "Number of medication records in this partition."@en ;
+    rdfs:subPropertyOf void:entities ;
+    void:class <https://ns.cascadeprotocol.org/clinical/v1#Medication> ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:allergyCount a owl:DatatypeProperty ;
+    rdfs:label "Allergy Count"@en ;
+    rdfs:comment "Number of allergy records in this partition."@en ;
+    rdfs:subPropertyOf void:entities ;
+    void:class <https://ns.cascadeprotocol.org/health/v1#AllergyRecord> ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:labResultCount a owl:DatatypeProperty ;
+    rdfs:label "Lab Result Count"@en ;
+    rdfs:comment "Number of laboratory result records in this partition."@en ;
+    rdfs:subPropertyOf void:entities ;
+    void:class <https://ns.cascadeprotocol.org/health/v1#LabResultRecord> ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:immunizationCount a owl:DatatypeProperty ;
+    rdfs:label "Immunization Count"@en ;
+    rdfs:comment "Number of immunization records in this partition."@en ;
+    rdfs:subPropertyOf void:entities ;
+    void:class <https://ns.cascadeprotocol.org/health/v1#ImmunizationRecord> ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:coverageCount a owl:DatatypeProperty ;
+    rdfs:label "Coverage Count"@en ;
+    rdfs:comment "Number of insurance coverage records in this partition."@en ;
+    rdfs:subPropertyOf void:entities ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:supplementCount a owl:DatatypeProperty ;
+    rdfs:label "Supplement Count"@en ;
+    rdfs:comment "Number of supplement records in this partition."@en ;
+    rdfs:subPropertyOf void:entities ;
+    void:class <https://ns.cascadeprotocol.org/clinical/v1#Supplement> ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+# Day counts. These count DAYS COVERED, not entities, so they are deliberately
+# NOT subproperties of void:entities: a 30-day heart rate history may hold many
+# more readings than 30. Conflating the two would make the VoID reading wrong.
+
+cascade:vitalSignDays a owl:DatatypeProperty ;
+    rdfs:label "Vital Sign Days"@en ;
+    rdfs:comment "Number of distinct days covered by vital sign records in this partition. A day count, not a record count."@en ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:heartRateDays a owl:DatatypeProperty ;
+    rdfs:label "Heart Rate Days"@en ;
+    rdfs:comment "Number of distinct days covered by heart rate history. A day count, not a record count."@en ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:bloodPressureDays a owl:DatatypeProperty ;
+    rdfs:label "Blood Pressure Days"@en ;
+    rdfs:comment "Number of distinct days covered by blood pressure history. A day count, not a record count."@en ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:activityDays a owl:DatatypeProperty ;
+    rdfs:label "Activity Days"@en ;
+    rdfs:comment "Number of distinct days covered by activity history. A day count, not a record count."@en ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:sleepDays a owl:DatatypeProperty ;
+    rdfs:label "Sleep Days"@en ;
+    rdfs:comment "Number of distinct nights covered by sleep history. A night count, not a record count."@en ;
+    rdfs:domain cascade:RecordSummary ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+# --- Interaction scenario ---------------------------------------------------
+
+cascade:involvedResources a owl:ObjectProperty ;
+    rdfs:label "Involved Resources"@en ;
+    rdfs:comment "Ordered list of the pod resources an agent must read together to detect this interaction."@en ;
+    rdfs:domain cascade:InteractionScenario ;
+    rdfs:range rdf:List ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:severity a owl:DatatypeProperty ;
+    rdfs:label "Severity"@en ;
+    rdfs:comment "Severity of the flagged interaction: low, moderate, high, or critical."@en ;
+    rdfs:domain cascade:InteractionScenario ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:requiresCrossProvenance a owl:DatatypeProperty ;
+    rdfs:label "Requires Cross-Provenance"@en ;
+    rdfs:comment "True when detecting this interaction requires correlating resources of different cascade:dataProvenance. The distinguishing property of this class: a single-source consumer cannot find it."@en ;
+    rdfs:domain cascade:InteractionScenario ;
+    rdfs:range xsd:boolean ;
+    owl:versionInfo "Added in core v3.4" .
+
+# --- Device sources ---------------------------------------------------------
+
+cascade:sourceType a owl:DatatypeProperty ;
+    rdfs:label "Source Type"@en ;
+    rdfs:comment "Mechanism a reading arrived through, for example healthKit, bluetoothDevice, manualEntry. Describes the transport, NOT the trustworthiness of the data; that is cascade:dataProvenance."@en ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:dataTypes a owl:DatatypeProperty ;
+    rdfs:label "Data Types"@en ;
+    rdfs:comment "Comma-separated list of the data types a device contributed, for example 'heartRate, activity, sleep'."@en ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:version a owl:DatatypeProperty ;
+    rdfs:label "Version"@en ;
+    rdfs:comment "Version string of a software agent or generator recorded in provenance."@en ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.4" .
+
+# ============================================================================
+# Reading-level Terms (v3.4)
+# ============================================================================
+#
+# Emitted on entries inside the health: history containers. Defined here rather
+# than in health: because they are not wellness-specific: any Cascade time
+# series entry carries a date and, where aggregated, a sample count.
+
+cascade:date a owl:DatatypeProperty ;
+    rdfs:label "Date"@en ;
+    rdfs:comment "Timestamp a reading or snapshot applies to. Note that health:date is a second, equivalent spelling emitted by a different serializer for the same purpose; readers of history containers must handle both."@en ;
+    rdfs:range xsd:dateTime ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:sampleCount a owl:DatatypeProperty ;
+    rdfs:label "Sample Count"@en ;
+    rdfs:comment "Number of underlying samples aggregated into a single reading. A daily resting heart rate of 68 derived from 142 samples is a stronger observation than one derived from 2, and consumers should be able to tell the difference."@en ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.4" .
+
+cascade:loincCode a owl:ObjectProperty ;
+    rdfs:label "LOINC Code"@en ;
+    rdfs:comment "LOINC reference for an observation, as an IRI."@en ;
+    rdfs:seeAlso <http://loinc.org/> ;
+    owl:versionInfo "Added in core v3.4" .

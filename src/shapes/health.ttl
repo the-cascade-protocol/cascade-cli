@@ -21,8 +21,8 @@
     dct:description "Vocabulary for consumer-generated wellness observations from wearable devices and HealthKit. Maps Cascade wellness properties to established SNOMED CT and LOINC codes following the three-layer ontology architecture."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-01-29"^^xsd:date ;
-    dct:modified "2026-02-28"^^xsd:date ;
-    owl:versionInfo "2.3" ;
+    dct:modified "2026-08-03"^^xsd:date ;
+    owl:versionInfo "2.5" ;
     rdfs:comment """Three-layer ontology for wellness data:
         Layer 1 (Established standards): SNOMED CT concept IDs + LOINC observation codes
         Layer 2 (Cascade health vocabulary): health: namespace properties linking to Layer 1
@@ -30,6 +30,26 @@
     rdfs:seeAlso <https://cascadeprotocol.org/docs/health/v1/> .
 
 # Changelog:
+# v2.5 (2026-08-03): Clinical record classes. Five classes that serializers have
+#     emitted since v1.3 but that this ontology never defined are now defined:
+#     health:LabResultRecord, health:ConditionRecord, health:AllergyRecord,
+#     health:ImmunizationRecord, health:FamilyHistoryRecord. Adds the 40
+#     properties they use (previously undefined vocabulary), 4 sleep-quality
+#     named individuals, and 6 wellness container classes
+#     (health:ActivityData, SleepData, HeartRateData, BloodPressureData,
+#     HRVData, BodyMeasurements) as rdfs:subClassOf health:HealthProfile.
+#     The subclass declarations make the existing rdfs:domain health:HealthProfile
+#     on the eight history container properties true rather than contradicted,
+#     and bring those containers under health:HealthProfileShape through
+#     SHACL subclass-aware sh:targetClass. Adds a namespace-boundary note
+#     explaining that health: vs clinical: is historical, not a provenance
+#     signal. No serializer changes; every term here was already being emitted.
+#
+# v2.4 (2026-03-27): EHR Import Reconciliation (P1-C) — Added health:SocialHistoryRecord
+#     class for social history observations (smoking, alcohol, exercise, occupation).
+#     Added 4 properties: health:smokingStatus, health:alcoholUse,
+#     health:exerciseFrequency, health:occupationalExposure.
+#
 # v2.3 (2026-02-28): BUG-006 — Added 6 Pattern A flat-property vocabulary terms
 #     for VitalSignReading blank nodes: health:value (generic numeric value),
 #     health:date (observation timestamp), health:sdnn (HRV SDNN measurement),
@@ -926,3 +946,544 @@ health:Unknown a health:WalkingSteadinessLevel ;
 # | Exercise Minutes      | health:exerciseMinutesWeekly | 68130003    | 73985-4  |
 # | Stand Hours           | health:standHoursDaily       | ---         | ---      |
 # | Sleep Duration        | health:averageDurationHours  | 248263006   | 93832-4  |
+
+# ============================================================================
+# Social History (v2.4)
+# ============================================================================
+
+###  Social History Record
+health:SocialHistoryRecord a owl:Class ;
+    rdfs:label "Social History Record"@en ;
+    rdfs:comment "A social history observation about a patient, including smoking status, alcohol use, exercise, occupation, and other lifestyle factors."@en ;
+    owl:versionInfo "Added in health v2.4" .
+
+health:smokingStatus a owl:DatatypeProperty ;
+    rdfs:label "Smoking Status"@en ;
+    rdfs:comment "Patient's smoking status (e.g., current-smoker, former-smoker, never-smoker)."@en ;
+    rdfs:domain health:SocialHistoryRecord ;
+    rdfs:range xsd:string .
+
+health:alcoholUse a owl:DatatypeProperty ;
+    rdfs:label "Alcohol Use"@en ;
+    rdfs:comment "Patient's alcohol consumption description."@en ;
+    rdfs:domain health:SocialHistoryRecord ;
+    rdfs:range xsd:string .
+
+health:exerciseFrequency a owl:DatatypeProperty ;
+    rdfs:label "Exercise Frequency"@en ;
+    rdfs:comment "Patient's reported exercise frequency."@en ;
+    rdfs:domain health:SocialHistoryRecord ;
+    rdfs:range xsd:string .
+
+health:occupationalExposure a owl:DatatypeProperty ;
+    rdfs:label "Occupational Exposure"@en ;
+    rdfs:comment "Occupational exposures relevant to patient health."@en ;
+    rdfs:domain health:SocialHistoryRecord ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# Namespace Boundary Note (v2.5)
+# ============================================================================
+#
+# The split between the health: and clinical: namespaces is HISTORICAL, not
+# semantic. It is not a provenance signal and must not be read as one.
+#
+# health: was introduced for consumer- and device-generated wellness data and
+# clinical: for EHR-sourced records, but serializers have never honoured that
+# division. Records typed health:LabResultRecord, health:ConditionRecord,
+# health:AllergyRecord and health:ImmunizationRecord carry EHR-sourced data,
+# and clinical:VitalSign records carry consumer-device data.
+#
+# PROVENANCE IS CARRIED BY cascade:dataProvenance, AND ONLY BY IT.
+# Consumers deciding whether a record came from an EHR, a device, or the
+# patient MUST key on cascade:dataProvenance (ClinicalGenerated, EHRVerified,
+# DeviceGenerated, PatientReported, SelfReported, AIExtracted). Keying on the
+# namespace of the rdf:type will give the wrong answer on real pods.
+#
+# Both namespaces are ratified and neither is being migrated. The clinical:
+# classes that duplicate the five classes defined below are deprecated in
+# clinical v1.13 (owl:deprecated true, rdfs:seeAlso pointing here) but are NOT
+# removed: an existing export path still emits them and existing pods contain
+# them. Readers must accept both spellings; writers should prefer these.
+#
+# ---------------------------------------------------------------------------
+# SocialHistoryRecord: two classes, deliberately kept
+# ---------------------------------------------------------------------------
+#
+# health:SocialHistoryRecord (v2.4, above) and clinical:SocialHistoryRecord
+# (clinical v1.9) both exist and both are retained. The asserted
+# consumer-versus-EHR division does not describe what is emitted:
+#
+#   - clinical:SocialHistoryRecord is emitted, by the free-text LLM extraction
+#     path only.
+#   - health:SocialHistoryRecord is emitted by nothing. The structured C-CDA
+#     Social History path that appears to write it reports the entries it read
+#     but writes no records at all, so the class is defined and shaped but
+#     never instantiated.
+#
+# Neither class is therefore a reliable indicator of how a social-history
+# observation was obtained. Consumers should accept both types and read
+# cascade:dataProvenance for the actual source. Reconciling the two is
+# deferred rather than guessed at.
+
+# ============================================================================
+# Clinical Record Classes (v2.5)
+# ============================================================================
+#
+# These five classes have been emitted by Cascade serializers since schema
+# version 1.3 but were never defined in this ontology. Defining them is purely
+# additive: no serializer changes, no rdf:type changes, no pod migration. It
+# makes existing data describable and, with health.shapes.ttl v1.2, checkable.
+#
+# Layer 1 alignment: each class states the FHIR R4 resource it corresponds to.
+# Layer 2: the properties below. Layer 3: checkup:/pots: aggregations.
+
+health:LabResultRecord a owl:Class ;
+    rdfs:label "Lab Result Record"@en ;
+    rdfs:comment "A laboratory test result: the test performed, its value and unit, the reference range it is read against, and the specimen it came from. Emitted for both EHR-imported and patient-entered results; read cascade:dataProvenance to tell them apart."@en ;
+    rdfs:subClassOf fhir:Observation ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/observation.html> ;
+    owl:versionInfo "Added in health v2.5; emitted since schema 1.3" .
+
+health:ConditionRecord a owl:Class ;
+    rdfs:label "Condition Record"@en ;
+    rdfs:comment "A diagnosed condition or problem-list entry, with its clinical status, onset, and coding. Emitted for both EHR-imported and self-reported conditions; read cascade:dataProvenance to tell them apart."@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/condition.html> ;
+    owl:versionInfo "Added in health v2.5; emitted since schema 1.3" .
+
+health:AllergyRecord a owl:Class ;
+    rdfs:label "Allergy Record"@en ;
+    rdfs:comment "An allergy or intolerance: the allergen, the reaction it provokes, and the severity of that reaction. Emitted for both EHR-imported and self-reported allergies; read cascade:dataProvenance to tell them apart."@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/allergyintolerance.html> ;
+    owl:versionInfo "Added in health v2.5; emitted since schema 1.3" .
+
+health:ImmunizationRecord a owl:Class ;
+    rdfs:label "Immunization Record"@en ;
+    rdfs:comment "An administered vaccine dose, with product identification, lot, route, site and administering party."@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/immunization.html> ;
+    owl:versionInfo "Added in health v2.5; emitted since schema 1.3" .
+
+health:FamilyHistoryRecord a owl:Class ;
+    rdfs:label "Family History Record"@en ;
+    rdfs:comment "A condition recorded for a relative of the patient, with the relationship and the relative's age at onset. The relationship is expressed with clinical:relationship, which is shared with coverage records."@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/familymemberhistory.html> ;
+    owl:versionInfo "Added in health v2.5; emitted since schema 1.3" .
+
+# ----------------------------------------------------------------------------
+# Properties shared across the record classes
+# ----------------------------------------------------------------------------
+# Domains are unions rather than a single class. A single-class rdfs:domain on
+# a property that several classes use is an assertion the data falsifies, which
+# is the defect this release is correcting elsewhere; do not reintroduce it.
+
+health:notes a owl:DatatypeProperty ;
+    rdfs:label "Notes"@en ;
+    rdfs:comment "Free-text clinical or patient commentary attached to a record."@en ;
+    rdfs:domain [ a owl:Class ; owl:unionOf (
+        health:LabResultRecord health:ConditionRecord health:AllergyRecord
+        health:ImmunizationRecord health:FamilyHistoryRecord ) ] ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:sourceRecordId a owl:DatatypeProperty ;
+    rdfs:label "Source Record Identifier"@en ;
+    rdfs:comment "Identifier of this record in the system it was imported from. Opaque to Cascade; used for reconciliation against the source system, not as a Cascade identity."@en ;
+    rdfs:domain [ a owl:Class ; owl:unionOf (
+        health:LabResultRecord health:ConditionRecord health:AllergyRecord
+        health:ImmunizationRecord health:FamilyHistoryRecord ) ] ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:status a owl:DatatypeProperty ;
+    rdfs:label "Status"@en ;
+    rdfs:comment "Lifecycle status of the record. The permitted values differ by class and are constrained per-shape, not here: condition records use the FHIR R4 ConditionClinicalStatusCodes value set, immunization records use ImmunizationStatusCodes."@en ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( health:ConditionRecord health:ImmunizationRecord ) ] ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:onsetDate a owl:DatatypeProperty ;
+    rdfs:label "Onset Date"@en ;
+    rdfs:comment "When the condition or allergy began, or was first recorded as beginning."@en ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( health:ConditionRecord health:AllergyRecord ) ] ;
+    rdfs:range xsd:dateTime ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:conditionName a owl:DatatypeProperty ;
+    rdfs:label "Condition Name"@en ;
+    rdfs:comment "Human-readable name of the condition. Used both for the patient's own conditions and for conditions recorded against a relative."@en ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( health:ConditionRecord health:FamilyHistoryRecord ) ] ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+# ----------------------------------------------------------------------------
+# Lab result properties
+# ----------------------------------------------------------------------------
+
+health:testName a owl:DatatypeProperty ;
+    rdfs:label "Test Name"@en ;
+    rdfs:comment "Human-readable name of the laboratory test performed."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:resultValue a owl:DatatypeProperty ;
+    rdfs:label "Result Value"@en ;
+    rdfs:comment "The measured value. Carried as a string because lab results are not uniformly numeric: ratios, titres, qualitative results ('Negative'), and bounded values ('<0.01') all occur. Exactly one value per record."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:resultUnit a owl:DatatypeProperty ;
+    rdfs:label "Result Unit"@en ;
+    rdfs:comment "Unit of measure for health:resultValue, as reported by the performing laboratory."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso <http://unitsofmeasure.org/> ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:interpretation a owl:DatatypeProperty ;
+    rdfs:label "Interpretation"@en ;
+    rdfs:comment "Categorical reading of the result against its reference range."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-observation-interpretation.html> ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:performedDate a owl:DatatypeProperty ;
+    rdfs:label "Performed Date"@en ;
+    rdfs:comment "When the specimen was collected or the test performed. Distinct from health:reportedDate."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:dateTime ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:reportedDate a owl:DatatypeProperty ;
+    rdfs:label "Reported Date"@en ;
+    rdfs:comment "When the laboratory released the result. Later than health:performedDate."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:dateTime ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:testCode a owl:ObjectProperty ;
+    rdfs:label "Test Code"@en ;
+    rdfs:comment "LOINC reference for the test performed, as an IRI."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:seeAlso <http://loinc.org/> ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:labCategory a owl:DatatypeProperty ;
+    rdfs:label "Lab Category"@en ;
+    rdfs:comment "Laboratory department or panel grouping (for example Chemistry, Hematology). Free text: laboratories do not agree on a common set."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:referenceRange a owl:DatatypeProperty ;
+    rdfs:label "Reference Range"@en ;
+    rdfs:comment "The normal range this result is read against, as printed by the performing laboratory (for example '70 - 100'). Not parsed."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:specimenType a owl:DatatypeProperty ;
+    rdfs:label "Specimen Type"@en ;
+    rdfs:comment "The specimen the test was run on (for example Serum, Whole Blood, Urine)."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:orderingProvider a owl:DatatypeProperty ;
+    rdfs:label "Ordering Provider"@en ;
+    rdfs:comment "Name of the clinician who ordered the test."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:performingLab a owl:DatatypeProperty ;
+    rdfs:label "Performing Laboratory"@en ;
+    rdfs:comment "Name of the laboratory that ran the test."@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+# ----------------------------------------------------------------------------
+# Condition properties
+# ----------------------------------------------------------------------------
+
+health:icd10Code a owl:ObjectProperty ;
+    rdfs:label "ICD-10-CM Code"@en ;
+    rdfs:comment "ICD-10-CM reference for the condition, as an IRI."@en ;
+    rdfs:domain health:ConditionRecord ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/codesystem-icd10.html> ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:conditionClass a owl:DatatypeProperty ;
+    rdfs:label "Condition Class"@en ;
+    rdfs:comment "Body-system grouping used for patient-facing organisation (for example cardiovascular, endocrine, respiratory). A presentation aid, not a clinical classification; do not use it for decision support."@en ;
+    rdfs:domain health:ConditionRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:monitoredVitalSigns a owl:ObjectProperty ;
+    rdfs:label "Monitored Vital Signs"@en ;
+    rdfs:comment "Ordered list of vital-sign names a patient or app tracks because of this condition (for example bloodPressure, heartRate). An rdf:List of string literals."@en ;
+    rdfs:domain health:ConditionRecord ;
+    rdfs:range rdf:List ;
+    owl:versionInfo "Added in health v2.5" .
+
+# ----------------------------------------------------------------------------
+# Allergy properties
+# ----------------------------------------------------------------------------
+
+health:allergen a owl:DatatypeProperty ;
+    rdfs:label "Allergen"@en ;
+    rdfs:comment "The substance the patient reacts to. Required: an allergy record without an allergen carries no safety information."@en ;
+    rdfs:domain health:AllergyRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:allergyCategory a owl:DatatypeProperty ;
+    rdfs:label "Allergy Category"@en ;
+    rdfs:comment "Category of the allergen, using the FHIR R4 AllergyIntoleranceCategory value set: food, medication, environment, biologic."@en ;
+    rdfs:domain health:AllergyRecord ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-allergy-intolerance-category.html> ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:reaction a owl:DatatypeProperty ;
+    rdfs:label "Reaction"@en ;
+    rdfs:comment "Description of the manifestation the allergen produces (for example 'Hives (urticaria)')."@en ;
+    rdfs:domain health:AllergyRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:allergySeverity a owl:DatatypeProperty ;
+    rdfs:label "Allergy Severity"@en ;
+    rdfs:comment "Severity of the reaction as a whole, using the FHIR R4 AllergyIntoleranceSeverity value set: mild, moderate, severe."@en ;
+    rdfs:domain health:AllergyRecord ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-reaction-event-severity.html> ;
+    owl:versionInfo "Added in health v2.5" .
+
+# ----------------------------------------------------------------------------
+# Immunization properties
+# ----------------------------------------------------------------------------
+
+health:vaccineName a owl:DatatypeProperty ;
+    rdfs:label "Vaccine Name"@en ;
+    rdfs:comment "Human-readable name of the vaccine product administered."@en ;
+    rdfs:domain health:ImmunizationRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:administrationDate a owl:DatatypeProperty ;
+    rdfs:label "Administration Date"@en ;
+    rdfs:comment "When the dose was administered. Corresponds to FHIR R4 Immunization.occurrence, which is 1..1."@en ;
+    rdfs:domain health:ImmunizationRecord ;
+    rdfs:range xsd:dateTime ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:vaccineCode a owl:DatatypeProperty ;
+    rdfs:label "Vaccine Code"@en ;
+    rdfs:comment "Coded identifier for the vaccine product, typically a CVX code."@en ;
+    rdfs:domain health:ImmunizationRecord ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-vaccine-code.html> ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:manufacturer a owl:DatatypeProperty ;
+    rdfs:label "Manufacturer"@en ;
+    rdfs:comment "Manufacturer of the administered vaccine product."@en ;
+    rdfs:domain health:ImmunizationRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:lotNumber a owl:DatatypeProperty ;
+    rdfs:label "Lot Number"@en ;
+    rdfs:comment "Manufacturer lot number of the administered dose. Required for recall tracing."@en ;
+    rdfs:domain health:ImmunizationRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:doseQuantity a owl:DatatypeProperty ;
+    rdfs:label "Dose Quantity"@en ;
+    rdfs:comment "Amount administered, value and unit together as printed (for example '0.5 mL')."@en ;
+    rdfs:domain health:ImmunizationRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:route a owl:DatatypeProperty ;
+    rdfs:label "Route"@en ;
+    rdfs:comment "Route of administration (for example intramuscular, oral, intranasal)."@en ;
+    rdfs:domain health:ImmunizationRecord ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-immunization-route.html> ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:site a owl:DatatypeProperty ;
+    rdfs:label "Administration Site"@en ;
+    rdfs:comment "Body site the dose was administered at (for example 'Left deltoid')."@en ;
+    rdfs:domain health:ImmunizationRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:administeringProvider a owl:DatatypeProperty ;
+    rdfs:label "Administering Provider"@en ;
+    rdfs:comment "Name of the person who administered the dose."@en ;
+    rdfs:domain health:ImmunizationRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:administeringLocation a owl:DatatypeProperty ;
+    rdfs:label "Administering Location"@en ;
+    rdfs:comment "Facility where the dose was administered."@en ;
+    rdfs:domain health:ImmunizationRecord ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in health v2.5" .
+
+# ----------------------------------------------------------------------------
+# Family history properties
+# ----------------------------------------------------------------------------
+
+health:onsetAge a owl:DatatypeProperty ;
+    rdfs:label "Onset Age"@en ;
+    rdfs:comment "Age in years at which the relative's condition began. Corresponds to FHIR R4 FamilyMemberHistory.condition.onsetAge."@en ;
+    rdfs:domain health:FamilyHistoryRecord ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in health v2.5" .
+
+# ============================================================================
+# Wellness Container Classes (v2.5)
+# ============================================================================
+#
+# Six containers that HealthProfileSerializer has always emitted at /wellness/.
+# Each is a partition of a health profile carrying one family of history
+# containers. Declaring them subclasses of health:HealthProfile does two things:
+#
+#   1. It makes the rdfs:domain health:HealthProfile already asserted on the
+#      eight history container properties above TRUE. Before this release those
+#      domain statements were contradicted by every pod ever written, because
+#      health:dailyActivityHistory is emitted on a health:ActivityData subject,
+#      never on a health:HealthProfile subject.
+#   2. It brings these subjects under health:HealthProfileShape, whose
+#      sh:targetClass is subclass-aware per SHACL 2.1.3.1.
+#
+# No serializer changes. No rdf:type changes. These subjects were already
+# being written with exactly these types.
+
+health:ActivityData a owl:Class ;
+    rdfs:label "Activity Data"@en ;
+    rdfs:comment "Wellness container for daily activity history: steps, active energy, exercise minutes and stand hours."@en ;
+    rdfs:subClassOf health:HealthProfile ;
+    owl:versionInfo "Added in health v2.5; emitted since health v2.0" .
+
+health:SleepData a owl:Class ;
+    rdfs:label "Sleep Data"@en ;
+    rdfs:comment "Wellness container for nightly sleep history: duration and quality."@en ;
+    rdfs:subClassOf health:HealthProfile ;
+    owl:versionInfo "Added in health v2.5; emitted since health v2.0" .
+
+health:HeartRateData a owl:Class ;
+    rdfs:label "Heart Rate Data"@en ;
+    rdfs:comment "Wellness container for resting and walking heart rate history."@en ;
+    rdfs:subClassOf health:HealthProfile ;
+    owl:versionInfo "Added in health v2.5; emitted since health v2.0" .
+
+health:BloodPressureData a owl:Class ;
+    rdfs:label "Blood Pressure Data"@en ;
+    rdfs:comment "Wellness container for blood pressure history from home monitors."@en ;
+    rdfs:subClassOf health:HealthProfile ;
+    owl:versionInfo "Added in health v2.5; emitted since health v2.0" .
+
+health:HRVData a owl:Class ;
+    rdfs:label "HRV Data"@en ;
+    rdfs:comment "Wellness container for heart rate variability (SDNN) history."@en ;
+    rdfs:subClassOf health:HealthProfile ;
+    owl:versionInfo "Added in health v2.5; emitted since health v2.0" .
+
+health:BodyMeasurements a owl:Class ;
+    rdfs:label "Body Measurements"@en ;
+    rdfs:comment "Wellness container for body mass and related anthropometric history."@en ;
+    rdfs:subClassOf health:HealthProfile ;
+    owl:versionInfo "Added in health v2.5; emitted since health v2.0" .
+
+# ============================================================================
+# Daily Snapshot Properties (v2.5)
+# ============================================================================
+#
+# Emitted on health:DailyActivitySnapshot and health:DailySleepSnapshot entries
+# inside the history containers. These are the single-day forms. The similarly
+# named health:activeEnergyBurnedKcal, health:exerciseMinutesWeekly and
+# health:standHoursDaily above are the 7-day aggregate forms carried on
+# health:ActivitySnapshot; the two sets are distinct and both are emitted.
+
+health:steps a owl:DatatypeProperty ;
+    rdfs:label "Steps"@en ;
+    rdfs:comment "Step count for a single day."@en ;
+    rdfs:domain health:DailyActivitySnapshot ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:activeEnergyKcal a owl:DatatypeProperty ;
+    rdfs:label "Active Energy (kcal)"@en ;
+    rdfs:comment "Active energy burned in kilocalories for a single day."@en ;
+    rdfs:domain health:DailyActivitySnapshot ;
+    rdfs:range xsd:decimal ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:exerciseMinutes a owl:DatatypeProperty ;
+    rdfs:label "Exercise Minutes"@en ;
+    rdfs:comment "Minutes of exercise recorded for a single day."@en ;
+    rdfs:domain health:DailyActivitySnapshot ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:standHours a owl:DatatypeProperty ;
+    rdfs:label "Stand Hours"@en ;
+    rdfs:comment "Hours in which standing was recorded for a single day. Bounded 0-24."@en ;
+    rdfs:domain health:DailyActivitySnapshot ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:durationHours a owl:DatatypeProperty ;
+    rdfs:label "Sleep Duration (hours)"@en ;
+    rdfs:comment "Total sleep duration in hours for a single night."@en ;
+    rdfs:domain health:DailySleepSnapshot ;
+    rdfs:range xsd:decimal ;
+    owl:versionInfo "Added in health v2.5" .
+
+# ----------------------------------------------------------------------------
+# Sleep quality individuals (v2.5)
+# ----------------------------------------------------------------------------
+#
+# health:sleepQuality is emitted with an IRI object, not a string literal:
+# HealthProfileSerializer writes `health:sleepQuality health:Good` and
+# HealthProfileDeserializer parses exactly that form. The four individuals it
+# ranges over were never defined. They are defined here.
+#
+# health:sleepQuality itself is left declared as it was (see above). Its
+# rdfs:range xsd:string does not describe what is emitted, and no known emitter
+# produces the string form, but correcting the declaration is a separate change
+# with its own compatibility question and is deferred rather than bundled here.
+# health:DailySleepSnapshotShape therefore constrains this property's
+# cardinality and permitted values but asserts no datatype.
+
+health:SleepQuality a owl:Class ;
+    rdfs:label "Sleep Quality"@en ;
+    rdfs:comment "Qualitative classification of a night's sleep, as derived by the recording device."@en ;
+    owl:versionInfo "Added in health v2.5" .
+
+health:Excellent a owl:NamedIndividual, health:SleepQuality ;
+    rdfs:label "Excellent"@en ;
+    rdfs:comment "Sleep quality classified as excellent."@en .
+
+health:Good a owl:NamedIndividual, health:SleepQuality ;
+    rdfs:label "Good"@en ;
+    rdfs:comment "Sleep quality classified as good."@en .
+
+health:Fair a owl:NamedIndividual, health:SleepQuality ;
+    rdfs:label "Fair"@en ;
+    rdfs:comment "Sleep quality classified as fair."@en .
+
+health:Poor a owl:NamedIndividual, health:SleepQuality ;
+    rdfs:label "Poor"@en ;
+    rdfs:comment "Sleep quality classified as poor."@en .

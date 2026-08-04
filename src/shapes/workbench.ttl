@@ -1,0 +1,378 @@
+# Cascade Workbench Vocabulary (Layer 3, app-specific) — v1-draft
+# Authored in spec/. Per draft policy, NOT registered in spec/VOCAB_VERSIONS
+# until v1.0 graduation.
+#
+# Changelog
+#   v1-draft.0.5 (2026-07-15)
+#     - ADDED the notes / flags / follow-ups substrate as W3C WEB ANNOTATIONS
+#       ([NOTES-ANNOTATION-VOCAB]; proposal 2026-07-13-notes-as-web-annotations
+#       in the Workbench vocab-proposals). Caregiver notes, "needs research"
+#       flags, and follow-ups are ONE artifact — an oa:Annotation over one or
+#       more graph nodes — distinguished by oa:motivatedBy (oa:commenting /
+#       oa:questioning / workbench:followUp). Layer-1 reuse, nothing
+#       redeclared: oa: carries body, multi-target, motivation, and span
+#       selectors (oa:TextQuoteSelector / oa:TextPositionSelector, the same
+#       byte-verified-span idea the Claims Ledger uses); PROV-O carries
+#       attribution (prov:wasAttributedTo — the caregiver, distinct from the
+#       patient and from any agent) and prov:generatedAtTime. Follow-ups are
+#       dual-typed cal:Vtodo and reuse W3C RDF Calendar ical:due +
+#       ical:status (RFC 5545 VTODO statuses) — schema:dueDate was considered
+#       and REJECTED because it does not exist (verified 404 at
+#       schema.org/dueDate; schema.org has only paymentDueDate).
+#     - MINTED exactly one term: workbench:followUp, an oa:Motivation with
+#       skos:broader oa:questioning, per the OA model's extension rule for
+#       custom motivations.
+#     - REMOVED workbench:InvestigationNote, workbench:hasNote, and
+#       workbench:noteText (draft removal; never emitted by shipping code —
+#       only type declarations existed in the Workbench contracts package).
+#       Superseded by the oa: substrate: an investigation-scoped note is an
+#       oa:Annotation whose oa:hasTarget is the workbench:Investigation. The
+#       contracts-type cleanup rides with shell Phase 9.
+#     - Pod placement: annotations live in a top-level notes/ container (see
+#       pod-structure.md §5.2), separate from annotations/ (which holds the
+#       record-amendment OVERLAYS below — machinery, not user content).
+#   v1-draft.0.4 (2026-06-28)
+#     - ADDED the filing/organization axis (workbench:userSourceLabel), the
+#       user-chosen label for the SOURCE a record is filed under in the
+#       Workbench "filing cabinet". It is a filing PREFERENCE attributed to the
+#       user: carried on a workbench:Annotation overlay (annotationProperty =
+#       "workbench:userSourceLabel", annotationValue = the label) bearing
+#       cascade:SelfReported provenance. It MUST NOT overwrite the objective
+#       imported origin clinical:sourceEHR, which is preserved and shown
+#       alongside; the effective grouping source prefers this label, else falls
+#       back to clinical:sourceEHR / the import-batch tag. Orthogonal axis with
+#       an open domain, mirroring how workbench:verificationStatus was added in
+#       v1-draft.0.3, so it can file any record. No new SHACL shape required:
+#       the Annotation overlay reuses the already-shaped string predicates
+#       workbench:annotationProperty and workbench:annotationValue.
+#   v1-draft.0.3 (2026-06-23)
+#     - Tombstone: REMOVED workbench:contentHash. A SHA-256 of an erased
+#       record's triples is still pseudonymised personal data (EDPB Guidelines
+#       01/2025; WP29 WP216 Table 5): health content is low-entropy and
+#       enumerable, so the hash is brute-forceable and re-creates the very
+#       erasure obligation the hard-erase discharged. A content-free event
+#       marker is the correct residue.
+#     - Tombstone: ADDED workbench:erasureAction (the action verb), so the
+#       Tombstone is a self-describing, content-free audit event
+#       (opaque id + actor + timestamp + action), not a content fingerprint.
+#     - ADDED the verification axis (workbench:verificationStatus +
+#       VerificationStatusValue {Unverified, Confirmed, Refuted}), orthogonal
+#       to the source axis (cascade:dataProvenance). Patient self-entered data
+#       is self-SOURCED and defaults to UNVERIFIED; this mirrors FHIR
+#       AllergyIntolerance/Condition.verificationStatus and is a candidate to
+#       graduate to clinical:/Layer 2 if it proves broadly useful.
+
+@prefix workbench: <https://ns.cascadeprotocol.org/workbench/v1#> .
+@prefix evidence:  <https://ns.cascadeprotocol.org/evidence/v1#> .
+@prefix cascade:   <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix dct:  <http://purl.org/dc/terms/> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix oa:   <http://www.w3.org/ns/oa#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix ical: <http://www.w3.org/2002/12/cal/ical#> .
+
+# ============================================================================
+# Ontology Metadata
+# ============================================================================
+
+<https://ns.cascadeprotocol.org/workbench/v1#> a owl:Ontology ;
+    dct:title "Cascade Protocol Workbench Vocabulary"@en ;
+    dct:description "Layer 3 vocabulary for the Cascade Workbench desktop investigation app."@en ;
+    dct:creator "Cascade Agentic Labs" ;
+    dct:created "2026-06-16"^^xsd:date ;
+    dct:modified "2026-07-15"^^xsd:date ;
+    owl:versionInfo "1.0-draft.0.5" ;
+    rdfs:comment "Holds the app-specific workspace objects only: Investigation, ImportedConversation, Hypothesis, Pin, InvestigationNote, plus the append-only record-amendment overlays (Amendment, Annotation, Retraction, Tombstone). The assertion/evidence/verdict grounding model is deliberately NOT here (it is cross-cutting Layer 2 evidence:). Phenotype capture is NOT here (it extends genomics:). Per the Layer 3 graduation rule, any class here that proves useful to other apps should graduate to Layer 2. Draft: not in VOCAB_VERSIONS until v1.0 graduation."@en ;
+    rdfs:seeAlso <https://cascadeprotocol.org/docs/workbench/v1-draft/> .
+
+# ============================================================================
+# Classes
+# ============================================================================
+
+workbench:Investigation a owl:Class ;
+    rdfs:label "Investigation"@en ;
+    rdfs:comment "A named, longitudinal inquiry over one patient's Pod: the top-level workspace object. Aggregates imported conversations, hypotheses, pinned evidence, and notes over time. Only the Workbench UI touches this class directly."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.1" .
+
+workbench:ImportedConversation a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Imported Conversation"@en ;
+    rdfs:comment "A conversation the user had with a general-purpose AI assistant (ChatGPT, Claude, Gemini, etc.), imported into an Investigation as a source. Discrete assertions extracted from it are evidence:Assertion instances produced by a cascade:AIExtractionActivity; those assertions carry cascade:dataProvenance cascade:AIAsserted (ungrounded by construction until graded)."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.1" .
+
+workbench:Hypothesis a owl:Class ;
+    rdfs:label "Hypothesis"@en ;
+    rdfs:comment "A candidate explanation under active consideration in an Investigation, with a lifecycle status. Designed to support widening the differential and explicitly retiring or excluding hypotheses, not just confirming one."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.1" .
+
+workbench:Pin a owl:Class ;
+    rdfs:label "Pin"@en ;
+    rdfs:comment "A curated bookmark within an Investigation pointing at any resource (a record, an assertion, a citation) with an optional note. The mechanism by which the user assembles evidence NotebookLM-style."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.1" .
+
+workbench:InvestigationStatusValue a owl:Class ;
+    rdfs:label "Investigation Status Value"@en ;
+    rdfs:comment "Closed enumeration of Investigation lifecycle states."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.1" .
+
+workbench:HypothesisStatusValue a owl:Class ;
+    rdfs:label "Hypothesis Status Value"@en ;
+    rdfs:comment "Closed enumeration of Hypothesis lifecycle states."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.1" .
+
+# ============================================================================
+# Named Individuals (enumerations)
+# ============================================================================
+
+workbench:Active   a owl:NamedIndividual, workbench:InvestigationStatusValue ; rdfs:label "Active"@en .
+workbench:Paused   a owl:NamedIndividual, workbench:InvestigationStatusValue ; rdfs:label "Paused"@en .
+workbench:Resolved a owl:NamedIndividual, workbench:InvestigationStatusValue ; rdfs:label "Resolved"@en .
+workbench:Archived a owl:NamedIndividual, workbench:InvestigationStatusValue ; rdfs:label "Archived"@en .
+
+workbench:Proposed  a owl:NamedIndividual, workbench:HypothesisStatusValue ; rdfs:label "Proposed"@en .
+workbench:Supported a owl:NamedIndividual, workbench:HypothesisStatusValue ; rdfs:label "Supported"@en .
+workbench:Retired   a owl:NamedIndividual, workbench:HypothesisStatusValue ; rdfs:label "Retired"@en ;
+    rdfs:comment "No longer pursued; kept for the record (not deleted)."@en .
+workbench:Excluded  a owl:NamedIndividual, workbench:HypothesisStatusValue ; rdfs:label "Excluded"@en ;
+    rdfs:comment "Actively ruled out by evidence."@en .
+
+workbench:Unverified a owl:NamedIndividual, workbench:VerificationStatusValue ; rdfs:label "Unverified"@en ;
+    rdfs:comment "Not corroborated by a clinician or authoritative source. The default for patient self-entered data. Maps to FHIR verificationStatus 'unconfirmed'."@en .
+workbench:Confirmed  a owl:NamedIndividual, workbench:VerificationStatusValue ; rdfs:label "Confirmed"@en ;
+    rdfs:comment "Corroborated. Maps to FHIR verificationStatus 'confirmed'."@en .
+workbench:Refuted    a owl:NamedIndividual, workbench:VerificationStatusValue ; rdfs:label "Refuted"@en ;
+    rdfs:comment "Disproved on review. Maps to FHIR verificationStatus 'refuted'."@en .
+
+# ============================================================================
+# Properties — Investigation
+# ============================================================================
+
+workbench:investigationTitle a owl:DatatypeProperty ; rdfs:label "investigation title"@en ;
+    rdfs:domain workbench:Investigation ; rdfs:range xsd:string .
+
+workbench:aboutPatient a owl:ObjectProperty ;
+    rdfs:subPropertyOf prov:wasAttributedTo ;
+    rdfs:label "about patient"@en ;
+    rdfs:comment "The patient (profile/card.ttl WebID) this Investigation concerns. With caregiver-proxy, the operating agent is recorded separately via cascade:ProxyAgent."@en ;
+    rdfs:domain workbench:Investigation ; rdfs:range rdfs:Resource .
+
+workbench:investigationStatus a owl:ObjectProperty ; rdfs:label "investigation status"@en ;
+    rdfs:domain workbench:Investigation ; rdfs:range workbench:InvestigationStatusValue .
+
+workbench:createdAt a owl:DatatypeProperty ; rdfs:label "created at"@en ;
+    rdfs:domain workbench:Investigation ; rdfs:range xsd:dateTime .
+workbench:updatedAt a owl:DatatypeProperty ; rdfs:label "updated at"@en ;
+    rdfs:domain workbench:Investigation ; rdfs:range xsd:dateTime .
+
+workbench:containsConversation a owl:ObjectProperty ; rdfs:label "contains conversation"@en ;
+    rdfs:domain workbench:Investigation ; rdfs:range workbench:ImportedConversation .
+workbench:hasHypothesis a owl:ObjectProperty ; rdfs:label "has hypothesis"@en ;
+    rdfs:domain workbench:Investigation ; rdfs:range workbench:Hypothesis .
+workbench:hasPin a owl:ObjectProperty ; rdfs:label "has pin"@en ;
+    rdfs:domain workbench:Investigation ; rdfs:range workbench:Pin .
+# (workbench:hasNote / workbench:InvestigationNote removed in v1-draft.0.5:
+#  an investigation-scoped note is an oa:Annotation targeting the
+#  Investigation — see the Web Annotation substrate section below.)
+
+# ============================================================================
+# Properties — ImportedConversation
+# ============================================================================
+
+workbench:conversationSource a owl:DatatypeProperty ; rdfs:label "conversation source"@en ;
+    rdfs:comment "Originating assistant, e.g. 'chatgpt', 'claude', 'gemini', 'other'."@en ;
+    rdfs:domain workbench:ImportedConversation ; rdfs:range xsd:string .
+workbench:importedAt a owl:DatatypeProperty ; rdfs:label "imported at"@en ;
+    rdfs:domain workbench:ImportedConversation ; rdfs:range xsd:dateTime .
+workbench:messageCount a owl:DatatypeProperty ; rdfs:label "message count"@en ;
+    rdfs:domain workbench:ImportedConversation ; rdfs:range xsd:integer .
+workbench:rawContentLocation a owl:DatatypeProperty ; rdfs:label "raw content location"@en ;
+    rdfs:comment "Pod-relative path to the stored raw conversation (recommended path sources/)."@en ;
+    rdfs:domain workbench:ImportedConversation ; rdfs:range xsd:string .
+workbench:extractedAssertion a owl:ObjectProperty ; rdfs:label "extracted assertion"@en ;
+    rdfs:comment "An evidence:Assertion decomposed from this conversation."@en ;
+    rdfs:domain workbench:ImportedConversation ; rdfs:range evidence:Assertion .
+
+# ============================================================================
+# Properties — Hypothesis
+# ============================================================================
+
+workbench:hypothesisLabel a owl:DatatypeProperty ; rdfs:label "hypothesis label"@en ;
+    rdfs:domain workbench:Hypothesis ; rdfs:range xsd:string .
+workbench:hypothesisStatus a owl:ObjectProperty ; rdfs:label "hypothesis status"@en ;
+    rdfs:domain workbench:Hypothesis ; rdfs:range workbench:HypothesisStatusValue .
+workbench:supportedByAssertion a owl:ObjectProperty ; rdfs:label "supported by assertion"@en ;
+    rdfs:domain workbench:Hypothesis ; rdfs:range evidence:Assertion .
+workbench:refutedByAssertion a owl:ObjectProperty ; rdfs:label "refuted by assertion"@en ;
+    rdfs:domain workbench:Hypothesis ; rdfs:range evidence:Assertion .
+
+# ============================================================================
+# Properties — Pin
+# ============================================================================
+
+workbench:pinnedResource a owl:ObjectProperty ; rdfs:label "pinned resource"@en ;
+    rdfs:comment "Any resource pinned into the Investigation. Open range for cross-namespace linking."@en ;
+    rdfs:domain workbench:Pin ; rdfs:range rdfs:Resource .
+workbench:pinNote a owl:DatatypeProperty ; rdfs:label "pin note"@en ;
+    rdfs:domain workbench:Pin ; rdfs:range xsd:string .
+
+# ============================================================================
+# Notes, research flags, and follow-ups — the W3C Web Annotation substrate
+# ----------------------------------------------------------------------------
+# Added in workbench v1-draft.0.5 ([NOTES-ANNOTATION-VOCAB]). Caregiver notes
+# ("more tired than usual"), "needs research" flags on claims, and follow-ups
+# ("recheck TSH in 3 months") are ONE artifact: an oa:Annotation over one or
+# more graph nodes, distinguished by oa:motivatedBy. This section deliberately
+# REDECLARES NOTHING from oa:/ical:/prov: — it documents the usage profile and
+# mints the single term the standards lack.
+#
+# The profile (enforced by workbench.shapes.ttl):
+#   - a workbench note IS an oa:Annotation with >= 1 oa:hasTarget (targets may
+#     be any Pod resource: records, conditions, evidence:Assertion instances,
+#     a workbench:Investigation, or an oa:SpecificResource carrying an
+#     oa:TextQuoteSelector / oa:TextPositionSelector to pin a passage inside a
+#     document or transcript — the same byte-verified-span idea the Claims
+#     Ledger uses);
+#   - body text is an oa:TextualBody (rdf:value carries the text);
+#   - motivation mapping: caregiver note = oa:commenting; research flag =
+#     oa:questioning (target is typically an assertion/claim node);
+#     follow-up / open loop = workbench:followUp (below);
+#   - attribution is REQUIRED: prov:wasAttributedTo (who wrote it — the
+#     caregiver, distinct from the patient and from any agent) and
+#     prov:generatedAtTime. A note that flows into grounding as
+#     caregiver-reported evidence carries this provenance with it.
+#   - a follow-up is ADDITIONALLY typed cal:Vtodo and reuses W3C RDF Calendar
+#     terms: ical:due (optional expected-completion date) and ical:status
+#     (REQUIRED; the RFC 5545 VTODO enum "NEEDS-ACTION" / "IN-PROCESS" /
+#     "COMPLETED" / "CANCELLED"). No due-date or status property is minted:
+#     a follow-up genuinely is a to-do. (schema:dueDate was considered and
+#     rejected — it does not exist; schema.org defines only paymentDueDate.)
+#
+# Pod placement: notes/ top-level container (pod-structure.md §5.2), separate
+# from annotations/ (the record-amendment overlays above are edit MACHINERY;
+# notes/ is user-authored content).
+# ============================================================================
+
+workbench:followUp a owl:NamedIndividual, oa:Motivation ;
+    rdfs:label "follow up"@en ;
+    skos:prefLabel "follow up"@en ;
+    skos:broader oa:questioning ;
+    rdfs:comment "The motivation of a follow-up / open loop: an annotation that names something the caregiver intends to resolve later (e.g. \"recheck TSH in 3 months\"). Minted per the Web Annotation model's extension rule (a custom motivation SHOULD be a skos:Concept with skos:broader to a standard one); oa:questioning is the nearest standard motivation — an open question awaiting resolution. An annotation motivated by workbench:followUp is dual-typed cal:Vtodo and carries ical:status (required) + ical:due (optional). Candidate to graduate to a shared layer if other Cascade apps adopt the open-loops worklist."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.5" .
+
+# ============================================================================
+# Append-only record amendment overlays
+# ----------------------------------------------------------------------------
+# Original records in a Pod are immutable. Every edit/delete is a NEW overlay
+# resource (Amendment / Annotation / Retraction / Tombstone) written to the
+# Pod's annotations/ directory and discovered at query time. The overlays carry
+# cascade:dataProvenance cascade:SelfReported, an optional prov:wasAttributedTo
+# actor, and a dct:created timestamp. Added in workbench v1-draft.0.2.
+# ============================================================================
+
+workbench:Amendment a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Amendment"@en ;
+    rdfs:comment "An append-only overlay that overrides one property value on an existing record without mutating the original. Names the amended record, the predicate CURIE being overridden, and the new value. Discovered at query time so the effective value can be projected over the immutable original."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.2" .
+
+workbench:Annotation a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Annotation"@en ;
+    rdfs:comment "An append-only overlay that ADDS a note or an extra attribute to an existing record without overriding any of its values. Use Amendment to override; use Annotation to augment."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.2" .
+
+workbench:Retraction a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Retraction"@en ;
+    rdfs:comment "An append-only soft-delete / supersede overlay (the entered-in-error pattern). The retracted record's bytes are retained; the Retraction marks it as withdrawn and may point at the kept record when merging duplicates."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.2" .
+
+workbench:Tombstone a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Tombstone"@en ;
+    rdfs:comment "A content-free hard-erase audit marker. Unlike a Retraction, the erased record's bytes are gone from its bucket file; the Tombstone records only the EVENT of erasure — the erased record's opaque id, the actor (prov:wasAttributedTo), the timestamp (dct:created), and the action (workbench:erasureAction) — so the deletion is provably logged WITHOUT retaining any content of the erased record. It deliberately holds no content hash: a hash of an erased record's triples is still pseudonymised personal data (low-entropy health content is brute-forceable), which would re-create the erasure obligation the hard-erase just discharged."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.2; contentHash removed, erasureAction added in v1-draft.0.3" .
+
+workbench:VerificationStatusValue a owl:Class ;
+    rdfs:label "Verification Status Value"@en ;
+    rdfs:comment "Closed enumeration of a record's clinical verification state — the VERIFICATION axis, orthogonal to the SOURCE axis (cascade:dataProvenance). Mirrors FHIR AllergyIntolerance/Condition.verificationStatus. Candidate to graduate to clinical:/Layer 2."@en ;
+    owl:versionInfo "Added in workbench v1-draft.0.3" .
+
+# ── Properties shared by all overlay classes ────────────────────────────────
+# (cascade:dataProvenance, prov:wasAttributedTo, and dct:created are reused
+#  from core/PROV-O/Dublin Core; no new predicates are minted for those.)
+
+# ── Properties — Amendment ──────────────────────────────────────────────────
+
+workbench:amendsRecord a owl:ObjectProperty ; rdfs:label "amends record"@en ;
+    rdfs:comment "The existing record whose property value this Amendment overrides."@en ;
+    rdfs:domain workbench:Amendment ; rdfs:range rdfs:Resource .
+workbench:amendsProperty a owl:DatatypeProperty ; rdfs:label "amends property"@en ;
+    rdfs:comment "The predicate CURIE being overridden, e.g. \"clinical:dosage\"."@en ;
+    rdfs:domain workbench:Amendment ; rdfs:range xsd:string .
+workbench:amendedValue a owl:DatatypeProperty ; rdfs:label "amended value"@en ;
+    rdfs:comment "The new value that supersedes the original value of amendsProperty."@en ;
+    rdfs:domain workbench:Amendment ; rdfs:range xsd:string .
+workbench:amendmentReason a owl:DatatypeProperty ; rdfs:label "amendment reason"@en ;
+    rdfs:comment "Optional free-text rationale for the amendment."@en ;
+    rdfs:domain workbench:Amendment ; rdfs:range xsd:string .
+
+# ── Properties — Annotation ─────────────────────────────────────────────────
+
+workbench:annotatesRecord a owl:ObjectProperty ; rdfs:label "annotates record"@en ;
+    rdfs:comment "The existing record this Annotation augments."@en ;
+    rdfs:domain workbench:Annotation ; rdfs:range rdfs:Resource .
+workbench:annotationText a owl:DatatypeProperty ; rdfs:label "annotation text"@en ;
+    rdfs:comment "Optional free-text note attached to the record."@en ;
+    rdfs:domain workbench:Annotation ; rdfs:range xsd:string .
+workbench:annotationProperty a owl:DatatypeProperty ; rdfs:label "annotation property"@en ;
+    rdfs:comment "Optional predicate CURIE of an extra attribute being added (paired with annotationValue)."@en ;
+    rdfs:domain workbench:Annotation ; rdfs:range xsd:string .
+workbench:annotationValue a owl:DatatypeProperty ; rdfs:label "annotation value"@en ;
+    rdfs:comment "Optional value of the extra attribute named by annotationProperty."@en ;
+    rdfs:domain workbench:Annotation ; rdfs:range xsd:string .
+
+# ── Properties — Retraction ─────────────────────────────────────────────────
+
+workbench:retractsRecord a owl:ObjectProperty ; rdfs:label "retracts record"@en ;
+    rdfs:comment "The existing record this Retraction soft-deletes / supersedes."@en ;
+    rdfs:domain workbench:Retraction ; rdfs:range rdfs:Resource .
+workbench:retractionReason a owl:DatatypeProperty ; rdfs:label "retraction reason"@en ;
+    rdfs:comment "Optional free-text rationale (e.g. \"entered in error\")."@en ;
+    rdfs:domain workbench:Retraction ; rdfs:range xsd:string .
+workbench:supersededBy a owl:ObjectProperty ; rdfs:label "superseded by"@en ;
+    rdfs:comment "Optional pointer to the kept record when merging duplicates."@en ;
+    rdfs:domain workbench:Retraction ; rdfs:range rdfs:Resource .
+
+# ── Properties — Tombstone ──────────────────────────────────────────────────
+
+workbench:erasedRecord a owl:ObjectProperty ; rdfs:label "erased record"@en ;
+    rdfs:comment "The id of the record whose bytes were hard-erased from its bucket file."@en ;
+    rdfs:domain workbench:Tombstone ; rdfs:range rdfs:Resource .
+workbench:erasedType a owl:DatatypeProperty ; rdfs:label "erased type"@en ;
+    rdfs:comment "Optional rdf:type CURIE of the erased record (a category, e.g. \"clinical:Medication\"), retained for audit. Category-level only — it names the kind of record erased, never its content."@en ;
+    rdfs:domain workbench:Tombstone ; rdfs:range xsd:string .
+workbench:erasureAction a owl:DatatypeProperty ; rdfs:label "erasure action"@en ;
+    rdfs:comment "The action this Tombstone records, e.g. \"hard-erase\". Makes the Tombstone a self-describing, content-free audit event."@en ;
+    rdfs:domain workbench:Tombstone ; rdfs:range xsd:string .
+workbench:erasureReason a owl:DatatypeProperty ; rdfs:label "erasure reason"@en ;
+    rdfs:comment "Optional free-text rationale for the hard erasure (author-supplied; keep content-free to preserve the erasure)."@en ;
+    rdfs:domain workbench:Tombstone ; rdfs:range xsd:string .
+
+# ── Properties — Verification axis (orthogonal to cascade:dataProvenance) ─────
+
+workbench:verificationStatus a owl:ObjectProperty ; rdfs:label "verification status"@en ;
+    rdfs:comment "A record's clinical verification state (VERIFICATION axis), independent of who reported it (SOURCE axis, cascade:dataProvenance). Open domain so it can tag any record; patient self-entered records default to workbench:Unverified."@en ;
+    rdfs:range workbench:VerificationStatusValue ;
+    owl:versionInfo "Added in workbench v1-draft.0.3" .
+
+# ── Properties — Filing / organization axis (orthogonal to the imported origin) ─
+
+workbench:userSourceLabel a owl:DatatypeProperty ; rdfs:label "user source label"@en ;
+    rdfs:comment "The user-chosen FILING label for the SOURCE a record is organized under in the Workbench 'filing cabinet' (the ORGANIZATION axis). It is a filing PREFERENCE attributed to the user, carried on a workbench:Annotation (annotationProperty = \"workbench:userSourceLabel\", annotationValue = the chosen label) whose overlay bears cascade:SelfReported provenance. It MUST NOT alter the objective imported origin clinical:sourceEHR, which is preserved and displayed alongside. The effective source the UI groups records by prefers this label when present, else falls back to the imported origin (clinical:sourceEHR, else the import-batch tag). Open domain (like workbench:verificationStatus) so it can file any record."@en ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in workbench v1-draft.0.4" .

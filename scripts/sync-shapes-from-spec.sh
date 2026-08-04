@@ -30,11 +30,14 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   echo "[dry-run] No files will be written."
 fi
 
+MISSING_COUNT=0
+
 copy_file() {
   local src="$1"
   local dst="$2"
   if [[ ! -f "$src" ]]; then
-    echo "  MISSING: $src"
+    echo "  MISSING: $src" >&2
+    MISSING_COUNT=$((MISSING_COUNT + 1))
     return
   fi
   if $DRY_RUN; then
@@ -45,38 +48,57 @@ copy_file() {
   fi
 }
 
-VOCABS=(core health clinical coverage checkup pots)
+# Sync BOTH the ontology and its shapes for every vocabulary, driven by a single
+# list per maturity tier.
+#
+# These used to be two independent lists — every vocabulary got its
+# `.shapes.ttl`, but only `core clinical coverage` got the ontology itself. The
+# validator loads both (`loadShapes` reads every `*.shapes.ttl` for constraints
+# and every other `*.ttl` for the vocabulary), so the split meant it could load a
+# shape whose target class its own loaded vocabulary did not define. Measured
+# before this change: 52 of 89 `sh:targetClass` values in Cascade namespaces
+# resolved to no loaded class definition, and `src/shapes/health.ttl` had never
+# been synced at all. Keeping one list per tier makes that drift impossible to
+# reintroduce by omission; `tests/shapes-sync.test.ts` asserts the invariant.
+STABLE_VOCABS=(core health clinical coverage checkup pots)
+
+# Draft vocabularies (per D-PATH, NOT registered in VOCAB_VERSIONS).
+# Mirrored so `cascade validate` can target the new classes while the
+# vocabularies are still pre-stable. They land in VOCAB_VERSIONS at v1.0.
+DRAFT_VOCABS=(genomics advisory evidence workbench)
 
 echo ""
-echo "=== Syncing SHACL shapes to src/shapes/ ==="
-for vocab in "${VOCABS[@]}"; do
+echo "=== Syncing stable vocabularies to src/shapes/ ==="
+for vocab in "${STABLE_VOCABS[@]}"; do
+  copy_file "$SPEC_ROOT/ontologies/$vocab/v1/$vocab.ttl" \
+            "$CLI_ROOT/src/shapes/$vocab.ttl"
   copy_file "$SPEC_ROOT/ontologies/$vocab/v1/$vocab.shapes.ttl" \
             "$CLI_ROOT/src/shapes/$vocab.shapes.ttl"
 done
 
-# Also sync full ontologies if CLI uses them for validation
 echo ""
-echo "=== Syncing ontologies to src/shapes/ ==="
-for vocab in core clinical coverage; do
-  copy_file "$SPEC_ROOT/ontologies/$vocab/v1/$vocab.ttl" \
-            "$CLI_ROOT/src/shapes/$vocab.ttl"
-done
-
-# Draft vocabularies (per D-PATH, NOT registered in VOCAB_VERSIONS).
-# Mirror the shapes file so cascade validate can target the new classes
-# while drafts are still pre-stable.
-echo ""
-echo "=== Syncing draft shapes to src/shapes/ ==="
-DRAFT_VOCABS=(genomics advisory evidence workbench)
+echo "=== Syncing draft vocabularies to src/shapes/ ==="
 for vocab in "${DRAFT_VOCABS[@]}"; do
+  copy_file "$SPEC_ROOT/ontologies/$vocab/v1-draft/$vocab.ttl" \
+            "$CLI_ROOT/src/shapes/$vocab.ttl"
   copy_file "$SPEC_ROOT/ontologies/$vocab/v1-draft/$vocab.shapes.ttl" \
             "$CLI_ROOT/src/shapes/$vocab.shapes.ttl"
 done
+
+if (( MISSING_COUNT > 0 )); then
+  echo "" >&2
+  echo "FAILED: $MISSING_COUNT expected file(s) not found in $SPEC_ROOT." >&2
+  echo "Every vocabulary listed above must ship both an ontology and a shapes" >&2
+  echo "file. Fix spec/ or correct the vocabulary lists in this script; do not" >&2
+  echo "leave a vocabulary half-synced." >&2
+  exit 1
+fi
 
 echo ""
 echo "Done. Next steps:"
 echo "  1. Review diffs: git diff src/shapes/"
 echo "  2. Update VOCAB_VERSIONS file"
-echo "  3. Verify: cascade validate passes all conformance fixtures"
-echo "  4. Update CHANGELOG.md"
-echo "  5. Bump version in package.json"
+echo "  3. npm run build && npm test  (tests/shapes-sync.test.ts checks the sync)"
+echo "  4. Verify: cascade validate passes all conformance fixtures"
+echo "  5. Update CHANGELOG.md"
+echo "  6. Bump version in package.json"
