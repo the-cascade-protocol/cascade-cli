@@ -245,6 +245,36 @@ clinical:DischargeSummaryShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Shape: Consultation Note (v1.13)
+# ============================================================================
+#
+# clinical:ConsultationNote is rdfs:subClassOf clinical:ClinicalDocument, and
+# its five sibling subclasses (ProgressNote, DischargeSummary,
+# LaboratoryReport, ImagingReport, VisitSummary) each carry an explicit
+# sh:targetClass. This one did not, and a subclass axiom alone does not
+# inherit a shape: SHACL resolves sh:targetClass over SHACL-instances in the
+# DATA graph, so an axiom that lives only in clinical.ttl does not expand the
+# target set. Consultation notes were therefore validating vacuously while
+# every other document type was checked, and nothing reported the difference.
+
+clinical:ConsultationNoteShape a sh:NodeShape ;
+    sh:targetClass clinical:ConsultationNote ;
+    rdfs:label "Consultation Note Shape"@en ;
+    rdfs:comment "Additional constraints for specialist consultation notes"@en ;
+
+    # Inherits ClinicalDocument constraints
+    sh:node clinical:ClinicalDocumentShape ;
+
+    # Consultation notes should record when the consultation happened
+    sh:property [
+        sh:path clinical:encounterDate ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Date"@en ;
+        sh:message "Consultation note must not carry more than one encounter date"@en
+    ] .
+
+# ============================================================================
 # Shape: Laboratory Report
 # ============================================================================
 

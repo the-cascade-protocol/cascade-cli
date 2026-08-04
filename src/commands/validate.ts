@@ -29,6 +29,7 @@ import {
   loadShapes,
   validateFile,
   findTurtleFiles,
+  failsValidation,
   type ValidationResult,
 } from '../lib/shacl-validator.js';
 import { shortenIRI } from '../lib/turtle-parser.js';
@@ -103,7 +104,7 @@ function formatResultHuman(result: ValidationResult, verbose: boolean): string {
   const relPath = result.file;
   const coverage = formatCoverage(result);
 
-  if (result.valid) {
+  if (result.results.length === 0) {
     lines.push(
       `${colors.green}PASS${colors.reset} ${relPath} (${result.quadCount} triples; ${coverage.summary})`,
     );
@@ -129,9 +130,15 @@ function formatResultHuman(result: ValidationResult, verbose: boolean): string {
     if (warnings.length > 0) countParts.push(`${warnings.length} warning${warnings.length !== 1 ? 's' : ''}`);
     if (infos.length > 0) countParts.push(`${infos.length} info`);
 
+    // Status tracks severity, not `sh:conforms`. An Info-only file conforms to
+    // nothing in the SHACL sense (`sh:conforms` is false the moment any result
+    // exists) but has no defect to report, so it reads PASS and lists its
+    // advisories underneath. See `failsValidation`.
     const statusIcon = violations.length > 0
       ? `${colors.red}FAIL${colors.reset}`
-      : `${colors.yellow}WARN${colors.reset}`;
+      : warnings.length > 0
+        ? `${colors.yellow}WARN${colors.reset}`
+        : `${colors.green}PASS${colors.reset}`;
 
     lines.push(
       `${statusIcon} ${relPath} (${result.quadCount} triples, ${countParts.join(', ')}; ${coverage.summary})`,
@@ -188,8 +195,10 @@ function printSummary(
   if (opts.json) return; // JSON mode outputs the full array
 
   const total = results.length;
-  const passed = results.filter((r) => r.valid).length;
-  const failed = total - passed;
+  // Keyed on severity, not on `sh:conforms`, so this column agrees with the
+  // process exit code. Both say "failure" only for `sh:Violation`.
+  const failed = results.filter(failsValidation).length;
+  const passed = total - failed;
 
   const totalViolations = results.reduce(
     (sum, r) => sum + r.results.filter((i) => i.severity === 'violation').length,
@@ -357,11 +366,8 @@ export function registerValidateCommand(program: Command): void {
           const result = validateFile(file, shapesStore, shapeFiles, dek);
           results.push(result);
 
-          if (!result.valid) {
-            const violations = result.results.filter((r) => r.severity === 'violation');
-            if (violations.length > 0) {
-              hasViolations = true;
-            }
+          if (failsValidation(result)) {
+            hasViolations = true;
           }
 
           // Print result immediately in human-readable mode

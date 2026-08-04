@@ -170,6 +170,18 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
     directory: 'clinical',
     filename: 'social-history.ttl',
   },
+  // The C-CDA Family History section emits `health:FamilyHistoryRecord`. Without
+  // this entry `routeTypeKey` matched no registered type and fell through to the
+  // FHIR passthrough bucket, so every family-history record a C-CDA import
+  // produced landed in `clinical/fhir-passthrough.ttl` — not the
+  // `clinical/family-history.ttl` the pod structure documents, and not anywhere
+  // the read verbs present as family history.
+  'family-history': {
+    label: 'Family History',
+    rdfTypes: [CASCADE_NAMESPACES.health + 'FamilyHistoryRecord'],
+    directory: 'clinical',
+    filename: 'family-history.ttl',
+  },
   'ai-extraction-activities': {
     label: 'AI Extraction Activities',
     rdfTypes: [CASCADE_NAMESPACES.cascade + 'AIExtractionActivity'],

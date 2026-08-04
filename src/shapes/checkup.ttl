@@ -1,0 +1,1983 @@
+@prefix checkup: <https://ns.cascadeprotocol.org/checkup/v1#> .
+@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
+@prefix fhir: <http://hl7.org/fhir/> .
+@prefix sct: <http://snomed.info/sct/> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+
+# ============================================================================
+# Ontology Metadata
+# ============================================================================
+
+<https://ns.cascadeprotocol.org/checkup/v1#> a owl:Ontology ;
+    dct:title "Cascade Checkup Vocabulary"@en ;
+    dct:description "Structured health data for patient intake forms and pre-visit preparation. Enables aggregation of EHR, HealthKit, and manually entered health data."@en ;
+    dct:creator "Cascade Agentic Labs" ;
+    dct:created "2026-01-03"^^xsd:date ;
+    dct:modified "2026-02-26"^^xsd:date ;
+    owl:versionInfo "3.2" ;
+    rdfs:seeAlso <https://cascadeprotocol.org/docs/checkup/v1/> .
+
+# ============================================================================
+# CORE CLASSES (27 active, 0 deprecated)
+# ============================================================================
+
+checkup:IntakeFormData a owl:Class ;
+    rdfs:label "Intake Form Data" ;
+    rdfs:comment "Aggregated patient data formatted for healthcare intake forms. Contains all sections needed for a complete pre-visit profile including demographics, medications, allergies, conditions, and visit concerns." ;
+    cascade:subConcern "intake" .
+
+checkup:InsuranceInfo a owl:Class ;
+    rdfs:label "Insurance Information" ;
+    rdfs:comment "Patient-reported insurance information for visit preparation. Uses coverage: namespace for standardized insurance properties (providerName, memberId, groupNumber, coverageType, effectiveStart/End, subscriberName/Relationship, rxBin/rxPcn/rxGroup); adds checkup-specific PCP information (primaryCareProvider, pcpPhone). See coverage.ttl for property definitions." ;
+    cascade:subConcern "financial" .
+
+checkup:MedicationSummary a owl:Class ;
+    rdfs:label "Medication Summary" ;
+    rdfs:comment "Current medication with enriched adherence and tolerability data. Links to clinical:Medication source records and tracks self-reported adherence barriers and side effects." ;
+    cascade:subConcern "summary" .
+
+checkup:AllergySummary a owl:Class ;
+    rdfs:label "Allergy Summary" ;
+    rdfs:comment "Known allergen with reaction type and severity. Tracks data provenance (EHR verified, self-reported) and links to clinical:AllergyIntolerance source records." ;
+    cascade:subConcern "summary" .
+
+checkup:ConditionSummary a owl:Class ;
+    rdfs:label "Condition Summary" ;
+    rdfs:comment "Active or resolved health condition with ICD-10 coding. Includes onset information and current status for clinical context." ;
+    cascade:subConcern "summary" .
+
+checkup:FamilyHistoryEntry a owl:Class ;
+    rdfs:label "Family History Entry" ;
+    rdfs:comment "Single family member health condition for risk assessment. Captures relative type, condition, and age at diagnosis for inherited condition screening." ;
+    cascade:subConcern "summary" .
+
+checkup:ScreeningStatus a owl:Class ;
+    rdfs:label "Screening Status" ;
+    rdfs:comment "Patient status for recommended preventive screening. Tracks last completed date, next due date, and applicable USPSTF/ACS guidelines." ;
+    cascade:subConcern "structural" .
+
+checkup:VisitIssue a owl:Class ;
+    rdfs:label "Visit Issue" ;
+    rdfs:comment "Health issue or symptom the patient wants to discuss at their visit (chief complaint). Includes severity, duration, and user-assigned priority for visit planning." ;
+    cascade:subConcern "intake" .
+
+checkup:SuggestedQuestion a owl:Class ;
+    rdfs:label "Suggested Question" ;
+    rdfs:comment "AI-generated or template question for the patient to ask their provider. Based on conditions, medications, symptoms, or health trends identified in their profile." ;
+    cascade:subConcern "analytics" .
+
+checkup:DiagnosticTestResult a owl:Class ;
+    rdfs:label "Diagnostic Test Result" ;
+    rdfs:comment "Reference to a diagnostic test from an external Cascade app (e.g., POTS Check, glucose monitoring). Provides summary for intake forms and links to detailed results in pod." ;
+    cascade:subConcern "intake" .
+
+checkup:SupplementSummary a owl:Class ;
+    rdfs:label "Supplement Summary" ;
+    rdfs:comment "Dietary supplement, OTC product, or herbal remedy with regulatory classification and evidence strength. Separate from MedicationSummary to reflect different regulatory status and data requirements. Links to clinical:Supplement source records." ;
+    cascade:subConcern "summary" .
+
+
+# --- Clinical Summary Classes (v1.7) ---
+
+checkup:ImmunizationSummary a owl:Class ;
+    rdfs:label "Immunization Summary" ;
+    rdfs:comment "Patient-facing immunization record for intake forms. Uses mixed namespace pattern: checkup: properties for app-layer enrichment (vaccineCategory) alongside clinical data fields." ;
+    cascade:subConcern "summary" ;
+    rdfs:subClassOf prov:Entity .
+
+checkup:LabResultSummary a owl:Class ;
+    rdfs:label "Lab Result Summary" ;
+    rdfs:comment "Patient-facing lab result summary for intake forms. Uses mixed namespace pattern: checkup:labCategory for app-layer categorization, clinical: properties for standardized lab data." ;
+    cascade:subConcern "summary" ;
+    rdfs:subClassOf prov:Entity .
+
+checkup:ProcedureSummary a owl:Class ;
+    rdfs:label "Procedure Summary" ;
+    rdfs:comment "Patient-facing procedure record for intake forms. Uses mixed namespace pattern: checkup: properties for app-layer fields (procedureName, procedureCategory, procedureLocation), clinical: properties for standardized clinical data (procedureStatus, performedDate, bodySite, performer, outcome, snomedCode, cptCode)." ;
+    cascade:subConcern "summary" ;
+    rdfs:subClassOf prov:Entity .
+
+# --- Reference Classes (v1.7) ---
+
+checkup:WellnessProfileReference a owl:Class ;
+    rdfs:label "Wellness Profile Reference" ;
+    rdfs:comment "Lightweight pointer to the patient's full wellness profile stored in the SDK HealthProfile. Uses rdfs:seeAlso to link to the wellness data file." ;
+    cascade:subConcern "structural" ;
+    rdfs:subClassOf prov:Entity .
+# ============================================================================
+# INSURANCE INFORMATION PROPERTIES
+# ============================================================================
+
+checkup:insuranceProvider a rdf:Property ;
+    rdfs:label "Insurance Provider" ;
+    rdfs:comment "Name of insurance company: Aetna, Blue Cross, Medicare, Medicaid, etc." ;
+    rdfs:domain checkup:InsuranceInfo ;
+    rdfs:range xsd:string .
+
+checkup:memberId a rdf:Property ;
+    rdfs:label "Member ID" ;
+    rdfs:comment "Insurance policy member/subscriber ID number." ;
+    rdfs:domain checkup:InsuranceInfo ;
+    rdfs:range xsd:string .
+
+checkup:groupNumber a rdf:Property ;
+    rdfs:label "Group Number" ;
+    rdfs:comment "Employer group number for employer-sponsored plans." ;
+    rdfs:domain checkup:InsuranceInfo ;
+    rdfs:range xsd:string .
+
+checkup:coverageType a rdf:Property ;
+    rdfs:label "Coverage Type" ;
+    rdfs:comment "Type of coverage: hmo, ppo, epo, pos, medicare, medicaid, tricare, self_pay." ;
+    rdfs:domain checkup:InsuranceInfo ;
+    rdfs:range xsd:string .
+
+checkup:primaryCareProvider a rdf:Property ;
+    rdfs:label "Primary Care Provider" ;
+    rdfs:comment "Name of assigned primary care provider on file with insurance." ;
+    rdfs:domain checkup:InsuranceInfo ;
+    rdfs:range xsd:string .
+
+checkup:pcpPhone a rdf:Property ;
+    rdfs:label "PCP Phone" ;
+    rdfs:comment "Primary care provider office phone for referral verification." ;
+    rdfs:domain checkup:InsuranceInfo ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# MEDICATION SUMMARY PROPERTIES
+# ============================================================================
+
+checkup:medicationName a rdf:Property ;
+    rdfs:label "Medication Name" ;
+    rdfs:comment "Name of the medication (generic or brand)." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:dose a rdf:Property ;
+    rdfs:label "Dose" ;
+    rdfs:comment "Medication dose with units (e.g., '10mg', '500mg')." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:frequency a rdf:Property ;
+    rdfs:label "Frequency" ;
+    rdfs:comment "How often medication is taken: once_daily, twice_daily, three_times_daily, as_needed, weekly, monthly." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:adherenceStatus a rdf:Property ;
+    rdfs:label "Adherence Status" ;
+    rdfs:comment "Self-reported adherence: taking_as_prescribed, usually_take, sometimes_miss, often_miss, stopped." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:adherenceBarrier a rdf:Property ;
+    rdfs:label "Adherence Barrier" ;
+    rdfs:comment "Reason for non-adherence if applicable: cost, side_effects, forgetfulness, access, complexity, other." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:sideEffects a rdf:Property ;
+    rdfs:label "Side Effects" ;
+    rdfs:comment "List of reported side effects as comma-separated string." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:perceivedEffectiveness a rdf:Property ;
+    rdfs:label "Perceived Effectiveness" ;
+    rdfs:comment "Patient assessment of medication effectiveness: very_effective, somewhat_effective, not_sure, not_effective." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:lastRefillDate a rdf:Property ;
+    rdfs:label "Last Refill Date" ;
+    rdfs:comment "Date of most recent prescription refill." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:date .
+
+checkup:prescriber a rdf:Property ;
+    rdfs:label "Prescriber" ;
+    rdfs:comment "Name of prescribing provider." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:sourceRecord a rdf:Property ;
+    rdfs:label "Source Record" ;
+    rdfs:comment "Link to clinical:Medication source record in pod." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:anyURI .
+
+# ============================================================================
+# MEDICATION SUMMARY PROPERTIES - Phase 3 Extensions (v1.2)
+# ============================================================================
+
+checkup:episodeId a rdf:Property ;
+    rdfs:label "Episode ID" ;
+    rdfs:comment "Link to canonical MedicationUseEpisode in CascadeSDK. Enables longitudinal tracking." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:startDate a rdf:Property ;
+    rdfs:label "Start Date" ;
+    rdfs:comment "Date when patient started taking this medication." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:date .
+
+checkup:indication a rdf:Property ;
+    rdfs:label "Indication" ;
+    rdfs:comment "Why the patient takes this medication (patient's understanding of the reason)." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:patientCost a rdf:Property ;
+    rdfs:label "Patient Cost" ;
+    rdfs:comment "Patient's out-of-pocket cost for medication or supplement." ;
+    rdfs:range xsd:decimal .
+
+checkup:costFrequency a rdf:Property ;
+    rdfs:label "Cost Frequency" ;
+    rdfs:comment "Frequency of cost: per_month, per_refill, per_dose, per_bottle, annual." ;
+    rdfs:range xsd:string .
+
+checkup:functionalImpact a rdf:Property ;
+    rdfs:label "Functional Impact" ;
+    rdfs:comment "How this medication helps the patient functionally (e.g., 'helps me sleep')." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:concernsForDoctor a rdf:Property ;
+    rdfs:label "Concerns For Doctor" ;
+    rdfs:comment "Concerns the patient wants to discuss with their healthcare provider." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:needsVerification a owl:DatatypeProperty ;
+    rdfs:label "Needs Verification" ;
+    rdfs:comment "Whether this medication needs patient verification." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:boolean .
+
+checkup:verificationReason a owl:DatatypeProperty ;
+    rdfs:label "Verification Reason" ;
+    rdfs:comment "Why verification is needed: historical, duplicate, conflicting_sources." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:lastVerifiedDate a owl:DatatypeProperty ;
+    rdfs:label "Last Verified Date" ;
+    rdfs:comment "When the patient last verified this medication." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:dateTime .
+
+checkup:importSessionId a owl:ObjectProperty ;
+    rdfs:label "Import Session ID" ;
+    rdfs:comment "Link to the import session that created this medication record." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:anyURI .
+
+# ============================================================================
+# SUPPLEMENT SUMMARY PROPERTIES (v1.1)
+# ============================================================================
+
+checkup:supplementName a rdf:Property ;
+    rdfs:label "Supplement Name" ;
+    rdfs:comment "Name of the supplement or OTC product." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:string .
+
+checkup:supplementDose a rdf:Property ;
+    rdfs:label "Supplement Dose" ;
+    rdfs:comment "Dose with units (e.g., '2000 IU', '500mg')." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:string .
+
+checkup:supplementFrequency a rdf:Property ;
+    rdfs:label "Supplement Frequency" ;
+    rdfs:comment "How often supplement is taken: once_daily, twice_daily, as_needed, weekly." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:string .
+
+checkup:supplementBrand a rdf:Property ;
+    rdfs:label "Supplement Brand" ;
+    rdfs:comment "Brand name if known (e.g., 'Nature Made', 'Garden of Life')." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:string .
+
+checkup:supplementForm a rdf:Property ;
+    rdfs:label "Supplement Form" ;
+    rdfs:comment "Physical form: capsule, tablet, softgel, liquid, powder, gummy, spray, patch, tea, tincture, other." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:string .
+
+checkup:regulatoryStatus a rdf:Property ;
+    rdfs:label "Regulatory Status" ;
+    rdfs:comment "Regulatory classification distinguishing from FDA-approved medications: dietarySupplement (DSHEA), otcDrug (FDA OTC monograph), homeopathic, herbalRemedy, unknown." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:string .
+
+checkup:evidenceStrength a rdf:Property ;
+    rdfs:label "Evidence Strength" ;
+    rdfs:comment "Level of clinical evidence: strongEvidence, moderateEvidence, limitedEvidence, traditionalUse, noEvidence, unknown." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:string .
+
+checkup:reasonForUse a rdf:Property ;
+    rdfs:label "Reason For Use" ;
+    rdfs:comment "User-provided reason for taking supplement (e.g., 'bone health', 'sleep support')." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:string .
+
+checkup:supplementStartDate a rdf:Property ;
+    rdfs:label "Supplement Start Date" ;
+    rdfs:comment "Date when patient started taking the supplement." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:date .
+
+checkup:supplementIsActive a rdf:Property ;
+    rdfs:label "Supplement Is Active" ;
+    rdfs:comment "Whether patient is currently taking the supplement." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:boolean .
+
+checkup:dsldId a rdf:Property ;
+    rdfs:label "DSLD ID" ;
+    rdfs:comment "NIH Dietary Supplement Label Database identifier for lookup." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:string .
+
+checkup:supplementSourceRecord a rdf:Property ;
+    rdfs:label "Supplement Source Record" ;
+    rdfs:comment "Link to clinical:Supplement source record in pod." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:anyURI .
+
+checkup:doctorAware a rdf:Property ;
+    rdfs:label "Doctor Aware" ;
+    rdfs:comment "Whether the patient's healthcare provider knows about this supplement. Used to identify supplements that should be discussed at visits." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:boolean .
+
+
+# ============================================================================
+# IMMUNIZATION SUMMARY PROPERTIES (v1.7)
+# ============================================================================
+
+checkup:vaccineName a owl:DatatypeProperty ;
+    rdfs:label "Vaccine Name" ;
+    rdfs:comment "Name of the vaccine administered." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:administrationDate a owl:DatatypeProperty ;
+    rdfs:label "Administration Date" ;
+    rdfs:comment "Date the vaccine was administered." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:dateTime .
+
+checkup:immunizationStatus a owl:DatatypeProperty ;
+    rdfs:label "Immunization Status" ;
+    rdfs:comment "Status: completed, entered-in-error, not-done." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:vaccineCode a owl:DatatypeProperty ;
+    rdfs:label "Vaccine Code" ;
+    rdfs:comment "CVX vaccine code for standardized identification." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:vaccineCategory a owl:DatatypeProperty ;
+    rdfs:label "Vaccine Category" ;
+    rdfs:comment "Categorization for intake form display: routine, travel, occupational, other." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:manufacturer a owl:DatatypeProperty ;
+    rdfs:label "Manufacturer" ;
+    rdfs:comment "Vaccine manufacturer name." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:lotNumber a owl:DatatypeProperty ;
+    rdfs:label "Lot Number" ;
+    rdfs:comment "Vaccine lot number." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:expirationDate a owl:DatatypeProperty ;
+    rdfs:label "Expiration Date" ;
+    rdfs:comment "Vaccine expiration date." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:date .
+
+checkup:doseNumber a owl:DatatypeProperty ;
+    rdfs:label "Dose Number" ;
+    rdfs:comment "Dose sequence number in multi-dose series." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:integer .
+
+checkup:doseQuantity a owl:DatatypeProperty ;
+    rdfs:label "Dose Quantity" ;
+    rdfs:comment "Dose quantity administered." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:administrationRoute a owl:DatatypeProperty ;
+    rdfs:label "Administration Route" ;
+    rdfs:comment "Route of vaccine administration: intramuscular, subcutaneous, oral, etc." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:administrationSite a owl:DatatypeProperty ;
+    rdfs:label "Administration Site" ;
+    rdfs:comment "Body site where vaccine was administered: left arm, right arm, etc." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:administeringProvider a owl:DatatypeProperty ;
+    rdfs:label "Administering Provider" ;
+    rdfs:comment "Name of the provider who administered the vaccine." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:administeringLocation a owl:DatatypeProperty ;
+    rdfs:label "Administering Location" ;
+    rdfs:comment "Location where vaccine was administered." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:immunizationNotes a owl:DatatypeProperty ;
+    rdfs:label "Notes" ;
+    rdfs:comment "Additional notes about the immunization." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+checkup:immunizationSourceRecord a owl:ObjectProperty ;
+    rdfs:label "Source Record" ;
+    rdfs:comment "Link to the source clinical:Immunization record." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:anyURI .
+
+# ============================================================================
+# LAB RESULT SUMMARY PROPERTIES (v1.7)
+# ============================================================================
+
+checkup:labCategory a owl:DatatypeProperty ;
+    rdfs:label "Lab Category" ;
+    rdfs:comment "Intake form display category: metabolic, hematology, lipid, thyroid, vitamin, other." ;
+    rdfs:domain checkup:LabResultSummary ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# PROCEDURE SUMMARY PROPERTIES (v1.8)
+# ============================================================================
+# Mixed namespace pattern: checkup: for app-layer fields, clinical: for
+# standardized clinical data fields.
+
+checkup:procedureName a owl:DatatypeProperty ;
+    rdfs:label "Procedure Name" ;
+    rdfs:comment "Name of the medical procedure." ;
+    rdfs:domain checkup:ProcedureSummary ;
+    rdfs:range xsd:string .
+
+checkup:procedureCategory a owl:DatatypeProperty ;
+    rdfs:label "Procedure Category" ;
+    rdfs:comment "Categorization for intake form display: surgical, diagnostic, therapeutic, other." ;
+    rdfs:domain checkup:ProcedureSummary ;
+    rdfs:range xsd:string .
+
+checkup:procedureLocation a owl:DatatypeProperty ;
+    rdfs:label "Procedure Location" ;
+    rdfs:comment "Facility or location where the procedure was performed." ;
+    rdfs:domain checkup:ProcedureSummary ;
+    rdfs:range xsd:string .
+
+checkup:procedureSourceRecord a owl:ObjectProperty ;
+    rdfs:label "Source Record" ;
+    rdfs:comment "Link to the source clinical:Procedure record." ;
+    rdfs:domain checkup:ProcedureSummary ;
+    rdfs:range xsd:anyURI .
+
+# The following clinical: properties are used by ProcedureSummary via the
+# mixed namespace pattern (defined in clinical.ttl):
+# - clinical:procedureStatus (string)
+# - clinical:performedDate (dateTime)
+# - clinical:bodySite (string)
+# - clinical:performer (string)
+# - clinical:outcome (string)
+# - clinical:snomedCode (string)
+# - clinical:cptCode (string)
+
+# ============================================================================
+# ALLERGY SUMMARY PROPERTIES
+# ============================================================================
+
+checkup:allergen a rdf:Property ;
+    rdfs:label "Allergen" ;
+    rdfs:comment "Name of the allergenic substance (drug, food, environmental)." ;
+    rdfs:domain checkup:AllergySummary ;
+    rdfs:range xsd:string .
+
+checkup:reaction a rdf:Property ;
+    rdfs:label "Reaction" ;
+    rdfs:comment "Type of allergic reaction: hives, rash, swelling, difficulty_breathing, anaphylaxis, nausea, other." ;
+    rdfs:domain checkup:AllergySummary ;
+    rdfs:range xsd:string .
+
+checkup:allergySeverity a rdf:Property ;
+    rdfs:label "Allergy Severity" ;
+    rdfs:comment "Severity of allergic reaction: mild, moderate, severe, life_threatening." ;
+    rdfs:domain checkup:AllergySummary ;
+    rdfs:range xsd:string .
+
+checkup:allergyCategory a rdf:Property ;
+    rdfs:label "Allergy Category" ;
+    rdfs:comment "Category of allergen: medication, food, environmental, latex, contrast, other." ;
+    rdfs:domain checkup:AllergySummary ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# CONDITION SUMMARY PROPERTIES
+# ============================================================================
+
+checkup:conditionName a rdf:Property ;
+    rdfs:label "Condition Name" ;
+    rdfs:comment "Name of the health condition or diagnosis." ;
+    rdfs:domain checkup:ConditionSummary ;
+    rdfs:range xsd:string .
+
+checkup:icd10Code a rdf:Property ;
+    rdfs:label "ICD-10 Code" ;
+    rdfs:comment "ICD-10-CM diagnosis code if available." ;
+    rdfs:domain checkup:ConditionSummary ;
+    rdfs:range xsd:string .
+
+checkup:snomedCode a rdf:Property ;
+    rdfs:label "SNOMED Code" ;
+    rdfs:comment "SNOMED CT concept ID if available." ;
+    rdfs:domain checkup:ConditionSummary ;
+    rdfs:range xsd:string .
+
+checkup:onsetDate a rdf:Property ;
+    rdfs:label "Onset Date" ;
+    rdfs:comment "Date when condition was first diagnosed or symptoms began." ;
+    rdfs:domain checkup:ConditionSummary ;
+    rdfs:range xsd:date .
+
+checkup:onsetYear a rdf:Property ;
+    rdfs:label "Onset Year" ;
+    rdfs:comment "Year of condition onset if exact date unknown." ;
+    rdfs:domain checkup:ConditionSummary ;
+    rdfs:range xsd:gYear .
+
+checkup:conditionStatus a rdf:Property ;
+    rdfs:label "Condition Status" ;
+    rdfs:comment "Current status: active, resolved, remission, recurrence, inactive." ;
+    rdfs:domain checkup:ConditionSummary ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# FAMILY HISTORY PROPERTIES
+# ============================================================================
+
+checkup:relativeType a rdf:Property ;
+    rdfs:label "Relative Type" ;
+    rdfs:comment "Relationship to patient: mother, father, sibling, maternal_grandmother, maternal_grandfather, paternal_grandmother, paternal_grandfather, aunt, uncle, child." ;
+    rdfs:domain checkup:FamilyHistoryEntry ;
+    rdfs:range xsd:string .
+
+checkup:relativeSex a rdf:Property ;
+    rdfs:label "Relative Sex" ;
+    rdfs:comment "Biological sex of relative: male, female." ;
+    rdfs:domain checkup:FamilyHistoryEntry ;
+    rdfs:range xsd:string .
+
+checkup:familyCondition a rdf:Property ;
+    rdfs:label "Family Condition" ;
+    rdfs:comment "Name of health condition the relative has/had." ;
+    rdfs:domain checkup:FamilyHistoryEntry ;
+    rdfs:range xsd:string .
+
+checkup:familyConditionCode a rdf:Property ;
+    rdfs:label "Family Condition Code" ;
+    rdfs:comment "ICD-10 or SNOMED code for the family condition." ;
+    rdfs:domain checkup:FamilyHistoryEntry ;
+    rdfs:range xsd:string .
+
+checkup:ageAtDiagnosis a rdf:Property ;
+    rdfs:label "Age at Diagnosis" ;
+    rdfs:comment "Relative's age when condition was diagnosed (if known)." ;
+    rdfs:domain checkup:FamilyHistoryEntry ;
+    rdfs:range xsd:integer .
+
+checkup:ageAtDeath a rdf:Property ;
+    rdfs:label "Age at Death" ;
+    rdfs:comment "Relative's age at death if deceased." ;
+    rdfs:domain checkup:FamilyHistoryEntry ;
+    rdfs:range xsd:integer .
+
+checkup:isDeceased a rdf:Property ;
+    rdfs:label "Is Deceased" ;
+    rdfs:comment "Whether the relative is deceased." ;
+    rdfs:domain checkup:FamilyHistoryEntry ;
+    rdfs:range xsd:boolean .
+
+# ============================================================================
+# SCREENING STATUS PROPERTIES
+# ============================================================================
+
+checkup:screeningType a rdf:Property ;
+    rdfs:label "Screening Type" ;
+    rdfs:comment "Type of preventive screening: mammogram, colonoscopy, pap_smear, psa, bone_density, aaa_ultrasound, lung_ct, diabetes_a1c, lipid_panel, colorectal." ;
+    rdfs:domain checkup:ScreeningStatus ;
+    rdfs:range xsd:string .
+
+checkup:screeningStatus a rdf:Property ;
+    rdfs:label "Screening Status" ;
+    rdfs:comment "Current status: not_due, due, overdue, completed, declined, not_applicable." ;
+    rdfs:domain checkup:ScreeningStatus ;
+    rdfs:range xsd:string .
+
+checkup:lastCompletedDate a rdf:Property ;
+    rdfs:label "Last Completed Date" ;
+    rdfs:comment "Date when screening was last completed." ;
+    rdfs:domain checkup:ScreeningStatus ;
+    rdfs:range xsd:date .
+
+checkup:nextDueDate a rdf:Property ;
+    rdfs:label "Next Due Date" ;
+    rdfs:comment "Date when screening is next due." ;
+    rdfs:domain checkup:ScreeningStatus ;
+    rdfs:range xsd:date .
+
+checkup:guidelineSource a rdf:Property ;
+    rdfs:label "Guideline Source" ;
+    rdfs:comment "Source of recommendation: USPSTF, ACS, AAP, ACOG, ADA." ;
+    rdfs:domain checkup:ScreeningStatus ;
+    rdfs:range xsd:string .
+
+checkup:gradeLevel a rdf:Property ;
+    rdfs:label "Grade Level" ;
+    rdfs:comment "USPSTF grade if applicable: A, B, C, D, I." ;
+    rdfs:domain checkup:ScreeningStatus ;
+    rdfs:range xsd:string .
+
+checkup:applicableAgeMin a rdf:Property ;
+    rdfs:label "Applicable Age Min" ;
+    rdfs:comment "Minimum age for this screening recommendation." ;
+    rdfs:domain checkup:ScreeningStatus ;
+    rdfs:range xsd:integer .
+
+checkup:applicableAgeMax a rdf:Property ;
+    rdfs:label "Applicable Age Max" ;
+    rdfs:comment "Maximum age for this screening recommendation." ;
+    rdfs:domain checkup:ScreeningStatus ;
+    rdfs:range xsd:integer .
+
+checkup:applicableSex a rdf:Property ;
+    rdfs:label "Applicable Sex" ;
+    rdfs:comment "Sex this screening applies to: male, female, all." ;
+    rdfs:domain checkup:ScreeningStatus ;
+    rdfs:range xsd:string .
+
+checkup:frequencyMonths a rdf:Property ;
+    rdfs:label "Frequency Months" ;
+    rdfs:comment "Recommended screening frequency in months." ;
+    rdfs:domain checkup:ScreeningStatus ;
+    rdfs:range xsd:integer .
+
+# ============================================================================
+# VISIT ISSUE (CHIEF COMPLAINT) PROPERTIES
+# ============================================================================
+
+checkup:issueCategory a rdf:Property ;
+    rdfs:label "Issue Category" ;
+    rdfs:comment "Category of health issue: pain, skin, digestive, respiratory, cardiovascular, mental_health, neurological, musculoskeletal, urinary, medication, screening, general, other." ;
+    rdfs:domain checkup:VisitIssue ;
+    rdfs:range xsd:string .
+
+checkup:issueDescription a rdf:Property ;
+    rdfs:label "Issue Description" ;
+    rdfs:comment "Free text description of the health issue." ;
+    rdfs:domain checkup:VisitIssue ;
+    rdfs:range xsd:string .
+
+checkup:issueDuration a rdf:Property ;
+    rdfs:label "Issue Duration" ;
+    rdfs:comment "How long the issue has been present: days, weeks, months, years." ;
+    rdfs:domain checkup:VisitIssue ;
+    rdfs:range xsd:string .
+
+checkup:issueSeverity a rdf:Property ;
+    rdfs:label "Issue Severity" ;
+    rdfs:comment "Severity of the issue: mild, moderate, severe." ;
+    rdfs:domain checkup:VisitIssue ;
+    rdfs:range xsd:string .
+
+checkup:issueFrequency a rdf:Property ;
+    rdfs:label "Issue Frequency" ;
+    rdfs:comment "How often the issue occurs: constant, intermittent, occasional, rare." ;
+    rdfs:domain checkup:VisitIssue ;
+    rdfs:range xsd:string .
+
+checkup:affectsDaily a rdf:Property ;
+    rdfs:label "Affects Daily Activities" ;
+    rdfs:comment "Whether the issue impacts daily activities." ;
+    rdfs:domain checkup:VisitIssue ;
+    rdfs:range xsd:boolean .
+
+checkup:relatedConditions a rdf:Property ;
+    rdfs:label "Related Conditions" ;
+    rdfs:comment "Links to existing condition entries that may be related." ;
+    rdfs:domain checkup:VisitIssue ;
+    rdfs:range checkup:ConditionSummary .
+
+checkup:issuePriority a rdf:Property ;
+    rdfs:label "Issue Priority" ;
+    rdfs:comment "User-ranked importance (1 = highest priority)." ;
+    rdfs:domain checkup:VisitIssue ;
+    rdfs:range xsd:integer .
+
+# ============================================================================
+# SUGGESTED QUESTION PROPERTIES
+# ============================================================================
+
+checkup:questionText a rdf:Property ;
+    rdfs:label "Question Text" ;
+    rdfs:comment "The suggested question to ask the provider." ;
+    rdfs:domain checkup:SuggestedQuestion ;
+    rdfs:range xsd:string .
+
+checkup:questionCategory a rdf:Property ;
+    rdfs:label "Question Category" ;
+    rdfs:comment "Category: treatment_options, side_effects, prevention, lifestyle, referral, diagnosis, prognosis, medication, screening." ;
+    rdfs:domain checkup:SuggestedQuestion ;
+    rdfs:range xsd:string .
+
+checkup:basedOnCondition a rdf:Property ;
+    rdfs:label "Based On Condition" ;
+    rdfs:comment "Link to condition that triggered this question." ;
+    rdfs:domain checkup:SuggestedQuestion ;
+    rdfs:range checkup:ConditionSummary .
+
+checkup:basedOnMedication a rdf:Property ;
+    rdfs:label "Based On Medication" ;
+    rdfs:comment "Link to medication that triggered this question." ;
+    rdfs:domain checkup:SuggestedQuestion ;
+    rdfs:range checkup:MedicationSummary .
+
+checkup:basedOnIssue a rdf:Property ;
+    rdfs:label "Based On Issue" ;
+    rdfs:comment "Link to visit issue that triggered this question." ;
+    rdfs:domain checkup:SuggestedQuestion ;
+    rdfs:range checkup:VisitIssue .
+
+checkup:basedOnTrend a rdf:Property ;
+    rdfs:label "Based On Trend" ;
+    rdfs:comment "Link to a health metric trend that triggered this question." ;
+    rdfs:domain checkup:SuggestedQuestion ;
+    rdfs:range health:MetricTrend .
+
+checkup:basedOnTemplate a owl:DatatypeProperty ;
+    rdfs:label "Based On Template" ;
+    rdfs:comment "Template name the question was generated from." ;
+    rdfs:domain checkup:SuggestedQuestion ;
+    rdfs:range xsd:string .
+
+checkup:basedOnScreening a owl:ObjectProperty ;
+    rdfs:label "Based On Screening" ;
+    rdfs:comment "Link to the screening record the question relates to." ;
+    rdfs:domain checkup:SuggestedQuestion ;
+    rdfs:range xsd:anyURI .
+
+# ============================================================================
+# DIAGNOSTIC TEST RESULT PROPERTIES
+# ============================================================================
+
+checkup:testType a rdf:Property ;
+    rdfs:label "Test Type" ;
+    rdfs:comment "Type of diagnostic test: pots_check, blood_pressure_series, glucose_series, ecg, sleep_analysis, other." ;
+    rdfs:domain checkup:DiagnosticTestResult ;
+    rdfs:range xsd:string .
+
+checkup:testDate a rdf:Property ;
+    rdfs:label "Test Date" ;
+    rdfs:comment "Date and time when the test was performed." ;
+    rdfs:domain checkup:DiagnosticTestResult ;
+    rdfs:range xsd:dateTime .
+
+checkup:sourceApp a rdf:Property ;
+    rdfs:label "Source App" ;
+    rdfs:comment "Name of the app that generated this result: POTS Check, Cascade Checkup, etc." ;
+    rdfs:domain checkup:DiagnosticTestResult ;
+    rdfs:range xsd:string .
+
+checkup:sourceAppVersion a rdf:Property ;
+    rdfs:label "Source App Version" ;
+    rdfs:comment "Version of the source app." ;
+    rdfs:domain checkup:DiagnosticTestResult ;
+    rdfs:range xsd:string .
+
+checkup:resultSummary a rdf:Property ;
+    rdfs:label "Result Summary" ;
+    rdfs:comment "Brief text summary suitable for intake forms." ;
+    rdfs:domain checkup:DiagnosticTestResult ;
+    rdfs:range xsd:string .
+
+checkup:resultDetails a rdf:Property ;
+    rdfs:label "Result Details" ;
+    rdfs:comment "Link to full result in pod (e.g., pots-check-uuid.ttl)." ;
+    rdfs:domain checkup:DiagnosticTestResult ;
+    rdfs:range xsd:anyURI .
+
+checkup:flaggedForDiscussion a rdf:Property ;
+    rdfs:label "Flagged For Discussion" ;
+    rdfs:comment "Whether user wants to discuss this result with provider." ;
+    rdfs:domain checkup:DiagnosticTestResult ;
+    rdfs:range xsd:boolean .
+
+# POTS Check specific properties
+checkup:potsThresholdMet a rdf:Property ;
+    rdfs:label "POTS Threshold Met" ;
+    rdfs:comment "Whether the POTS diagnostic threshold was met (HR increase >= 30 bpm)." ;
+    rdfs:domain checkup:DiagnosticTestResult ;
+    rdfs:range xsd:boolean .
+
+checkup:maxHeartRateDelta a rdf:Property ;
+    rdfs:label "Max Heart Rate Delta" ;
+    rdfs:comment "Maximum heart rate change during standing test (bpm)." ;
+    rdfs:domain checkup:DiagnosticTestResult ;
+    rdfs:range xsd:double .
+
+checkup:orthostaticFlags a rdf:Property ;
+    rdfs:label "Orthostatic Flags" ;
+    rdfs:comment "Orthostatic findings: hypotension_suspected, hypertension_suspected, none." ;
+    rdfs:domain checkup:DiagnosticTestResult ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# INTAKE FORM DATA AGGREGATE PROPERTIES
+# ============================================================================
+
+checkup:generatedAt a rdf:Property ;
+    rdfs:label "Generated At" ;
+    rdfs:comment "Timestamp when intake form data was generated." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range xsd:dateTime .
+
+checkup:schemaVersion a rdf:Property ;
+    rdfs:label "Schema Version" ;
+    rdfs:comment "Version of the checkup vocabulary used." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range xsd:string .
+
+checkup:hasPatientProfile a rdf:Property ;
+    rdfs:label "Has Patient Profile" ;
+    rdfs:comment "DEPRECATED (v3.0): checkup:PatientProfile class removed. Use cascade:PatientProfile from core.ttl for patient demographics." ;
+    owl:deprecated "true"^^xsd:boolean ;
+    rdfs:domain checkup:IntakeFormData .
+
+checkup:hasInsurance a rdf:Property ;
+    rdfs:label "Has Insurance" ;
+    rdfs:comment "Link to insurance information." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:InsuranceInfo .
+
+checkup:hasMedication a rdf:Property ;
+    rdfs:label "Has Medication" ;
+    rdfs:comment "Link to medication summary entry." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:MedicationSummary .
+
+checkup:hasSupplement a rdf:Property ;
+    rdfs:label "Has Supplement" ;
+    rdfs:comment "Link to supplement summary entry." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:SupplementSummary .
+
+checkup:hasAllergy a rdf:Property ;
+    rdfs:label "Has Allergy" ;
+    rdfs:comment "Link to allergy summary entry." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:AllergySummary .
+
+checkup:hasCondition a rdf:Property ;
+    rdfs:label "Has Condition" ;
+    rdfs:comment "Link to condition summary entry." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:ConditionSummary .
+
+checkup:hasFamilyHistory a rdf:Property ;
+    rdfs:label "Has Family History" ;
+    rdfs:comment "Link to family history entry." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:FamilyHistoryEntry .
+
+checkup:hasVitalsTrend a rdf:Property ;
+    rdfs:label "Has Vitals Trend" ;
+    rdfs:comment "DEPRECATED (v3.0): checkup:VitalSignsTrend class removed. Use health:MetricTrend (Layer 2) and checkup:WellnessSummary (Layer 3) instead." ;
+    owl:deprecated "true"^^xsd:boolean ;
+    rdfs:domain checkup:IntakeFormData .
+
+checkup:hasScreening a rdf:Property ;
+    rdfs:label "Has Screening" ;
+    rdfs:comment "Link to screening status entry." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:ScreeningStatus .
+
+checkup:hasVisitIssue a rdf:Property ;
+    rdfs:label "Has Visit Issue" ;
+    rdfs:comment "Link to visit issue/chief complaint." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:VisitIssue .
+
+checkup:hasSuggestedQuestion a rdf:Property ;
+    rdfs:label "Has Suggested Question" ;
+    rdfs:comment "Link to generated question for provider." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:SuggestedQuestion .
+
+checkup:hasDiagnosticResult a rdf:Property ;
+    rdfs:label "Has Diagnostic Result" ;
+    rdfs:comment "Link to diagnostic test result from external app." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:DiagnosticTestResult .
+
+checkup:hasWellnessSummary a rdf:Property ;
+    rdfs:label "Has Wellness Summary" ;
+    rdfs:comment "Link to wellness summary with trends and baselines." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:WellnessSummary .
+
+checkup:hasTrendInsight a rdf:Property ;
+    rdfs:label "Has Trend Insight" ;
+    rdfs:comment "Link to a patient-readable trend insight." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:TrendInsight .
+
+checkup:hasCorrelationInsight a rdf:Property ;
+    rdfs:label "Has Correlation Insight" ;
+    rdfs:comment "Link to a temporal correlation insight." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:CorrelationInsight .
+
+checkup:hasKeyIndicator a rdf:Property ;
+    rdfs:label "Has Key Indicator" ;
+    rdfs:comment "Link to a key health indicator for dashboard display." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:KeyIndicator .
+
+checkup:hasAttentionItem a rdf:Property ;
+    rdfs:label "Has Attention Item" ;
+    rdfs:comment "Link to an item requiring patient attention." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:AttentionItem .
+
+checkup:hasVisitPrepSummary a rdf:Property ;
+    rdfs:label "Has Visit Prep Summary" ;
+    rdfs:comment "Link to a curated visit preparation summary." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:VisitPrepSummary .
+
+# ============================================================================
+# DATA PROVENANCE PROPERTIES (shared across record types)
+# ============================================================================
+
+checkup:hasProvenance a rdf:Property ;
+    rdfs:label "Has Provenance" ;
+    rdfs:comment "Link to provenance information for any record." ;
+    rdfs:range cascade:DataProvenance .
+
+checkup:provenanceType a rdf:Property ;
+    rdfs:label "Provenance Type" ;
+    rdfs:comment "Source type: ehr_verified, self_reported, scanned, device, ai_extracted, imported." ;
+    rdfs:range xsd:string .
+
+checkup:provenanceSource a rdf:Property ;
+    rdfs:label "Provenance Source" ;
+    rdfs:comment "Specific source identifier: MyChart, Apple Health, manual entry, etc." ;
+    rdfs:range xsd:string .
+
+checkup:provenanceDate a rdf:Property ;
+    rdfs:label "Provenance Date" ;
+    rdfs:comment "Date when data was recorded or verified at source." ;
+    rdfs:range xsd:dateTime .
+
+# ============================================================================
+# EHR PROVENANCE PROPERTIES (v1.3 - Medication Experience Phase A)
+# ============================================================================
+# Extended provenance properties for tracking medication data from EHR systems.
+# These properties enable any Cascade-compatible app to know where medication
+# data originated, supporting data sovereignty across applications.
+
+checkup:ehrSystemName a rdf:Property ;
+    rdfs:label "EHR System Name" ;
+    rdfs:comment "Name of the EHR patient portal or system: MyChart, Swedish Connect, Cerner, etc." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:ehrOrganization a rdf:Property ;
+    rdfs:label "EHR Organization" ;
+    rdfs:comment "Healthcare organization name associated with the EHR record: Virginia Mason, Swedish Medical, etc." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:fhirResourceType a rdf:Property ;
+    rdfs:label "FHIR Resource Type" ;
+    rdfs:comment "FHIR resource type the medication was derived from: MedicationStatement, MedicationDispense, MedicationRequest, MedicationAdministration." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:lastSyncedFromSource a rdf:Property ;
+    rdfs:label "Last Synced From Source" ;
+    rdfs:comment "Timestamp when this medication record was last synchronized from the EHR source." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:dateTime .
+
+# ============================================================================
+# MEDICATION CLASSIFICATION PROPERTIES (v1.3 - Medication Experience Phase A)
+# ============================================================================
+# Properties for classifying medications into relevance tiers and tracking
+# brand/generic name mappings for display purposes.
+
+checkup:relevanceTier a rdf:Property ;
+    rdfs:label "Relevance Tier" ;
+    rdfs:comment "Classification tier for medication relevance. Values: 'current' (actively taking), 'needsVerification' (status unclear), 'historical' (past medication), 'filtered' (procedure/IV meds)." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:brandName a rdf:Property ;
+    rdfs:label "Brand Name" ;
+    rdfs:comment "Common brand name for the medication if different from generic name. Stored in pod for portability across apps." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:commonBrandNames a rdf:Property ;
+    rdfs:label "Common Brand Names" ;
+    rdfs:comment "Comma-separated list of common brand names for reference data." ;
+    rdfs:range xsd:string .
+
+checkup:therapeuticClass a rdf:Property ;
+    rdfs:label "Therapeutic Class" ;
+    rdfs:comment "Therapeutic/pharmacological class: Beta Blocker, ACE Inhibitor, SSRI, etc." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+checkup:tierClassificationReason a rdf:Property ;
+    rdfs:label "Tier Classification Reason" ;
+    rdfs:comment "Human-readable explanation for why a medication was classified into its tier." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# INSIGHT & CORRELATION CLASSES (v1.4)
+# ============================================================================
+# Layer 3 classes that synthesize across data domains to produce patient-facing
+# insights. These enable MVP features F4 (Medication-Metric Timeline),
+# F5 (Health Score), F8 (Attention Items), and F9 (Visit Prep).
+
+checkup:WellnessSummary a owl:Class ;
+    rdfs:label "Wellness Summary" ;
+    rdfs:comment "Layer 3 patient-facing summary of wellness data. Aggregates trends and baselines from health: Layer 2 properties into a patient-readable format." ;
+    cascade:subConcern "analytics" ;
+    rdfs:subClassOf prov:Entity .
+
+checkup:TrendInsight a owl:Class ;
+    rdfs:label "Trend Insight" ;
+    rdfs:comment "A patient-readable observation derived from trend data. Example: 'Your resting heart rate has dropped 5 bpm since you started walking 10k steps/day.'" ;
+    cascade:subConcern "analytics" ;
+    rdfs:subClassOf prov:Entity .
+
+checkup:CorrelationInsight a owl:Class ;
+    rdfs:label "Correlation Insight" ;
+    rdfs:comment "Links two data domains with an observed temporal relationship. Example: medication start date correlates with metric change. IMPORTANT: Temporal correlation only — never implies causation." ;
+    cascade:subConcern "analytics" ;
+    rdfs:subClassOf prov:Entity .
+
+checkup:KeyIndicator a owl:Class ;
+    rdfs:label "Key Indicator" ;
+    rdfs:comment "A distilled, patient-friendly health metric chosen for its predictive value and simplicity. Used for dashboard summaries and health scores." ;
+    cascade:subConcern "analytics" ;
+    rdfs:subClassOf prov:Entity .
+
+checkup:AttentionItem a owl:Class ;
+    rdfs:label "Attention Item" ;
+    rdfs:comment "Flags when a metric deviates significantly from personal baseline, data has gone stale, or a trend crosses a threshold. Rule-based, not clinical advice." ;
+    cascade:subConcern "analytics" ;
+    rdfs:subClassOf prov:Entity .
+
+# --- WellnessSummary Properties ---
+
+checkup:wellnessTrend a owl:ObjectProperty ;
+    rdfs:label "Wellness Trend" ;
+    rdfs:comment "Link to a health:MetricTrend for a wellness metric" ;
+    rdfs:domain checkup:WellnessSummary ;
+    rdfs:range health:MetricTrend .
+
+checkup:wellnessBaselineDate a owl:DatatypeProperty ;
+    rdfs:label "Baseline Date" ;
+    rdfs:comment "Date of the baseline snapshot this summary compares against" ;
+    rdfs:domain checkup:WellnessSummary ;
+    rdfs:range xsd:dateTime .
+
+# --- TrendInsight Properties ---
+
+checkup:insightText a owl:DatatypeProperty ;
+    rdfs:label "Insight Text" ;
+    rdfs:comment "Patient-readable description of the insight" ;
+    rdfs:domain checkup:TrendInsight ;
+    rdfs:range xsd:string .
+
+checkup:insightSourceTrend a owl:ObjectProperty ;
+    rdfs:label "Source Trend" ;
+    rdfs:comment "The health:MetricTrend this insight is derived from" ;
+    rdfs:domain checkup:TrendInsight ;
+    rdfs:range health:MetricTrend .
+
+checkup:insightGeneratedBy a owl:ObjectProperty ;
+    rdfs:label "Generated By" ;
+    rdfs:comment "The agent that produced this insight. Should link to a prov:Agent (e.g., a cascade:DataSource for 'cascade-rule-engine', or a provider agent). Aligns with W3C PROV-O prov:wasGeneratedBy pattern." ;
+    rdfs:domain checkup:TrendInsight ;
+    rdfs:range prov:Agent .
+
+# --- CorrelationInsight Properties ---
+
+checkup:correlationMetric a owl:ObjectProperty ;
+    rdfs:label "Correlated Metric" ;
+    rdfs:comment "The wellness metric involved in the correlation" ;
+    rdfs:domain checkup:CorrelationInsight ;
+    rdfs:range health:MetricTrend .
+
+checkup:correlationEvent a owl:ObjectProperty ;
+    rdfs:label "Correlated Event" ;
+    rdfs:comment "The clinical event (medication start/stop, condition onset) involved in the correlation" ;
+    rdfs:domain checkup:CorrelationInsight .
+
+checkup:correlationText a owl:DatatypeProperty ;
+    rdfs:label "Correlation Text" ;
+    rdfs:comment "Patient-readable description. Must use temporal language only ('started approximately after'), never causal language ('caused by')." ;
+    rdfs:domain checkup:CorrelationInsight ;
+    rdfs:range xsd:string .
+
+checkup:correlationTimeLag a owl:DatatypeProperty ;
+    rdfs:label "Time Lag" ;
+    rdfs:comment "Days between the clinical event and the observed metric change onset" ;
+    rdfs:domain checkup:CorrelationInsight ;
+    rdfs:range xsd:integer .
+
+# --- KeyIndicator Properties ---
+
+checkup:indicatorMetric a owl:DatatypeProperty ;
+    rdfs:label "Indicator Metric Key" ;
+    rdfs:comment "The metric key this indicator represents (e.g., 'restingHeartRate')" ;
+    rdfs:domain checkup:KeyIndicator ;
+    rdfs:range xsd:string .
+
+checkup:indicatorValue a owl:DatatypeProperty ;
+    rdfs:domain checkup:KeyIndicator ;
+    rdfs:range xsd:decimal .
+
+checkup:indicatorUnit a owl:DatatypeProperty ;
+    rdfs:domain checkup:KeyIndicator ;
+    rdfs:range xsd:string .
+
+checkup:indicatorLabel a owl:DatatypeProperty ;
+    rdfs:label "Patient-Friendly Label" ;
+    rdfs:comment "e.g., 'Your resting heart rate' instead of 'RHR'" ;
+    rdfs:domain checkup:KeyIndicator ;
+    rdfs:range xsd:string .
+
+checkup:indicatorStatus a owl:DatatypeProperty ;
+    rdfs:label "Status" ;
+    rdfs:comment "Traffic light: 'good', 'watch', 'attention'" ;
+    rdfs:domain checkup:KeyIndicator ;
+    rdfs:range xsd:string .
+
+# --- AttentionItem Properties ---
+
+checkup:attentionReason a owl:DatatypeProperty ;
+    rdfs:label "Attention Reason" ;
+    rdfs:comment "Why this needs attention: 'baseline_deviation', 'stale_data', 'threshold_crossed'" ;
+    rdfs:domain checkup:AttentionItem ;
+    rdfs:range xsd:string .
+
+checkup:attentionMetric a owl:DatatypeProperty ;
+    rdfs:label "Attention Metric" ;
+    rdfs:domain checkup:AttentionItem ;
+    rdfs:range xsd:string .
+
+checkup:attentionText a owl:DatatypeProperty ;
+    rdfs:label "Attention Text" ;
+    rdfs:comment "Patient-readable explanation: 'Your blood pressure hasn't been recorded in 60 days'" ;
+    rdfs:domain checkup:AttentionItem ;
+    rdfs:range xsd:string .
+
+checkup:attentionSeverity a owl:DatatypeProperty ;
+    rdfs:label "Severity" ;
+    rdfs:comment "'info', 'watch', 'action'" ;
+    rdfs:domain checkup:AttentionItem ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# VISIT PREP SUMMARY (v1.4)
+# ============================================================================
+# A curated clinical summary for appointments. Combines wellness trends,
+# medication context, and patient questions into a one-page document.
+
+checkup:VisitPrepSummary a owl:Class ;
+    rdfs:label "Visit Prep Summary" ;
+    rdfs:comment "A curated, one-page clinical summary designed for a 15-minute appointment. Auto-generated from metric changes, medication context, and patient questions, then user-edited before export." ;
+    cascade:subConcern "analytics" ;
+    rdfs:subClassOf prov:Entity .
+
+checkup:visitPrepDate a owl:DatatypeProperty ;
+    rdfs:domain checkup:VisitPrepSummary ;
+    rdfs:range xsd:dateTime .
+
+checkup:visitPrepComparisonDate a owl:DatatypeProperty ;
+    rdfs:comment "Date of the previous snapshot being compared against" ;
+    rdfs:domain checkup:VisitPrepSummary ;
+    rdfs:range xsd:dateTime .
+
+checkup:visitPrepChange a owl:ObjectProperty ;
+    rdfs:comment "A metric change included in this visit prep" ;
+    rdfs:domain checkup:VisitPrepSummary ;
+    rdfs:range health:MetricTrend .
+
+checkup:visitPrepCorrelation a owl:ObjectProperty ;
+    rdfs:domain checkup:VisitPrepSummary ;
+    rdfs:range checkup:CorrelationInsight .
+
+checkup:visitPrepAttention a owl:ObjectProperty ;
+    rdfs:domain checkup:VisitPrepSummary ;
+    rdfs:range checkup:AttentionItem .
+
+checkup:visitPrepUserNotes a owl:DatatypeProperty ;
+    rdfs:comment "Patient-authored questions and concerns for the visit" ;
+    rdfs:domain checkup:VisitPrepSummary ;
+    rdfs:range xsd:string .
+
+checkup:noteContent a owl:DatatypeProperty ;
+    rdfs:label "Note Content" ;
+    rdfs:comment "Free-text notes for visit preparation. Merges previously separate VisitPrepNotes content into VisitPrepSummary." ;
+    rdfs:domain checkup:VisitPrepSummary ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# ADHERENCE & DISCUSSION CLASSES (v1.5)
+# ============================================================================
+# Patient-reported adherence tracking and visit discussion preparation.
+# Supports Bug 6/11 export overhaul Phase 4B serialization.
+
+checkup:DailyCheckIn a owl:Class ;
+    rdfs:label "Daily Check-in" ;
+    rdfs:comment "Patient-reported daily medication adherence check-in capturing response status, missed medications, and optional notes." ;
+    cascade:subConcern "self-report" ;
+    rdfs:subClassOf health:SelfReport .
+
+checkup:DiscussionTopic a owl:Class ;
+    rdfs:label "Discussion Topic" ;
+    rdfs:comment "AI-generated or user-created topic for discussion during a healthcare visit. Topics are derived from medication data, adherence patterns, supplement interactions, or user input." ;
+    cascade:subConcern "analytics" ;
+    rdfs:subClassOf prov:Entity .
+
+checkup:CheckInSettings a owl:Class ;
+    rdfs:label "Check-in Settings" ;
+    rdfs:comment "Application configuration for daily check-in notification scheduling and day-of-week preferences." ;
+    cascade:subConcern "app-config" .
+
+# --- DailyCheckIn Properties ---
+
+checkup:checkInDate a owl:DatatypeProperty ;
+    rdfs:label "Check-in Date" ;
+    rdfs:comment "Date of the check-in (normalized to midnight)" ;
+    rdfs:domain checkup:DailyCheckIn ;
+    rdfs:range xsd:dateTime .
+
+checkup:checkInResponse a owl:DatatypeProperty ;
+    rdfs:label "Check-in Response" ;
+    rdfs:comment "Adherence response: allTaken, missedSome, skippedToday" ;
+    rdfs:domain checkup:DailyCheckIn ;
+    rdfs:range xsd:string .
+
+checkup:missedMedicationIds a owl:DatatypeProperty ;
+    rdfs:label "Missed Medication IDs" ;
+    rdfs:comment "Comma-separated UUIDs of missed medications (when response is missedSome)" ;
+    rdfs:domain checkup:DailyCheckIn ;
+    rdfs:range xsd:string .
+
+checkup:checkInNotes a owl:DatatypeProperty ;
+    rdfs:label "Check-in Notes" ;
+    rdfs:comment "Optional patient notes about the day" ;
+    rdfs:domain checkup:DailyCheckIn ;
+    rdfs:range xsd:string .
+
+checkup:submittedAt a owl:DatatypeProperty ;
+    rdfs:label "Submitted At" ;
+    rdfs:comment "Timestamp when the check-in was submitted" ;
+    rdfs:domain checkup:DailyCheckIn ;
+    rdfs:range xsd:dateTime .
+
+# --- DiscussionTopic Properties ---
+
+checkup:topicText a owl:DatatypeProperty ;
+    rdfs:label "Topic Text" ;
+    rdfs:comment "The discussion topic question or statement" ;
+    rdfs:domain checkup:DiscussionTopic ;
+    rdfs:range xsd:string .
+
+checkup:topicCategory a owl:DatatypeProperty ;
+    rdfs:label "Topic Category" ;
+    rdfs:comment "Category: durationBased, recentChange, adherenceConcern, sideEffectReport, multipleForSame, supplementDoctor, interactionRisk, refillDue, effectivenessConcern, costConcern, custom" ;
+    rdfs:domain checkup:DiscussionTopic ;
+    rdfs:range xsd:string .
+
+checkup:topicSource a owl:DatatypeProperty ;
+    rdfs:label "Topic Source" ;
+    rdfs:comment "Source type: medication, supplement, medicationPair, supplementMedicationPair, adherencePattern, custom" ;
+    rdfs:domain checkup:DiscussionTopic ;
+    rdfs:range xsd:string .
+
+checkup:relevanceScore a owl:DatatypeProperty ;
+    rdfs:label "Relevance Score" ;
+    rdfs:comment "AI-computed relevance score (0.0-1.0)" ;
+    rdfs:domain checkup:DiscussionTopic ;
+    rdfs:range xsd:double .
+
+checkup:isSelected a owl:DatatypeProperty ;
+    rdfs:label "Is Selected" ;
+    rdfs:comment "Whether the topic is active for the next visit" ;
+    rdfs:domain checkup:DiscussionTopic ;
+    rdfs:range xsd:boolean .
+
+checkup:relatedMedicationName a owl:DatatypeProperty ;
+    rdfs:label "Related Medication Name" ;
+    rdfs:comment "Optional medication name providing context" ;
+    rdfs:domain checkup:DiscussionTopic ;
+    rdfs:range xsd:string .
+
+checkup:detailText a owl:DatatypeProperty ;
+    rdfs:label "Detail Text" ;
+    rdfs:comment "Optional supplementary detail text" ;
+    rdfs:domain checkup:DiscussionTopic ;
+    rdfs:range xsd:string .
+
+# --- CheckInSettings Properties ---
+
+checkup:checkInEnabled a owl:DatatypeProperty ;
+    rdfs:label "Check-in Enabled" ;
+    rdfs:comment "Whether daily check-ins are active" ;
+    rdfs:domain checkup:CheckInSettings ;
+    rdfs:range xsd:boolean .
+
+checkup:notificationHour a owl:DatatypeProperty ;
+    rdfs:label "Notification Hour" ;
+    rdfs:comment "Notification hour in 24-hour format (0-23)" ;
+    rdfs:domain checkup:CheckInSettings ;
+    rdfs:range xsd:integer .
+
+checkup:notificationMinute a owl:DatatypeProperty ;
+    rdfs:label "Notification Minute" ;
+    rdfs:comment "Notification minute (0-59)" ;
+    rdfs:domain checkup:CheckInSettings ;
+    rdfs:range xsd:integer .
+
+checkup:enabledDays a owl:DatatypeProperty ;
+    rdfs:label "Enabled Days" ;
+    rdfs:comment "Comma-separated enabled days: sunday, monday, tuesday, wednesday, thursday, friday, saturday" ;
+    rdfs:domain checkup:CheckInSettings ;
+    rdfs:range xsd:string .
+
+# --- IntakeFormData aggregate links (v1.5) ---
+
+checkup:hasDailyCheckIn a owl:ObjectProperty ;
+    rdfs:label "Has Daily Check-in" ;
+    rdfs:comment "Link to a daily medication adherence check-in record." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:DailyCheckIn .
+
+checkup:hasDiscussionTopic a owl:ObjectProperty ;
+    rdfs:label "Has Discussion Topic" ;
+    rdfs:comment "Link to a discussion topic for a healthcare visit." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:DiscussionTopic .
+
+checkup:hasCheckInSettings a owl:ObjectProperty ;
+    rdfs:label "Has Check-in Settings" ;
+    rdfs:comment "Link to check-in notification configuration." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:CheckInSettings .
+
+# ============================================================================
+# INTAKE QUESTIONNAIRE CLASSES (v1.6)
+# ============================================================================
+# FHIR-inspired intake questionnaire response model using native Cascade
+# Protocol serialization. Uses LOINC panel codes as questionnaire identifiers
+# and SNOMED CT for coded answers. Supports template-driven intake form
+# expansion (Kaiser eCheck-In gap analysis: surgical history, social history,
+# advanced care planning, pharmacy preference).
+#
+# Design rationale: Full FHIR QuestionnaireResponse was evaluated and
+# rejected — ~5-6x more verbose in RDF/Turtle due to fhir:v blank-node
+# wrapping for every primitive value, creates two incompatible RDF patterns
+# in the same Pod, and no standard FHIR Questionnaires combine surgical +
+# social + safety screening into a single intake form. This hybrid approach
+# uses LOINC/SNOMED as the actual vocabulary with checkup: providing only
+# the minimal container. A mechanical transformation to FHIR
+# QuestionnaireResponse JSON is preserved for clinical system export.
+#
+# See: https://hl7.org/fhir/questionnaireresponse.html
+
+checkup:IntakeQuestionnaireResponse a owl:Class ;
+    rdfs:label "Intake Questionnaire Response" ;
+    rdfs:comment "Response to a standardized intake questionnaire section. Structure inspired by FHIR QuestionnaireResponse but uses native Cascade Protocol serialization. Uses LOINC panel codes as questionnaire identifiers and SNOMED CT codes for standardized answers." ;
+    cascade:subConcern "intake" ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:seeAlso fhir:QuestionnaireResponse .
+
+checkup:ResponseItem a owl:Class ;
+    rdfs:label "Response Item" ;
+    rdfs:comment "A question-answer pair within an intake questionnaire response. Uses LOINC item codes as link identifiers and SNOMED CT codes for coded answers where available. Supports nested sub-items via childItem for hierarchical questionnaire structures." ;
+    cascade:subConcern "intake" ;
+    rdfs:subClassOf prov:Entity .
+
+# --- IntakeQuestionnaireResponse Properties ---
+
+checkup:questionnaireId a owl:DatatypeProperty ;
+    rdfs:label "Questionnaire ID" ;
+    rdfs:comment "LOINC panel code identifying the questionnaire section (e.g., 71421-2 for Social History, 10187-3 for Review of Systems)" ;
+    rdfs:domain checkup:IntakeQuestionnaireResponse ;
+    rdfs:range xsd:string .
+
+checkup:questionnaireTitle a owl:DatatypeProperty ;
+    rdfs:label "Questionnaire Title" ;
+    rdfs:comment "Human-readable title of the questionnaire section" ;
+    rdfs:domain checkup:IntakeQuestionnaireResponse ;
+    rdfs:range xsd:string .
+
+checkup:responseItem a owl:ObjectProperty ;
+    rdfs:label "Response Item" ;
+    rdfs:comment "Link to a ResponseItem containing a question-answer pair" ;
+    rdfs:domain checkup:IntakeQuestionnaireResponse ;
+    rdfs:range checkup:ResponseItem .
+
+checkup:completedAt a owl:DatatypeProperty ;
+    rdfs:label "Completed At" ;
+    rdfs:comment "Timestamp when the questionnaire response was completed" ;
+    rdfs:domain checkup:IntakeQuestionnaireResponse ;
+    rdfs:range xsd:dateTime .
+
+# --- ResponseItem Properties ---
+
+checkup:itemLinkId a owl:DatatypeProperty ;
+    rdfs:label "Item Link ID" ;
+    rdfs:comment "LOINC item code identifying the question (e.g., 72166-2 for Tobacco smoking status, 63512-8 for Alcohol use)" ;
+    rdfs:domain checkup:ResponseItem ;
+    rdfs:range xsd:string .
+
+checkup:itemText a owl:DatatypeProperty ;
+    rdfs:label "Item Text" ;
+    rdfs:comment "Human-readable question display text" ;
+    rdfs:domain checkup:ResponseItem ;
+    rdfs:range xsd:string .
+
+checkup:itemAnswer a owl:DatatypeProperty ;
+    rdfs:label "Item Answer" ;
+    rdfs:comment "Free-text answer value" ;
+    rdfs:domain checkup:ResponseItem ;
+    rdfs:range xsd:string .
+
+checkup:itemAnswerCode a owl:DatatypeProperty ;
+    rdfs:label "Item Answer Code" ;
+    rdfs:comment "Coded answer value from a standard terminology (SNOMED CT or LOINC answer code)" ;
+    rdfs:domain checkup:ResponseItem ;
+    rdfs:range xsd:string .
+
+checkup:itemAnswerCodeSystem a owl:DatatypeProperty ;
+    rdfs:label "Item Answer Code System" ;
+    rdfs:comment "Code system URI for the coded answer (e.g., http://snomed.info/sct/, http://loinc.org/)" ;
+    rdfs:domain checkup:ResponseItem ;
+    rdfs:range xsd:anyURI .
+
+checkup:childItem a owl:ObjectProperty ;
+    rdfs:label "Child Item" ;
+    rdfs:comment "Nested sub-item for hierarchical questionnaire structures (e.g., follow-up questions based on answers)" ;
+    rdfs:domain checkup:ResponseItem ;
+    rdfs:range checkup:ResponseItem .
+
+# --- IntakeFormData aggregate link (v1.6) ---
+
+checkup:hasQuestionnaireResponse a owl:ObjectProperty ;
+    rdfs:label "Has Questionnaire Response" ;
+    rdfs:comment "Link to a completed intake questionnaire response section." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:IntakeQuestionnaireResponse .
+
+# --- IntakeFormData aggregate links (v1.7) ---
+
+checkup:hasImmunization a owl:ObjectProperty ;
+    rdfs:label "Has Immunization" ;
+    rdfs:comment "Link to an immunization summary entry." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:ImmunizationSummary .
+
+checkup:hasLabResult a owl:ObjectProperty ;
+    rdfs:label "Has Lab Result" ;
+    rdfs:comment "Link to a lab result summary entry." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:LabResultSummary .
+
+checkup:hasWellnessBaseline a owl:ObjectProperty ;
+    rdfs:label "Has Wellness Baseline" ;
+    rdfs:comment "DEPRECATED (v3.0): checkup:WellnessBaseline class removed. Use checkup:WellnessProfileReference to link to SDK HealthProfile." ;
+    owl:deprecated "true"^^xsd:boolean ;
+    rdfs:domain checkup:IntakeFormData .
+
+checkup:hasActivitySummary a owl:ObjectProperty ;
+    rdfs:label "Has Activity Summary" ;
+    rdfs:comment "DEPRECATED (v3.0): checkup:ActivitySummary class removed. Use checkup:WellnessProfileReference to link to SDK HealthProfile." ;
+    owl:deprecated "true"^^xsd:boolean ;
+    rdfs:domain checkup:IntakeFormData .
+
+# --- IntakeFormData aggregate links (v1.8) ---
+
+checkup:hasProcedure a owl:ObjectProperty ;
+    rdfs:label "Has Procedure" ;
+    rdfs:comment "Link to a procedure summary entry." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:ProcedureSummary .
+
+# ============================================================================
+# MEDICATION CHANGE RECORD (v1.9)
+# ============================================================================
+# Tracks changes to medications and supplements between visit snapshots.
+# Consumed by report generators (PlainTextReportGenerator, PatientBriefSections,
+# ProviderViews) for the "Changes Since Last Visit" section.
+
+checkup:MedicationChangeRecord a owl:Class ;
+    rdfs:label "Medication Change Record" ;
+    rdfs:comment "A recorded change to a medication or supplement since the last visit snapshot. Tracked for the Changes Since Last Visit report section." ;
+    cascade:subConcern "analytics" ;
+    rdfs:subClassOf prov:Entity .
+
+checkup:changeType a owl:DatatypeProperty ;
+    rdfs:label "Change Type" ;
+    rdfs:comment "Type of change: added, stopped, doseChanged, frequencyChanged, adherenceChanged, statusChanged." ;
+    rdfs:domain checkup:MedicationChangeRecord ;
+    rdfs:range xsd:string .
+
+checkup:changedField a owl:DatatypeProperty ;
+    rdfs:label "Changed Field" ;
+    rdfs:comment "Name of the field that was changed (e.g., dose, frequency)." ;
+    rdfs:domain checkup:MedicationChangeRecord ;
+    rdfs:range xsd:string .
+
+checkup:changeRecordPreviousValue a owl:DatatypeProperty ;
+    rdfs:label "Previous Value" ;
+    rdfs:comment "Value of the field before the change." ;
+    rdfs:domain checkup:MedicationChangeRecord ;
+    rdfs:range xsd:string .
+
+checkup:changeRecordNewValue a owl:DatatypeProperty ;
+    rdfs:label "New Value" ;
+    rdfs:comment "Value of the field after the change." ;
+    rdfs:domain checkup:MedicationChangeRecord ;
+    rdfs:range xsd:string .
+
+checkup:changeDate a owl:DatatypeProperty ;
+    rdfs:label "Change Date" ;
+    rdfs:comment "Date when the change occurred." ;
+    rdfs:domain checkup:MedicationChangeRecord ;
+    rdfs:range xsd:dateTime .
+
+checkup:hasChange a owl:ObjectProperty ;
+    rdfs:label "Has Change" ;
+    rdfs:comment "Link from a MedicationSummary or SupplementSummary to a change record." ;
+    rdfs:range checkup:MedicationChangeRecord .
+
+# --- IntakeFormData aggregate links (v1.9) ---
+# (hasChange is defined on MedicationSummary/SupplementSummary, not IntakeFormData)
+
+# ============================================================================
+# VISIT PREP TRAY (v3.1 — Task A7)
+# ============================================================================
+
+checkup:VisitPrepTray a owl:Class ;
+    rdfs:label "Visit Prep Tray" ;
+    rdfs:comment "Per-appointment visit preparation container grouping issues, discussion topics, questions, and notes. Uses a typed payload wrapper (VisitItemPayload) to preserve existing type richness from VisitIssue, DiscussionTopic, and SuggestedQuestion." ;
+    cascade:subConcern "intake" ;
+    rdfs:subClassOf prov:Entity .
+
+checkup:VisitTrayItem a owl:Class ;
+    rdfs:label "Visit Tray Item" ;
+    rdfs:comment "A typed item within a VisitPrepTray. Wraps VisitIssue, DiscussionTopic, SuggestedQuestion, note, or custom content with intent category and resolution tracking." ;
+    rdfs:subClassOf prov:Entity .
+
+# --- VisitPrepTray Properties ---
+
+checkup:prepTitle a owl:DatatypeProperty ;
+    rdfs:label "Prep Title" ;
+    rdfs:comment "Display title for the visit prep (e.g., 'Rheumatologist - Feb 28')." ;
+    rdfs:domain checkup:VisitPrepTray ;
+    rdfs:range xsd:string .
+
+checkup:appointmentDate a owl:DatatypeProperty ;
+    rdfs:label "Appointment Date" ;
+    rdfs:comment "Scheduled appointment date and time." ;
+    rdfs:domain checkup:VisitPrepTray ;
+    rdfs:range xsd:dateTime .
+
+checkup:prepProviderName a owl:DatatypeProperty ;
+    rdfs:label "Prep Provider Name" ;
+    rdfs:comment "Name of the healthcare provider for this appointment." ;
+    rdfs:domain checkup:VisitPrepTray ;
+    rdfs:range xsd:string .
+
+checkup:specialty a owl:DatatypeProperty ;
+    rdfs:label "Specialty" ;
+    rdfs:comment "Provider specialty (e.g., 'Rheumatology', 'Cardiology')." ;
+    rdfs:domain checkup:VisitPrepTray ;
+    rdfs:range xsd:string .
+
+checkup:visitPrepStatus a owl:DatatypeProperty ;
+    rdfs:label "Visit Prep Status" ;
+    rdfs:comment "Tray status: preparing, ready, completed." ;
+    rdfs:domain checkup:VisitPrepTray ;
+    rdfs:range xsd:string .
+
+checkup:prepCompletedDate a owl:DatatypeProperty ;
+    rdfs:label "Prep Completed Date" ;
+    rdfs:comment "When the visit was marked completed." ;
+    rdfs:domain checkup:VisitPrepTray ;
+    rdfs:range xsd:dateTime .
+
+checkup:hasTrayItem a owl:ObjectProperty ;
+    rdfs:label "Has Tray Item" ;
+    rdfs:comment "Link from a VisitPrepTray to a VisitTrayItem." ;
+    rdfs:domain checkup:VisitPrepTray ;
+    rdfs:range checkup:VisitTrayItem .
+
+# --- VisitTrayItem Properties ---
+
+checkup:payloadType a owl:DatatypeProperty ;
+    rdfs:label "Payload Type" ;
+    rdfs:comment "Payload discriminator: issue, topic, question, note, custom." ;
+    rdfs:domain checkup:VisitTrayItem ;
+    rdfs:range xsd:string .
+
+checkup:intentCategory a owl:DatatypeProperty ;
+    rdfs:label "Intent Category" ;
+    rdfs:comment "Intent of the tray item: discuss, schedule, inform, ask." ;
+    rdfs:domain checkup:VisitTrayItem ;
+    rdfs:range xsd:string .
+
+checkup:isResolved a owl:DatatypeProperty ;
+    rdfs:label "Is Resolved" ;
+    rdfs:comment "Whether the tray item has been addressed or resolved." ;
+    rdfs:domain checkup:VisitTrayItem ;
+    rdfs:range xsd:boolean .
+
+checkup:sourceSection a owl:DatatypeProperty ;
+    rdfs:label "Source Section" ;
+    rdfs:comment "Health Map section this item originated from (e.g., 'medications', 'conditions')." ;
+    rdfs:domain checkup:VisitTrayItem ;
+    rdfs:range xsd:string .
+
+checkup:sourceRecordId a owl:DatatypeProperty ;
+    rdfs:label "Source Record ID" ;
+    rdfs:comment "UUID linking to the source record that prompted this tray item." ;
+    rdfs:domain checkup:VisitTrayItem ;
+    rdfs:range xsd:anyURI .
+
+# --- IntakeFormData aggregate links (v3.1) ---
+
+checkup:hasVisitPrep a owl:ObjectProperty ;
+    rdfs:label "Has Visit Prep" ;
+    rdfs:comment "Link from IntakeFormData to a VisitPrepTray." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:VisitPrepTray .
+
+checkup:activeVisitPrepId a owl:DatatypeProperty ;
+    rdfs:label "Active Visit Prep ID" ;
+    rdfs:comment "UUID of the currently active visit prep tray on IntakeFormData." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# DARK VOCABULARY REMEDIATION (v2.2 — PF1-R)
+# ============================================================================
+# Properties previously emitted by CheckupSerializer but not formally defined.
+# Corrected property names and new definitions added in Schema Refactoring
+# Plan Phase 3, PF1-R.
+
+# --- IntakeFormData aggregate link ---
+
+checkup:hasLabResults a owl:ObjectProperty ;
+    rdfs:label "Has Lab Results" ;
+    rdfs:comment "Link to a lab result summary entry. Replaces dark vocabulary checkup:hasLabResultSummary." ;
+    rdfs:domain checkup:IntakeFormData ;
+    rdfs:range checkup:LabResultSummary .
+
+# --- Structural / reference properties ---
+
+checkup:wellnessProfileRef a owl:ObjectProperty ;
+    rdfs:label "Wellness Profile Reference" ;
+    rdfs:comment "URI reference to the patient's HealthProfile wellness data file." ;
+    rdfs:domain checkup:IntakeFormData .
+
+checkup:lastSnapshotDate a owl:DatatypeProperty ;
+    rdfs:label "Last Snapshot Date" ;
+    rdfs:comment "When the medication or supplement data was last snapshotted from clinical records." ;
+    rdfs:range xsd:dateTime .
+
+# --- Renamed medication property ---
+
+checkup:medicationEndDate a owl:DatatypeProperty ;
+    rdfs:label "Medication End Date" ;
+    rdfs:comment "End date for a medication prescription. Replaces dark vocabulary checkup:endDate (disambiguated from other end-date uses). NOTE: This reflects the administrative EHR order expiry date, which may not match the actual supply exhaustion date. Use checkup:supplyEndDate for the computed supply end date." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:date .
+
+checkup:supplyEndDate a owl:DatatypeProperty ;
+    rdfs:label "Supply End Date" ;
+    rdfs:comment "Computed date when the dispensed medication supply is expected to be exhausted, calculated as startDate + supplyDurationDays. Distinguishes clinical supply exhaustion from administrative EHR order expiry (checkup:medicationEndDate). Consumers should use this property — rather than medicationEndDate — to determine whether a medication is likely still active when adherenceStatus is absent." ;
+    rdfs:domain checkup:MedicationSummary ;
+    rdfs:range xsd:date .
+
+# --- Renamed immunization property ---
+
+checkup:immunizationNotes a owl:DatatypeProperty ;
+    rdfs:label "Immunization Notes" ;
+    rdfs:comment "Free-text notes about an immunization record. Replaces dark vocabulary checkup:notes (disambiguated from clinical:notes used in lab results)." ;
+    rdfs:domain checkup:ImmunizationSummary ;
+    rdfs:range xsd:string .
+
+# --- Renamed supplement properties ---
+
+checkup:supplementIsActive a owl:DatatypeProperty ;
+    rdfs:label "Supplement Is Active" ;
+    rdfs:comment "Whether the patient is currently taking this supplement. Replaces dark vocabulary checkup:isActive (disambiguated from generic boolean use)." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:boolean .
+
+checkup:supplementUPC a owl:DatatypeProperty ;
+    rdfs:label "Supplement UPC" ;
+    rdfs:comment "Universal Product Code for supplement identification. Replaces dark vocabulary checkup:upc (disambiguated with supplement prefix)." ;
+    rdfs:domain checkup:SupplementSummary ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# (Legacy Compatibility section removed in v3.0 — ClinicalSummary, HealthRecord,
+#  ReviewOfSystems, DataProvenance classes deleted per CLN1 cleanup)
+# ============================================================================
+# (Tier 3 PatientProfile properties removed in v3.0 — preferredLanguage,
+#  maritalStatus, raceEthnicity, preferredPharmacy, hasLivingWill,
+#  hasPowerOfAttorney, hasDNR, advanceDirectiveNotes deleted per CLN1 cleanup.
+#  Migrated to cascade:/dct: namespace in core.ttl.)
+
+# (Insurance migration properties removed in v3.0 — subscriberName,
+#  subscriberRelationship, effectiveDate, rxBin, rxPcn, rxGroup deleted per
+#  CLN1 cleanup. Migrated to coverage: namespace.)
+
+# ============================================================================
+# CHANGELOG
+# ============================================================================
+#
+# v3.2 (2026-02-26, BUG-002): Added checkup:supplyEndDate DatatypeProperty on
+# MedicationSummary. Computed as startDate + supplyDurationDays, this field
+# allows consumers to distinguish administrative EHR order expiry
+# (checkup:medicationEndDate) from actual supply exhaustion. Updated
+# checkup:medicationEndDate rdfs:comment to clarify the distinction.
+# Active classes: 28. Properties added: 1.
+#
+# v3.1 (2026-02-22, Task A7): Added VisitPrepTray class (8 properties) and
+# VisitTrayItem class (5 properties) for per-appointment visit preparation
+# containers. VisitPrepTray groups VisitIssue, DiscussionTopic,
+# SuggestedQuestion, and note items with typed payload wrappers and intent
+# categories. Added hasTrayItem ObjectProperty linking tray to items. Added
+# hasVisitPrep and activeVisitPrepId aggregate links on IntakeFormData.
+# Active classes: 28. Part of Health Map v3 Pre-Phase Track A.
+#
+# v3.0 (2026-02-18, Phase 4 CLN1): Removed 8 deprecated classes (PatientProfile,
+# VitalSignsTrend, WellnessBaseline, ActivitySummary, ClinicalSummary, HealthRecord,
+# ReviewOfSystems, DataProvenance) and their associated properties. Removed 9 core
+# PatientProfile properties (patientName, dateOfBirth, computedAge, ageGroup,
+# biologicalSex, genderIdentity, contactPhone, contactEmail, emergencyContact).
+# Removed 8 deprecated Tier 3 PatientProfile properties (migrated to cascade:/dct:
+# namespace). Removed 6 deprecated insurance properties (migrated to coverage:
+# namespace). Removed deprecated checkup:cascadeUri (superseded by cascade:cascadeUri).
+# Removed VitalSignsTrend properties (8), WellnessBaseline properties (8),
+# ActivitySummary properties (8). Deprecated hasPatientProfile, hasVitalsTrend,
+# hasWellnessBaseline, hasActivitySummary aggregate links. Updated basedOnTrend
+# range to health:MetricTrend. Clean break per guiding constraint #1.
+# Active classes: 27. Total properties removed: ~50.
+#
+# v2.3 (2026-02-18): Deprecated checkup:cascadeUri in favor of
+#   cascade:cascadeUri from core.ttl (Phase 3.5 ONT3). The checkup-specific
+#   definition is superseded by the cross-vocabulary property in core.
+#
+# v2.2 (2026-02-17): Dark Vocabulary Remediation (PF1-R)
+# - Added hasLabResults aggregate link (replaces dark hasLabResultSummary)
+# - Added wellnessProfileRef ObjectProperty for intake form -> wellness link
+# - Added lastSnapshotDate DatatypeProperty for medication/supplement snapshot timestamps
+# - Added medicationEndDate (replaces dark checkup:endDate, disambiguated)
+# - Added immunizationNotes (replaces dark checkup:notes in immunization context)
+# - Added supplementIsActive (replaces dark checkup:isActive in supplement context)
+# - Added cascadeUri ObjectProperty for stable supplement identifiers
+# - Added supplementUPC (replaces dark checkup:upc, disambiguated with prefix)
+# - Total new properties: 8 (all previously dark vocabulary)
+#
+# v2.1 (2026-02-17): DailyCheckIn now rdfs:subClassOf health:SelfReport.
+#   Base self-report properties (reportDate, reportType, completionStatus,
+#   reportContext, reportNotes) promoted to health: namespace. (Phase 3, WS7)
+#
+# v2.0 (2026-02-17): Schema Refactoring Phase 3 — PatientProfile Migration
+# - Deprecated checkup:PatientProfile (use cascade:PatientProfile from core.ttl)
+# - Deprecated 8 Tier 3 patient profile properties with cascade:/dct: replacements:
+#   preferredLanguage (-> dct:language), maritalStatus (-> cascade:maritalStatus),
+#   raceEthnicity (-> cascade:raceEthnicity), preferredPharmacy (-> cascade:hasPreferredPharmacy),
+#   hasLivingWill, hasPowerOfAttorney, hasDNR, advanceDirectiveNotes
+#   (-> cascade:AdvanceDirectives class properties)
+# - Total deprecated classes: 8 (PatientProfile + WellnessBaseline + ActivitySummary +
+#   VitalSignsTrend + HealthRecord + ClinicalSummary + ReviewOfSystems + ScreeningStatus-like)
+#
+# v1.11 (2026-02-18): Updated InsuranceInfo class comment to reference coverage:
+#   namespace for mixed namespace pattern. Part of Schema Refactoring Plan
+#   Phase 2 (WS4).
+#
+# v1.10 (2026-02-17): Schema Refactoring Phase 1 — Taxonomy & Dark Vocabulary
+# - Added cascade:subConcern annotations to all 35 classes (31 active + 4
+#   already-deprecated; summary, analytics, intake, self-report, identity,
+#   financial, app-config, structural, deprecated)
+# - Deprecated WellnessBaseline and ActivitySummary (use WellnessProfileReference)
+# - Deprecated ReviewOfSystems (use IntakeQuestionnaireResponse with LOINC 10187-3)
+# - Defined 14 dark vocabulary properties with migration annotations:
+#   - 8 Tier 3 patient profile properties (preferredLanguage, maritalStatus,
+#     raceEthnicity, preferredPharmacy, hasLivingWill, hasPowerOfAttorney,
+#     hasDNR, advanceDirectiveNotes) — migrating to cascade:/dct: in WS6
+#   - 6 insurance properties (subscriberName, subscriberRelationship,
+#     effectiveDate, rxBin, rxPcn, rxGroup) — migrating to coverage: in WS4
+# - Zero dark vocabulary: every serializer-emitted property now defined in TTL
+#
+# v1.9 (2026-02-10): Medication Change Records
+# - Added MedicationChangeRecord class for tracking medication/supplement
+#   changes between visit snapshots (5 properties + hasChange link)
+# - Enables "Changes Since Last Visit" report section persistence
+# - hasChange link defined without domain constraint — used by both
+#   MedicationSummary and SupplementSummary
+# - Property names prefixed to avoid collision with VitalSignsTrend
+#   previousValue/newValue: changeRecordPreviousValue, changeRecordNewValue
+# - Total classes: 17 (was 16) + 2 questionnaire classes
+#
+# v1.8 (2026-02-10): Procedure Summary & Serializer Alignment
+# - Added ProcedureSummary class with mixed namespace pattern
+#   (4 checkup: properties + 7 clinical: cross-references)
+# - Added hasProcedure aggregate link on IntakeFormData
+# - Total classes: 16 (was 15) + 2 questionnaire classes
+#
+# v1.7 (2026-02-10): Wellness Data & Clinical Summary Classes
+# - Added 5 new classes: WellnessBaseline, ActivitySummary,
+#   ImmunizationSummary, LabResultSummary, WellnessProfileReference
+# - WellnessBaseline: aggregated vital sign baseline (8 properties)
+# - ActivitySummary: combined activity/sleep metrics (8 properties)
+# - ImmunizationSummary: patient-facing vaccine record (16 properties)
+#   using mixed namespace pattern
+# - LabResultSummary: patient-facing lab summary with labCategory
+#   (uses clinical: properties for standardized data)
+# - WellnessProfileReference: lightweight pointer to full wellness profile
+# - Added checkup:noteContent to VisitPrepSummary (merges VisitPrepNotes)
+# - Added 4 MedicationSummary verification properties: needsVerification,
+#   verificationReason, lastVerifiedDate, importSessionId
+# - Added 2 SuggestedQuestion properties: basedOnTemplate, basedOnScreening
+# - Added 4 IntakeFormData aggregate links: hasImmunization, hasLabResult,
+#   hasWellnessBaseline, hasActivitySummary
+#
+# v1.6 (2026-02-09) - Intake Questionnaire Data Model
+# - Added 2 new classes: IntakeQuestionnaireResponse, ResponseItem
+# - IntakeQuestionnaireResponse: FHIR-inspired questionnaire container using
+#   LOINC panel codes as identifiers and SNOMED CT for coded answers
+# - ResponseItem: question-answer pair with nested sub-items support
+# - Added 10 new properties: questionnaireId, questionnaireTitle, responseItem,
+#   completedAt, itemLinkId, itemText, itemAnswer, itemAnswerCode,
+#   itemAnswerCodeSystem, childItem
+# - Added hasQuestionnaireResponse link from IntakeFormData
+# - Design follows "established vocabularies first" principle:
+#   LOINC/SNOMED as actual vocabulary, checkup: as minimal container
+# - Mechanical transformation path to FHIR QuestionnaireResponse JSON
+#   preserved for clinical system interoperability
+# - Supports template-driven intake form expansion (Kaiser eCheck-In
+#   gap analysis: surgical history, social history, advanced care planning)
+#
+# v1.5 (2026-02-07) - Adherence & Discussion Classes
+# - Added 3 new classes: DailyCheckIn, DiscussionTopic, CheckInSettings
+# - DailyCheckIn: patient-reported medication adherence with per-medication
+#   tracking (LOINC 79474-4, SNOMED 225390008/418633004)
+# - DiscussionTopic: AI-generated or user-created visit discussion items
+#   with 11 categories, relevance scoring, and medication context
+# - CheckInSettings: application configuration for notification scheduling
+# - Added 17 new properties for check-in, discussion, and settings
+# - Added hasDailyCheckIn, hasDiscussionTopic, hasCheckInSettings links
+#   from IntakeFormData
+# - Supports Bug 6/11 export overhaul Phase 4B serialization
+#
+# v1.4 (2026-02-01) - Insight & Correlation Classes, Visit Prep
+# - Added 5 new Layer 3 classes: WellnessSummary, TrendInsight,
+#   CorrelationInsight, KeyIndicator, AttentionItem
+# - Added VisitPrepSummary class for curated clinical visit preparation
+# - Added aggregate links to IntakeFormData: hasWellnessSummary,
+#   hasTrendInsight, hasCorrelationInsight, hasKeyIndicator,
+#   hasAttentionItem, hasVisitPrepSummary
+# - Deprecated VitalSignsTrend (superseded by health:MetricTrend at
+#   Layer 2 + checkup:WellnessSummary at Layer 3)
+# - CorrelationInsight enforces temporal-only language (no causation)
+# - insightGeneratedBy uses prov:Agent range for both software and
+#   human agent provenance
+# - Added health: prefix import for cross-layer references
+#
+# v1.3 (2026-01-17) - Medication Experience Phase A: EHR Provenance
+# - Added EHR Provenance Properties section:
+#   - ehrSystemName: EHR patient portal identifier
+#   - ehrOrganization: Healthcare org name
+#   - fhirResourceType: FHIR resource type origin
+#   - lastSyncedFromSource: Sync timestamp
+# - Added Medication Classification Properties section:
+#   - relevanceTier: current, needsVerification, historical, filtered
+#   - brandName: Brand name mapping for display
+#   - commonBrandNames: Comma-separated brand names for reference
+#   - therapeuticClass: Pharmacological class
+#   - tierClassificationReason: Human-readable classification explanation
+# - These properties enable cross-app medication data portability
+#
+# v1.2 (2026-01-15) - Phase 7: SHACL Shapes + Validation
+# - Added Phase 3 MedicationSummary properties (episodeId, indication, cost, functionalImpact)
+# - Added doctorAware property for SupplementSummary
+# - Updated to align with checkup.shapes.ttl v1.2
+# - SHACL shapes now validate:
+#   - MedicationSummary with episode linkage
+#   - SupplementSummary with required regulatoryStatus
+#
+# v1.1 (2026-01-15)
+# - Added SupplementSummary class for dietary supplements and OTC products
+# - Added 12 supplement-specific properties (regulatoryStatus, evidenceStrength, etc.)
+# - Added hasSupplement property to IntakeFormData
+# - Supplements explicitly separated from medications due to different regulatory status
+#
+# v1.0 (2026-01-03)
+# - Initial release with 12 core classes
+# - IntakeFormData, PatientProfile, InsuranceInfo, MedicationSummary,
+#   AllergySummary, ConditionSummary, FamilyHistoryEntry, VitalSignsTrend,
+#   ScreeningStatus, VisitIssue, SuggestedQuestion, DiagnosticTestResult
+# - POTS Check integration via DiagnosticTestResult
+# - Data provenance properties for source tracking
+#
+
+# End of Cascade Checkup Vocabulary v3.1

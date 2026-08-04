@@ -21,8 +21,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-07-20"^^xsd:date ;
-    owl:versionInfo "1.12" ;
+    dct:modified "2026-08-03"^^xsd:date ;
+    owl:versionInfo "1.13" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -101,27 +101,39 @@ clinical:Medication a owl:Class ;
 
 clinical:Allergy a owl:Class ;
     rdfs:label "Allergy"@en ;
-    rdfs:comment "Allergy or intolerance record from EHR AllergyIntolerance resource"@en ;
+    rdfs:comment "Allergy or intolerance record from EHR AllergyIntolerance resource. DEPRECATED in clinical v1.13: use health:AllergyRecord, which is the type every import path already emits. Retained, not removed: the pod export path is still the sole emitter of this class and existing pods contain it. Readers must continue to accept both."@en ;
     rdfs:subClassOf fhir:AllergyIntolerance ;
-    rdfs:subClassOf prov:Entity .
+    rdfs:subClassOf prov:Entity ;
+    owl:deprecated true ;
+    rdfs:seeAlso <https://ns.cascadeprotocol.org/health/v1#AllergyRecord> ;
+    owl:versionInfo "Deprecated in clinical v1.13; superseded by health:AllergyRecord" .
 
 clinical:LabResult a owl:Class ;
     rdfs:label "Lab Result"@en ;
-    rdfs:comment "Laboratory test result from EHR Observation resource"@en ;
+    rdfs:comment "Laboratory test result from EHR Observation resource. DEPRECATED in clinical v1.13: use health:LabResultRecord, which is the type every import path already emits. Retained, not removed: the pod export path is still the sole emitter of this class and existing pods contain it. Readers must continue to accept both."@en ;
     rdfs:subClassOf fhir:Observation ;
-    rdfs:subClassOf prov:Entity .
+    rdfs:subClassOf prov:Entity ;
+    owl:deprecated true ;
+    rdfs:seeAlso <https://ns.cascadeprotocol.org/health/v1#LabResultRecord> ;
+    owl:versionInfo "Deprecated in clinical v1.13; superseded by health:LabResultRecord" .
 
 clinical:Condition a owl:Class ;
     rdfs:label "Condition"@en ;
-    rdfs:comment "Medical condition or diagnosis from EHR Condition resource"@en ;
+    rdfs:comment "Medical condition or diagnosis from EHR Condition resource. DEPRECATED in clinical v1.13: use health:ConditionRecord, which is the type every import path already emits. Retained, not removed: the pod export path is still the sole emitter of this class and existing pods contain it. Readers must continue to accept both."@en ;
     rdfs:subClassOf fhir:Condition ;
-    rdfs:subClassOf prov:Entity .
+    rdfs:subClassOf prov:Entity ;
+    owl:deprecated true ;
+    rdfs:seeAlso <https://ns.cascadeprotocol.org/health/v1#ConditionRecord> ;
+    owl:versionInfo "Deprecated in clinical v1.13; superseded by health:ConditionRecord" .
 
 clinical:Immunization a owl:Class ;
     rdfs:label "Immunization"@en ;
-    rdfs:comment "Vaccination record from EHR Immunization resource"@en ;
+    rdfs:comment "Vaccination record from EHR Immunization resource. DEPRECATED in clinical v1.13: use health:ImmunizationRecord, which is the type every import path already emits. Retained, not removed: the pod export path is still the sole emitter of this class and existing pods contain it. Readers must continue to accept both."@en ;
     rdfs:subClassOf fhir:Immunization ;
-    rdfs:subClassOf prov:Entity .
+    rdfs:subClassOf prov:Entity ;
+    owl:deprecated true ;
+    rdfs:seeAlso <https://ns.cascadeprotocol.org/health/v1#ImmunizationRecord> ;
+    owl:versionInfo "Deprecated in clinical v1.13; superseded by health:ImmunizationRecord" .
 
 clinical:Procedure a owl:Class ;
     rdfs:label "Procedure"@en ;
@@ -496,7 +508,20 @@ clinical:recordDate a owl:DatatypeProperty ;
 
 clinical:status a owl:DatatypeProperty ;
     rdfs:label "Status"@en ;
-    rdfs:comment "FHIR status of the record (active, completed, etc.)"@en ;
+    rdfs:comment """Lifecycle status of the record. Permitted values depend on the record class and are constrained per-shape, not on this property.
+
+INTENDED VALUE SETS (FHIR R4). Recorded here in v1.13 because they are only partly enforced, and the gap should be visible in the vocabulary rather than only in the shapes:
+
+  clinical:Immunization   ImmunizationStatusCodes    completed | entered-in-error | not-done
+                          -- ENFORCED by clinical:ImmunizationShape
+  clinical:Procedure      EventStatus
+                          -- ENFORCED by clinical:ProcedureShape
+  clinical:Medication     MedicationRequest.status   active | on-hold | cancelled | completed |
+                                                     entered-in-error | stopped | draft | unknown
+                          -- NOT ENFORCED by clinical:MedicationShape
+
+The omission on medications is deliberate as of v1.13, not an oversight. Emitted data uses at least one value outside the FHIR set ("discontinued"; the FHIR equivalents are "stopped" and "ended"), so adding sh:in would be a BREAKING change for existing pods, not a clarification: records that validate today would start failing without any emitter having been corrected first. The ordered fix is to map emitters onto the FHIR value set, then add the constraint in a release explicitly flagged as tightening."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-medicationrequest-status.html> ;
     rdfs:range xsd:string .
 
 clinical:loincCode a owl:DatatypeProperty ;
@@ -702,7 +727,12 @@ clinical:referenceRange a owl:DatatypeProperty ;
 
 clinical:interpretation a owl:DatatypeProperty ;
     rdfs:label "Interpretation"@en ;
-    rdfs:comment "Interpretation flag (normal, high, low, abnormal)"@en ;
+    rdfs:comment """Categorical reading of an observation against its reference range.
+
+clinical:LabResultShape constrains this property with sh:in to normal | high | low | abnormal | critical (and capitalized forms). clinical:VitalSignShape deliberately does NOT, and as of v1.13 the inconsistency is intentional rather than an oversight: emitted vital-sign data uses "elevated", which is outside the lab set, so applying the lab constraint to vital signs would be a BREAKING change for existing pods rather than a clarification.
+
+Note also that neither set is the FHIR set. FHIR R4 Observation.interpretation binds to v3-ObservationInterpretation, whose codes are symbolic (N, H, L, A, HH, LL, AA), not English words. Both Cascade sets are local vocabulary. Reconciling the two spellings and then aligning them onto the FHIR codes is the ordered fix; doing either half on its own breaks readers."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-observation-interpretation.html> ;
     rdfs:range xsd:string .
 
 clinical:specimenType a owl:DatatypeProperty ;
@@ -1300,6 +1330,33 @@ clinical:isActive a owl:DatatypeProperty ;
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.13 (2026-08-03)
+# - Deprecated 4 classes: clinical:LabResult, clinical:Condition,
+#   clinical:Allergy, clinical:Immunization. Each carries owl:deprecated true
+#   and rdfs:seeAlso pointing at its health: equivalent, which is the type
+#   every import path already emits and which health v2.5 now defines and
+#   shapes. NOT removed: the pod export path remains the sole emitter of these
+#   four classes, and existing pods contain them. Readers must accept both
+#   spellings; writers should prefer the health: forms. No emitter changed in
+#   this release.
+# - Documented the intended FHIR R4 value sets on clinical:status and
+#   clinical:interpretation, and recorded WHY two of them are not enforced.
+#   clinical:MedicationShape has no sh:in on status and clinical:VitalSignShape
+#   has none on interpretation, while the sibling shapes do. Emitted data uses
+#   "discontinued" for medication status and "elevated" for vital-sign
+#   interpretation, neither of which is in the corresponding constrained set,
+#   so adding the constraints would be breaking for existing pods rather than
+#   clarifying. The gap is now stated in the vocabulary instead of being
+#   visible only as an absence in the shapes.
+# - Added clinical:ConsultationNoteShape. clinical:ConsultationNote is one of
+#   six rdfs:subClassOf clinical:ClinicalDocument; the other five each carry an
+#   explicit sh:targetClass and this one did not. A subclass axiom does not
+#   inherit a shape (SHACL resolves sh:targetClass over SHACL-instances in the
+#   DATA graph, so an axiom in this file does not expand the target set), so
+#   consultation notes were validating vacuously while every sibling document
+#   type was checked. Consequence: a consultation note missing importedAt,
+#   sourceEHR or fhirResourceId passed before and fails now.
 #
 # Version 1.12 (2026-07-20)
 # - Added clinical:parsedIndicationReference ObjectProperty, a

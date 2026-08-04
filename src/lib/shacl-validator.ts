@@ -24,6 +24,15 @@ import { readResource } from './pod-encryption.js';
 const { namedNode } = DataFactory;
 
 export interface ValidationResult {
+  /**
+   * The SHACL `sh:conforms` value, verbatim.
+   *
+   * Per [SHACL 3.2](https://www.w3.org/TR/shacl/#validation-report) this is
+   * `false` whenever the report carries ANY result, regardless of severity — so
+   * a file whose only finding is an `sh:Info` advisory reports `valid: false`.
+   * That is correct SHACL and wrong English. Do not use this field to decide
+   * whether a file passed; use {@link failsValidation}.
+   */
   valid: boolean;
   file: string;
   results: ValidationIssue[];
@@ -70,6 +79,26 @@ export interface ValidationIssue {
   focusNode?: string;
   value?: string;
   specLink?: string;
+}
+
+/**
+ * Whether a result counts as a validation FAILURE.
+ *
+ * A file fails if and only if it carries at least one `sh:Violation`. Parse
+ * errors, unreadable files and processing errors are all synthesised as
+ * violations, so they fail through this same rule.
+ *
+ * **Warnings and Info deliberately do not fail.** The rule is fixed by the exit
+ * code, which has always been driven by violations alone: `cascade validate`
+ * exits 0 on a warning-only or info-only run. Counting those files as failures
+ * in the summary made the tally and the exit code assert opposite things about
+ * the same run, so a caller who trusted one was misled by the other. Advisories
+ * still print per file and are still counted on the `Issues:` line; they just do
+ * not move the pass/fail column. Tightening a constraint from Info or Warning to
+ * Violation is the supported way to make something fail.
+ */
+export function failsValidation(result: ValidationResult): boolean {
+  return result.results.some((issue) => issue.severity === 'violation');
 }
 
 /** Mapping from shape file prefixes to their documentation base URLs */

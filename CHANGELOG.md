@@ -11,6 +11,43 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+**Vocabulary and shapes synced to core v3.4, health v2.5 and clinical v1.13.** health v2.5 defines
+five record classes the CLI has been emitting for a long time without any definition or constraint
+behind them — `health:LabResultRecord`, `health:AllergyRecord`, `health:ConditionRecord`,
+`health:ImmunizationRecord`, `health:FamilyHistoryRecord` — and gives each a SHACL shape. clinical
+v1.13 deprecates the four duplicated `clinical:*` equivalents (they are not removed, and nothing
+stops emitting them) and adds a shape for consultation notes, which were the one document subtype
+validating against nothing. core v3.4 models the pod export manifest on
+[DCAT 3](https://www.w3.org/TR/vocab-dcat-3/) and [VoID](https://www.w3.org/TR/void/).
+
+**Records that used to validate against nothing are now actually validated, and some of them will
+report findings. That means the validator improved, not that your data degraded.** These records
+have not changed. Before this release, `cascade validate` had no constraints for them, and a SHACL
+report over zero constraints conforms — so they were reported as passing without being examined.
+Concretely, on the 19-file reference pod the number of Cascade-typed subjects that no shape applied
+to falls from **122 to 1**, and subjects actually checked rises from **156 to 277** of 448. The
+reference pod reports zero violations after the change; a pod carrying data the new shapes disagree
+with will report violations it did not report before, and those findings were always true.
+
+A worked example of what this buys, because it is not paperwork: a single bundle carrying two
+same-day glucose readings — a fasting 95 and a post-prandial 310, an entirely routine pairing —
+produced ONE subject asserting both `health:resultValue "95"` and `health:resultValue "310"`.
+`cascade validate` returned PASS on that, because nothing constrained the cardinality, and reading
+it back gave `"health:resultValue": "95, 310"`, a single string no consumer can interpret. The
+`sh:maxCount 1` on the new lab shape catches it at write time.
+
+**Known finding after upgrading: three date properties.** The C-CDA converter reads
+`<effectiveTime value="20250311"/>` and writes `2025-03-11` as a plain string literal on
+`health:performedDate`, `health:onsetDate` and `health:administrationDate`. All three are declared
+`rdfs:range xsd:dateTime` and are now constrained with `sh:datatype xsd:dateTime`, so C-CDA imports
+will report violations on them. The constraint is not new and not an overreach — it is the same one
+`clinical:onsetDate` has always carried — but the emitters have disagreed with it for as long as
+they have existed and nothing was checking. It is deliberately not patched in this release: the
+source carries DAY precision, and typing it as `xsd:dateTime` means appending `T00:00:00`, which
+invents a time that downstream date arithmetic will treat as real. FHIR R4's `dateTime` primitive
+accepts `YYYY-MM-DD` precisely to avoid that, so the correct fix is a vocabulary change first and
+an emitter change second, in a release of its own.
+
 **`cascade validate` now reports how many subjects it actually checked.** Before this change it
 returned PASS on records it had no constraints for, and there was no way to tell the difference
 from the output. A file whose subjects match no `sh:targetClass` runs zero constraints, and a
@@ -31,9 +68,12 @@ shape applies to. The same figures are available under `coverage` in `--json` ou
 **If your validation output changes after upgrading, the validator got more accurate — your data
 did not get worse.** Nothing that passed before now fails: unshaped subjects are counted and
 named, but they do not affect the exit code, because a class with no shape is a gap in the
-vocabulary rather than a defect in your data. On a 19-file reference pod this surfaces 292
-previously unreported subjects (122 of them carrying Cascade-namespace types) that were being
-reported as passing while nothing ran against them.
+vocabulary rather than a defect in your data. On a 19-file reference pod this surfaced 292
+previously unreported subjects, 122 of them carrying Cascade-namespace types, that were being
+reported as passing while nothing ran against them. The vocabulary sync in this same release then
+closes 121 of those 122; what remains unshaped is almost entirely subjects typed only in foreign
+vocabularies (`prov:`, `fhir:`, `solid:`, `foaf:`, `ldp:`), which Cascade shapes are not written to
+constrain.
 
 ### Fixed
 
@@ -47,6 +87,35 @@ reported as passing while nothing ran against them.
   [SHACL 2.1.3.1](https://www.w3.org/TR/shacl/#targetClass), so a shape targeting a superclass is
   correctly reported as covering subclass-typed subjects, transitively. Nodes reached through a
   parent shape's `sh:node` are counted as checked rather than reported as unconstrained.
+- **A file whose only findings are advisories is no longer counted as failed.** `sh:conforms` is
+  false whenever a SHACL report carries any result at all, including `sh:Info`, and the summary was
+  reading it directly — so a file with zero violations and one Info advisory printed `WARN` and was
+  tallied under **failed**, while the exit code (computed from violations alone) said 0. On a pod
+  with no defects the summary read `19 total, 15 passed, 4 failed` and the process exited 0, so one
+  of the two was always lying. A file now fails if and only if it carries at least one
+  `sh:Violation`; warnings and info are printed per file and counted on the `Issues:` line but do
+  not move the pass/fail column, which is what makes the tally and the exit code agree. The same pod
+  now reports `19 total, 19 passed, 0 failed` with `4 info`.
+- **The vocabulary sync script only ever copied half of what it should have.** It kept two separate
+  lists: one naming the vocabularies whose `.shapes.ttl` to copy, and one naming the vocabularies
+  whose ontology to copy. The second list had three entries and never grew. `health.ttl` had
+  therefore never been synced at all — 928 lines against the 1489 it should have been — and
+  `checkup`, `pots` and all four draft vocabularies had no ontology bundled either. The measured
+  consequence: **52 of 89 `sh:targetClass` values in Cascade namespaces resolved to a class that the
+  CLI's own loaded vocabulary did not define**, meaning the validator was loading shapes that could
+  select nothing and report nothing, silently. The script now drives both files from one list per
+  maturity tier and exits non-zero if any expected file is missing, and `tests/shapes-sync.test.ts`
+  asserts the invariant directly: every Cascade-namespace `sh:targetClass` in the bundled shapes
+  must resolve to a class defined in the bundled vocabulary, every shapes file must have a matching
+  ontology, each `VOCAB_VERSIONS` row must equal the `owl:versionInfo` of the ontology actually
+  bundled, and `dist/shapes` must match `src/shapes` byte for byte.
+- **Family-history records no longer land in the FHIR passthrough bucket.**
+  `health:FamilyHistoryRecord` was registered in no data-type entry, so import routing fell through
+  to its unmapped-type branch and every family-history record a C-CDA import produced was written to
+  `clinical/fhir-passthrough.ttl` instead of `clinical/family-history.ttl`. Nothing looked wrong:
+  the import succeeded and the section summary counted the records. They were simply filed under
+  "type we could not map", which is the one bucket a reader is entitled to skip — and the class now
+  has a ratified shape whose consumers look for the file that did not exist.
 
 ## [0.11.0] - 2026-08-03
 

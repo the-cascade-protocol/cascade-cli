@@ -1,0 +1,369 @@
+@prefix advisory: <https://ns.cascadeprotocol.org/advisory/v1#> .
+@prefix genomics: <https://ns.cascadeprotocol.org/genomics/v1#> .
+@prefix cascade:  <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix owl:      <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:      <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:     <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:      <http://www.w3.org/2001/XMLSchema#> .
+@prefix dct:      <http://purl.org/dc/terms/> .
+@prefix prov:     <http://www.w3.org/ns/prov#> .
+
+# ============================================================================
+# Changelog
+# ============================================================================
+# v1.0-draft.0.1 (2026-05-05) — Initial draft.
+#   Defines the Cascade Advisory Patch (CAP) profile envelope, the six
+#   AdvisoryClass named individuals, the Cadence enum, the per-pod
+#   TrustedIssuer class with TrustSourceEnum provenance, the AutoApplyPolicy
+#   class with AutoApplyScope, and the detached-JWS signature property
+#   (per D-Q4). References cascade:AdvisoryApplicationActivity from core
+#   v3.1; does not redeclare it.
+# ============================================================================
+
+# ============================================================================
+# Ontology Metadata
+# ============================================================================
+
+<https://ns.cascadeprotocol.org/advisory/v1#> a owl:Ontology ;
+    owl:imports <https://ns.cascadeprotocol.org/core/v1#> ;
+    dct:title "Cascade Protocol Advisory Vocabulary"@en ;
+    dct:description "Vocabulary for the Cascade Advisory Patch (CAP) profile — a constrained subset of W3C LDPatch carrying clinical knowledge updates (variant reclassifications, PGx dosing changes, surveillance guideline updates, etc.) into a Cascade pod with author-readable, statically-auditable, bounded-execution semantics."@en ;
+    dct:creator "Cascade Agentic Labs" ;
+    dct:created "2026-05-05"^^xsd:date ;
+    dct:modified "2026-05-05"^^xsd:date ;
+    owl:versionInfo "1.0-draft" ;
+    rdfs:comment "DRAFT — vocabulary is under development and subject to change before v1.0 stable release. Architecture: (1) constrained-LDPatch envelope (advisory:CascadeAdvisoryPatch) with required human-readable summary, advisory class, issuer, and issuance time; (2) tiered cadence — SafetyCritical advisories check on every app open, VariantReclassification monthly, SurveillanceGuidelineUpdate quarterly-to-annual (advisory:Cadence enum); (3) per-pod trust — each pod chooses which issuers to trust via advisory:TrustedIssuer records (advisory:TrustSourceEnum tracks how each was added: cascade-cli starter list vs user-added vs imported-from-registry vs verified-via-DID); (4) detached JWS Ed25519 signatures (RFC 7515) for issuer authentication (advisory:signature plus issuer claims); (5) opt-in auto-apply scoped per (issuer x advisoryClass) pair via advisory:AutoApplyPolicy. The application of an advisory to a pod is recorded using cascade:AdvisoryApplicationActivity (declared in core v3.1, not redeclared here)."@en ;
+    rdfs:seeAlso <https://cascadeprotocol.org/docs/advisory/v1.0-draft/> .
+
+# ============================================================================
+# Profile envelope: CascadeAdvisoryPatch
+# ============================================================================
+
+advisory:CascadeAdvisoryPatch a owl:Class ;
+    rdfs:label "Cascade Advisory Patch"@en ;
+    rdfs:comment "The envelope of a CAP file — a constrained-LDPatch document delivering a clinical knowledge update to a Cascade pod. Subclass of prov:Entity so applications can be linked via prov:used / prov:wasGeneratedBy. The application of a CAP to a pod is recorded as a cascade:AdvisoryApplicationActivity (defined in core v3.1) which uses prov:used to point at both the patch and the matched record. Every CascadeAdvisoryPatch MUST carry advisory:humanSummary, advisory:advisoryClass, advisory:issuer, and advisory:issuedAt; SHOULD carry advisory:signature; MAY carry advisory:supersedes, advisory:applicableUntil, advisory:advisoryId, advisory:issuerName, advisory:evidenceUrl, advisory:profileVersion, and advisory:appliesToActiveOnly."@en ;
+    rdfs:subClassOf prov:Entity .
+
+# ----------------------------------------------------------------------------
+# Required envelope properties
+# ----------------------------------------------------------------------------
+
+advisory:humanSummary a owl:DatatypeProperty ;
+    rdfs:label "Human Summary"@en ;
+    rdfs:comment "Plain-text, one-paragraph, patient-readable summary of what this advisory means and what (if anything) the user should do. REQUIRED on every advisory — the applier MUST reject patches without it. This is the string the queue UI shows the user when prompting for approval."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range xsd:string .
+
+advisory:advisoryClass a owl:ObjectProperty ;
+    rdfs:label "Advisory Class"@en ;
+    rdfs:comment "The taxonomic category of this advisory, drawn from the six published advisory:AdvisoryClass named individuals. Drives the cadence with which the pod checks for new advisories of this class and the default queue-vs-auto-apply behaviour."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range advisory:AdvisoryClass .
+
+advisory:issuer a owl:ObjectProperty ;
+    rdfs:label "Issuer"@en ;
+    rdfs:comment "The IRI (or DID) identifying the entity that signed this advisory. The pod compares this to its local advisory:TrustedIssuer graph to decide whether to honour the patch silently, queue it for explicit user trust review, or reject it. Range is advisory:TrustedIssuer when the issuer record has been resolved into the pod; xsd:anyURI when the patch is being parsed before resolution."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch .
+
+advisory:issuedAt a owl:DatatypeProperty ;
+    rdfs:label "Issued At"@en ;
+    rdfs:comment "ISO 8601 dateTime when the issuer signed this advisory. REQUIRED. Used both for ordering (later issuance supersedes earlier in a chain) and for signature freshness checks."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range xsd:dateTime .
+
+# ----------------------------------------------------------------------------
+# Optional envelope properties
+# ----------------------------------------------------------------------------
+
+advisory:advisoryId a owl:ObjectProperty ;
+    rdfs:label "Advisory Identifier"@en ;
+    rdfs:comment "Stable identifier IRI for this specific advisory. Used as the target of advisory:supersedes in later advisories that revise or replace this one. Optional but strongly recommended for any advisory that may be superseded later."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch .
+
+advisory:supersedes a owl:ObjectProperty ;
+    rdfs:label "Supersedes"@en ;
+    rdfs:comment "IRI of a prior advisory:CascadeAdvisoryPatch that this one revises or replaces. Forms a supersession chain. The pod MAY mark records produced by the prior advisory as superseded but MUST NOT delete them — supersession is monotonic and roll-forward auditable per CAP profile constraint C1."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range advisory:CascadeAdvisoryPatch .
+
+advisory:applicableUntil a owl:DatatypeProperty ;
+    rdfs:label "Applicable Until"@en ;
+    rdfs:comment "ISO 8601 dateTime after which this advisory should no longer be applied to new matches. The pod SHOULD still honour applications that occurred before this time. Used by both worked examples (BRCA2 reclassification, CPIC CYP2C19/warfarin) — the canonical name."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range xsd:dateTime .
+
+advisory:profileVersion a owl:DatatypeProperty ;
+    rdfs:label "Profile Version"@en ;
+    rdfs:comment "Version of the Cascade Advisory Patch profile this advisory conforms to (e.g. \"0.1\"). Lets the applier reject patches written against a profile version it does not implement."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range xsd:string .
+
+advisory:issuerName a owl:DatatypeProperty ;
+    rdfs:label "Issuer Display Name"@en ;
+    rdfs:comment "Human-readable display name for the issuer (e.g. \"ClinGen HBOP-VCEP\", \"CPIC\"). Convenience field for UI; the authoritative identity is advisory:issuer."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range xsd:string .
+
+advisory:evidenceUrl a owl:ObjectProperty ;
+    rdfs:label "Evidence URL"@en ;
+    rdfs:comment "IRI of the publicly-citable evidence supporting this advisory (a ClinVar evidence-repo entry, a CPIC guideline page, a published VCEP statement, etc.). Shown to the user in the queue UI as a 'learn more' link."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch .
+
+advisory:appliesToActiveOnly a owl:DatatypeProperty ;
+    rdfs:label "Applies To Active Records Only"@en ;
+    rdfs:comment "If true, the advisory should only fire when the matched record is currently 'active' according to the pod's domain semantics (e.g. a medication still on the active list, a condition not marked resolved). Used in PGx dosing advisories so the pod does not re-surface guidance for drugs the user discontinued."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range xsd:boolean .
+
+advisory:cadence a owl:ObjectProperty ;
+    rdfs:label "Cadence"@en ;
+    rdfs:comment "Optional override of the default check-cadence for this advisory class. If absent, the pod uses the cadence implied by advisory:advisoryClass."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range advisory:Cadence .
+
+# ============================================================================
+# Signature (per D-Q4: detached JWS Ed25519, RFC 7515)
+# ============================================================================
+
+advisory:signature a owl:DatatypeProperty ;
+    rdfs:label "Signature"@en ;
+    rdfs:comment "Detached JWS in RFC 7515 compact serialization carrying an Ed25519 signature over the canonicalized patch body. The protected header MUST include the JWS claims advisory:signatureIssuer (iss), advisory:signatureIssuedAt (iat), and advisory:signatureContentType (cty, fixed to 'application/x-cascade-advisory-patch'); MAY include advisory:signatureExpiresAt (exp). The signature is verified against the public key on the matching advisory:TrustedIssuer record. Per D-Q4, W3C VC 2.0 envelope wrapping is deferred to a later profile version."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range xsd:string .
+
+advisory:signatureIssuer a owl:DatatypeProperty ;
+    rdfs:label "Signature Issuer (iss)"@en ;
+    rdfs:comment "JWS 'iss' claim — the issuer URI asserted inside the signed envelope. The applier MUST verify this matches advisory:issuer on the unsigned envelope."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range xsd:string .
+
+advisory:signatureIssuedAt a owl:DatatypeProperty ;
+    rdfs:label "Signature Issued At (iat)"@en ;
+    rdfs:comment "JWS 'iat' claim — Unix epoch seconds at which the signature was produced. The applier MUST verify this is consistent with advisory:issuedAt within an implementation-defined skew tolerance."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range xsd:long .
+
+advisory:signatureExpiresAt a owl:DatatypeProperty ;
+    rdfs:label "Signature Expires At (exp)"@en ;
+    rdfs:comment "JWS 'exp' claim — Unix epoch seconds after which the signature itself is no longer valid (independent of advisory:applicableUntil, which scopes the clinical applicability)."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range xsd:long .
+
+advisory:signatureContentType a owl:DatatypeProperty ;
+    rdfs:label "Signature Content Type (cty)"@en ;
+    rdfs:comment "JWS 'cty' claim — fixed to 'application/x-cascade-advisory-patch' for v0.1. Lets generic JWS verifiers reject signatures intended for other media types."@en ;
+    rdfs:domain advisory:CascadeAdvisoryPatch ;
+    rdfs:range xsd:string .
+
+# ============================================================================
+# AdvisoryClass taxonomy (six named individuals)
+# ============================================================================
+# The cadence comments below reference the tiered-cadence guidance in
+# drafts/REPORT-genomics-and-advisory.md (Mersch et al. 2018 ~25% of VUSes
+# reclassify within 9 years, lumpy with VCEP batches; SafetyCritical must
+# fire fast or it isn't safety-critical; carrier-frequency updates are
+# slow-moving population-genetics deltas).
+# ============================================================================
+
+advisory:AdvisoryClass a owl:Class ;
+    rdfs:label "Advisory Class"@en ;
+    rdfs:comment "Closed taxonomy of advisory categories. The class drives the recommended check cadence and the default queue-vs-auto-apply UX. v0.1 ships six named individuals; new classes require a vocabulary version bump."@en .
+
+advisory:SafetyCritical a owl:NamedIndividual, advisory:AdvisoryClass ;
+    rdfs:label "Safety-Critical"@en ;
+    rdfs:comment "An advisory that, if not surfaced quickly, may put the user at material clinical risk (e.g. a drug recall, a black-box warning added to a medication the user is taking, an urgent revocation of a prior reclassification). Recommended cadence: every app open. Default UX: surface as an in-app banner immediately on next open; do not silently auto-apply unless the user has explicitly opted in for this issuer."@en .
+
+advisory:VariantReclassification a owl:NamedIndividual, advisory:AdvisoryClass ;
+    rdfs:label "Variant Reclassification"@en ;
+    rdfs:comment "An advisory that updates the ACMG (or comparable) clinical classification of a previously interpreted variant — typically VUS to Likely Pathogenic, Likely Pathogenic to Pathogenic, or downgrade in the opposite direction. Recommended cadence: monthly. Default UX: queue for user review with the prior interpretation shown alongside the proposed new one; encourage re-engagement with a genetic counselor."@en .
+
+advisory:DrugInteraction a owl:NamedIndividual, advisory:AdvisoryClass ;
+    rdfs:label "Drug Interaction / PGx Update"@en ;
+    rdfs:comment "An advisory carrying new or updated pharmacogenetic dosing guidance (e.g. CPIC-style guideline revisions tied to a star allele or diplotype). Recommended cadence: monthly. Default UX: queue for review when the relevant medication is on the user's active list; suppress when not (see advisory:appliesToActiveOnly)."@en .
+
+advisory:LabReferenceRangeUpdate a owl:NamedIndividual, advisory:AdvisoryClass ;
+    rdfs:label "Lab Reference Range Update"@en ;
+    rdfs:comment "An advisory that updates the reference range, units, or interpretation thresholds for a lab analyte (e.g. a new age-specific HbA1c band, a unit harmonization). Recommended cadence: quarterly. Default UX: silent auto-apply when the issuer is on the auto-apply policy for this class, since the change is typically a non-clinical re-display."@en .
+
+advisory:SurveillanceGuidelineUpdate a owl:NamedIndividual, advisory:AdvisoryClass ;
+    rdfs:label "Surveillance Guideline Update"@en ;
+    rdfs:comment "An advisory carrying changes to recommended surveillance protocols (e.g. NCCN updating screening intervals for BRCA1/2 carriers, ACMG secondary-finding actionability list edits). Recommended cadence: quarterly to annual. Default UX: queue for review and link to the published guideline."@en .
+
+advisory:CarrierFrequencyUpdate a owl:NamedIndividual, advisory:AdvisoryClass ;
+    rdfs:label "Carrier Frequency Update"@en ;
+    rdfs:comment "An advisory updating population carrier-frequency or allele-frequency estimates used in residual-risk calculations (e.g. gnomAD release deltas, ancestry-specific frequency revisions). Recommended cadence: annual. Default UX: silent auto-apply when the issuer is on the auto-apply policy, since these are population-level reference-data refreshes."@en .
+
+# ============================================================================
+# Cadence enum
+# ============================================================================
+
+advisory:Cadence a owl:Class ;
+    rdfs:label "Cadence"@en ;
+    rdfs:comment "Closed enumeration of recommended check-cadence values for advisories. Used as the range of advisory:cadence on a CascadeAdvisoryPatch (per-advisory override) and as the implied cadence of each advisory:AdvisoryClass."@en .
+
+advisory:EveryAppOpen a owl:NamedIndividual, advisory:Cadence ;
+    rdfs:label "Every App Open"@en ;
+    rdfs:comment "Pod checks for new advisories of this class on every foregrounding of the app. Reserved for SafetyCritical."@en .
+
+advisory:Daily a owl:NamedIndividual, advisory:Cadence ;
+    rdfs:label "Daily"@en ;
+    rdfs:comment "Pod checks at most once per calendar day."@en .
+
+advisory:Weekly a owl:NamedIndividual, advisory:Cadence ;
+    rdfs:label "Weekly"@en ;
+    rdfs:comment "Pod checks at most once per calendar week."@en .
+
+advisory:Monthly a owl:NamedIndividual, advisory:Cadence ;
+    rdfs:label "Monthly"@en ;
+    rdfs:comment "Pod checks at most once per calendar month. Default cadence for VariantReclassification and DrugInteraction."@en .
+
+advisory:Quarterly a owl:NamedIndividual, advisory:Cadence ;
+    rdfs:label "Quarterly"@en ;
+    rdfs:comment "Pod checks at most once per calendar quarter. Default cadence for LabReferenceRangeUpdate and the lower bound for SurveillanceGuidelineUpdate."@en .
+
+advisory:Annually a owl:NamedIndividual, advisory:Cadence ;
+    rdfs:label "Annually"@en ;
+    rdfs:comment "Pod checks at most once per calendar year. Default cadence for CarrierFrequencyUpdate and the upper bound for SurveillanceGuidelineUpdate."@en .
+
+# ============================================================================
+# TrustedIssuer (per D-Q3: per-pod, lives in <pod>/trust/issuers.ttl)
+# ============================================================================
+
+advisory:TrustedIssuer a owl:Class ;
+    rdfs:label "Trusted Issuer"@en ;
+    rdfs:comment "An issuer the pod has chosen to trust. Lives per-pod (typically at <pod>/trust/issuers.ttl) — the protocol does NOT define a centralized registry. How the pod populates this graph (cascade-cli starter list, user-added in-app, imported from a community-driven registry URL, or verified via DID) is operational and is captured per-record by advisory:trustSource. Per D-Q3 the protocol is positioned as an extensible framework rather than a gatekeeper; community-driven issuer evaluation and certification is a separate, parallel workstream."@en .
+
+advisory:trustedIssuerId a owl:DatatypeProperty ;
+    rdfs:label "Trusted Issuer Identifier"@en ;
+    rdfs:comment "The IRI (HTTPS URL or DID) that uniquely identifies this issuer. MUST equal the value of advisory:issuer on any patch this issuer signs."@en ;
+    rdfs:domain advisory:TrustedIssuer ;
+    rdfs:range xsd:anyURI .
+
+advisory:trustedIssuerName a owl:DatatypeProperty ;
+    rdfs:label "Trusted Issuer Display Name"@en ;
+    rdfs:comment "Human-readable name shown in pod UI when describing this issuer (e.g. 'ClinGen HBOP-VCEP', 'CPIC')."@en ;
+    rdfs:domain advisory:TrustedIssuer ;
+    rdfs:range xsd:string .
+
+advisory:trustedIssuerPublicKey a owl:DatatypeProperty ;
+    rdfs:label "Trusted Issuer Public Key"@en ;
+    rdfs:comment "The Ed25519 public key (per D-Q4) used to verify advisory:signature on patches issued by this issuer. Encoded as a JWK (RFC 7517) JSON string or as multibase-encoded raw key bytes; SHACL shapes constrain the exact form."@en ;
+    rdfs:domain advisory:TrustedIssuer ;
+    rdfs:range xsd:string .
+
+advisory:trustSource a owl:ObjectProperty ;
+    rdfs:label "Trust Source"@en ;
+    rdfs:comment "Provenance flag indicating how this issuer was added to the pod's trust graph. Used by UI to differentiate cascade-recommended starters from user-curated additions and to surface 'imported from community registry' provenance."@en ;
+    rdfs:domain advisory:TrustedIssuer ;
+    rdfs:range advisory:TrustSourceEnum .
+
+advisory:trustAddedAt a owl:DatatypeProperty ;
+    rdfs:label "Trust Added At"@en ;
+    rdfs:comment "ISO 8601 dateTime when this issuer was added to the pod's trust graph."@en ;
+    rdfs:domain advisory:TrustedIssuer ;
+    rdfs:range xsd:dateTime .
+
+advisory:TrustSourceEnum a owl:Class ;
+    rdfs:label "Trust Source Enumeration"@en ;
+    rdfs:comment "Closed enumeration of the ways an advisory:TrustedIssuer record may have entered the pod's trust graph."@en .
+
+advisory:RecommendedStarterList a owl:NamedIndividual, advisory:TrustSourceEnum ;
+    rdfs:label "Recommended Starter List"@en ;
+    rdfs:comment "Issuer was seeded by `cascade-cli init` from the cascade-recommended starter list (e.g. ClinGen, CPIC, NCCN). The list is a non-binding suggestion; the user retains authority to remove any of these issuers."@en .
+
+advisory:UserAdded a owl:NamedIndividual, advisory:TrustSourceEnum ;
+    rdfs:label "User Added"@en ;
+    rdfs:comment "Issuer was explicitly added by the user in-app, typically by pasting an issuer URI or scanning a QR code provided by the issuer."@en .
+
+advisory:ImportedFromRegistry a owl:NamedIndividual, advisory:TrustSourceEnum ;
+    rdfs:label "Imported From Registry"@en ;
+    rdfs:comment "Issuer was imported from a community-driven issuer registry URL the user chose to consult. Forward-compatibility hook for the parallel issuer-certification workstream."@en .
+
+advisory:VerifiedViaDID a owl:NamedIndividual, advisory:TrustSourceEnum ;
+    rdfs:label "Verified Via DID"@en ;
+    rdfs:comment "Issuer identifier was resolved as a Decentralized Identifier and the DID document chain was verified at trust-add time. Forward-compatibility hook for DID-based issuer identity."@en .
+
+# ============================================================================
+# AutoApplyPolicy
+# ============================================================================
+
+advisory:AutoApplyPolicy a owl:Class ;
+    rdfs:label "Auto-Apply Policy"@en ;
+    rdfs:comment "A per-pod policy declaring which (issuer x advisoryClass) pairs the pod will apply silently rather than queueing for explicit user approval. Auto-apply is opt-in by default; the user adds policy records explicitly. Each record points at one or more advisory:AutoApplyScope tuples."@en .
+
+advisory:appliesTo a owl:ObjectProperty ;
+    rdfs:label "Applies To (Auto-Apply Scope)"@en ;
+    rdfs:comment "Links a policy to one or more advisory:AutoApplyScope records, each pairing an issuer with an advisory class. A patch matches the policy when its (advisory:issuer, advisory:advisoryClass) tuple equals at least one of the linked scopes."@en ;
+    rdfs:domain advisory:AutoApplyPolicy ;
+    rdfs:range advisory:AutoApplyScope .
+
+advisory:effectiveFrom a owl:DatatypeProperty ;
+    rdfs:label "Effective From"@en ;
+    rdfs:comment "ISO 8601 dateTime from which the policy is active. Patches issued or applied before this time fall back to queue-for-approval."@en ;
+    rdfs:domain advisory:AutoApplyPolicy ;
+    rdfs:range xsd:dateTime .
+
+advisory:effectiveUntil a owl:DatatypeProperty ;
+    rdfs:label "Effective Until"@en ;
+    rdfs:comment "ISO 8601 dateTime after which the policy is no longer active. Optional — absence means the policy stays active until the user revokes it."@en ;
+    rdfs:domain advisory:AutoApplyPolicy ;
+    rdfs:range xsd:dateTime .
+
+advisory:requiresQuorum a owl:DatatypeProperty ;
+    rdfs:label "Requires Quorum"@en ;
+    rdfs:comment "Forward-compatibility flag for v1.0 counter-signing. When true, the policy will only auto-apply if the patch carries signatures from a quorum of trusted issuers (rather than just one). Declared in v0.1 for forward compatibility but unused — the v0.1 applier MUST treat this as if absent and ignore counter-signatures."@en ;
+    rdfs:domain advisory:AutoApplyPolicy ;
+    rdfs:range xsd:boolean .
+
+advisory:AutoApplyScope a owl:Class ;
+    rdfs:label "Auto-Apply Scope"@en ;
+    rdfs:comment "One (issuer, advisoryClass) tuple authorizing silent auto-application. Reusable across multiple AutoApplyPolicy records."@en .
+
+advisory:scopeIssuer a owl:ObjectProperty ;
+    rdfs:label "Scope Issuer"@en ;
+    rdfs:comment "The trusted issuer this scope authorizes."@en ;
+    rdfs:domain advisory:AutoApplyScope ;
+    rdfs:range advisory:TrustedIssuer .
+
+advisory:scopeAdvisoryClass a owl:ObjectProperty ;
+    rdfs:label "Scope Advisory Class"@en ;
+    rdfs:comment "The advisory class this scope authorizes for the paired issuer. Use one of the six published advisory:AdvisoryClass named individuals."@en ;
+    rdfs:domain advisory:AutoApplyScope ;
+    rdfs:range advisory:AdvisoryClass .
+
+# ============================================================================
+# Cross-references (declared in core v3.1, NOT redeclared here)
+# ============================================================================
+# - cascade:AdvisoryApplicationActivity (rdfs:subClassOf prov:Activity) records
+#   the application of a CAP to a pod. Use:
+#     <activity> a cascade:AdvisoryApplicationActivity ;
+#                prov:used <patch-iri> ;
+#                prov:used <matched-record-iri> ;
+#                prov:startedAtTime <when-applied>^^xsd:dateTime .
+#   Records produced by the patch carry prov:wasGeneratedBy <activity>.
+
+# ============================================================================
+# Pod Storage Paths (Recommended)
+# ============================================================================
+# /trust/issuers.ttl                 - advisory:TrustedIssuer graph (per D-Q3)
+# /trust/auto-apply.ttl              - advisory:AutoApplyPolicy + Scope graph
+# /advisories/queued/<id>.ldpatch    - patches awaiting user approval
+# /advisories/applied/<id>.ldpatch   - patches that have been applied
+# /advisories/inapplicable/<id>.ldpatch - patches with zero Bind matches
+# /provenance/advisory-applications/<id>.ttl
+#                                   - cascade:AdvisoryApplicationActivity
+#                                     records, one per application
+
+# ============================================================================
+# Notes
+# ============================================================================
+# Data Classification: Clinical knowledge updates (issuer-curated)
+# Underlying syntax: W3C LDPatch (Recommendation, 2015), constrained per
+#                    drafts/advisory-v1/PROFILE.md
+# Signing: Detached JWS Ed25519 (RFC 7515) per D-Q4; W3C VC 2.0 wrapping
+#          deferred to a later profile version.
+# Trust model: Per-pod (D-Q3). The protocol ships a recommended starter list
+#              via cascade-cli but does not operate a centralized registry.
+
+# DRAFT STATUS: This vocabulary is under active development. Property names,
+# ranges, and structure may change before v1.0 stable release.
