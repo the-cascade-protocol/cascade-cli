@@ -1,0 +1,168 @@
+name: Release to npm
+
+# Publishing is driven by the tag, so a version can no longer be bumped in
+# package.json, tagged, and then silently never shipped -- which is exactly what
+# happened to 0.11.0, a version that exists as a git tag and has never existed on
+# npm. Pushing v0.13.0 is what publishes 0.13.0, and the job refuses to proceed
+# if those two numbers disagree.
+#
+# Authentication is npm Trusted Publishing (OIDC): no NPM_TOKEN is stored in this
+# repository. Before the first run, configure the trusted publisher at
+# https://www.npmjs.com/package/@the-cascade-protocol/cli/access with:
+#
+#   Organization/user:    the-cascade-protocol
+#   Repository:           cascade-cli
+#   Workflow filename:    release.yml
+#   Environment:          npm
+#
+# Trusted publishing requires npm >= 11.5.1 and a cloud-hosted runner.
+# Provenance is generated automatically, so --provenance is not passed.
+#
+# The environment setup below deliberately mirrors tests.yml. If that file gains
+# a dependency, this one needs it too, or releases will start failing on a suite
+# that passes in CI.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  # Tests that are KNOWN to skip on a runner, and why.
+  #
+  # The reference patient pod lives in cascadeprotocol.org, a PRIVATE repository
+  # that is not checked out here, and the suites that read it are guarded by
+  # `describe.skipIf(!existsSync(REFERENCE_POD))`. On a runner they therefore
+  # vanish rather than fail. Locally, with the pod present, the same suite runs
+  # 1676 tests with ZERO skips.
+  #
+  # This number is a ratchet, not a tolerance. It fails the release in BOTH
+  # directions on purpose: if it grows, some test started silently not running
+  # and a release must not ship on that; if it shrinks, the gap genuinely closed
+  # and the baseline should be lowered in the same commit that closed it. Either
+  # way the number stays honest instead of drifting into a rubber stamp.
+  EXPECTED_SKIPPED_TESTS: '64'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      # Required for Trusted Publishing and the provenance attestation.
+      id-token: write
+
+    steps:
+      # cascade-cli goes in a subdirectory so the conformance fixtures repo can
+      # sit next to it; several suites read fixtures via `../../conformance`.
+      - name: Checkout cascade-cli
+        uses: actions/checkout@v4
+        with:
+          path: cascade-cli
+
+      - name: Checkout conformance fixtures
+        uses: actions/checkout@v4
+        with:
+          repository: the-cascade-protocol/conformance
+          path: conformance
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+          cache-dependency-path: cascade-cli/package-lock.json
+
+      # setup-node bundles whatever npm shipped with the Node release, which can
+      # predate trusted publishing. Pin the floor explicitly rather than hoping.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
+
+      # The five *-conformance suites canonicalize Turtle through Apache Jena's
+      # `riot` (execFileSync) for byte-equal comparison, so it must be on PATH.
+      - name: Set up Java (Apache Jena runtime)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Apache Jena (riot)
+        run: |
+          set -euo pipefail
+          JENA_VERSION=5.6.0
+          curl -fsSL "https://archive.apache.org/dist/jena/binaries/apache-jena-${JENA_VERSION}.tar.gz" -o "${RUNNER_TEMP}/jena.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/jena.tar.gz" -C "${RUNNER_TEMP}"
+          echo "${RUNNER_TEMP}/apache-jena-${JENA_VERSION}/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify riot is available
+        run: riot --version
+
+      - name: Install dependencies
+        working-directory: cascade-cli
+        run: npm ci
+
+      # A tag that disagrees with package.json would publish a version nobody
+      # asked for. npm allows unpublish only within 72 hours.
+      - name: Refuse to publish if the tag and package.json disagree
+        working-directory: cascade-cli
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          echo "tag=${tag} package.json=${pkg}"
+          if [ "${tag}" != "${pkg}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${pkg}"
+            exit 1
+          fi
+
+      - name: Build
+        working-directory: cascade-cli
+        run: npm run build
+
+      # pipefail is load-bearing: without it the pipeline's status is tee's, so a
+      # failing test suite would report success and the release would ship.
+      - name: Test
+        working-directory: cascade-cli
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee "${RUNNER_TEMP}/test-output.txt"
+
+      # Green is not the same as complete. Without this, a release could ship on
+      # a run where an entire suite quietly stopped executing.
+      - name: Refuse to publish if the skip count moved
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/test-output.txt"
+
+          # Vitest prints "Tests  N passed | M skipped (T)". Absent the skip
+          # clause there were no skips at all.
+          summary="$(grep -aE '^[[:space:]]*Tests[[:space:]]' "${out}" | tail -1 || true)"
+          if [ -z "${summary}" ]; then
+            echo "::error::Could not find the vitest summary line; refusing to publish on an unreadable test result."
+            exit 1
+          fi
+          echo "summary: ${summary}"
+
+          skipped="$(printf '%s' "${summary}" | sed -n 's/.*[^0-9]\([0-9][0-9]*\) skipped.*/\1/p')"
+          [ -n "${skipped}" ] || skipped=0
+          echo "skipped=${skipped} expected=${EXPECTED_SKIPPED_TESTS}"
+
+          if [ "${skipped}" -gt "${EXPECTED_SKIPPED_TESTS}" ]; then
+            echo "::error::${skipped} tests skipped, expected ${EXPECTED_SKIPPED_TESTS}. Something stopped running; a release must not ship on a suite that shrank."
+            exit 1
+          fi
+          if [ "${skipped}" -lt "${EXPECTED_SKIPPED_TESTS}" ]; then
+            echo "::error::Only ${skipped} tests skipped, expected ${EXPECTED_SKIPPED_TESTS}. That is good news: lower EXPECTED_SKIPPED_TESTS in this workflow in the same change that closed the gap, so the ratchet keeps its meaning."
+            exit 1
+          fi
+
+      # No NODE_AUTH_TOKEN: the OIDC token minted by id-token: write is the
+      # credential.
+      - name: Publish to npm
+        working-directory: cascade-cli
+        run: npm publish
