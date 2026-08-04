@@ -82,7 +82,7 @@ interface ImportReport {
      * `recordsAdded` counts every subject WRITTEN, which on the cross-batch
      * replace path is the file's whole post-merge content, so on a re-import of
      * data the pod already has it equals the total and reads as if everything
-     * were new (root 3.53).
+     * were new.
      */
     recordsNew: number;
     type: string;
@@ -97,7 +97,7 @@ interface ImportReport {
    * Of `totalRecordsImported`, how many subjects the pod did not already hold,
    * and how many it did. An honest re-import summary: a 100% duplicate import
    * reports `recordsNew: 0` instead of restating the whole pod as if it were
-   * fresh. The fuller {new, duplicate, conflict} record report is root 1.5;
+   * fresh. The fuller {new, duplicate, conflict} record report is tracked separately;
    * these two are the subset of it this command can answer from disk today.
    */
   recordsNew: number;
@@ -106,7 +106,7 @@ interface ImportReport {
    * Cross-record edge resolution tally across all converted inputs: how many
    * reference edges (clinical:hasLabResult, coverage:relatedClaim) were written
    * as resolved subject IRIs vs dropped because the referenced record was not in
-   * the batch. The fuller {new, duplicate, conflict} record report is root 1.5.
+   * the batch. The fuller {new, duplicate, conflict} record report is tracked separately.
    */
   edgeResolution: {
     resolved: number;
@@ -119,7 +119,7 @@ interface ImportReport {
      * invocation turned into edges. On a re-import of data the pod already has,
      * the reconciler recognizes those edges as already stated and there is
      * nothing left to resolve, so the deltas legitimately fall to zero — which
-     * read as edge LOSS while being the opposite (root 3.53). This total is the
+     * read as edge LOSS while being the opposite. This total is the
      * number a "K of N and J linked" surface wants: stable across re-imports.
      */
     totalInPod: number;
@@ -514,7 +514,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         // exception is an input that resolves INSIDE the destination pod — an
         // app writing a bundle to `<pod>/analysis/<id>.ttl` and importing the
         // file it just wrote. That is a pod resource, so on an encrypted pod it
-        // must be read through the DEK we already resolved above (root 4.23).
+        // must be read through the DEK we already resolved above.
         // Containment is decided by the filesystem, not by a flag, because a
         // flag would eventually be passed for a genuinely external file.
         let rawBytes: Buffer;
@@ -528,9 +528,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
               if (!(e instanceof PodDecryptError)) throw e;
               // A pod-internal resource that does not authenticate under the pod
               // DEK is a plaintext leftover. `pod encrypt` now walks the whole
-              // pod (root 4.25), so a pod sealed by THIS build has none, but
+              // pod, so a pod sealed by THIS build has none, but
               // three sources still produce them: pods sealed by an older CLI,
-              // the MCP surface's plaintext writes (root 3.36), and any file a
+              // the MCP surface's plaintext writes, and any file a
               // migration pass deliberately left alone. Read it as plaintext
               // rather than failing an import that would otherwise succeed.
               //
@@ -564,7 +564,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         // the fast path; a missing or unrecognized extension is decided by
         // sniffing the bytes, because real portal downloads arrive
         // extension-less and an IHE XDM zip that reaches the Turtle parser dies
-        // with `Unexpected "PK..."` (root 2.8).
+        // with `Unexpected "PK..."`.
         const inputKind = classifyImportInput(absPath, rawBytes);
         if (inputKind === 'ccda') {
           // C-CDA ZIP or XML — convert natively
@@ -614,7 +614,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           // another file of this import or already in the pod (an Apple Health
           // export is one resource per file), so BOTH the lift and the
           // cross-record reference resolution run once below over the merged
-          // result instead of per file (root backlog 2.11). Per-file resolution
+          // result instead of per file. Per-file resolution
           // would drop every cross-file edge as unresolved.
           const result = await convert(content, 'fhir', 'cascade', 'turtle', systemName, passthroughMinimal, entry.source?.sourceEhr, true, true);
           if (!result.success) {
@@ -670,7 +670,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       let mergedTurtle: string;
       let reconciliationSummary: object | undefined;
       // Count of record-to-record edge objects the reconciler redirected from a
-      // merged-away subject to its survivor (R4, root backlog 3.13a).
+      // merged-away subject to its survivor.
       let reconciledEdgeRewrites = 0;
 
       // Load existing pod data as an implicit source 0 when --reconcile-existing is set
@@ -736,7 +736,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           //
           // Zero conflicts and no existing file means there is nothing to say:
           // creating a prefixes-only pending-conflicts.ttl announced a conflict
-          // queue that does not exist (root 3.53). An existing file is still
+          // queue that does not exist. An existing file is still
           // rewritten when the list is empty, because "no conflicts remain" has
           // to be able to CLEAR stale entries from an earlier import.
           const conflictsFile = path.join(podDir, 'settings', 'pending-conflicts.ttl');
@@ -766,7 +766,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         return;
       }
 
-      // --- Step 4a2: Resolve cross-record reference edges (R5, root 2.11) ---
+      // --- Step 4a2: Resolve cross-record reference edges ---
       // The FHIR converter deferred reference resolution (each file was
       // converted separately, and an Apple Health export is one resource per
       // file, so a reference's target was almost never in the same batch). Every
@@ -828,7 +828,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // over the final quad set, because the per-run `resolved`/`unresolved`
       // deltas fall to zero on a re-import whose edges the pod already states —
       // honest as a delta, but read as edge loss by any surface that shows the
-      // linked-record count (root 3.53).
+      // linked-record count.
       for (const [, quads] of subjectQuads) {
         for (const q of quads) {
           if (!RECORD_EDGE_PREDICATES.has(q.predicate.value)) continue;
@@ -1130,7 +1130,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         }
         console.log(`  Sources:          ${sourceReport.length} file(s)`);
         // "Records imported: 243" on a re-import of 243 records the pod already
-        // held read as 243 fresh records. Name the duplicates (root 3.53).
+        // held read as 243 fresh records. Name the duplicates.
         console.log(
           `  Records imported: ${totalRecordsImported}` +
             (recordsAlreadyPresent > 0
@@ -1169,7 +1169,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         if (edgeTotal > 0) {
           // Lead with the number the pod HOLDS. The per-run "resolved" count
           // legitimately falls to zero on a re-import whose edges are already
-          // stated, and on its own that reads as edge loss (root 3.53).
+          // stated, and on its own that reads as edge loss.
           console.log(`  Record-to-record edges: ${edgeResolution.totalInPod} in pod` +
             ` (${edgeResolution.resolved} newly resolved this import` +
             (edgeResolution.unresolved > 0 ? `, ${edgeResolution.unresolved} dropped (reference target not in import)` : '') +

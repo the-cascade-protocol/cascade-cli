@@ -1,5 +1,5 @@
 /**
- * Tests for the graph query surface (root backlog 4.6, slice Q1).
+ * Tests for the graph query surface (slice Q1).
  *
  * `pod query` gains a read-only graph surface over the stored forward edges:
  *   - `--neighbors <iri> [--hops N] [--edge <pred>...]` — bounded, both-directions

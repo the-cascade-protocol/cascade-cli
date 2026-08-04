@@ -1,5 +1,5 @@
 /**
- * Regression tests for the type-index prefix self-heal (root backlog 1.6, slice R0).
+ * Regression tests for the type-index prefix self-heal (slice R0).
  *
  * When `cascade pod import` appends a `solid:TypeRegistration` block to a type
  * index, the block's `solid:forClass` CURIE may use any Cascade prefix

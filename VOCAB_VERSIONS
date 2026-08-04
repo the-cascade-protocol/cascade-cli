@@ -54,6 +54,8 @@
 #   here. tests/shapes-sync.test.ts now pins these rows to the owl:versionInfo
 #   of the synced ontology, so a bump without a sync (or a sync without a bump)
 #   fails the suite.
+# Updated 2026-08-04: removed internal tracker references from the bundled
+#   shapes comments. Comment-only; no vocabulary version changed.
 core=3.4
 health=2.5
 clinical=1.13

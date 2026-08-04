@@ -1,12 +1,12 @@
 /**
- * Re-import duplication of stated record-to-record edges (root backlog 2.22).
+ * Re-import duplication of stated record-to-record edges.
  *
  * A stated edge reaches the reconciler in two different shapes, and full
  * quad-identity dedup cannot see that they are one statement:
  *
  *   - RESOLVED, as the pod holds it:     <proc> clinical:hasEncounter <urn:uuid:enc>
  *   - a PLACEHOLDER, as a fresh convert emits it (reference resolution is deferred
- *     to once per import invocation, R5 / root 2.11)
+ *     to once per import invocation, R5)
  *
  * On a re-import the pod contributes the first and the new input the second, both
  * survived, the caller resolved the placeholder to the same target, and the
@@ -18,7 +18,7 @@
  * The reconciler now keys each passthrough edge on where its object RESOLVES TO.
  * These tests lock that in, plus the two other things a fully duplicate import
  * has to get right: reconciler bookkeeping must not accumulate, and the summary
- * must count the duplicates it silently dropped (root 3.53).
+ * must count the duplicates it silently dropped.
  *
  * All data is synthetic and PHI-free.
  */
@@ -99,7 +99,7 @@ function objectsOf(ttl: string, subject: string, predicate: string): string[] {
     .map((q) => q.object.value);
 }
 
-describe('reconciler: a re-imported stated edge is kept exactly once (root 2.22)', () => {
+describe('reconciler: a re-imported stated edge is kept exactly once', () => {
   it('collapses the pod-resolved edge and the re-imported placeholder into one', async () => {
     const result = await runReconciliation([
       { content: podTurtle(), systemName: 'existing-pod' },
@@ -174,7 +174,7 @@ describe('reconciler: a re-imported stated edge is kept exactly once (root 2.22)
     expect(objectsOf(third.turtle, LAB_URI, RECONCILIATION_STATUS)).toHaveLength(1);
   });
 
-  it('counts the duplicate subjects it dropped instead of reporting zero (root 3.53)', async () => {
+  it('counts the duplicate subjects it dropped instead of reporting zero', async () => {
     // The same content-hashed subject arriving twice is a re-import of one record.
     // It was already deduplicated, but reported as if nothing had been a duplicate.
     const withLab = await runReconciliation([

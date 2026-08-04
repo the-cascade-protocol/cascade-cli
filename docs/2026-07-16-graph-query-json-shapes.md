@@ -1,6 +1,6 @@
 # Graph query surface: JSON output shapes (contract)
 
-**Command:** `cascade pod query` (root backlog 4.6, slice Q1)
+**Command:** `cascade pod query` (slice Q1)
 **Date:** 2026-07-16
 **Audience:** Workbench GraphFactRetriever (G1), the agent's jq usage, the Workbench tauri harness (which mocks these shapes per scenario).
 
@@ -112,7 +112,7 @@ record subjects and any record-to-record edges to or from them flow through the
 generic edge definition with no change here. Encrypted pods decrypt transparently
 before parsing, exactly like `query --all`.
 
-Note (per root backlog 3.10): a dedicated `--notes` / assertions **query verb**
+Note: a dedicated `--notes` / assertions **query verb**
 is still out of scope for this slice. The point above is only that the graph load
 does not *exclude* those containers; it does not add a semantic notes surface.
 

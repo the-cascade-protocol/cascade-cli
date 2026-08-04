@@ -4,7 +4,7 @@
  *
  * Three defects, one path — the monthly re-sync:
  *
- *  - root 2.22: record-to-record edges were appended again on every re-import.
+ *  -: record-to-record edges were appended again on every re-import.
  *    The pod holds an edge RESOLVED; a fresh conversion emits it as a placeholder
  *    (reference resolution is deferred to once per import invocation, R5); quad
  *    identity could not see they were one statement, so the subject ended up
@@ -12,9 +12,9 @@
  *    bundle's 11 stated edges became 17 statements and Turtle grew 19282 -> 20807
  *    bytes (+7.9%), while `cascade:reconciliationStatus` grew without bound
  *    (0 -> 5 -> 10 across three imports).
- *  - root 3.53: the summary reported a 100% duplicate import as if every record
+ *  -: the summary reported a 100% duplicate import as if every record
  *    were new, and created a prefixes-only `settings/pending-conflicts.ttl`.
- *  - root 3.52: `--report` was silently ignored under `--dry-run`, which is the
+ *  -: `--report` was silently ignored under `--dry-run`, which is the
  *    one place a machine-readable preflight matters most.
  *
  * All fixtures are synthetic and PHI-free.
@@ -122,7 +122,7 @@ function duplicateTriples(podDir: string): string[] {
   return [...seen.entries()].filter(([, n]) => n > 1).map(([k]) => k);
 }
 
-describe('pod import: an identical re-import leaves the pod unchanged (root 2.22)', () => {
+describe('pod import: an identical re-import leaves the pod unchanged', () => {
   let podDir: string;
   let report1: ImportReport;
   let report2: ImportReport;
@@ -181,7 +181,7 @@ describe('pod import: an identical re-import leaves the pod unchanged (root 2.22
     expect(report3.edgeResolution.totalInPod).toBe(report1.edgeResolution.totalInPod);
   });
 
-  it('reports the re-import honestly: nothing new, everything already present (root 3.53)', () => {
+  it('reports the re-import honestly: nothing new, everything already present', () => {
     // Import 1 into a fresh pod: all new.
     expect(report1.recordsNew).toBe(report1.totalRecordsImported);
     expect(report1.recordsAlreadyPresent).toBe(0);
@@ -194,7 +194,7 @@ describe('pod import: an identical re-import leaves the pod unchanged (root 2.22
     expect(report2.reconciliation.summary?.duplicateSubjectsDropped).toBeGreaterThan(0);
   });
 
-  it('does not degrade the edge numbers into looking like edge loss (root 3.53)', () => {
+  it('does not degrade the edge numbers into looking like edge loss', () => {
     // The per-run delta legitimately falls to zero — there is nothing left to
     // resolve — but the number a "K of N linked" surface reads must not move.
     expect(report2.edgeResolution.resolved).toBe(0);
@@ -204,7 +204,7 @@ describe('pod import: an identical re-import leaves the pod unchanged (root 2.22
     }
   });
 
-  it('does not create an empty pending-conflicts.ttl when nothing is pending (root 3.53)', () => {
+  it('does not create an empty pending-conflicts.ttl when nothing is pending', () => {
     // This fixture produces no conflicts, so announcing a conflict queue that
     // holds nothing but @prefix lines is a lie a GUI has to special-case.
     expect(fs.existsSync(path.join(podDir, 'settings', 'pending-conflicts.ttl'))).toBe(false);
@@ -258,7 +258,7 @@ describe('pod import: a single-bundle re-import settles and never duplicates an 
   });
 });
 
-describe('pod import: --report under --dry-run (root 3.52)', () => {
+describe('pod import: --report under --dry-run', () => {
   it('writes the report a dry run would produce, and still touches nothing in the pod', () => {
     const podDir = newPod('cascade-dryrun-report-');
     const before = podSnapshot(podDir);

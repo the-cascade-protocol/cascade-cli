@@ -331,7 +331,7 @@ describe('C-CDA converter — narrative-only section (P4-F)', () => {
 });
 
 // =============================================================================
-// R2: BATTERY lab panel materialization + membership edges (root backlog 3.11a)
+// R2: BATTERY lab panel materialization + membership edges
 // =============================================================================
 
 const CLINICAL = 'https://ns.cascadeprotocol.org/clinical/v1#';
@@ -340,7 +340,7 @@ const CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const LOINC = 'http://loinc.org/rdf#';
 
-describe('C-CDA converter — lab panel materialization (R2, root 3.11a)', () => {
+describe('C-CDA converter — lab panel materialization', () => {
   const readLocal = () => fs.readFileSync(path.join(LOCAL_FIXTURES_DIR, 'ccda-lab-panel.xml'), 'utf-8');
 
   it('materializes exactly one LaboratoryReport per BATTERY organizer with the expected panel fields', async () => {
@@ -462,10 +462,10 @@ describe('C-CDA converter — lab panel materialization (R2, root 3.11a)', () =>
 });
 
 // =============================================================================
-// R3: C-CDA encounter extraction + panel-to-visit edges (root backlog 3.11 c/d)
+// R3: C-CDA encounter extraction + panel-to-visit edges (c/d)
 // =============================================================================
 
-describe('C-CDA converter — encounter extraction and hasEncounter edges (R3, root 3.11c/d)', () => {
+describe('C-CDA converter — encounter extraction and hasEncounter edges (R3)', () => {
   const readLocal = () => fs.readFileSync(path.join(LOCAL_FIXTURES_DIR, 'ccda-encounter-panel.xml'), 'utf-8');
 
   it('mints one populated clinical:Encounter per distinct visit, deduped across member observations', async () => {

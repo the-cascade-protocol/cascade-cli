@@ -1,5 +1,5 @@
 /**
- * Re-import importedAt duplication (root backlog 1.5, symptom 3).
+ * Re-import importedAt duplication.
  *
  * Passthrough subjects (clinical:ClinicalDocument, clinical:LaboratoryReport)
  * are carried verbatim and deduped by full quad identity. `clinical:importedAt`
