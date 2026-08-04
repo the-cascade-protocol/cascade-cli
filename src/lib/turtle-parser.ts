@@ -12,7 +12,10 @@ import * as fs from 'fs/promises';
 const { namedNode } = DataFactory;
 
 /** Well-known RDF predicates */
-const RDF_TYPE_IRI = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+export const RDF_TYPE_IRI = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+
+/** `rdfs:subClassOf`, used for SHACL class-target resolution. */
+export const RDFS_SUBCLASS_OF_IRI = 'http://www.w3.org/2000/01/rdf-schema#subClassOf';
 
 /** Known Cascade Protocol namespace prefixes */
 export const CASCADE_NAMESPACES: Record<string, string> = {
@@ -121,8 +124,20 @@ function extractSubjectsWithTypes(store: Store): SubjectInfo[] {
 }
 
 /**
- * Detect which Cascade Protocol vocabularies are used in a parsed Turtle file
- * based on prefixes and type URIs.
+ * Detect which Cascade Protocol vocabularies are *mentioned* in a parsed Turtle
+ * file, based on prefix declarations and on namespaces appearing in type URIs,
+ * predicates and objects.
+ *
+ * IMPORTANT: this answers "which vocabularies does this file reference?" and
+ * nothing more. It must NOT be used to report which SHACL shapes apply to, or
+ * were run against, a file. A file can declare the `health:` prefix, or use a
+ * single `health:` predicate, while no shape in `health.shapes.ttl` targets any
+ * of its subjects — in which case reporting `Shapes: health.shapes.ttl` claims
+ * constraints ran that never ran.
+ *
+ * For shape applicability use {@link computeShapeCoverage} in `shacl-validator.ts`,
+ * which resolves `sh:targetClass` (and the other `sh:target*` forms) against the
+ * subjects actually present in the data graph.
  */
 export function detectVocabularies(result: ParseResult): string[] {
   const vocabs = new Set<string>();
@@ -227,6 +242,51 @@ export function getAllTypes(store: Store): string[] {
     types.add(obj.value);
   }
   return Array.from(types);
+}
+
+/**
+ * Collect the direct `rdfs:subClassOf` edges present in a store, as a map from
+ * a class IRI to the set of classes it is *directly* declared a subclass of.
+ *
+ * Used to resolve SHACL class targets: per SHACL 2.1.3.1 a node is targeted by
+ * `sh:targetClass C` when it is a SHACL instance of `C`, meaning its `rdf:type`
+ * is `C` or any subclass of `C` reachable by `rdfs:subClassOf*`.
+ * https://www.w3.org/TR/shacl/#targetClass
+ */
+export function collectSubClassOfEdges(store: Store): Map<string, Set<string>> {
+  const edges = new Map<string, Set<string>>();
+  for (const quad of store.getQuads(null, namedNode(RDFS_SUBCLASS_OF_IRI), null, null)) {
+    const sub = quad.subject.value;
+    let supers = edges.get(sub);
+    if (!supers) {
+      supers = new Set<string>();
+      edges.set(sub, supers);
+    }
+    supers.add(quad.object.value);
+  }
+  return edges;
+}
+
+/**
+ * Expand a class IRI to itself plus every class reachable from it by following
+ * `rdfs:subClassOf` transitively (`rdfs:subClassOf*`). Cycle-safe.
+ */
+export function expandToSuperClasses(
+  cls: string,
+  edges: Map<string, Set<string>>,
+): Set<string> {
+  const seen = new Set<string>([cls]);
+  const stack = [cls];
+  while (stack.length > 0) {
+    const current = stack.pop() as string;
+    for (const parent of edges.get(current) ?? []) {
+      if (!seen.has(parent)) {
+        seen.add(parent);
+        stack.push(parent);
+      }
+    }
+  }
+  return seen;
 }
 
 /**
