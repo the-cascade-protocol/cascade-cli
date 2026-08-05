@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url);
 const pkg = require('../package.json') as { version: string };
 
 const CLI_PATH = resolve(__dirname, '../dist/index.js');
-const REFERENCE_POD = resolve(__dirname, '../../reference-patient-pod');
+const REFERENCE_POD = resolve(__dirname, '../../conformance/reference-patient-pod');
 const skipIfNoPod = !existsSync(REFERENCE_POD);
 
 function runCli(args: string): string {
@@ -94,13 +94,13 @@ describe('cascade CLI', () => {
     });
 
     it.skipIf(skipIfNoPod)('should validate a valid Turtle file', () => {
-      const podPath = resolve(__dirname, '../../reference-patient-pod/clinical/medications.ttl');
+      const podPath = resolve(__dirname, '../../conformance/reference-patient-pod/clinical/medications.ttl');
       const output = runCli(`validate ${podPath}`);
       expect(output).toContain('PASS');
     });
 
     it.skipIf(skipIfNoPod)('should output JSON when --json flag is used', () => {
-      const podPath = resolve(__dirname, '../../reference-patient-pod/clinical/medications.ttl');
+      const podPath = resolve(__dirname, '../../conformance/reference-patient-pod/clinical/medications.ttl');
       const output = runCli(`--json validate ${podPath}`);
       const parsed = JSON.parse(output);
       expect(parsed).toBeInstanceOf(Array);
@@ -109,7 +109,7 @@ describe('cascade CLI', () => {
     });
 
     it.skipIf(skipIfNoPod)('should validate a directory of Turtle files', () => {
-      const podPath = resolve(__dirname, '../../reference-patient-pod/clinical');
+      const podPath = resolve(__dirname, '../../conformance/reference-patient-pod/clinical');
       const output = runCli(`validate ${podPath}`);
       expect(output).toContain('PASS');
       expect(output).toContain('Validation Summary');

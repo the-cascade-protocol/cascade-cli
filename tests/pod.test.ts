@@ -15,7 +15,7 @@ import { resolve } from 'path';
 import { existsSync } from 'fs';
 
 const CLI_PATH = resolve(__dirname, '../dist/index.js');
-const REFERENCE_POD = resolve(__dirname, '../../reference-patient-pod');
+const REFERENCE_POD = resolve(__dirname, '../../conformance/reference-patient-pod');
 const skipIfNoPod = !existsSync(REFERENCE_POD);
 
 function runCli(args: string): string {

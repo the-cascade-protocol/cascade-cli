@@ -32,18 +32,21 @@ permissions:
 env:
   # Tests that are KNOWN to skip on a runner, and why.
   #
-  # The reference patient pod lives in cascadeprotocol.org, a PRIVATE repository
-  # that is not checked out here, and the suites that read it are guarded by
-  # `describe.skipIf(!existsSync(REFERENCE_POD))`. On a runner they therefore
-  # vanish rather than fail. Locally, with the pod present, the same suite runs
-  # 1676 tests with ZERO skips.
+  # The remaining 24 are the CAP advisory suites. They read two *.ldpatch
+  # example files that are not committed to ANY repository -- they exist only in
+  # a local working tree -- so no runner can be given them until they are
+  # committed somewhere. Locally, where those files happen to exist, the suite
+  # runs 1676 tests with ZERO skips.
+  #
+  # The reference-pod half of this number (40) is closed: the pod now lives in
+  # the conformance repository, which this workflow already checks out.
   #
   # This number is a ratchet, not a tolerance. It fails the release in BOTH
   # directions on purpose: if it grows, some test started silently not running
   # and a release must not ship on that; if it shrinks, the gap genuinely closed
   # and the baseline should be lowered in the same commit that closed it. Either
   # way the number stays honest instead of drifting into a rubber stamp.
-  EXPECTED_SKIPPED_TESTS: '64'
+  EXPECTED_SKIPPED_TESTS: '24'
 
 jobs:
   publish:
@@ -140,8 +143,12 @@ jobs:
           out="${RUNNER_TEMP}/test-output.txt"
 
           # Vitest prints "Tests  N passed | M skipped (T)". Absent the skip
-          # clause there were no skips at all.
-          summary="$(grep -aE '^[[:space:]]*Tests[[:space:]]' "${out}" | tail -1 || true)"
+          # clause there were no skips at all. It also colorizes, so that line
+          # begins with an ANSI escape rather than whitespace -- strip escapes
+          # before matching, or the anchor silently matches nothing and the
+          # result is reported as unreadable.
+          clean="$(sed 's/\x1b\[[0-9;]*m//g' "${out}")"
+          summary="$(printf '%s\n' "${clean}" | grep -aE '^[[:space:]]*Tests[[:space:]]+[0-9]+ passed' | tail -1 || true)"
           if [ -z "${summary}" ]; then
             echo "::error::Could not find the vitest summary line; refusing to publish on an unreadable test result."
             exit 1

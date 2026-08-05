@@ -24,7 +24,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 // Reference patient pod path
-const REFERENCE_POD = path.resolve(__dirname, '..', '..', 'reference-patient-pod');
+const REFERENCE_POD = path.resolve(__dirname, '..', '..', 'conformance', 'reference-patient-pod');
 
 // ─── Server Creation ──────────────────────────────────────────────────────────
 
