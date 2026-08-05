@@ -143,8 +143,12 @@ jobs:
           out="${RUNNER_TEMP}/test-output.txt"
 
           # Vitest prints "Tests  N passed | M skipped (T)". Absent the skip
-          # clause there were no skips at all.
-          summary="$(grep -aE '^[[:space:]]*Tests[[:space:]]' "${out}" | tail -1 || true)"
+          # clause there were no skips at all. It also colorizes, so that line
+          # begins with an ANSI escape rather than whitespace -- strip escapes
+          # before matching, or the anchor silently matches nothing and the
+          # result is reported as unreadable.
+          clean="$(sed 's/\x1b\[[0-9;]*m//g' "${out}")"
+          summary="$(printf '%s\n' "${clean}" | grep -aE '^[[:space:]]*Tests[[:space:]]+[0-9]+ passed' | tail -1 || true)"
           if [ -z "${summary}" ]; then
             echo "::error::Could not find the vitest summary line; refusing to publish on an unreadable test result."
             exit 1

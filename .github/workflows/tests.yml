@@ -86,7 +86,12 @@ jobs:
           EXPECTED_SKIPPED_TESTS: '24'
         run: |
           set -euo pipefail
-          summary="$(grep -aE '^[[:space:]]*Tests[[:space:]]' "${RUNNER_TEMP}/test-output.txt" | tail -1 || true)"
+          # vitest colorizes, so the summary line starts with an ANSI escape, not
+          # whitespace. Strip escapes before matching: anchoring on ^[[:space:]]*
+          # against raw output silently matches nothing and reports the result as
+          # unreadable.
+          clean="$(sed 's/\x1b\[[0-9;]*m//g' "${RUNNER_TEMP}/test-output.txt")"
+          summary="$(printf '%s\n' "${clean}" | grep -aE '^[[:space:]]*Tests[[:space:]]+[0-9]+ passed' | tail -1 || true)"
           if [ -z "${summary}" ]; then
             echo "::error::Could not find the vitest summary line; refusing to treat an unreadable test result as a pass."
             exit 1
