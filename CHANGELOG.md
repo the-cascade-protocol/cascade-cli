@@ -9,6 +9,49 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+**`pod add-record` no longer destroys prefix declarations it did not author.** Adding a record to a
+bucket an importer had written stripped every `@prefix` line out of the file and re-emitted a
+narrower header of its own, deleting the `rxnorm:`, `sct:`, `loinc:`, `fhir:` and `vcard:`
+declarations while keeping the CURIEs in the body that used them. The file stopped parsing, and
+because one unreadable bucket fails the whole-pod read, `pod query` and `pod info` failed for the
+entire pod. A pod that had imported medications and then had one record added by hand reported
+`Undefined prefix "rxnorm:"` and could not be read at all. The same command also bricked a pod with
+no import involved, by accepting a `core:` CURIE it never declared.
+
+**An unparseable bucket is no longer silently replaced by the next `pod import`.** Import caught the
+parse failure, treated the file as empty, and wrote over it — so a bucket with a damaged header lost
+every record it held, at exit 0, reported as a normal import. The same command on its default flag
+path instead died with an uncaught parser exception and a stack trace. Both paths now refuse that
+single bucket by name, exit non-zero, leave the file byte-unchanged, and continue writing the
+healthy buckets in the same import.
+
+**`pod erase` no longer rewrites relative IRIs in records it was not asked to touch.** Erasing one
+record rewrote the surviving records' `prov:wasAttributedTo </profile/card.ttl#me>` to
+`<undefined/profile/card.ttl#me>`, silently corrupting patient attribution. `pod import`'s merge
+path did the same and additionally demoted the term from an IRI to a string literal.
+
+**`pod add-record` validates `--by` values and property CURIEs before writing.** A value containing
+a character that cannot appear in an IRI produced an unparseable bucket at exit 0; it is now
+rejected with a message naming the offending value.
+
+### Changed
+
+Every record-data merge (`pod add-record`, `pod import`, `pod erase`, and the amend/annotate/retract
+overlays) now writes through a single graph re-serializer rather than by manipulating Turtle text.
+The writer owns the whole document including its header, and emits a full `<IRI>` for any namespace
+it has no prefix for, so a bucket carrying an undeclared CURIE can no longer be produced. The
+prefixes a file already declared are preserved, so a bucket keeps the prefix names it was written
+with. Human-curated files (`settings/publicTypeIndex.ttl`, `index.ttl`, `profile/card.ttl`,
+`profile/extended.ttl`) are deliberately not routed through it and are unchanged.
+
+**Upgrade note.** A bucket already damaged by the first bug above will now be refused by
+`add-record`, `erase` and `import` rather than silently appended to or overwritten. That is
+deliberate — the previous behaviour is what turned a broken header into lost records — but it means
+an already-damaged file must be repaired before those commands will touch it. Repairing it means
+restoring the missing `@prefix` lines; the records themselves are intact.
+
 ## [0.12.0] - 2026-08-04
 
 **If you are upgrading from 0.10.0, this release also contains everything described under 0.11.0

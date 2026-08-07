@@ -36,7 +36,7 @@ env:
   # example files that are not committed to ANY repository -- they exist only in
   # a local working tree -- so no runner can be given them until they are
   # committed somewhere. Locally, where those files happen to exist, the suite
-  # runs 1676 tests with ZERO skips.
+  # runs 1854 tests with ZERO skips.
   #
   # The reference-pod half of this number (40) is closed: the pod now lives in
   # the conformance repository, which this workflow already checks out.
