@@ -282,11 +282,20 @@ export class PodReader {
    * read-only caller wants. A caller that RE-SERIALIZES the file it read must
    * pass `''` instead: absolutizing IRIs that were relative on disk would
    * rewrite the document as a side effect of reading it.
+   *
+   * A FUNCTION may be passed instead, and is handed the decrypted text before
+   * it is parsed. That is how the sentinel-base callers pick a base this
+   * document provably does not already contain — a choice that cannot be made
+   * from the outside, because only this method has the plaintext.
    */
-  parseFile(absPath: string, opts?: { baseIri?: string }): PodReadResult<ParseResult> {
+  parseFile(
+    absPath: string,
+    opts?: { baseIri?: string | ((text: string) => string) },
+  ): PodReadResult<ParseResult> {
     const text = this.readText(absPath);
     if (!text.ok) return text;
-    const result = parseTurtle(text.value, opts?.baseIri ?? `file://${absPath}`);
+    const baseIri = typeof opts?.baseIri === 'function' ? opts.baseIri(text.value) : opts?.baseIri;
+    const result = parseTurtle(text.value, baseIri ?? `file://${absPath}`);
     if (!result.success) {
       return { ok: false, failure: this.failure(absPath, 'parse', result.errors.join('; ')) };
     }

@@ -537,3 +537,116 @@ describe('overlay writers merge through the same door', () => {
     expect(strictParse(p).filter((q) => q.predicate.value.endsWith('annotationText'))).toHaveLength(5);
   }, TEST_TIMEOUT_MS);
 });
+
+// ---------------------------------------------------------------------------
+// The additive merge keeps what the bucket already held
+// ---------------------------------------------------------------------------
+
+/** A second one-medication bundle, a different drug, routing to the same bucket. */
+const ATORVASTATIN_BUNDLE = {
+  resourceType: 'Bundle',
+  type: 'collection',
+  entry: [
+    {
+      resource: {
+        resourceType: 'MedicationStatement',
+        id: 'm2',
+        status: 'active',
+        medicationCodeableConcept: {
+          coding: [{
+            system: 'http://www.nlm.nih.gov/research/umls/rxnorm',
+            code: '617314',
+            display: 'Atorvastatin 10 MG',
+          }],
+        },
+        subject: { reference: 'Patient/p1' },
+      },
+    },
+  ],
+};
+
+describe('import into a bucket that already holds records', () => {
+  // The additive path's `combine` opens by copying every subject the file
+  // already holds into its accumulator. Delete that copy and the import writes
+  // ONLY the incoming subjects: the bucket's existing records are silently
+  // replaced, not merged. That is the same defect class as the silent
+  // overwrite this whole change exists to close, one line away in the same
+  // function, and nothing pinned it — the nearest existing test imports into a
+  // NEW bucket, so it never exercises "keep what the file already holds".
+  //
+  // Three flag combinations reach the additive path, and they do NOT all pin
+  // the line equally — stated explicitly so a future reader does not assume
+  // more coverage than exists:
+  //
+  //   --no-reconcile-existing  PINS IT. The pod's own records are not loaded,
+  //                            so the copy of `existing` is the only thing
+  //                            keeping them. Deleting the loop loses them.
+  //   --no-reconcile only      Does NOT pin it. `--reconcile-existing` is on by
+  //                            default, so the pod's records are loaded into
+  //                            `allInputs` and ride in as INCOMING quads; the
+  //                            copy loop is redundant on that path. Kept as a
+  //                            no-data-loss regression test, not as a tripwire.
+  //   both flags               Pins it, same as the first.
+  for (const flags of [
+    ['--no-reconcile-existing'],
+    ['--no-reconcile', '--no-reconcile-existing'],
+    ['--no-reconcile'],
+  ]) {
+    it(`keeps the records already in the bucket when importing with ${flags.join(' ')}`, async () => {
+      const base = mkTmpDir();
+      const podDir = path.join(base, 'pod');
+      const bundleA = path.join(base, 'a.json');
+      const bundleB = path.join(base, 'b.json');
+      fs.writeFileSync(bundleA, JSON.stringify(RXNORM_BUNDLE), 'utf-8');
+      fs.writeFileSync(bundleB, JSON.stringify(ATORVASTATIN_BUNDLE), 'utf-8');
+
+      expect((await runCli(['pod', 'init', podDir])).exitCode).toBe(0);
+      expect((await runCli(['pod', 'import', podDir, bundleA])).exitCode).toBe(0);
+
+      const medsPath = path.join(podDir, 'clinical', 'medications.ttl');
+      const medicationSubjects = (): string[] => {
+        const isMedication = (q: Quad) =>
+          q.predicate.value === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' &&
+          q.object.value === 'https://ns.cascadeprotocol.org/clinical/v1#Medication';
+        return [...new Set(strictParse(medsPath).filter(isMedication).map((q) => q.subject.value))].sort();
+      };
+
+      const before = medicationSubjects();
+      // The fixture must actually create the hazard, or the assertion is vacuous.
+      expect(before).toHaveLength(1);
+
+      expect((await runCli(['pod', 'import', podDir, bundleB, ...flags])).exitCode).toBe(0);
+
+      const after = medicationSubjects();
+      expect(after, 'the pre-existing record was dropped by the import').toEqual(
+        expect.arrayContaining(before),
+      );
+      expect(after).toHaveLength(2);
+
+      const text = fs.readFileSync(medsPath, 'utf-8');
+      expect(text, 'the pre-existing record was dropped').toContain('Metformin 500 MG');
+      expect(text, 'the incoming record was not written').toContain('Atorvastatin 10 MG');
+      expect(() => strictParse(medsPath)).not.toThrow();
+    }, TEST_TIMEOUT_MS);
+  }
+
+  it('keeps a hand-entered record when a later import lands in its bucket', async () => {
+    // The user-visible shape of the same loss: `add-record` then `import`.
+    const base = mkTmpDir();
+    const podDir = path.join(base, 'pod');
+    const bundle = path.join(base, 'b.json');
+    fs.writeFileSync(bundle, JSON.stringify(ATORVASTATIN_BUNDLE), 'utf-8');
+
+    await runCli(['pod', 'init', podDir]);
+    expect((await runCli([
+      'pod', 'add-record', podDir,
+      '--type', 'clinical:Medication', '--json', '{"clinical:drugName":"Vitamin D"}',
+    ])).exitCode).toBe(0);
+
+    expect((await runCli(['pod', 'import', podDir, bundle, '--no-reconcile-existing'])).exitCode).toBe(0);
+
+    const text = fs.readFileSync(path.join(podDir, 'clinical', 'medications.ttl'), 'utf-8');
+    expect(text, 'the hand-entered record was dropped by the import').toContain('Vitamin D');
+    expect(text).toContain('Atorvastatin 10 MG');
+  }, TEST_TIMEOUT_MS);
+});

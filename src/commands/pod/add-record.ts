@@ -25,7 +25,7 @@ import type { Quad } from 'n3';
 import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
 import { DATA_TYPES, resolvePodDir, fileExists, type DataTypeInfo } from './helpers.js';
 import { resolvePodDek, mintUri } from '../../lib/annotations.js';
-import { mergeIntoBucket, KNOWN_PREFIXES } from '../../lib/bucket-write.js';
+import { mergeIntoBucket, KNOWN_PREFIXES, assertWritableIri } from '../../lib/bucket-write.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -135,6 +135,26 @@ export function registerAddRecordSubcommand(pod: Command, program: Command): voi
       let dek: Buffer | undefined;
       try {
         dek = await resolvePodDek(podDir);
+      } catch (e: unknown) {
+        printError(e instanceof Error ? e.message : String(e), globalOpts);
+        process.exitCode = 1;
+        return;
+      }
+
+      // Validate every user-supplied IRI BEFORE a term is minted from it.
+      //
+      // A NamedNode holding a space serializes to `<https://ex.org/a b#me>`,
+      // which no reader can parse — and an unreadable bucket is one this CLI
+      // correctly refuses to overwrite. So a single accepted typo takes the
+      // bucket out of service for add-record, erase AND import, permanently,
+      // with no repair verb. Rejecting the input is the only place this is
+      // recoverable.
+      try {
+        if (options.by !== undefined) assertWritableIri(options.by, '--by');
+        for (const curie of Object.keys(props)) {
+          const iri = expandCurie(curie);
+          if (iri) assertWritableIri(iri, `the property CURIE "${curie}"`);
+        }
       } catch (e: unknown) {
         printError(e instanceof Error ? e.message : String(e), globalOpts);
         process.exitCode = 1;

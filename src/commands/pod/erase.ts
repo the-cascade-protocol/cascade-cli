@@ -60,7 +60,7 @@ import {
   type PodReader,
   type PodReadFailure,
 } from '../../lib/pod-read.js';
-import { mergeIntoBucket, derelativizeQuads, REL_BASE } from '../../lib/bucket-write.js';
+import { mergeIntoBucket, derelativizeQuads, relBase, relBaseFor } from '../../lib/bucket-write.js';
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 
@@ -169,7 +169,11 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
         // </profile/card.ttl#me> into "undefined/profile/card.ttl#me".
         // derelativizeQuads strips the sentinel straight back off, so the
         // subject match below compares the IRI the user typed.
-        const parsed = reader.parseFile(file, { baseIri: REL_BASE });
+        //
+        // relBaseFor sees this file's decrypted text and guarantees the base is
+        // not already in it, so an IRI a third party wrote to LOOK like the
+        // sentinel is left alone rather than rewritten into another resource.
+        const parsed = reader.parseFile(file, { baseIri: relBaseFor });
         if (!parsed.ok) {
           unreadable.push(parsed.failure);
           continue;
@@ -180,7 +184,9 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
         // relative to the file the record was found in.
         if (foundFile) continue;
 
-        const quads = derelativizeQuads(parsed.value.quads);
+        // relBaseFor has just made that base the active one, so it is the base
+        // this file was parsed under.
+        const quads = derelativizeQuads(parsed.value.quads, relBase());
         const match = quads.filter((q) => q.subject.value === options.record);
         if (match.length > 0) {
           foundFile = file;

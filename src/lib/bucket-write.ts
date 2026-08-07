@@ -30,11 +30,22 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { Parser, Writer, DataFactory } from 'n3';
-import type { Quad, Quad_Object, Quad_Subject } from 'n3';
+import type { Quad, Quad_Graph, Quad_Object, Quad_Predicate, Quad_Subject, Term } from 'n3';
 import { readResource, writeResource } from './pod-encryption.js';
 
-const { namedNode, blankNode, quad: makeQuad } = DataFactory;
+const { namedNode, blankNode, literal, quad: makeQuad } = DataFactory;
+
+/**
+ * A term as it exists at RUNTIME, which is wider than n3's `Term` union.
+ *
+ * n3's TypeScript `Term` has no `'Quad'` member, but its parser really does
+ * produce nested quads (RDF-star) whenever `format` is left unset — which is
+ * exactly how `turtle-parser.ts`, and therefore `pod erase`'s read, parses. A
+ * term walk that trusts the declared union silently skips those.
+ */
+type RuntimeTerm = Term | (Quad & { termType: 'Quad' });
 
 /**
  * Namespaces the CLI itself can emit, so its own output stays compact.
@@ -79,12 +90,107 @@ export const KNOWN_PREFIXES: Record<string, string> = {
  * literal string `"undefined/profile/card.ttl#me"`, and it is silent: the file
  * still parses, it just says something else.
  *
- * A bare-scheme base makes N3's `_base`, `_basePath` and `_baseRoot` the same
- * string, so every relative form (root-relative, doc-relative, empty `<>`,
- * fragment-only `<#x>`) acquires exactly this one prefix, which
- * {@link derelativizeQuads} strips back off on the way out.
+ * SHAPE: the sentinel must be a BARE SCHEME — `<scheme>:` and nothing after the
+ * colon. N3 derives `_baseRoot` with `/^(?:([a-z][a-z0-9+.-]*:))?(?:\/\/[^/]*)?/i`
+ * and root-relative IRIs resolve against `_baseRoot`, not `_base`. A base of
+ * `urn:x-cascade-rel-<nonce>:` therefore yields `_baseRoot === 'urn:'`, and
+ * `</profile/card.ttl#me>` resolves to `urn:/profile/card.ttl#me` — which does
+ * NOT carry the sentinel, so it is never stripped back off and the pod's WebID
+ * silently becomes a different resource. Only a bare scheme makes `_base`,
+ * `_basePath` and `_baseRoot` the same string, which is what makes all four
+ * relative forms (root-relative, doc-relative, empty `<>`, fragment-only
+ * `<#x>`) acquire exactly this one prefix. Verified against n3 1.26.0.
+ *
+ * NONCE: the scheme carries 128 random bits, minted once per process, rather
+ * than being a fixed literal. A fixed literal is FORGEABLE, and forging it is a
+ * silent re-identification attack: the strip cannot tell "this term was
+ * relative in the source" from "this term merely starts with the sentinel", so
+ * third-party Turtle containing `<x-cascade-rel:http://real.example/thing>` —
+ * a perfectly legal absolute IRI, reachable through `pod import` — came back
+ * out as `<http://real.example/thing>`, a statement about a different, real
+ * resource, at exit 0. With a per-process nonce there is no string an attacker
+ * can write down that this process will strip.
  */
-export const REL_BASE = 'x-cascade-rel:';
+const REL_BASE_SCHEME_PREFIX = 'x-cascade-rel-';
+
+/** A fresh sentinel. Bare scheme, 128 bits of entropy, hex so it stays a legal scheme. */
+function mintRelBase(): string {
+  return `${REL_BASE_SCHEME_PREFIX}${randomBytes(16).toString('hex')}:`;
+}
+
+let activeRelBase = mintRelBase();
+
+/**
+ * Every sentinel this process has minted.
+ *
+ * One element in every real run. It exists so {@link assertNoSentinelLeak} can
+ * still catch a term carrying a SUPERSEDED sentinel, which is the one way a
+ * regeneration could otherwise open a leak.
+ */
+const mintedRelBases = new Set<string>([activeRelBase]);
+
+/** The sentinel currently in force for this process. */
+export function relBase(): string {
+  return activeRelBase;
+}
+
+/**
+ * The sentinel to parse `text` under, guaranteed absent from `text`.
+ *
+ * The check is what turns "an attacker practically cannot collide with the
+ * nonce" into "a collision cannot happen at all". Everything downstream — the
+ * strip, and the leak assertion — decides purely on `startsWith(base)`, so if a
+ * source document could contain the base then a document could still name a
+ * term the strip would rewrite. It cannot: any text that happens to hold the
+ * active sentinel gets a fresh one minted for it, so within one parse
+ * `startsWith(base)` means "N3 resolved this against the base", never "the
+ * document said so".
+ *
+ * Reaching the loop body requires source text containing 128 specific random
+ * bits that this process has never written anywhere ({@link
+ * assertNoSentinelLeak} is what keeps that true). It is expected to be dead
+ * code forever; it is here because "unreachable" is a claim about today's
+ * coverage and this is the branch that makes the guarantee unconditional.
+ */
+export function relBaseFor(text: string): string {
+  activeRelBase = pickSentinelBase(text, activeRelBase, () => {
+    const minted = mintRelBase();
+    mintedRelBases.add(minted);
+    return minted;
+  });
+  return activeRelBase;
+}
+
+/** How many draws before {@link pickSentinelBase} concludes minting is broken. */
+const MAX_SENTINEL_DRAWS = 8;
+
+/**
+ * Keep `current` if `text` does not contain it; otherwise draw again, BOUNDED.
+ *
+ * The bound is the point, and `mint` is injected so it can be observed. A
+ * `while (contains) remint` loop terminates only because minting is random —
+ * a property of a DIFFERENT function. If that ever stops holding (a
+ * "simplification", a seeded double, a stubbed RNG) an unbounded loop hangs
+ * the CLI forever on any input containing the sentinel, with no output and no
+ * error. That is not hypothetical: mutating the nonce back to a fixed literal
+ * to check this module's tripwires burned 22 minutes of CPU in a hang instead
+ * of failing in a second.
+ *
+ * Eight colliding draws is not a case worth continuing from. It means the
+ * randomness assumption is broken, and saying so beats spinning.
+ */
+export function pickSentinelBase(text: string, current: string, mint: () => string): string {
+  let candidate = current;
+  for (let draw = 0; draw < MAX_SENTINEL_DRAWS; draw++) {
+    if (!text.includes(candidate)) return candidate;
+    candidate = mint();
+  }
+  throw new Error(
+    `Internal error: could not obtain a relative-IRI sentinel absent from the source text in ` +
+      `${MAX_SENTINEL_DRAWS} draws. The sentinel carries 128 random bits, so this means minting ` +
+      `has stopped being random.`,
+  );
+}
 
 /**
  * An existing bucket file could not be read as Turtle.
@@ -106,22 +212,120 @@ export class BucketParseError extends Error {
   }
 }
 
-/** Undo the {@link REL_BASE} sentinel on every IRI term of every quad. */
-export function derelativizeQuads(quads: Quad[]): Quad[] {
-  const strip = (value: string): string =>
-    value.startsWith(REL_BASE) ? value.slice(REL_BASE.length) : value;
-  return quads.map((q) => {
-    const s = q.subject.termType === 'NamedNode' && q.subject.value.startsWith(REL_BASE)
-      ? (namedNode(strip(q.subject.value)) as Quad_Subject)
-      : q.subject;
-    const p = q.predicate.value.startsWith(REL_BASE)
-      ? namedNode(strip(q.predicate.value))
-      : q.predicate;
-    const o = q.object.termType === 'NamedNode' && q.object.value.startsWith(REL_BASE)
-      ? (namedNode(strip(q.object.value)) as Quad_Object)
-      : q.object;
-    return s === q.subject && p === q.predicate && o === q.object ? q : makeQuad(s, p, o, q.graph);
-  });
+/**
+ * A term that still carries the sentinel was about to be written to a pod.
+ *
+ * Not a user error: a gap in {@link derelativizeQuads}'s term coverage. It is
+ * fatal rather than best-effort because the damage is PERMANENT. Once
+ * `"5"^^<x-cascade-rel-...:myLocalType>` is on disk that datatype IRI is
+ * ABSOLUTE, so no later parse resolves it against anything and no later strip
+ * removes it. There is no second chance to notice.
+ */
+export class SentinelLeakError extends Error {
+  readonly term: string;
+
+  constructor(term: string) {
+    super(
+      `Internal error: the relative-IRI sentinel leaked into a term that was about to be ` +
+        `written: ${term}\n` +
+        `  This is a gap in derelativizeQuads' term coverage, not a problem with your data. ` +
+        `Nothing was written.`,
+    );
+    this.name = 'SentinelLeakError';
+    this.term = term;
+  }
+}
+
+/** Strip one sentinel prefix off a term, recursing into everything that holds an IRI. */
+function derelativizeTerm(term: RuntimeTerm, base: string): RuntimeTerm {
+  switch (term.termType) {
+    case 'NamedNode':
+      return term.value.startsWith(base) ? namedNode(term.value.slice(base.length)) : term;
+    case 'Literal': {
+      // A literal's DATATYPE is a NamedNode, and `"5"^^<myLocalType>` is a
+      // relative IRI like any other. Missing this is what leaked the sentinel
+      // into pod data. A language-tagged literal's datatype is rdf:langString,
+      // which is absolute, so reaching the rebuild means there is no language
+      // to carry across.
+      const dt = term.datatype;
+      if (!dt || !dt.value.startsWith(base)) return term;
+      return literal(term.value, namedNode(dt.value.slice(base.length)));
+    }
+    case 'Quad':
+      return derelativizeQuad(term, base) as RuntimeTerm;
+    default:
+      // BlankNode, Variable, DefaultGraph. No IRI, nothing to strip.
+      return term;
+  }
+}
+
+/** Strip the sentinel off all four positions of one quad, graph included. */
+function derelativizeQuad(q: Quad, base: string): Quad {
+  const s = derelativizeTerm(q.subject as RuntimeTerm, base) as Quad_Subject;
+  const p = derelativizeTerm(q.predicate as RuntimeTerm, base) as Quad_Predicate;
+  const o = derelativizeTerm(q.object as RuntimeTerm, base) as Quad_Object;
+  const g = derelativizeTerm(q.graph as RuntimeTerm, base) as Quad_Graph;
+  return s === q.subject && p === q.predicate && o === q.object && g === q.graph
+    ? q
+    : makeQuad(s, p, o, g);
+}
+
+/**
+ * Undo the sentinel base on every IRI-bearing term of every quad.
+ *
+ * `base` defaults to the sentinel currently in force. A caller that ran its own
+ * parser must pass the base IT parsed under, because that is the only string
+ * whose presence means "N3 resolved this".
+ */
+export function derelativizeQuads(quads: Quad[], base: string = relBase()): Quad[] {
+  return quads.map((q) => derelativizeQuad(q, base));
+}
+
+/** Does any part of this term still mention `base`? */
+function termLeaks(term: RuntimeTerm, base: string): string | undefined {
+  switch (term.termType) {
+    case 'NamedNode':
+      return term.value.includes(base) ? term.value : undefined;
+    case 'Literal':
+      // The literal's own lexical form is checked too: the sentinel reached
+      // pod data once before by a term being DEMOTED from a NamedNode to a
+      // string literal on the reconciler's path.
+      if (term.value.includes(base)) return `"${term.value}"`;
+      return term.datatype?.value.includes(base) ? `^^<${term.datatype.value}>` : undefined;
+    case 'Quad':
+      return quadLeaks(term, base);
+    default:
+      return undefined;
+  }
+}
+
+function quadLeaks(q: Quad, base: string): string | undefined {
+  for (const t of [q.subject, q.predicate, q.object, q.graph]) {
+    const hit = termLeaks(t as RuntimeTerm, base);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/**
+ * Refuse to write anything that still mentions a sentinel this process minted.
+ *
+ * The test is `includes`, not `startsWith`: a sentinel anywhere inside a term
+ * is a leak, and no legitimate term can contain one, because
+ * {@link relBaseFor} has already established that the source text does not and
+ * nothing else mints them. That makes this a coverage tripwire with no way to
+ * misfire on user data — if {@link derelativizeTerm} ever stops covering a term
+ * position, the write fails loudly instead of poisoning a bucket forever.
+ *
+ * @throws {SentinelLeakError}
+ */
+export function assertNoSentinelLeak(quads: Quad[]): void {
+  for (const q of quads) {
+    for (const base of mintedRelBases) {
+      const hit = quadLeaks(q, base);
+      if (hit) throw new SentinelLeakError(hit);
+    }
+  }
 }
 
 /**
@@ -133,9 +337,10 @@ export function derelativizeQuads(quads: Quad[]): Quad[] {
  */
 export function parseBucketTurtle(
   turtle: string,
+  base: string = relBaseFor(turtle),
 ): Promise<{ quads: Quad[]; prefixes: Record<string, string> }> {
   return new Promise((resolve, reject) => {
-    const parser = new Parser({ format: 'Turtle', baseIRI: REL_BASE });
+    const parser = new Parser({ format: 'Turtle', baseIRI: base });
     const quads: Quad[] = [];
     parser.parse(turtle, (error, q, prefixes) => {
       if (error) {
@@ -143,7 +348,7 @@ export function parseBucketTurtle(
         return;
       }
       if (!q) {
-        resolve({ quads: derelativizeQuads(quads), prefixes: toIriMap(prefixes) });
+        resolve({ quads: derelativizeQuads(quads, base), prefixes: toIriMap(prefixes) });
         return;
       }
       quads.push(q);
@@ -205,6 +410,98 @@ export function serializeBucket(quads: Quad[], prefixes: Record<string, string>)
   });
 }
 
+// ---------------------------------------------------------------------------
+// IRI legality
+// ---------------------------------------------------------------------------
+
+/**
+ * The characters Turtle forbids inside `<...>`, straight from the grammar:
+ *
+ *   IRIREF ::= '<' ([^#x00-#x20<>"{}|^`\] | UCHAR)* '>'
+ *   — https://www.w3.org/TR/turtle/#grammar-production-IRIREF
+ *
+ * This is the W3C production, not a rule this project invented, and it is
+ * deliberately narrower than "is this a well-formed IRI": a NamedNode is only
+ * rejected when it cannot be SERIALIZED, so `/profile/card.ttl#me` (relative,
+ * and load-bearing for pod attribution) and `https://ex.org/café#me`
+ * (non-ASCII, legal in an IRI) both stay acceptable.
+ */
+const ILLEGAL_IRI_CHAR = /[\u0000-\u0020<>"{}|^`\\]/;
+
+/** The first character of `iri` that Turtle cannot write, if any. */
+export function findIllegalIriChar(iri: string): string | undefined {
+  return ILLEGAL_IRI_CHAR.exec(iri)?.[0];
+}
+
+/** An IRI a caller asked to mint cannot be written as Turtle. */
+export class UnwritableIriError extends Error {
+  readonly iri: string;
+
+  constructor(label: string, iri: string, offending: string) {
+    const codePoint = `U+${(offending.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}`;
+    super(
+      `Invalid IRI for ${label}: ${iri}\n` +
+        `  It contains ${codePoint}, which Turtle forbids inside <...> ` +
+        "(IRIREF ::= '<' ([^#x00-#x20<>\"{}|^`\\] | UCHAR)* '>').\n" +
+        `  Writing it would produce a bucket file that cannot be parsed, and every later ` +
+        `add-record, erase and import on that file would refuse. Nothing was written.`,
+    );
+    this.name = 'UnwritableIriError';
+    this.iri = iri;
+  }
+}
+
+/**
+ * Refuse an IRI that cannot be serialized, BEFORE a term is minted from it.
+ *
+ * Late is not good enough. A NamedNode holding a space serializes to
+ * `<https://ex.org/a b#me>`, which the next read cannot parse — and this
+ * module's own contract is that an unreadable bucket is never overwritten. So
+ * a single accepted typo takes the bucket out of service permanently, with no
+ * CLI repair path. Validating the INPUT is what keeps that unreachable.
+ *
+ * @param label how the value reached us, e.g. `--by` or a property CURIE.
+ * @throws {UnwritableIriError}
+ */
+export function assertWritableIri(iri: string, label: string): void {
+  const offending = findIllegalIriChar(iri);
+  if (offending !== undefined) throw new UnwritableIriError(label, iri, offending);
+}
+
+/** Walk one term, refusing any NamedNode (nested ones included) that cannot be written. */
+function assertWritableTerm(term: RuntimeTerm, file: string): void {
+  switch (term.termType) {
+    case 'NamedNode':
+      assertWritableIri(term.value, `a term of ${file}`);
+      return;
+    case 'Literal':
+      if (term.datatype) assertWritableIri(term.datatype.value, `a literal datatype of ${file}`);
+      return;
+    case 'Quad':
+      for (const t of [term.subject, term.predicate, term.object, term.graph]) {
+        assertWritableTerm(t as RuntimeTerm, file);
+      }
+      return;
+    default:
+      return;
+  }
+}
+
+/**
+ * The backstop for {@link assertWritableIri}: no document leaves this module
+ * unparseable, whatever the caller handed over.
+ *
+ * Commands validate their own inputs so the user gets an error naming the flag
+ * they typed. This catches the writer that forgets to.
+ */
+function assertWritableQuads(quads: Quad[], file: string): void {
+  for (const q of quads) {
+    for (const t of [q.subject, q.predicate, q.object, q.graph]) {
+      assertWritableTerm(t as RuntimeTerm, file);
+    }
+  }
+}
+
 /** How `newQuads` are combined with what the file already held. */
 export type BucketCombine = (existing: Quad[], incoming: Quad[]) => Quad[];
 
@@ -261,12 +558,19 @@ export async function mergeIntoBucket(
   let existingQuads: Quad[] = [];
   let filePrefixes: Record<string, string> = {};
 
+  // One sentinel for the whole operation: the same string that the existing
+  // document was parsed under is the one stripped off the merged result, so a
+  // caller handing over quads from its OWN parse (the reconciler's path) is
+  // covered by the same guarantee.
+  let relBaseUsed = relBase();
+
   if (existedBefore) {
     // A read failure (bad DEK, unreadable bytes) propagates untouched: it is
     // not a parse error and it must not be reported as one.
     const existing = readResource(targetFile, dek);
+    relBaseUsed = relBaseFor(existing);
     try {
-      const parsed = await parseBucketTurtle(existing);
+      const parsed = await parseBucketTurtle(existing, relBaseUsed);
       existingQuads = parsed.quads;
       filePrefixes = parsed.prefixes;
     } catch (e: unknown) {
@@ -280,7 +584,11 @@ export async function mergeIntoBucket(
   // are compact too.
   const prefixes = { ...KNOWN_PREFIXES, ...filePrefixes };
 
-  const merged = derelativizeQuads(normalizeBlankNodes(combine(existingQuads, newQuads)));
+  const merged = derelativizeQuads(normalizeBlankNodes(combine(existingQuads, newQuads)), relBaseUsed);
+  // Last gate before serialization. A term the strip did not reach must not be
+  // discovered later, because by then it is absolute and permanent.
+  assertNoSentinelLeak(merged);
+  assertWritableQuads(merged, targetFile);
   const turtle = await serializeBucket(merged, prefixes);
 
   options.validate?.(turtle, targetFile);

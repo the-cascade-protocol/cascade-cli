@@ -59,7 +59,7 @@ import {
 } from '../../lib/pod-encryption.js';
 import { obtainPassphrase } from '../../lib/passphrase.js';
 import { classifyImportInput, isPathInsidePod } from '../../lib/import-input.js';
-import { mergeIntoBucket, derelativizeQuads, REL_BASE } from '../../lib/bucket-write.js';
+import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket-write.js';
 
 // ---------------------------------------------------------------------------
 // Import report type
@@ -210,14 +210,20 @@ async function parseTurtleToQuads(turtle: string): Promise<Map<string, Quad[]>> 
     // so </profile/card.ttl#me> resolves to "undefined/profile/card.ttl#me".
     // derelativizeQuads puts it back, so the subject keys
     // this map is dedup-ed by are the IRIs the file actually states.
-    const parser = new Parser({ format: 'Turtle', baseIRI: REL_BASE });
+    //
+    // The base is chosen against THIS text and the strip below uses that same
+    // base: third-party Turtle reaches this parser (`pod import` of a .ttl), and
+    // an IRI the document merely wrote to LOOK like the sentinel must not be
+    // rewritten into the different, real resource hiding behind it.
+    const base = relBaseFor(turtle);
+    const parser = new Parser({ format: 'Turtle', baseIRI: base });
     const collected: Quad[] = [];
 
     parser.parse(turtle, (error, quad) => {
       if (error) { reject(error); return; }
       if (!quad) {
         const bySubject = new Map<string, Quad[]>();
-        for (const q of derelativizeQuads(collected)) {
+        for (const q of derelativizeQuads(collected, base)) {
           const subj = q.subject.value;
           if (!bySubject.has(subj)) bySubject.set(subj, []);
           bySubject.get(subj)!.push(q);

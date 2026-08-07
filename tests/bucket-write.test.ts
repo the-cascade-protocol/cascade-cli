@@ -27,12 +27,13 @@ import {
   mergeIntoBucket,
   BucketParseError,
   KNOWN_PREFIXES,
-  REL_BASE,
+  relBase,
   derelativizeQuads,
   normalizeBlankNodes,
   parseBucketTurtle,
 } from '../src/lib/bucket-write.js';
 import { generateDek, readResource } from '../src/lib/pod-encryption.js';
+import { TURTLE_PREFIXES } from '../src/lib/fhir-converter/types.js';
 
 const { namedNode, literal, blankNode, quad: makeQuad } = DataFactory;
 
@@ -181,11 +182,21 @@ describe('mergeIntoBucket: the existing document keeps the prefixes it declared'
     const p = seed(hostile);
     await mergeIntoBucket(p, recordQuads(), undefined);
 
-    const quads = strictParse(fs.readFileSync(p, 'utf-8'));
+    const out = fs.readFileSync(p, 'utf-8');
+    const quads = strictParse(out);
     const typeOf = (s: string) =>
       quads.find((q) => q.subject.value === s && q.predicate.value === NS.rdf + 'type')?.object.value;
     expect(typeOf('urn:uuid:OLD')).toBe('http://example.org/private-clinical#Medication');
     expect(typeOf('urn:uuid:NEW')).toBe(NS.clinical + 'Medication');
+
+    // PRECEDENCE, asserted on the TEXT. `{...KNOWN_PREFIXES, ...filePrefixes}`
+    // can be written the other way round and the assertions above cannot tell:
+    // both spellings denote the same graph, so a strict parse is identical
+    // either way. Only the header says which binding won, and the module's
+    // contract is that the file's own declarations do — that is what keeps a
+    // bucket recognisable as the document its writer left behind.
+    expect(out).toContain('@prefix clinical: <http://example.org/private-clinical#>');
+    expect(out).not.toContain(`@prefix clinical: <${NS.clinical}>`);
   });
 
   it('writes a full <IRI> rather than an undeclared CURIE for an unknown namespace', async () => {
@@ -197,6 +208,26 @@ describe('mergeIntoBucket: the existing document keeps the prefixes it declared'
     const out = fs.readFileSync(p, 'utf-8');
     expect(out).toContain('<http://weird.example/v9#p>');
     expect(() => strictParse(out)).not.toThrow();
+  });
+
+  it('APPENDS: what the file already held stays put, byte for byte, at the front', async () => {
+    // The default combine is `[...existing, ...incoming]`. Prepending, or
+    // sorting, keeps every graph-level assertion in this file green and keeps
+    // `pod-import-reimport-idempotence` green too — that suite compares import
+    // N against import N+1 under the SAME build, so any consistent order is
+    // idempotent by construction. Nothing else notices that every record in
+    // every bucket moved. A whole-file diff on the next write is not a
+    // cosmetic difference for a document users read and version.
+    const p = seed(IMPORTED_BUCKET);
+    await mergeIntoBucket(p, [], undefined);
+    const before = fs.readFileSync(p, 'utf-8');
+
+    await mergeIntoBucket(p, recordQuads(), undefined);
+    const after = fs.readFileSync(p, 'utf-8');
+
+    expect(after.startsWith(before), 'the existing document was rewritten, not appended to').toBe(true);
+    expect(after.length).toBeGreaterThan(before.length);
+    expect(after.slice(before.length)).toContain('Vitamin D');
   });
 
   it('is stable: repeated merges neither duplicate nor drop a declaration', async () => {
@@ -299,7 +330,7 @@ describe('mergeIntoBucket: relative IRIs come out exactly as they went in', () =
   it('never lets the sentinel base reach disk', async () => {
     const p = seed(`<urn:uuid:OLD> <urn:p> </profile/card.ttl#me>.\n`);
     for (let i = 0; i < 3; i++) await mergeIntoBucket(p, recordQuads(`urn:uuid:N${i}`), undefined);
-    expect(fs.readFileSync(p, 'utf-8')).not.toContain(REL_BASE);
+    expect(fs.readFileSync(p, 'utf-8')).not.toContain(relBase());
   });
 
   it('strips the sentinel from quads a CALLER supplies, not only from what it parsed', async () => {
@@ -310,13 +341,13 @@ describe('mergeIntoBucket: relative IRIs come out exactly as they went in', () =
     const p = file();
     await mergeIntoBucket(p, [
       makeQuad(
-        namedNode(REL_BASE + '/records/1'),
+        namedNode(relBase() + '/records/1'),
         namedNode('urn:p'),
-        namedNode(REL_BASE + '/profile/card.ttl#me'),
+        namedNode(relBase() + '/profile/card.ttl#me'),
       ),
     ], undefined);
     const out = fs.readFileSync(p, 'utf-8');
-    expect(out).not.toContain(REL_BASE);
+    expect(out).not.toContain(relBase());
     expect(out).toContain('</profile/card.ttl#me>');
     expect(out).toContain('</records/1>');
   });
@@ -577,5 +608,45 @@ describe('KNOWN_PREFIXES', () => {
 
   it('binds cascade: and core: to the same namespace as the rest of the CLI', () => {
     expect(KNOWN_PREFIXES.cascade).toBe('https://ns.cascadeprotocol.org/core/v1#');
+  });
+
+  it('opens with TURTLE_PREFIXES, in TURTLE_PREFIXES\' order', () => {
+    // The doc comment states this contract, and reversing all fifteen entries
+    // leaves the whole suite green, so nothing enforced it.
+    //
+    // What the order actually buys, stated precisely so it is not over-claimed:
+    // an N3 Writer emits declarations in insertion order, so matching the
+    // importer's order keeps a bucket an OLDER CLI wrote from having its whole
+    // header block reshuffled the first time this module rewrites it. It is
+    // diff-churn control. It is NOT what keeps the re-import idempotence suite
+    // byte-stable — that compares two runs of the same build, which agree on
+    // any order.
+    expect(Object.keys(KNOWN_PREFIXES).slice(0, Object.keys(TURTLE_PREFIXES).length))
+      .toEqual(Object.keys(TURTLE_PREFIXES));
+    for (const [name, ns] of Object.entries(TURTLE_PREFIXES)) {
+      expect(KNOWN_PREFIXES[name], `${name} bound differently from the importer`).toBe(ns);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A read failure is not a parse failure
+// ---------------------------------------------------------------------------
+
+describe('mergeIntoBucket: a read failure is never reported as a parse failure', () => {
+  it('propagates a wrong-DEK failure untouched instead of blaming the file', async () => {
+    // Moving `readResource` inside the try/catch keeps the whole suite green
+    // while turning "your passphrase is wrong" into "this file is not valid
+    // Turtle: ... Nothing was written." That tells a user to repair, or delete,
+    // a bucket that is perfectly intact — the worst possible advice, given the
+    // file is ciphertext they cannot inspect to check.
+    const p = file();
+    await mergeIntoBucket(p, recordQuads('urn:uuid:A'), generateDek());
+
+    const err = await mergeIntoBucket(p, recordQuads('urn:uuid:B'), generateDek())
+      .then(() => undefined, (e: unknown) => e);
+    expect(err, 'a merge under the wrong DEK must not succeed').toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(BucketParseError);
+    expect((err as Error).message).not.toMatch(/as Turtle/);
   });
 });

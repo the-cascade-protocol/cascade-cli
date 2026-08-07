@@ -18,7 +18,7 @@ import {
 import { normalizeMedName, normalizeDose, normalizeFrequency, type DrugNameNormalizer } from './medication-normalize.js';
 import { medicationCodeKeys, sharedMedicationCodeKey } from './code-keys.js';
 import { cascadeTerminologyResolver } from './terminology.js';
-import { REL_BASE } from './bucket-write.js';
+import { relBase, relBaseFor, derelativizeQuads } from './bucket-write.js';
 
 // Re-export so existing consumers of the reconciler's normalizeMedName keep
 // working. The canonical definition now lives in ./medication-normalize.ts
@@ -164,8 +164,9 @@ export async function parseTurtle(turtle: string, defaultSystem: string): Promis
     // Sentinel base: pod content arrives here on its way back to the pod, and a
     // relative IRI must survive the trip. N3's default resolves
     // </profile/card.ttl#me> to "undefined/profile/card.ttl#me"; the sentinel is
-    // stripped back off at the bucket write chokepoint.
-    const parser = new Parser({ format: 'Turtle', baseIRI: REL_BASE });
+    // stripped back off at the bucket write chokepoint. It is chosen against
+    // THIS text, so nothing the document itself says can be mistaken for it.
+    const parser = new Parser({ format: 'Turtle', baseIRI: relBaseFor(turtle) });
     const bySubject = new Map<string, Array<{ pred: string; obj: RdfValue }>>();
 
     parser.parse(turtle, (error, quad) => {
@@ -232,7 +233,7 @@ async function collectQuads(turtle: string): Promise<{ passthrough: Quad[]; all:
     // Same sentinel base as parseTurtle above: passthrough subjects are copied
     // verbatim into the reconciled output, so their relative IRIs must not be
     // rewritten on the way through.
-    const parser = new Parser({ format: 'Turtle', baseIRI: REL_BASE });
+    const parser = new Parser({ format: 'Turtle', baseIRI: relBaseFor(turtle) });
     const quadsBySubject = new Map<string, Quad[]>();
     const all: Quad[] = [];
 
@@ -1301,6 +1302,15 @@ async function serializeGroups(
     const writer = new Writer({ prefixes: TURTLE_PREFIXES });
     let edgeObjectsRewritten = 0;
 
+    // The sentinel base is a private detail of ONE parse. It must not survive
+    // into this text: the next stage re-parses this output under a base chosen
+    // for THAT text, so a sentinel that arrives already attached is never
+    // resolved, never stripped, and lands on disk absolute and permanent. Every
+    // quad leaves here derelativized, which keeps the invariant global — no
+    // Turtle this CLI produces, intermediate or final, mentions the sentinel.
+    const base = relBase();
+    const emit = (q: Quad): void => { writer.addQuad(derelativizeQuads([q], base)[0]); };
+
     // Redirect a NamedNode edge object that points at a merged-away (discarded)
     // subject to its surviving canonical subject; lineage predicates are left
     // dangling by design (see LINEAGE_PREDICATES). Returns the IRI to serialize
@@ -1318,11 +1328,11 @@ async function serializeGroups(
       if (q.object.termType === 'NamedNode') {
         const rewritten = rewriteEdgeIri(q.predicate.value, q.object.value);
         if (rewritten !== q.object.value) {
-          writer.addQuad(makeQuad(q.subject, q.predicate, namedNode(rewritten)));
+          emit(makeQuad(q.subject, q.predicate, namedNode(rewritten)));
           continue;
         }
       }
-      writer.addQuad(q);
+      emit(q);
     }
 
     for (let i = 0; i < groups.length; i++) {
@@ -1348,7 +1358,7 @@ async function serializeGroups(
               ? literal(val.value, namedNode(val.datatype))
               : literal(val.value);
           if (LINEAGE_PREDICATES.has(pred)) emittedLineage.add(`${pred}|${obj.value}`);
-          writer.addQuad(makeQuad(subj, namedNode(pred), obj));
+          emit(makeQuad(subj, namedNode(pred), obj));
         }
       }
 
@@ -1357,8 +1367,8 @@ async function serializeGroups(
         : g.matchType === 'pass_through' ? 'canonical'
         : (g.matchType === 'status_conflict' || g.matchType === 'value_conflict') ? 'conflict-resolved'
         : 'merged';
-      writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'reconciliationStatus'), literal(status)));
-      writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(res.canonical.sourceSystem)));
+      emit(makeQuad(subj, namedNode(NS.cascade + 'reconciliationStatus'), literal(status)));
+      emit(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(res.canonical.sourceSystem)));
 
       if (g.matchType !== 'pass_through' && res.mergedUris.length > 1) {
         for (const srcUri of res.mergedUris) {
@@ -1367,15 +1377,15 @@ async function serializeGroups(
             // once, not once per re-import.
             if (emittedLineage.has(`${pred}|${srcUri}`)) continue;
             emittedLineage.add(`${pred}|${srcUri}`);
-            writer.addQuad(makeQuad(subj, namedNode(pred), namedNode(srcUri)));
+            emit(makeQuad(subj, namedNode(pred), namedNode(srcUri)));
           }
         }
-        writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'mergedSources'), literal(res.mergedSystems.join(', '))));
-        writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'conflictResolution'), literal(res.strategy)));
-        if (g.conflictField) writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'conflictField'), literal(g.conflictField)));
+        emit(makeQuad(subj, namedNode(NS.cascade + 'mergedSources'), literal(res.mergedSystems.join(', '))));
+        emit(makeQuad(subj, namedNode(NS.cascade + 'conflictResolution'), literal(res.strategy)));
+        if (g.conflictField) emit(makeQuad(subj, namedNode(NS.cascade + 'conflictField'), literal(g.conflictField)));
         if (g.conflictValues) {
           const valDesc = Object.entries(g.conflictValues).map(([s, v]) => `${s}: "${v}"`).join(' vs ');
-          writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'conflictValues'), literal(valDesc)));
+          emit(makeQuad(subj, namedNode(NS.cascade + 'conflictValues'), literal(valDesc)));
         }
       }
     }

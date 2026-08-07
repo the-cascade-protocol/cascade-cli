@@ -22,7 +22,7 @@ import { DataFactory } from 'n3';
 import type { Quad, Quad_Object } from 'n3';
 import { openPod } from './pod-read.js';
 import { loadShapes, validateTurtle } from './shacl-validator.js';
-import { mergeIntoBucket, KNOWN_PREFIXES } from './bucket-write.js';
+import { mergeIntoBucket, KNOWN_PREFIXES, assertWritableIri } from './bucket-write.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -109,6 +109,23 @@ export function buildOverlayQuads(
   actorIri: string | undefined,
   createdIso: string,
 ): Quad[] {
+  // Every IRI an overlay command took from the user lands here — `--record`,
+  // `--superseded-by`, `--by` — so this is the one place that has to refuse an
+  // IRI Turtle cannot write. Doing it per-command is how the same hole gets
+  // reopened by the next command that grows a `--record` flag. Without it the
+  // overlay file becomes unparseable, and an unparseable overlay is one every
+  // later write refuses: one typo bricks it for good.
+  //
+  // The failure was not silent before — the SHACL gate caught the unparseable
+  // MERGED document — but it reported "Parse error: Unexpected ..." and never
+  // named the value the user typed, which is the difference between a typo you
+  // fix and a bug you file.
+  assertWritableIri(subjectUri, 'the overlay subject');
+  if (actorIri) assertWritableIri(actorIri, '--by');
+  for (const l of lines) {
+    if (l.object.termType === 'NamedNode') assertWritableIri(l.object.value, l.predicate);
+  }
+
   const subject = namedNode(subjectUri);
   const allLines: OverlayLine[] = [
     { predicate: 'cascade:dataProvenance', object: namedNode(KNOWN_PREFIXES.cascade + 'SelfReported') },
