@@ -23,7 +23,7 @@ import { Parser } from 'n3';
 import type { Quad } from 'n3';
 import { printResult, printError, printVerbose, printWarning, type OutputOptions } from '../../lib/output.js';
 import { convert } from '../../lib/fhir-converter/index.js';
-import { quadsToTurtle, type SectionCensusEntry } from '../../lib/fhir-converter/types.js';
+import { type SectionCensusEntry } from '../../lib/fhir-converter/types.js';
 import {
   resolveReferenceEdges,
   buildResourceRefsFromQuads,
@@ -59,6 +59,7 @@ import {
 } from '../../lib/pod-encryption.js';
 import { obtainPassphrase } from '../../lib/passphrase.js';
 import { classifyImportInput, isPathInsidePod } from '../../lib/import-input.js';
+import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket-write.js';
 
 // ---------------------------------------------------------------------------
 // Import report type
@@ -88,6 +89,14 @@ interface ImportReport {
     type: string;
   }>;
   typeCounts: Record<string, number>;
+  /**
+   * Pod-relative bucket paths this import REFUSED to write because the file
+   * already on disk could not be read as Turtle. Their records were not
+   * imported and those files are byte-unchanged. Non-empty means a non-zero
+   * exit code: an unreadable bucket holds unknown content, and overwriting it
+   * would turn a broken header into lost records.
+   */
+  bucketsRefused: string[];
   /** Record counts grouped by EHR of origin (clinical:sourceEHR), for the plan. */
   sourceBreakdown: Record<string, number>;
   /** "Do we have everything?" checks from container adapters (e.g. source labels). */
@@ -148,10 +157,14 @@ interface ImportReport {
 // Load existing pod data as ReconcilerInput records for cross-batch dedup
 // ---------------------------------------------------------------------------
 
-async function loadExistingPodData(podDir: string, dek?: Buffer): Promise<ReconcilerInput[]> {
+async function loadExistingPodData(
+  podDir: string,
+  dek?: Buffer,
+): Promise<{ inputs: ReconcilerInput[]; unreadable: string[] }> {
   // Pod data directories that contain reconcilable records
   const DATA_DIRS = ['clinical', 'wellness'];
   const inputs: ReconcilerInput[] = [];
+  const unreadable: string[] = [];
 
   for (const dir of DATA_DIRS) {
     const dirPath = path.join(podDir, dir);
@@ -167,16 +180,23 @@ async function loadExistingPodData(podDir: string, dek?: Buffer): Promise<Reconc
       const filePath = path.join(dirPath, file);
       try {
         const content = readResource(filePath, dek);
-        if (content.trim().length > 0) {
-          inputs.push({ content, systemName: 'existing-pod' });
-        }
+        if (content.trim().length === 0) continue;
+        // PARSE-CHECK here, not just read-check. The reconciler parses these
+        // strings with no error handling of its own, so a bucket whose header
+        // was damaged used to take the whole import down with an unhandled
+        // rejection and a raw stack trace. Naming the file and carrying on is
+        // safe because the write chokepoint independently refuses to overwrite
+        // any bucket it cannot parse — the records in it are never lost, and
+        // never silently replaced by a partial rewrite either.
+        await parseTurtleToQuads(content);
+        inputs.push({ content, systemName: 'existing-pod' });
       } catch {
-        // Skip unreadable files
+        unreadable.push(`${dir}/${file}`);
       }
     }
   }
 
-  return inputs;
+  return { inputs, unreadable };
 }
 
 // ---------------------------------------------------------------------------
@@ -185,16 +205,33 @@ async function loadExistingPodData(podDir: string, dek?: Buffer): Promise<Reconc
 
 async function parseTurtleToQuads(turtle: string): Promise<Map<string, Quad[]>> {
   return new Promise((resolve, reject) => {
-    const parser = new Parser({ format: 'Turtle' });
-    const bySubject = new Map<string, Quad[]>();
+    // The SENTINEL base, because this turtle can be a pod file's own content on
+    // its way back to that same file. N3's default leaves _baseRoot undefined,
+    // so </profile/card.ttl#me> resolves to "undefined/profile/card.ttl#me".
+    // derelativizeQuads puts it back, so the subject keys
+    // this map is dedup-ed by are the IRIs the file actually states.
+    //
+    // The base is chosen against THIS text and the strip below uses that same
+    // base: third-party Turtle reaches this parser (`pod import` of a .ttl), and
+    // an IRI the document merely wrote to LOOK like the sentinel must not be
+    // rewritten into the different, real resource hiding behind it.
+    const base = relBaseFor(turtle);
+    const parser = new Parser({ format: 'Turtle', baseIRI: base });
+    const collected: Quad[] = [];
 
     parser.parse(turtle, (error, quad) => {
       if (error) { reject(error); return; }
-      if (!quad) { resolve(bySubject); return; }
-
-      const subj = quad.subject.value;
-      if (!bySubject.has(subj)) bySubject.set(subj, []);
-      bySubject.get(subj)!.push(quad);
+      if (!quad) {
+        const bySubject = new Map<string, Quad[]>();
+        for (const q of derelativizeQuads(collected, base)) {
+          const subj = q.subject.value;
+          if (!bySubject.has(subj)) bySubject.set(subj, []);
+          bySubject.get(subj)!.push(q);
+        }
+        resolve(bySubject);
+        return;
+      }
+      collected.push(quad);
     });
   });
 }
@@ -676,7 +713,15 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // Load existing pod data as an implicit source 0 when --reconcile-existing is set
       let existingInputs: ReconcilerInput[] = [];
       if (options.reconcileExisting !== false) {
-        existingInputs = await loadExistingPodData(podDir, dek);
+        const existing = await loadExistingPodData(podDir, dek);
+        existingInputs = existing.inputs;
+        for (const rel of existing.unreadable) {
+          printWarning(
+            `Existing pod file ${rel} could not be read as Turtle and was excluded from ` +
+              `reconciliation. It will NOT be written to either.`,
+            globalOpts,
+          );
+        }
         if (existingInputs.length > 0) {
           printVerbose(`Loaded ${existingInputs.length} existing pod file(s) for cross-batch reconciliation.`, globalOpts);
         }
@@ -870,6 +915,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       const filesWritten: ImportReport['filesWritten'] = [];
       const typeCounts: Record<string, number> = {};
       const newFiles: string[] = []; // relative paths (for index.ttl updates)
+      // Buckets this import refused to write because the existing file could
+      // not be read. Named in the summary and fatal to the exit code.
+      const bucketsRefused: string[] = [];
 
       for (const [typeKey, subjectQArrays] of buckets) {
         const info = DATA_TYPES[typeKey];
@@ -881,73 +929,75 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         const targetFile = path.join(podDir, info.directory, info.filename);
         const relPath = `${info.directory}/${info.filename}`;
 
-        // Serialize new quads
         const allNewQuads = subjectQArrays.flat();
-        const newTurtle = await quadsToTurtle(allNewQuads);
 
-        let finalTurtle: string;
         let recordsAdded = subjectQArrays.length;
         // Of those, the subjects this file did not already hold. Equal to
         // recordsAdded on a fresh file; zero on a fully duplicate re-import.
         let recordsNew = subjectQArrays.length;
-        let isNewFile = true;
+        const isNewFile = !(await fileExists(targetFile));
 
-        if (useCrossBatchReplace) {
-          // Cross-batch reconciliation: the reconciler output already represents
-          // the complete merged state (existing + new, deduped). Write it directly
-          // without re-merging against the existing file to avoid duplicates.
-          isNewFile = !(await fileExists(targetFile));
-          finalTurtle = newTurtle;
-          // recordsAdded reflects the full set of subjects in this bucket after reconciliation
-          recordsAdded = subjectQArrays.length;
-          // Which of them are genuinely new needs the pre-import file: the
-          // replace path never reads it, which is exactly why a re-import used to
-          // report its whole merged output as freshly imported records.
-          if (!isNewFile) {
-            let priorSubjects: Set<string>;
-            try {
-              priorSubjects = new Set(
-                (await parseTurtleToQuads(readResource(targetFile, dek))).keys(),
-              );
-            } catch {
-              priorSubjects = new Set();
+        // Every write below goes through the ONE bucket chokepoint, so the
+        // file's own prefix declarations survive, relative IRIs survive, and an
+        // existing bucket that does not parse is a refusal rather than a
+        // silently emptied Map.
+        try {
+          if (useCrossBatchReplace) {
+            // Cross-batch reconciliation: the reconciler output already
+            // represents the complete merged state (existing + new, deduped),
+            // so the file's contents are REPLACED, not appended to.
+            const priorSubjects = new Set<string>();
+            await mergeIntoBucket(targetFile, allNewQuads, dek, {
+              dryRun,
+              combine: (existing, incoming) => {
+                // Which subjects are genuinely new needs the pre-import file.
+                // The replace path used to never read it, which is why a
+                // re-import reported its whole merged output as fresh records.
+                for (const q of existing) priorSubjects.add(q.subject.value);
+                return incoming;
+              },
+            });
+            recordsAdded = subjectQArrays.length;
+            if (!isNewFile) {
+              recordsNew = subjectQArrays.filter(
+                (quads) => quads.length > 0 && !priorSubjects.has(quads[0].subject.value),
+              ).length;
             }
-            recordsNew = subjectQArrays.filter(
-              (quads) => quads.length > 0 && !priorSubjects.has(quads[0].subject.value),
-            ).length;
+          } else {
+            // Additive merge: keep every subject the file already holds and add
+            // only the ones it lacks (dedup by subject URI).
+            let addedCount = 0;
+            await mergeIntoBucket(targetFile, allNewQuads, dek, {
+              dryRun,
+              combine: (existing) => {
+                const bySubject = new Map<string, Quad[]>();
+                for (const q of existing) {
+                  const bucketQuads = bySubject.get(q.subject.value);
+                  if (bucketQuads) bucketQuads.push(q);
+                  else bySubject.set(q.subject.value, [q]);
+                }
+                for (const [subjectUri, quads] of subjectQuads) {
+                  if (routeTypeKey(quads) === typeKey && !bySubject.has(subjectUri)) {
+                    bySubject.set(subjectUri, quads);
+                    addedCount++;
+                  }
+                }
+                return Array.from(bySubject.values()).flat();
+              },
+            });
+            // The additive path only ever writes subjects the file lacked.
+            recordsAdded = addedCount;
+            recordsNew = addedCount;
           }
-        } else if (await fileExists(targetFile)) {
-          isNewFile = false;
-          // Merge: parse existing, combine unique subjects
-          let existingQuads: Map<string, Quad[]>;
-          try {
-            const existing = readResource(targetFile, dek);
-            existingQuads = await parseTurtleToQuads(existing);
-          } catch {
-            existingQuads = new Map();
-          }
-
-          // Add new subjects (dedup by subject URI)
-          let addedCount = 0;
-          for (const [subjectUri, quads] of subjectQuads) {
-            if (routeTypeKey(quads) === typeKey && !existingQuads.has(subjectUri)) {
-              existingQuads.set(subjectUri, quads);
-              addedCount++;
-            }
-          }
-          recordsAdded = addedCount;
-          // The additive path only ever writes subjects the file lacked.
-          recordsNew = addedCount;
-
-          const mergedQuads = Array.from(existingQuads.values()).flat();
-          finalTurtle = await quadsToTurtle(mergedQuads);
-        } else {
-          finalTurtle = newTurtle;
-        }
-
-        if (!dryRun) {
-          await fs.mkdir(path.dirname(targetFile), { recursive: true });
-          writeResource(targetFile, finalTurtle, dek);
+        } catch (e: unknown) {
+          // An existing bucket this import cannot read is a bucket whose
+          // contents are unknown, and unknown is not empty. Refuse to write
+          // THIS file, name it, and fail the run — overwriting it would take an
+          // already-corrupted pod from "one broken header" to "records gone".
+          const detail = e instanceof Error ? e.message : String(e);
+          printError(`Refusing to write ${relPath}: ${detail}`, globalOpts);
+          bucketsRefused.push(relPath);
+          continue;
         }
 
         typeCounts[typeKey] = (typeCounts[typeKey] ?? 0) + recordsAdded;
@@ -1094,6 +1144,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           : { enabled: false },
         filesWritten,
         typeCounts,
+        bucketsRefused,
         sourceBreakdown,
         completeness,
         totalRecordsImported,
@@ -1225,6 +1276,18 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             }
           } catch { /* non-fatal */ }
         }
+      }
+
+      // A refused bucket is not a warning. Its records were NOT imported and
+      // the caller must be able to see that without parsing prose.
+      if (bucketsRefused.length > 0) {
+        printError(
+          `${bucketsRefused.length} bucket(s) could not be read and were left untouched: ` +
+            `${bucketsRefused.join(', ')}. The records routed to them were NOT imported. ` +
+            `Repair or remove those files and re-run the import.`,
+          globalOpts,
+        );
+        process.exitCode = 1;
       }
     });
 }

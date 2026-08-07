@@ -17,22 +17,45 @@
  */
 
 import * as path from 'node:path';
-import * as fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { readResource, writeResource } from './pod-encryption.js';
-import { openPod, fileExists } from './pod-read.js';
+import { DataFactory } from 'n3';
+import type { Quad, Quad_Object } from 'n3';
+import { openPod } from './pod-read.js';
 import { loadShapes, validateTurtle } from './shacl-validator.js';
+import { mergeIntoBucket, KNOWN_PREFIXES, assertWritableIri } from './bucket-write.js';
+
+const { namedNode, literal, quad: makeQuad } = DataFactory;
 
 /** The pod-relative directory holding append-only overlay resources. */
 export const ANNOTATIONS_DIR = 'annotations';
 
-/** Shared Turtle prefix header for every overlay resource file. */
-export const OVERLAY_PREFIXES = `@prefix workbench: <https://ns.cascadeprotocol.org/workbench/v1#> .
-@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
-@prefix prov: <http://www.w3.org/ns/prov#> .
-@prefix dct: <http://purl.org/dc/terms/> .
-@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
-`;
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+
+/**
+ * CURIE prefixes an overlay may name. Expansion happens HERE, at build time,
+ * so no overlay predicate reaches disk as text: a prefix this map does not know
+ * is a loud throw rather than an unparseable `annotations/*.ttl`.
+ */
+const OVERLAY_NS: Record<string, string> = {
+  workbench: KNOWN_PREFIXES.workbench,
+  cascade: KNOWN_PREFIXES.cascade,
+  prov: KNOWN_PREFIXES.prov,
+  dct: KNOWN_PREFIXES.dct,
+  xsd: KNOWN_PREFIXES.xsd,
+};
+
+/** Expand an overlay CURIE to its full IRI. @throws on an unknown prefix. */
+function expandOverlayCurie(curie: string): string {
+  const idx = curie.indexOf(':');
+  const ns = idx > 0 ? OVERLAY_NS[curie.slice(0, idx)] : undefined;
+  if (!ns) {
+    throw new Error(
+      `Unknown overlay CURIE prefix in "${curie}". Overlay terms must use one of: ` +
+        `${Object.keys(OVERLAY_NS).join(', ')}.`,
+    );
+  }
+  return ns + curie.slice(idx + 1);
+}
 
 /**
  * Resolve the DEK for an encrypted pod, or `undefined` for a plaintext pod.
@@ -47,66 +70,76 @@ export async function resolvePodDek(podDir: string): Promise<Buffer | undefined>
   return (await openPod(podDir)).dek;
 }
 
-/** Escape a value for use inside a Turtle "..." string literal. */
-export function escapeTurtleString(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r')
-    .replace(/\t/g, '\\t');
-}
-
-/** A single `predicate value` line within an overlay subject block. */
+/** A single `predicate value` statement within an overlay subject block. */
 export interface OverlayLine {
   /** Predicate in CURIE form, e.g. 'workbench:amendsRecord'. */
   predicate: string;
-  /** The object term, already serialized (IRI in <...> or "literal"^^type). */
-  object: string;
+  /** The object term. Build it with {@link strLit} / {@link iriRef} / {@link dateTimeLit}. */
+  object: Quad_Object;
 }
 
-/** A literal string object: `"escaped"`. */
-export function strLit(value: string): string {
-  return `"${escapeTurtleString(value)}"`;
+/** A plain string literal object. */
+export function strLit(value: string): Quad_Object {
+  return literal(value);
 }
 
-/** A typed dateTime object: `"..."^^xsd:dateTime`. */
-export function dateTimeLit(iso: string): string {
-  return `"${escapeTurtleString(iso)}"^^xsd:dateTime`;
+/** An `xsd:dateTime` literal object. */
+export function dateTimeLit(iso: string): Quad_Object {
+  return literal(iso, namedNode(KNOWN_PREFIXES.xsd + 'dateTime'));
 }
 
-/** An IRI object: `<iri>`. */
-export function iriRef(iri: string): string {
-  return `<${iri}>`;
+/** An IRI object. */
+export function iriRef(iri: string): Quad_Object {
+  return namedNode(iri);
 }
 
 /**
- * Build the Turtle block for one overlay subject.
+ * Build the quads for one overlay subject.
  *
  * @param subjectUri  the minted urn:uuid: of this overlay
  * @param rdfType     the workbench class CURIE, e.g. 'workbench:Amendment'
- * @param lines       the class-specific predicate/object lines
+ * @param lines       the class-specific predicate/object statements
  * @param actorIri    optional prov:wasAttributedTo actor IRI
  * @param createdIso  dct:created timestamp (ISO 8601)
  */
-export function buildOverlayBlock(
+export function buildOverlayQuads(
   subjectUri: string,
   rdfType: string,
   lines: OverlayLine[],
   actorIri: string | undefined,
   createdIso: string,
-): string {
+): Quad[] {
+  // Every IRI an overlay command took from the user lands here — `--record`,
+  // `--superseded-by`, `--by` — so this is the one place that has to refuse an
+  // IRI Turtle cannot write. Doing it per-command is how the same hole gets
+  // reopened by the next command that grows a `--record` flag. Without it the
+  // overlay file becomes unparseable, and an unparseable overlay is one every
+  // later write refuses: one typo bricks it for good.
+  //
+  // The failure was not silent before — the SHACL gate caught the unparseable
+  // MERGED document — but it reported "Parse error: Unexpected ..." and never
+  // named the value the user typed, which is the difference between a typo you
+  // fix and a bug you file.
+  assertWritableIri(subjectUri, 'the overlay subject');
+  if (actorIri) assertWritableIri(actorIri, '--by');
+  for (const l of lines) {
+    if (l.object.termType === 'NamedNode') assertWritableIri(l.object.value, l.predicate);
+  }
+
+  const subject = namedNode(subjectUri);
   const allLines: OverlayLine[] = [
-    ...lines,
-    { predicate: 'cascade:dataProvenance', object: 'cascade:SelfReported' },
+    { predicate: 'cascade:dataProvenance', object: namedNode(KNOWN_PREFIXES.cascade + 'SelfReported') },
   ];
   if (actorIri) {
     allLines.push({ predicate: 'prov:wasAttributedTo', object: iriRef(actorIri) });
   }
   allLines.push({ predicate: 'dct:created', object: dateTimeLit(createdIso) });
 
-  const body = allLines.map((l) => `    ${l.predicate} ${l.object}`).join(' ;\n');
-  return `<${subjectUri}> a ${rdfType} ;\n${body} .\n`;
+  return [
+    makeQuad(subject, namedNode(RDF_TYPE), namedNode(expandOverlayCurie(rdfType))),
+    ...lines.map((l) => makeQuad(subject, namedNode(expandOverlayCurie(l.predicate)), l.object)),
+    ...allLines.map((l) => makeQuad(subject, namedNode(expandOverlayCurie(l.predicate)), l.object)),
+  ];
 }
 
 /** Description of one overlay to be written. */
@@ -126,21 +159,21 @@ export interface OverlaySpec {
 }
 
 /**
- * Append an overlay resource to `<pod>/annotations/<fileName>` via the
- * read-merge-write pattern. The MERGED file content is SHACL-validated before
- * it is written; a malformed overlay throws and nothing is persisted.
+ * Append an overlay resource to `<pod>/annotations/<fileName>` through the
+ * bucket chokepoint. The MERGED document is SHACL-validated before it is
+ * written; a malformed overlay throws and nothing is persisted.
  *
- * @throws {Error} if the merged overlay fails SHACL validation.
+ * @throws {Error}            if the merged overlay fails SHACL validation.
+ * @throws {BucketParseError} if the existing overlay file does not parse.
  */
 export async function appendOverlay(
   podDir: string,
   spec: OverlaySpec,
   dek: Buffer | undefined,
 ): Promise<void> {
-  const annotationsDir = path.join(podDir, ANNOTATIONS_DIR);
-  const filePath = path.join(annotationsDir, spec.fileName);
+  const filePath = path.join(podDir, ANNOTATIONS_DIR, spec.fileName);
 
-  const block = buildOverlayBlock(
+  const newQuads = buildOverlayQuads(
     spec.subjectUri,
     spec.rdfType,
     spec.lines,
@@ -148,42 +181,10 @@ export async function appendOverlay(
     spec.createdIso,
   );
 
-  // Read existing body (without re-applying the prefix header), if present.
-  let existingBody = '';
-  if (await fileExists(filePath)) {
-    const existing = readResource(filePath, dek);
-    // Strip the leading prefix header lines so we keep a single header.
-    existingBody = stripPrefixHeader(existing);
-  }
-
-  const mergedBody = existingBody.trim().length > 0
-    ? `${existingBody.trimEnd()}\n\n${block}`
-    : block;
-  const merged = `${OVERLAY_PREFIXES}\n${mergedBody}`;
-
-  // Validate the merged graph BEFORE writing. A malformed overlay must fail.
-  validateOverlayGraph(merged, filePath);
-
-  await fs.mkdir(annotationsDir, { recursive: true });
-  writeResource(filePath, merged, dek);
-}
-
-/**
- * Remove the leading `@prefix` / `@base` header lines from a Turtle document,
- * returning just the statement body. Lets us re-append a single shared header.
- */
-function stripPrefixHeader(turtle: string): string {
-  const lines = turtle.split('\n');
-  let i = 0;
-  while (i < lines.length) {
-    const trimmed = lines[i].trim();
-    if (trimmed === '' || trimmed.startsWith('@prefix') || trimmed.startsWith('@base')) {
-      i++;
-      continue;
-    }
-    break;
-  }
-  return lines.slice(i).join('\n');
+  await mergeIntoBucket(filePath, newQuads, dek, {
+    // Validate the merged graph BEFORE writing. A malformed overlay must fail.
+    validate: (turtle, file) => validateOverlayGraph(turtle, file),
+  });
 }
 
 let cachedShapes: ReturnType<typeof loadShapes> | undefined;
