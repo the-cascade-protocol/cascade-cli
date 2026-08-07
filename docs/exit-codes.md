@@ -50,6 +50,24 @@ Two failures, weighed differently, because "fail on anything" is its own outage:
 Warnings go to stderr and never change the exit code. An error message for a
 read failure always names the files it could not read.
 
+### `pod doctor` reads the same three codes as a diagnosis
+
+`cascade pod doctor` scans a pod for damage, so "there is something wrong" is its
+normal successful answer rather than a failure. It maps onto the same three
+codes without bending them:
+
+| Code | For `pod doctor` |
+|---|---|
+| `0` | Nothing is wrong, or (under `--write`) everything found was repaired. |
+| `1` | Damage remains: a dry run that found something, or a file doctor read and will not repair. Also "there is no pod at that path". |
+| `2` | Something could not be **read**: the pod would not open, a resource did not decrypt, or a `.ttl` holds bytes that are not text. |
+
+`2` outranks `1` when both apply. A file doctor could not open was never
+examined, and a verb whose entire job is to report the state of your pod must
+not describe files it never read. Its `--json` report carries a per-file
+`status` of `repaired`, `repairable`, `refused` or `unreadable`, and the
+unreadable ones are also named on stderr in the usual envelope.
+
 ## The `--json` error envelope
 
 With `--json`, an error is a single JSON object on **stderr**. `error` is always
