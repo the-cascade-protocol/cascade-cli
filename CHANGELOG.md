@@ -9,6 +9,31 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+**`cascade pod doctor <pod-dir> [--write]` — a recovery path for a pod the write commands refuse.**
+Scans every `.ttl` file in a pod and repairs the ones whose only defect is that the header is
+missing `@prefix` declarations the body uses — the damage the `pod add-record` bug below produced.
+Everything else is reported with a next step rather than repaired.
+
+It is a dry run by default; `--write` is required to change anything. A repair only ever PREPENDS
+the missing declarations, so every existing byte survives verbatim and the command is safe on the
+comment-anchored scaffolding files (`settings/publicTypeIndex.ttl`, `index.ttl`, `profile/card.ttl`,
+`profile/extended.ttl`) as well as on record buckets. The repaired text must pass a strict parse
+before it is written, the original is backed up beside the file as `*.doctor-backup` and restored if
+the post-write read-back does not verify, and a prefix the tool does not know is a refusal naming
+the prefix — it will never invent a namespace. Encrypted pods are handled transparently and stay
+ciphertext.
+
+Reported but deliberately not repaired, because each needs a human decision: empty and truncated
+files (an interrupted write leaves both), IRIs holding a character Turtle forbids, and resources
+that do not decrypt — the last of which says so plainly instead of blaming a passphrase that
+demonstrably worked on the rest of the pod.
+
+Exit codes follow the existing convention: `0` when nothing is wrong or everything found was
+repaired, `1` when damage remains, `2` when the pod itself could not be opened. `--json` prints a
+report distinguishing repaired / repairable / refused / unreadable with a per-file reason.
+
 ### Fixed
 
 **`pod add-record` no longer destroys prefix declarations it did not author.** Adding a record to a
@@ -49,8 +74,9 @@ with. Human-curated files (`settings/publicTypeIndex.ttl`, `index.ttl`, `profile
 **Upgrade note.** A bucket already damaged by the first bug above will now be refused by
 `add-record`, `erase` and `import` rather than silently appended to or overwritten. That is
 deliberate — the previous behaviour is what turned a broken header into lost records — but it means
-an already-damaged file must be repaired before those commands will touch it. Repairing it means
-restoring the missing `@prefix` lines; the records themselves are intact.
+an already-damaged file must be repaired before those commands will touch it. The records themselves
+are intact; run `cascade pod doctor <pod-dir>` to see what is wrong and `--write` to restore the
+missing `@prefix` lines.
 
 ## [0.12.0] - 2026-08-04
 

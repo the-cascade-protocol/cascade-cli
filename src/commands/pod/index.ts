@@ -8,6 +8,7 @@
  *   query <pod-dir>     Query data within a pod
  *   export <pod-dir>    Export pod data
  *   info <pod-dir>      Show pod metadata and statistics
+ *   doctor <pod-dir>    Diagnose a damaged pod, and repair it with --write
  *
  * This module delegates to focused subcommand modules:
  *   - init.ts    Pod initialization with templates
@@ -32,6 +33,7 @@ import { registerAnnotateSubcommand } from './annotate.js';
 import { registerAddRecordSubcommand } from './add-record.js';
 import { registerRetractSubcommand } from './retract.js';
 import { registerEraseSubcommand } from './erase.js';
+import { registerDoctorSubcommand } from './doctor.js';
 
 export function registerPodCommand(program: Command): void {
   const pod = program.command('pod').description('Manage Cascade Pod structures');
@@ -51,4 +53,5 @@ export function registerPodCommand(program: Command): void {
   registerAddRecordSubcommand(pod, program);
   registerRetractSubcommand(pod, program);
   registerEraseSubcommand(pod, program);
+  registerDoctorSubcommand(pod, program);
 }

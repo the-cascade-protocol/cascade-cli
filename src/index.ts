@@ -62,6 +62,8 @@ Examples:
   cascade pod init ./my-pod
   cascade pod import ./my-pod records.xml
   cascade pod extract ./my-pod
+  cascade pod doctor ./my-pod
+  cascade pod doctor ./my-pod --write
   cascade agent
   cascade agent serve
   cascade capabilities
