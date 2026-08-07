@@ -18,6 +18,7 @@ import {
 import { normalizeMedName, normalizeDose, normalizeFrequency, type DrugNameNormalizer } from './medication-normalize.js';
 import { medicationCodeKeys, sharedMedicationCodeKey } from './code-keys.js';
 import { cascadeTerminologyResolver } from './terminology.js';
+import { REL_BASE } from './bucket-write.js';
 
 // Re-export so existing consumers of the reconciler's normalizeMedName keep
 // working. The canonical definition now lives in ./medication-normalize.ts
@@ -141,6 +142,14 @@ interface RdfValue {
   value: string;
   /** xsd:* datatype URI for typed literals; undefined for URIs and plain strings */
   datatype?: string;
+  /**
+   * True when the object was a NamedNode. Recorded at parse time because the
+   * re-emission below otherwise has to GUESS from the string, and its guess
+   * ("starts with http or urn:") demotes every other scheme to a literal —
+   * which is how a pod's `prov:wasAttributedTo </profile/card.ttl#me>` came
+   * back from an import as the string "undefined/profile/card.ttl#me".
+   */
+  isIri?: boolean;
 }
 
 interface ParsedRecord {
@@ -152,7 +161,11 @@ interface ParsedRecord {
 
 export async function parseTurtle(turtle: string, defaultSystem: string): Promise<ParsedRecord[]> {
   return new Promise((resolve, reject) => {
-    const parser = new Parser({ format: 'Turtle' });
+    // Sentinel base: pod content arrives here on its way back to the pod, and a
+    // relative IRI must survive the trip. N3's default resolves
+    // </profile/card.ttl#me> to "undefined/profile/card.ttl#me"; the sentinel is
+    // stripped back off at the bucket write chokepoint.
+    const parser = new Parser({ format: 'Turtle', baseIRI: REL_BASE });
     const bySubject = new Map<string, Array<{ pred: string; obj: RdfValue }>>();
 
     parser.parse(turtle, (error, quad) => {
@@ -186,7 +199,7 @@ export async function parseTurtle(turtle: string, defaultSystem: string): Promis
       const obj = quad.object;
       const rdfVal: RdfValue = obj.termType === 'Literal' && obj.datatype?.value && obj.datatype.value !== NS.xsd + 'string'
         ? { value: obj.value, datatype: obj.datatype.value }
-        : { value: obj.value };
+        : { value: obj.value, isIri: obj.termType === 'NamedNode' };
       bySubject.get(subj)!.push({ pred: quad.predicate.value, obj: rdfVal });
     });
   });
@@ -216,7 +229,10 @@ export async function parseTurtle(turtle: string, defaultSystem: string): Promis
  */
 async function collectQuads(turtle: string): Promise<{ passthrough: Quad[]; all: Quad[] }> {
   return new Promise((resolve, reject) => {
-    const parser = new Parser({ format: 'Turtle' });
+    // Same sentinel base as parseTurtle above: passthrough subjects are copied
+    // verbatim into the reconciled output, so their relative IRIs must not be
+    // rewritten on the way through.
+    const parser = new Parser({ format: 'Turtle', baseIRI: REL_BASE });
     const quadsBySubject = new Map<string, Quad[]>();
     const all: Quad[] = [];
 
@@ -1322,7 +1338,10 @@ async function serializeGroups(
         // Re-derived below for every record; a carried-over copy would double it.
         if (RECONCILER_DERIVED_PREDICATES.has(pred)) continue;
         for (const val of vals) {
-          const isIri = val.value.startsWith('http') || val.value.startsWith('urn:');
+          // What the source term ACTUALLY was, when we recorded it. The
+          // string-shape guess is only the fallback for values this reconciler
+          // derived itself rather than parsed.
+          const isIri = val.isIri ?? (val.value.startsWith('http') || val.value.startsWith('urn:'));
           const obj = isIri
             ? namedNode(rewriteEdgeIri(pred, val.value))
             : val.datatype

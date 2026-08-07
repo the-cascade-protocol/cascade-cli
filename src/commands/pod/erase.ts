@@ -60,8 +60,7 @@ import {
   type PodReader,
   type PodReadFailure,
 } from '../../lib/pod-read.js';
-import { writeResource } from '../../lib/pod-encryption.js';
-import { quadsToTurtle } from '../../lib/fhir-converter/types.js';
+import { mergeIntoBucket, derelativizeQuads, REL_BASE } from '../../lib/bucket-write.js';
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 
@@ -163,10 +162,14 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
         if (excludeFiles.has(file)) continue;
         if ([...excludeDirs].some((d) => file.startsWith(d + path.sep))) continue;
 
-        // baseIri '' because the surviving quads are re-serialized back to this
-        // same file: resolving relative IRIs against the file URL here would
-        // rewrite them as a side effect of the erasure.
-        const parsed = reader.parseFile(file, { baseIri: '' });
+        // A SENTINEL base, not the file URL and not '': the surviving quads are
+        // re-serialized back to this same file, so a relative IRI must come out
+        // exactly as it went in. The file URL would rewrite it absolutely; ''
+        // leaves N3's _baseRoot undefined and silently turns
+        // </profile/card.ttl#me> into "undefined/profile/card.ttl#me".
+        // derelativizeQuads strips the sentinel straight back off, so the
+        // subject match below compares the IRI the user typed.
+        const parsed = reader.parseFile(file, { baseIri: REL_BASE });
         if (!parsed.ok) {
           unreadable.push(parsed.failure);
           continue;
@@ -177,7 +180,7 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
         // relative to the file the record was found in.
         if (foundFile) continue;
 
-        const quads = parsed.value.quads;
+        const quads = derelativizeQuads(parsed.value.quads);
         const match = quads.filter((q) => q.subject.value === options.record);
         if (match.length > 0) {
           foundFile = file;
@@ -228,9 +231,16 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
       const typeQuad = subjectQuads.find((q) => q.predicate.value === RDF_TYPE);
       const erasedType = typeQuad ? shortenType(typeQuad.object.value) : undefined;
 
-      // Re-serialize the bucket WITHOUT the erased subject and write it back.
-      const newBucketTurtle = await quadsToTurtle(remainingQuads);
-      writeResource(foundFile, newBucketTurtle, dek);
+      // Re-serialize the bucket WITHOUT the erased subject and write it back,
+      // through the chokepoint so the file keeps the prefixes it declared
+      // rather than being flattened onto whichever set this command knows.
+      try {
+        await mergeIntoBucket(foundFile, [], dek, { combine: () => remainingQuads });
+      } catch (e: unknown) {
+        printError(e instanceof Error ? e.message : String(e), globalOpts);
+        process.exitCode = 1;
+        return;
+      }
 
       // Write the content-free Tombstone overlay (the erasure audit event).
       const tombstoneUri = mintUri();

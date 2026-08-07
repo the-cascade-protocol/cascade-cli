@@ -20,15 +20,14 @@
 
 import type { Command } from 'commander';
 import * as path from 'node:path';
-import * as fs from 'node:fs/promises';
+import { DataFactory } from 'n3';
+import type { Quad } from 'n3';
 import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
 import { DATA_TYPES, resolvePodDir, fileExists, type DataTypeInfo } from './helpers.js';
-import {
-  resolvePodDek,
-  mintUri,
-  escapeTurtleString,
-} from '../../lib/annotations.js';
-import { readResource, writeResource } from '../../lib/pod-encryption.js';
+import { resolvePodDek, mintUri } from '../../lib/annotations.js';
+import { mergeIntoBucket, KNOWN_PREFIXES } from '../../lib/bucket-write.js';
+
+const { namedNode, literal, quad: makeQuad } = DataFactory;
 
 // CURIE prefix -> namespace IRI for expanding --type and property CURIEs.
 const PREFIX_NS: Record<string, string> = {
@@ -43,17 +42,7 @@ const PREFIX_NS: Record<string, string> = {
   fhir: 'http://hl7.org/fhir/',
 };
 
-const TURTLE_PREFIX_HEADER = `@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
-@prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
-@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
-@prefix coverage: <https://ns.cascadeprotocol.org/coverage/v1#> .
-@prefix checkup: <https://ns.cascadeprotocol.org/checkup/v1#> .
-@prefix pots: <https://ns.cascadeprotocol.org/pots/v1#> .
-@prefix workbench: <https://ns.cascadeprotocol.org/workbench/v1#> .
-@prefix prov: <http://www.w3.org/ns/prov#> .
-@prefix dct: <http://purl.org/dc/terms/> .
-@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
-`;
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 
 // The Pod's canonical patient WebID (see `cascade pod init`), used as the
 // default prov:wasAttributedTo actor for a self-entered record when --by is
@@ -155,42 +144,59 @@ export function registerAddRecordSubcommand(pod: Command, program: Command): voi
       const recordUri = mintUri();
       const createdIso = new Date().toISOString();
 
-      // Build the record's predicate/object lines from propsJson.
-      const lines: string[] = [`    a ${options.type}`];
+      // Build the record as QUADS, never as text. Every CURIE is expanded here,
+      // so the serializer decides how (or whether) to abbreviate it — which is
+      // why `--type core:X` / `core:someProperty` can no longer emit a CURIE
+      // whose prefix the header never declared.
+      const subject = namedNode(recordUri);
+      const newQuads: Quad[] = [makeQuad(subject, namedNode(RDF_TYPE), namedNode(typeIri))];
       for (const [curie, value] of Object.entries(props)) {
         // Validate each property CURIE expands to a known namespace.
-        if (!expandCurie(curie)) {
+        const predicateIri = expandCurie(curie);
+        if (!predicateIri) {
           printError(`Unknown property CURIE prefix: ${curie}`, globalOpts);
           process.exitCode = 1;
           return;
         }
-        lines.push(`    ${curie} "${escapeTurtleString(String(value))}"`);
+        newQuads.push(makeQuad(subject, namedNode(predicateIri), literal(String(value))));
       }
       // Source axis: who reported it (self) — and a real attribution triple.
-      lines.push('    cascade:dataProvenance cascade:SelfReported');
-      lines.push(`    prov:wasAttributedTo <${options.by ?? PATIENT_WEBID}>`);
+      newQuads.push(makeQuad(
+        subject,
+        namedNode(KNOWN_PREFIXES.cascade + 'dataProvenance'),
+        namedNode(KNOWN_PREFIXES.cascade + 'SelfReported'),
+      ));
+      newQuads.push(makeQuad(
+        subject,
+        namedNode(KNOWN_PREFIXES.prov + 'wasAttributedTo'),
+        namedNode(options.by ?? PATIENT_WEBID),
+      ));
       // Verification axis (orthogonal to source): self-entered data is unverified
       // until corroborated. Mirrors FHIR verificationStatus.
-      lines.push('    workbench:verificationStatus workbench:Unverified');
-      lines.push(`    dct:created "${escapeTurtleString(createdIso)}"^^xsd:dateTime`);
-
-      const block = `<${recordUri}>\n${lines.join(' ;\n')} .\n`;
+      newQuads.push(makeQuad(
+        subject,
+        namedNode(KNOWN_PREFIXES.workbench + 'verificationStatus'),
+        namedNode(KNOWN_PREFIXES.workbench + 'Unverified'),
+      ));
+      newQuads.push(makeQuad(
+        subject,
+        namedNode(KNOWN_PREFIXES.dct + 'created'),
+        literal(createdIso, namedNode(KNOWN_PREFIXES.xsd + 'dateTime')),
+      ));
 
       const targetFile = path.join(podDir, bucket.info.directory, bucket.info.filename);
 
-      // Read-merge-write into the bucket file (preserve a single prefix header).
-      let mergedBody = block;
-      if (await fileExists(targetFile)) {
-        const existing = readResource(targetFile, dek);
-        const existingBody = stripPrefixHeader(existing);
-        mergedBody = existingBody.trim().length > 0
-          ? `${existingBody.trimEnd()}\n\n${block}`
-          : block;
+      // Read-merge-write through the bucket chokepoint: the existing document's
+      // own prefix declarations are harvested and kept, so a bucket an import
+      // wrote does not lose `rxnorm:` / `sct:` / `loinc:` / `vcard:` the moment
+      // a hand-entered record lands in it.
+      try {
+        await mergeIntoBucket(targetFile, newQuads, dek);
+      } catch (e: unknown) {
+        printError(e instanceof Error ? e.message : String(e), globalOpts);
+        process.exitCode = 1;
+        return;
       }
-      const merged = `${TURTLE_PREFIX_HEADER}\n${mergedBody}`;
-
-      await fs.mkdir(path.dirname(targetFile), { recursive: true });
-      writeResource(targetFile, merged, dek);
 
       const result = { added: true, recordUri, type: options.type };
 
@@ -205,19 +211,4 @@ export function registerAddRecordSubcommand(pod: Command, program: Command): voi
         console.log(`  File: ${bucket.info.directory}/${bucket.info.filename}`);
       }
     });
-}
-
-/** Strip leading @prefix / @base header lines, returning the statement body. */
-function stripPrefixHeader(turtle: string): string {
-  const lines = turtle.split('\n');
-  let i = 0;
-  while (i < lines.length) {
-    const trimmed = lines[i].trim();
-    if (trimmed === '' || trimmed.startsWith('@prefix') || trimmed.startsWith('@base')) {
-      i++;
-      continue;
-    }
-    break;
-  }
-  return lines.slice(i).join('\n');
 }
