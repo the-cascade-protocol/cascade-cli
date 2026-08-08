@@ -9,6 +9,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-08
+
+**Upgrade from 0.12.0 is recommended for anyone who has ever added a record by hand to a pod they
+imported into.** That combination could leave a bucket unreadable, and a later import could then
+replace it. Both are fixed below, and `pod doctor` repairs pods already affected.
+
 ### Added
 
 **`cascade pod doctor <pod-dir> [--write]` — a recovery path for a pod the write commands refuse.**
@@ -845,6 +851,8 @@ Previous release — see git history.
 
 ---
 
+[0.13.0]: https://github.com/the-cascade-protocol/cascade-cli/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/the-cascade-protocol/cascade-cli/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/the-cascade-protocol/cascade-cli/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/the-cascade-protocol/cascade-cli/compare/v0.5.10...v0.10.0
 [0.4.0]: https://github.com/the-cascade-protocol/cli/compare/v0.3.6...v0.4.0
