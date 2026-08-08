@@ -52,6 +52,9 @@ export const COMMAND_ENRICHMENT: EnrichmentTable = {
 
   'pod export': {
     examples: ['cascade pod export ./my-pod', 'cascade pod export ./my-pod --format directory'],
+    notes: [
+      'Conditional refusal, enforced at run time: against an ENCRYPTED pod this exits 1 unless --allow-encrypted is passed, because the archive would otherwise contain ciphertext that looks like a working export. Decrypt the pod first, or pass the flag to export the sealed bytes deliberately — an export made that way carries a README explaining what the files are.',
+    ],
   },
 
   'pod import': {
