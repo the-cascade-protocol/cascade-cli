@@ -320,6 +320,24 @@ const VERBS: Record<string, VerbSpec> = {
     strayOutcome: 'warn',
     mutates: true,
   },
+  doctor: {
+    category: 'read',
+    // The DRY RUN, which is the default and reads every .ttl in the pod. Its
+    // repair path has its own suites (pod-doctor.test.ts, and the sealed-pod
+    // half in pod-doctor-encrypted.test.ts); what belongs here is the read.
+    argv: (pod) => ['--json', 'pod', 'doctor', pod],
+    successExit: 0,
+    // `"unreadable": 0` is the honest-read assertion in this verb's own
+    // vocabulary: with the key, nothing in the pod is unexaminable. A keyless
+    // read makes it the file count instead, so it cannot pass hollow.
+    successMustContain: '"unreadable": 0',
+    strayTarget: 'clinical/medications.ttl',
+    // Fatal, at exit 2, even though doctor's job is to report per-file damage.
+    // A file it could not READ was never examined, and a verb whose whole
+    // purpose is to tell you the state of your pod must not answer "here is the
+    // state of your pod" about files it never opened.
+    strayOutcome: 'fatal',
+  },
   export: {
     category: 'read',
     // D-CLI-2: an encrypted pod is refused before any read, in EVERY scenario,

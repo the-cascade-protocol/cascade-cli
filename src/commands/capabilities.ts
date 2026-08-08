@@ -180,6 +180,25 @@ function getCapabilities(version: string): CapabilitiesOutput {
         status: 'implemented',
       },
       {
+        name: 'pod doctor',
+        description:
+          'Diagnose a damaged Cascade Pod and, with --write, repair files whose only defect is a missing @prefix declaration. This is the recovery path when add-record, erase or import refuse a bucket that will not parse. Dry run by default; only ever PREPENDS declarations, never rewrites existing bytes; never invents a namespace.',
+        usage: 'cascade pod doctor <pod-dir> [--write]',
+        parameters: [
+          { name: 'pod-dir', type: 'string', required: true, description: 'Path to the Cascade Pod' },
+          { name: '--write', type: 'boolean', required: false, description: 'Apply the repairs (default is a dry run that modifies nothing)' },
+          { name: '--json', type: 'boolean', required: false, description: 'Output the report as JSON (global flag; place it before "pod")' },
+        ],
+        examples: ['cascade pod doctor ./my-pod', 'cascade pod doctor ./my-pod --write', 'cascade --json pod doctor ./my-pod'],
+        outputSchema: {
+          description: 'JSON report structure for --json',
+          shape: '{ pod, encrypted, mode: "dry-run"|"write", scanned, healthy, repaired, repairable, refused, unreadable, findings: Finding[] }',
+          findingShape: '{ file, status: "repairable"|"repaired"|"refused"|"unreadable", damage, reason, nextStep?, missingPrefixes?, triples?, preservedBytes?, backup? }',
+          exitCodes: '0 = nothing wrong or everything repaired; 1 = damage remains (or no pod at that path); 2 = the pod could not be opened',
+        },
+        status: 'implemented',
+      },
+      {
         name: 'reconcile',
         description: 'Reconcile Cascade RDF records from multiple sources into a normalized record set, resolving conflicts using trust-weighted scoring',
         usage: 'cascade reconcile <files...> [options]',
