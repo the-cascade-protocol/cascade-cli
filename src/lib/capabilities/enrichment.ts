@@ -107,6 +107,30 @@ export const COMMAND_ENRICHMENT: EnrichmentTable = {
     },
   },
 
+  'pod add-record': {
+    // The propsJson positional is what the parser exposes, and it is the form
+    // that behaves. The command's own error text teaches `--json '{...}'`,
+    // which lands the object on this same positional only because the global
+    // boolean --json absorbs the flag — and it silently switches the command's
+    // output to JSON as a side effect. Documenting the accidental form would be
+    // teaching an agent to depend on parse order.
+    examples: [
+      'cascade pod add-record ./my-pod \'{"health:conditionName":"Iron deficiency","health:status":"active"}\' --type health:ConditionRecord',
+      'CASCADE_RECORD_JSON=\'{"health:medicationName":"Aspirin"}\' cascade pod add-record ./my-pod --type clinical:Medication',
+    ],
+    notes: [
+      'Enforced at run time, not by the parser: the record properties are mandatory. Pass them as the propsJson positional argument — a JSON object of { "<curie>": "<value>" } — or set CASCADE_RECORD_JSON, which is the better route for a large payload. With neither, the command exits 1 with "No properties provided."',
+      '--type takes a CURIE whose prefix is one of cascade/core, health, clinical, coverage, checkup, pots, workbench, fhir, and whose class must map to a known bucket file (e.g. health:ConditionRecord, clinical:Medication). An unmapped type is refused rather than guessed.',
+      'The record is written as cascade:SelfReported and workbench:Unverified, attributed to --by if given and otherwise to the pod owner\'s WebID.',
+    ],
+  },
+
+  'pod annotate': {
+    notes: [
+      'Enforced at run time, not by the parser: the annotation needs content. Pass --text, or --property together with --value. With neither, the command exits 1 with "Provide at least one of --text or --value (with --property)."',
+    ],
+  },
+
   'pod erase': {
     notes: [
       'Destructive and not reversible: the record bytes are removed from the bucket file. --confirm is mandatory, and a Tombstone audit marker is written in the record\'s place.',
@@ -116,10 +140,22 @@ export const COMMAND_ENRICHMENT: EnrichmentTable = {
 
   'conformance run': {
     examples: ['cascade conformance run --suite ./fixtures --self'],
+    notes: [
+      'Enforced at run time, not by the parser: exactly one mode must be chosen. Without --self or --command the command exits 1 with "Either --command or --self must be specified".',
+    ],
   },
 
   serve: {
+    // Commander's one-liner dropped the word MCP entirely, and --mcp is
+    // enforced in the action rather than by the parser, so a generated-only
+    // descriptor would tell an agent that `cascade serve` starts a server.
+    // It does not: it exits 1.
+    description:
+      'Start the local MCP (Model Context Protocol) server, exposing the cascade_* tools listed under mcpTools to an MCP client such as Claude Desktop or Claude Code. Serves over stdio by default, or SSE on a port. Requires --mcp.',
     examples: ['cascade serve --mcp', 'cascade serve --mcp --transport sse --port 3000'],
+    notes: [
+      'Enforced at run time, not by the parser: --mcp is mandatory in practice. `cascade serve` on its own exits 1 with "The --mcp flag is required." There is no non-MCP server mode.',
+    ],
   },
 
   capabilities: {

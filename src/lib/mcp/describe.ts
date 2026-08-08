@@ -115,22 +115,56 @@ function describeTool(
 }
 
 function describeParameter(schema: z.ZodType): McpParameterDescriptor {
-  const inner = unwrapOptional(schema);
-  const choices = enumValues(inner);
-  const properties = objectProperties(inner);
+  const chain = unwrapChain(schema);
+  const core = chain[chain.length - 1];
+  const choices = enumValues(core);
+  const properties = objectProperties(core);
 
   return {
-    type: zodTypeName(inner),
-    description: schema.description ?? inner.description ?? '',
+    type: zodTypeName(core),
+    // `.describe()` may be applied at any point in the chain.
+    description: chain.find((link) => link.description !== undefined)?.description ?? '',
     required: !schema.isOptional(),
     ...(choices ? { enum: choices } : {}),
     ...(properties ? { properties } : {}),
   };
 }
 
-/** `.describe()` is often applied after `.optional()`, so both sides are read. */
-function unwrapOptional(schema: z.ZodType): z.ZodType {
-  return schema instanceof z.ZodOptional ? (schema.unwrap() as z.ZodType) : schema;
+/**
+ * Peel the wrappers off a schema, outermost first, down to the type that
+ * carries the shape and the allowed values.
+ *
+ * This has to keep going rather than unwrap once. `z.enum([...]).default('x')`
+ * is a wrapper around an enum, and stopping at the wrapper reports the
+ * parameter as type `unknown` with no enum at all — silently deleting the only
+ * list of valid values an agent has, while every test stays green. Swapping
+ * `.optional()` for `.default()` is a routine, more-correct cleanup, so this is
+ * a live hazard rather than a hypothetical one.
+ *
+ * Wrappers this does not know about are not silently tolerated either: they
+ * surface as type `unknown`, which `tests/capabilities-registry.test.ts` fails
+ * on. That gate is the general protection; these three unwraps are the cases
+ * that exist today.
+ */
+function unwrapChain(schema: z.ZodType): z.ZodType[] {
+  const chain: z.ZodType[] = [schema];
+  let current = schema;
+
+  // Bounded: a wrapper chain this long is a bug, not a schema.
+  for (let depth = 0; depth < 10; depth += 1) {
+    const next = unwrapOnce(current);
+    if (!next) break;
+    chain.push(next);
+    current = next;
+  }
+  return chain;
+}
+
+function unwrapOnce(schema: z.ZodType): z.ZodType | undefined {
+  if (schema instanceof z.ZodOptional) return schema.unwrap() as z.ZodType;
+  if (schema instanceof z.ZodNullable) return schema.unwrap() as z.ZodType;
+  if (schema instanceof z.ZodDefault) return schema.unwrap() as z.ZodType;
+  return undefined;
 }
 
 function zodTypeName(schema: z.ZodType): string {
@@ -157,10 +191,11 @@ function objectProperties(schema: z.ZodType): Record<string, string> | undefined
 
   const properties: Record<string, string> = {};
   for (const [key, field] of Object.entries(shape)) {
-    const inner = unwrapOptional(field);
+    const chain = unwrapChain(field);
+    const core = chain[chain.length - 1];
     const optional = field.isOptional() ? ' (optional)' : '';
-    const text = field.description ?? inner.description;
-    properties[key] = `${zodTypeName(inner)}${optional}${text ? ` — ${text}` : ''}`;
+    const text = chain.find((link) => link.description !== undefined)?.description;
+    properties[key] = `${zodTypeName(core)}${optional}${text ? ` — ${text}` : ''}`;
   }
   return Object.keys(properties).length > 0 ? properties : undefined;
 }

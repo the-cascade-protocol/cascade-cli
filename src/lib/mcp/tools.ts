@@ -505,7 +505,11 @@ function registerCapabilities(server: McpServer): void {
         description: 'Cascade Protocol MCP Server — Local-first AI agent access to structured health data.',
         protocol: 'https://cascadeprotocol.org',
         securityModel: {
-          networkCalls: 'zero — all operations are local',
+          // Scoped to the tools this server exposes, which is what a client of
+          // this document is asking about. It is NOT a claim about the CLI as a
+          // whole: `advisory feed pull` and `pod extract` do make outbound
+          // calls, and neither is reachable through an MCP tool.
+          networkCalls: 'zero — every tool on this server reads and writes the local filesystem only',
           dataStorage: 'local filesystem only',
           provenance: 'all agent-written data tagged with AIGenerated provenance',
           auditLog: 'all operations logged to provenance/audit-log.ttl in the Pod',

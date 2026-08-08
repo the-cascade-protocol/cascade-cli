@@ -51,12 +51,24 @@ export function buildCapabilities(program: Command): CapabilitiesOutput {
   return {
     name: CLI_PACKAGE_NAME,
     version: CLI_VERSION,
-    description: 'Cascade Protocol CLI - Validate, convert, and manage health data with zero network calls',
+    description:
+      'Cascade Protocol CLI - Validate, convert, and manage health data. Local-first: every command ' +
+      'operates on the local filesystem except the two named in securityModel.networkCalls.',
     protocol: 'https://cascadeprotocol.org',
     parameterConventions: PARAMETER_CONVENTIONS,
     globalOptions: describeGlobalOptions(program),
     securityModel: {
-      networkCalls: 'zero — all operations are local',
+      // This claim used to read "zero — all operations are local", which was
+      // false while two verbs made outbound calls. It went unnoticed partly
+      // because neither verb was described here. State the exceptions; the
+      // field is only useful if it is true. `tests/capabilities-registry.test.ts`
+      // greps src/ for fetch() and fails if a third one appears.
+      networkCalls:
+        'none by default — no command contacts a network to validate, convert, query, import or ' +
+        'write. Two exceptions, both only when you invoke them: `advisory feed pull` fetches the ' +
+        'feed URL you pass it (any host you choose), and `pod extract` posts narrative text to the ' +
+        'cascade-agent server at --agent-url (http://127.0.0.1:8765 by default, i.e. your machine). ' +
+        'No telemetry, no analytics, no implicit calls.',
       dataStorage: 'local filesystem only',
       provenance: 'all agent-written data tagged with AIGenerated provenance',
       auditLog: 'all MCP operations logged to provenance/audit-log.ttl',

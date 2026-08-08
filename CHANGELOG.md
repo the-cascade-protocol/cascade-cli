@@ -34,6 +34,19 @@ options rather than repeated per command, with a correct statement of where they
   0.13.0. Both documents now read the version from `package.json`.
 - **`pod doctor`'s description claimed `--json` had to be placed before `pod`.** Root options are
   accepted in any position.
+- **The document claimed the CLI makes zero network calls** (backlog 3.34), in both
+  `securityModel.networkCalls` and the top-level description, while `advisory feed pull` fetches the
+  feed URL it is given and `pod extract` posts narrative text to the local cascade-agent. The claim
+  survived partly because neither command was described here. Both are now named as the exceptions,
+  and a test greps `src/` for outbound calls so a third one cannot appear while the claim stands.
+  The MCP server's own document keeps a zero-network claim, now scoped to the tools it exposes,
+  which is true: none of the six touches the network.
+- **`cascade serve` was described without the word MCP, and `--mcp` was shown as optional.**
+  Commander's one-liner is "Start local agent server" and the flag is enforced in the action handler
+  rather than by the parser, so a purely generated entry told agents that `cascade serve` starts the
+  server. It exits 1. `serve`, `conformance run`, `pod annotate` and `pod add-record` all enforce
+  requirements the parser does not, and each now states its own in `notes`; the document explains
+  that `required` reflects parse-time enforcement only.
 
 ## [0.13.0] - 2026-08-08
 

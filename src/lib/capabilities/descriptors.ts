@@ -147,10 +147,12 @@ function buildUsage(name: string, cmd: Command): string {
 
 /** States the omissions the descriptors make, so a reader cannot misread them. */
 export const PARAMETER_CONVENTIONS =
-  'In tools[].parameters: an entry carries "required": true only when the CLI enforces it, and the key is ' +
-  'absent when the parameter is optional. "type": "boolean" is a flag that takes no value; "string[]" is a ' +
-  'variadic argument. "default" appears only when a default is registered. mcpTools[].parameters state ' +
-  '"required" explicitly on every entry.';
+  'In tools[].parameters: "required": true means the ARGUMENT PARSER rejects the command without it, and ' +
+  'the key is absent otherwise. Absent is not a promise that the command will run: several commands accept ' +
+  'a parse-legal invocation and then refuse it, and every one of those states its real requirement in that ' +
+  'command\'s "notes" — read notes before composing a call. "type": "boolean" is a flag that takes no value; ' +
+  '"string[]" is a variadic argument. "default" appears only when a default is registered. ' +
+  'mcpTools[].parameters state "required" explicitly on every entry.';
 
 function describeArgument(arg: Argument): CommandParameter {
   return {
