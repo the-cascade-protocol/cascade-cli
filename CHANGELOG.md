@@ -9,6 +9,32 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+**`cascade capabilities` is generated from the command registry instead of being maintained by
+hand.** The document is what an AI agent reads to learn what this CLI can do, and the hand-written
+version described 12 of the 34 invocable commands: every write verb and every recovery verb was
+invisible, including `pod doctor`. It also listed 12 of `pod query`'s 23 options, so whole queryable
+data types (`--insurance`, `--claims`, `--benefits`, `--documents`, `--lab-reports`, `--imaging`,
+`--devices`, `--medication-administrations`, `--fhir-passthrough`) and the graph surface
+(`--neighbors`, `--hops`, `--edge`, `--edges`) could not be discovered at all.
+
+All 40 registered commands and command groups are now described, with every argument, option,
+default and choice list read from the registry that `cascade` parses with. Examples, output schemas
+and safety semantics remain hand-authored in a decoration table that can only add to a command the
+registry produced — it cannot introduce one. `--json` and `--verbose` are described once as root
+options rather than repeated per command, with a correct statement of where they may appear.
+
+### Fixed
+
+- **`cascade capabilities` advertised an MCP tool, `cascade_pod_import`, that has never existed.**
+  Both capabilities documents now derive their tool list from `registerTools`, so the advertised set
+  cannot differ from the registered set.
+- **The `cascade_capabilities` MCP tool reported `version: "0.2.0"`** while the package was on
+  0.13.0. Both documents now read the version from `package.json`.
+- **`pod doctor`'s description claimed `--json` had to be placed before `pod`.** Root options are
+  accepted in any position.
+
 ## [0.13.0] - 2026-08-08
 
 **Upgrade from 0.12.0 is recommended for anyone who has ever added a record by hand to a pod they
