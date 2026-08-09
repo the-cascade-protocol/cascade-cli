@@ -28,6 +28,9 @@ import {
 import { loadShapes, validateTurtle, validateFile, findTurtleFiles } from '../shacl-validator.js';
 import { convert } from '../fhir-converter/index.js';
 import { writeAuditEntry, createAuditEntry } from './audit.js';
+import { describeMcpTools } from './describe.js';
+import { MCP_TOOL_ENRICHMENT } from '../capabilities/enrichment.js';
+import { CLI_VERSION, CLI_PACKAGE_NAME } from '../version.js';
 
 // ─── Shared State ────────────────────────────────────────────────────────────
 
@@ -491,71 +494,27 @@ function registerCapabilities(server: McpServer): void {
     'Describe all available Cascade Protocol MCP tools, their parameters, and usage examples. Use this as the entry point for discovering what the server can do.',
     {},
     async () => {
+      // Derived from registerTools, not written out again. This document and
+      // `cascade capabilities` were two hand-maintained mirrors of one registry
+      // and had drifted apart from it and from each other.
+      const tools = describeMcpTools(registerTools, MCP_TOOL_ENRICHMENT);
+
       const capabilities = {
-        name: '@the-cascade-protocol/cli',
-        version: '0.2.0',
+        name: CLI_PACKAGE_NAME,
+        version: CLI_VERSION,
         description: 'Cascade Protocol MCP Server — Local-first AI agent access to structured health data.',
         protocol: 'https://cascadeprotocol.org',
         securityModel: {
-          networkCalls: 'zero — all operations are local',
+          // Scoped to the tools this server exposes, which is what a client of
+          // this document is asking about. It is NOT a claim about the CLI as a
+          // whole: `advisory feed pull` and `pod extract` do make outbound
+          // calls, and neither is reachable through an MCP tool.
+          networkCalls: 'zero — every tool on this server reads and writes the local filesystem only',
           dataStorage: 'local filesystem only',
           provenance: 'all agent-written data tagged with AIGenerated provenance',
           auditLog: 'all operations logged to provenance/audit-log.ttl in the Pod',
         },
-        tools: [
-          {
-            name: 'cascade_pod_read',
-            description: 'Read a Pod and return a JSON summary of all contents',
-            parameters: { path: 'string (optional) — Pod directory path' },
-            returns: 'JSON with patient profile, record counts, provenance sources',
-          },
-          {
-            name: 'cascade_pod_query',
-            description: 'Query records by data type',
-            parameters: {
-              path: 'string (optional) — Pod directory path',
-              dataType: 'medications|conditions|allergies|lab-results|immunizations|vital-signs|supplements|insurance|patient-profile|heart-rate|blood-pressure|activity|sleep|all',
-            },
-            returns: 'JSON array of matching records with properties',
-          },
-          {
-            name: 'cascade_validate',
-            description: 'Validate Turtle data against SHACL shapes',
-            parameters: {
-              path: 'string (optional) — file or directory path',
-              content: 'string (optional) — inline Turtle content',
-            },
-            returns: 'Validation results with pass/fail per constraint',
-          },
-          {
-            name: 'cascade_convert',
-            description: 'Convert between FHIR R4 JSON and Cascade Turtle/JSON-LD',
-            parameters: {
-              content: 'string — content to convert',
-              from: 'fhir|cascade',
-              to: 'cascade|fhir',
-              format: 'turtle|jsonld (optional, default: turtle)',
-            },
-            returns: 'Converted output',
-          },
-          {
-            name: 'cascade_write',
-            description: 'Write a health record to a Pod with AIGenerated provenance',
-            parameters: {
-              path: 'string (optional) — Pod directory path',
-              dataType: 'medications|conditions|allergies|lab-results|immunizations|vital-signs|supplements',
-              record: 'JSON object with record fields',
-              provenance: 'JSON object with agentId, reason, confidence, sourceRecords (all optional)',
-            },
-            returns: 'Record URI, file path, provenance metadata',
-          },
-          {
-            name: 'cascade_capabilities',
-            description: 'This tool — describes all available tools',
-            parameters: {},
-            returns: 'This capabilities document',
-          },
-        ],
+        tools,
         namespaces: {
           cascade: 'https://ns.cascadeprotocol.org/core/v1#',
           clinical: 'https://ns.cascadeprotocol.org/clinical/v1#',
@@ -571,12 +530,9 @@ function registerCapabilities(server: McpServer): void {
           'cascade:AIExtracted — AI-extracted from existing clinical documents',
           'cascade:AIGenerated — AI-generated observations, analyses, or recommendations',
         ],
-        cliEquivalents: {
-          cascade_pod_read: 'cascade pod info <pod-dir> --json',
-          cascade_pod_query: 'cascade pod query <pod-dir> --medications --json',
-          cascade_validate: 'cascade validate <file-or-dir> --json',
-          cascade_convert: 'cascade convert --from fhir --to cascade <file>',
-        },
+        cliEquivalents: Object.fromEntries(
+          tools.filter((tool) => tool.cliEquivalent).map((tool) => [tool.name, tool.cliEquivalent]),
+        ),
       };
 
       return { content: [{ type: 'text', text: JSON.stringify(capabilities, null, 2) }] };
