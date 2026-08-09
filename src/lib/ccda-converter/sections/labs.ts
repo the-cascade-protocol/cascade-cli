@@ -46,6 +46,8 @@ import { firstOf, listOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { contentFingerprint, EMPTY_SEED } from '../../identity.js';
 import { resolveCodeUri } from '../code-systems.js';
+import { ccdaDateQuad } from '../dates.js';
+import { buildNarrativeIdMap, narrativeTextFor, resolveNarrativeName } from '../narrative-reference.js';
 import { buildEncounterRecord } from './encounters.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
@@ -117,6 +119,7 @@ interface LabObservation {
 function extractObservationQuads(
   obs: any,
   sourceSystem: string,
+  narrativeIdMap: Record<string, string>,
   warnings?: string[],
 ): LabObservation | null {
   if (!obs) return null;
@@ -126,6 +129,26 @@ function extractObservationQuads(
   const codeSystem = codeEl?.['@_codeSystem'] ?? codeEl?.codeSystem ?? '';
   const displayName = codeEl?.['@_displayName'] ?? codeEl?.displayName ?? '';
   const isLoinc = isLoincSystem(codeSystem);
+
+  // The test's name when the structured code does not carry one. C-CDA lets the
+  // entry point at the section narrative instead of repeating the name as an
+  // attribute — `<code><originalText><reference value="#result1"/></originalText>`
+  // — and this handler used to read `@displayName` only, so every such result
+  // reached the pod with NO `health:testName`. That property is `sh:minCount 1`,
+  // so the record was invalid for missing a name the document stated in plain
+  // words one dereference away.
+  //
+  // Two containers carry it: the code's `<originalText>` (which may also hold the
+  // text inline rather than behind a reference) and, in some exports, the
+  // observation's own `<text>`. Both resolve through the same narrative map.
+  //
+  // If neither resolves, this stays empty and NOTHING is emitted below. The
+  // minCount violation then fires and is true: no name for this record exists in
+  // what the converter can read. A placeholder would hide that.
+  const testName =
+    displayName ||
+    resolveNarrativeName(codeEl, narrativeIdMap) ||
+    narrativeTextFor(obs?.text, narrativeIdMap);
 
   // Extract effective date
   const effTime = obs?.effectiveTime;
@@ -161,6 +184,13 @@ function extractObservationQuads(
     sourceId,
     content: {
       loincCode: isLoinc ? code : undefined,
+      // The STRUCTURED name only, deliberately. A name recovered from the
+      // narrative is now emitted (above), but adding it to the key would re-mint
+      // every id-less result that gains one, i.e. duplicate them against any pod
+      // that already holds them. Widening the key is a defensible change with a
+      // migration attached; it is not this change, and
+      // `tests/ccda-narrative-names.test.ts` pins a golden IRI so the choice
+      // cannot drift silently.
       testName: displayName || undefined,
       // `dateVal` raw, NOT `dateStr`. `formatCcdaDate` truncates to a calendar
       // day, which merged a 07:00 draw with an 11:00 draw.
@@ -183,8 +213,12 @@ function extractObservationQuads(
   if (isLoinc && code) {
     quads.push(makeQuad(subj, namedNode(NS.health + 'testCode'), namedNode(resolveCodeUri(LOINC_OID, code))));
   }
-  if (displayName) quads.push(makeQuad(subj, namedNode(NS.health + 'testName'), literal(displayName)));
-  if (dateStr) quads.push(makeQuad(subj, namedNode(NS.health + 'performedDate'), literal(dateStr)));
+  if (testName) quads.push(makeQuad(subj, namedNode(NS.health + 'testName'), literal(testName)));
+  // Typed from the RAW effectiveTime, not from the day-truncated `dateStr`: a
+  // source that stated a time keeps it, a source that stated a day gets no
+  // invented one. See `dates.ts`.
+  const performedQuad = ccdaDateQuad(uri, NS.health + 'performedDate', dateVal);
+  if (performedQuad) quads.push(performedQuad);
   if (value) quads.push(makeQuad(subj, namedNode(NS.health + 'resultValue'), literal(value)));
   if (unit) quads.push(makeQuad(subj, namedNode(NS.health + 'resultUnit'), literal(unit)));
   if (refRangeText) quads.push(makeQuad(subj, namedNode(NS.health + 'referenceRangeText'), literal(refRangeText)));
@@ -323,12 +357,16 @@ function buildPanelQuads(
 export function extractLabQuads(
   entries: any[],
   sourceSystem: string,
-  _sectionText?: any,
+  sectionText?: any,
   importedAt?: string,
   warnings?: string[],
 ): Quad[] {
   const quads: Quad[] = [];
   const stamp = importedAt ?? new Date().toISOString();
+  // The section's own narrative, indexed by element ID. `sectionText` was already
+  // being passed to every handler and this one ignored it (`_sectionText`), which
+  // is why the names sitting in it were unreachable.
+  const narrativeIdMap = buildNarrativeIdMap(sectionText);
   // Encounter records dedupe across the whole section: many organizers cite the
   // same visit, so a given encounter subject is emitted once even though each
   // panel that references it gets its own hasEncounter edge.
@@ -353,7 +391,7 @@ export function extractLabQuads(
         if (!comp?.observation) continue;
         const obsList = listOf<any>(comp.observation);
         for (const obs of obsList) {
-          const member = extractObservationQuads(obs, sourceSystem, warnings);
+          const member = extractObservationQuads(obs, sourceSystem, narrativeIdMap, warnings);
           if (!member) continue;
           quads.push(...member.quads);
           memberSubjects.push(member.subject);
@@ -396,7 +434,7 @@ export function extractLabQuads(
       // Standalone observation (no organizer): a plain lab result, no panel.
       const obsList = listOf<any>(entry.observation);
       for (const obs of obsList) {
-        const member = extractObservationQuads(obs, sourceSystem, warnings);
+        const member = extractObservationQuads(obs, sourceSystem, narrativeIdMap, warnings);
         if (member) quads.push(...member.quads);
       }
     }

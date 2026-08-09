@@ -321,12 +321,13 @@ describe('a conformant Epic-shaped FHIR bundle converts and validates', () => {
     expect(objects(`${NS.clinical}cptCode`)).toEqual(['0042T']);
   });
 
-  it('writes an interpretation the shapes accept for a code outside the old enum', () => {
-    // The converter has no mapping for the susceptibility code "I" and writes
-    // the data-absent-reason code `unknown`. That value is now IN the value
-    // set, which is the specific thing that used to fail. This asserts the
-    // value that is actually written rather than the one we wish were written;
-    // widening the converter's own HL7 mapping is a separate change.
-    expect(objects(`${NS.health}interpretation`)).toEqual(['unknown']);
+  it('carries the susceptibility code the source sent', () => {
+    // This used to assert `['unknown']`, with a note that the converter had no
+    // mapping for the susceptibility code "I" and that widening its HL7 mapping
+    // was a separate change. This is that change: `health:interpretation` is
+    // bound to the ObservationInterpretation code system, so the code is carried
+    // rather than translated, and "intermediate susceptibility" no longer arrives
+    // as "the source said nothing".
+    expect(objects(`${NS.health}interpretation`)).toEqual(['I']);
   });
 });

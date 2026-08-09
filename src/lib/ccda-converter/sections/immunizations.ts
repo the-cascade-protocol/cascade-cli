@@ -6,6 +6,7 @@ import { NS } from '../../fhir-converter/types.js';
 import { firstOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
+import { ccdaDateQuad } from '../dates.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
 
@@ -69,9 +70,9 @@ export function extractImmunizationQuads(
     if (code && (codeSystem.includes('292') || codeSystem === cvxOid)) {
       quads.push(makeQuad(subj, namedNode(NS.health + 'cvxCode'), namedNode(resolveCodeUri(cvxOid, code))));
     }
-    if (dateStr) {
-      quads.push(makeQuad(subj, namedNode(NS.health + 'administrationDate'), literal(dateStr)));
-    }
+    // Typed from the raw effectiveTime; see `dates.ts`.
+    const administrationQuad = ccdaDateQuad(uri, NS.health + 'administrationDate', dateVal);
+    if (administrationQuad) quads.push(administrationQuad);
     if (sourceId) {
       quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceRecordId'), literal(sourceId)));
     }

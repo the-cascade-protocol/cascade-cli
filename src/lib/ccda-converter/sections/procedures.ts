@@ -6,6 +6,8 @@ import { NS } from '../../fhir-converter/types.js';
 import { firstOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
+import { ccdaDateQuad } from '../dates.js';
+import { buildNarrativeIdMap, resolveNarrativeName } from '../narrative-reference.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
 
@@ -17,13 +19,14 @@ export const PROCEDURES_LOINC = '47519-4';
 export function extractProcedureQuads(
   entries: any[],
   sourceSystem: string,
-  _sectionText?: any,
+  sectionText?: any,
   _importedAt?: string,
   warnings?: string[],
 ): Quad[] {
   const quads: Quad[] = [];
   const snomedOid = '2.16.840.1.113883.6.96';
   const cptOid = '2.16.840.1.113883.6.12';
+  const narrativeIdMap = buildNarrativeIdMap(sectionText);
 
   for (const entry of entries) {
     // `<procedure>` and `<act>` are both repeatable elements and are therefore
@@ -43,6 +46,10 @@ export function extractProcedureQuads(
     const code = codeEl?.['@_code'] ?? codeEl?.code ?? '';
     const codeSystem = codeEl?.['@_codeSystem'] ?? codeEl?.codeSystem ?? '';
     const displayName = codeEl?.['@_displayName'] ?? codeEl?.displayName ?? '';
+    // The same narrative recovery the results and problems sections do: a
+    // procedure whose code carries no `@displayName` normally names itself in the
+    // section narrative behind `<originalText><reference value="#id"/>`.
+    const procedureName = displayName || resolveNarrativeName(codeEl, narrativeIdMap);
 
     const effTime = proc?.effectiveTime ?? {};
     const dateVal =
@@ -69,8 +76,10 @@ export function extractProcedureQuads(
     const subj = namedNode(uri);
     quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Procedure')));
     quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(sourceSystem)));
-    if (displayName) quads.push(makeQuad(subj, namedNode(NS.health + 'procedureName'), literal(displayName)));
-    if (dateStr) quads.push(makeQuad(subj, namedNode(NS.health + 'performedDate'), literal(dateStr)));
+    if (procedureName) quads.push(makeQuad(subj, namedNode(NS.health + 'procedureName'), literal(procedureName)));
+    // Typed from the raw effectiveTime; see `dates.ts`.
+    const performedQuad = ccdaDateQuad(uri, NS.health + 'performedDate', dateVal);
+    if (performedQuad) quads.push(performedQuad);
     if (code) {
       if (codeSystem.includes('6.96') || codeSystem === snomedOid) {
         quads.push(makeQuad(subj, namedNode(NS.health + 'snomedCode'), namedNode(resolveCodeUri(snomedOid, code))));

@@ -182,15 +182,20 @@ describe('C-CDA lab results that differ are two records', () => {
       .toEqual(subjectsOfType(convert(structuredClone(doc)), 'LabResultRecord'));
   });
 
-  it('the day-truncated date is still what the record REPORTS', () => {
-    // STABILITY PIN. Full precision moved into the identity key only; the
-    // emitted `health:performedDate` literal is unchanged, so no consumer that
-    // reads or queries the date sees a different value.
+  it('the record REPORTS the date at the precision the source stated', () => {
+    // This used to assert `['2026-08-02']`, and said so as a stability pin: full
+    // precision had moved into the identity key while the emitted literal stayed
+    // day-truncated. That is no longer the behaviour, deliberately. The emitters
+    // now type the literal, and typing it meant deciding WHICH type — which
+    // meant reading the precision the source stated instead of discarding it.
+    // A source that wrote 07:00 gets 07:00; the day-truncated string is still
+    // what the identity key uses, and `tests/ccda-typed-dates.test.ts` covers the
+    // day-precision case where no time is invented.
     const quads = convert([{ observation: labObs({ id: 'obs-1', time: '20260802070000-0500' }) }]);
     const dates = quads
       .filter((q: any) => q.predicate.value.endsWith('performedDate'))
       .map((q: any) => q.object.value);
-    expect(dates).toEqual(['2026-08-02']);
+    expect(dates).toEqual(['2026-08-02T07:00:00-05:00']);
   });
 });
 

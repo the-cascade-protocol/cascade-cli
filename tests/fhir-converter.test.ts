@@ -412,7 +412,10 @@ describe('FHIR -> Cascade converters', () => {
       expect(findQuadValue(quads, NS.health + 'testName')).toBe('Glucose');
       expect(findQuadValue(quads, NS.health + 'resultValue')).toBe('105');
       expect(findQuadValue(quads, NS.health + 'resultUnit')).toBe('mg/dL');
-      expect(findQuadValue(quads, NS.health + 'interpretation')).toBe('abnormal');
+      // "H", the code the fixture sends, not the word "abnormal" it used to be
+      // flattened onto. `tests/fhir-interpretation-passthrough.test.ts` covers
+      // the family.
+      expect(findQuadValue(quads, NS.health + 'interpretation')).toBe('H');
     });
 
     it('should handle referenceRange', () => {

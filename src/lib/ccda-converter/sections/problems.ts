@@ -6,6 +6,8 @@ import { NS } from '../../fhir-converter/types.js';
 import { firstOf, listOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
+import { ccdaDateQuad } from '../dates.js';
+import { buildNarrativeIdMap, resolveNarrativeName } from '../narrative-reference.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
 
@@ -17,13 +19,14 @@ export const PROBLEMS_LOINC = '11450-4';
 export function extractProblemQuads(
   entries: any[],
   sourceSystem: string,
-  _sectionText?: any,
+  sectionText?: any,
   _importedAt?: string,
   warnings?: string[],
 ): Quad[] {
   const quads: Quad[] = [];
   const snomedOid = '2.16.840.1.113883.6.96';
   const icd10Oid = '2.16.840.1.113883.6.90';
+  const narrativeIdMap = buildNarrativeIdMap(sectionText);
 
   for (const entry of entries) {
     // Conditions are inside an act/observation
@@ -48,6 +51,14 @@ export function extractProblemQuads(
       const displayName =
         valueEl?.['@_displayName'] ?? valueEl?.displayName ??
         firstTranslation?.['@_displayName'] ?? firstTranslation?.displayName ?? '';
+
+      // Same recovery as the results section: when neither the value nor its
+      // translations name the condition, the name is usually in the section
+      // narrative, referenced from `<value><originalText><reference value="#id"/>`.
+      // `health:conditionName` is `sh:minCount 1`, so reading `@displayName` only
+      // meant an invalid record for a problem the document named in words.
+      // Unresolvable stays empty and emits nothing.
+      const conditionName = displayName || resolveNarrativeName(valueEl, narrativeIdMap);
 
       const isSnomed = codeSystem.includes('6.96') || codeSystem === snomedOid;
       const isIcd10 = codeSystem.includes('6.90') || codeSystem === icd10Oid;
@@ -91,6 +102,9 @@ export function extractProblemQuads(
         content: {
           snomedCode: isSnomed ? code : undefined,
           icd10Code: isIcd10 ? code : undefined,
+          // The STRUCTURED name only. A narrative-recovered name is emitted but
+          // deliberately kept out of the key, for the reason spelled out in
+          // `labs.ts`: widening it re-mints every record that gains one.
           conditionName: displayName || undefined,
           onsetDate: onsetDate || undefined,
           // Serialized as health:status, so it belongs in the key: "active" and
@@ -110,9 +124,11 @@ export function extractProblemQuads(
 
       if (isSnomed && code) quads.push(makeQuad(subj, namedNode(NS.health + 'snomedCode'), namedNode(resolveCodeUri(snomedOid, code))));
       if (isIcd10 && code) quads.push(makeQuad(subj, namedNode(NS.health + 'icd10Code'), namedNode(resolveCodeUri(icd10Oid, code))));
-      if (displayName) quads.push(makeQuad(subj, namedNode(NS.health + 'conditionName'), literal(displayName)));
+      if (conditionName) quads.push(makeQuad(subj, namedNode(NS.health + 'conditionName'), literal(conditionName)));
       if (status) quads.push(makeQuad(subj, namedNode(NS.health + 'status'), literal(status.toLowerCase())));
-      if (onsetDate) quads.push(makeQuad(subj, namedNode(NS.health + 'onsetDate'), literal(onsetDate)));
+      // Typed from the raw effectiveTime; see `dates.ts`.
+      const onsetQuad = ccdaDateQuad(uri, NS.health + 'onsetDate', onsetVal);
+      if (onsetQuad) quads.push(onsetQuad);
       if (sourceId) quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceRecordId'), literal(sourceId)));
     }
   }

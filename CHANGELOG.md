@@ -7,6 +7,71 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+**C-CDA date properties are emitted as typed literals, at the precision the source stated.** Five
+section handlers each sliced `<effectiveTime value="20250311"/>` down to `2025-03-11` with their own
+copy of the same expression and wrote it with `literal(dateStr)`, which is a PLAIN literal and
+therefore `xsd:string`. health 2.6 / clinical 1.14 constrain those properties to `xsd:date` or
+`xsd:dateTime`, so every C-CDA-converted record carrying one failed validation on a date the
+document had stated perfectly well. The sites now build the literal through one helper,
+`src/lib/ccda-converter/dates.ts`, which reads the datatype off the source precision:
+
+- `20250311143000-0500` becomes `"2025-03-11T14:30:00-05:00"^^xsd:dateTime`
+- `20250311` becomes `"2025-03-11"^^xsd:date`
+
+A day-precision value is not promoted to `T00:00:00`. Appending midnight would satisfy the datatype
+check by asserting a time of day the source never gave, and a fabricated 00:00 is indistinguishable
+downstream from a real one. A value coarser than a calendar day (`202503`) is not emitted at all,
+because neither accepted datatype can express it. Affects `health:performedDate` (results,
+procedures, and the vital-sign-to-lab fallback), `health:onsetDate` (problems) and
+`health:administrationDate` (immunizations). Identity keys are untouched: they still read the
+day-truncated string, so no record IRI moves.
+
+**C-CDA record names are recovered from the section narrative when the structured code omits them.**
+C-CDA lets an entry name its concept in the attested narrative and point at it from the structured
+data (`<code><originalText><reference value="#result1"/></originalText>`) instead of repeating the
+name as a `@displayName` attribute. The results, problems and procedures handlers read
+`@displayName` only, so those records reached the pod with no name at all — and `health:testName`
+and `health:conditionName` are `sh:minCount 1`, so each was invalid for missing a name the document
+stated one dereference away. The resolver that `medications.ts` already carried privately moved to
+`src/lib/ccda-converter/narrative-reference.ts`, unchanged, and the three sites call it. A
+structured `@displayName` still wins where both are present.
+
+When a reference does not resolve — no element declares that ID, or the element it names is empty —
+nothing is emitted and the `minCount` violation stands, because it is then a true statement about
+the document. Substituting a placeholder would turn a visible failure into a plausible-looking
+record.
+
+**FHIR `Observation.interpretation` codes are carried through instead of flattened.** The importer
+mapped nine HL7 v3 codes onto four English words (H and L both to "abnormal", HH and LL both to
+"critical") and wrote `unknown` for everything else — which is where susceptibility (S/I/R),
+detection (POS/NEG/DET/ND), reactivity (RR/WR/NR) and change (B/D/U/W) results went. "The organism
+is resistant to this antibiotic" and "the source reported nothing" arrived as the same string.
+health 2.6 binds `health:interpretation` to that code system, so a code in the accepted set is now
+written verbatim, and `unknown` means one thing: the source Observation carried no interpretation. A
+code outside the accepted set keeps the previous nearest mapping and raises a warning naming the
+code. The accepted set is a copy of the `sh:in` list in the bundled shapes, and a test reads the
+shapes file and fails if the two ever disagree.
+
+### Changed
+
+`tests/known-shacl-gaps.ts` shrinks: the date-datatype gap it documented is closed by the emitter
+fix above, so the two suites that referenced it assert zero violations again. The file now records
+the one finding that remains — `clinical:ProcedureShape` requires `clinical:procedureName` while
+`sections/procedures.ts` writes the name to `health:procedureName`, so a procedure record violates
+the name constraint while carrying a name. Moving that predicate is a data change for every existing
+consumer and wants its own release note, so it is pinned rather than folded in here.
+
+### Verification
+
+Full suite 133 files / 619 suites / 1983 tests, 0 failed, 0 skipped (from 130 / 602 / 1931 before).
+Three synthetic C-CDA fixtures under `test-fixtures/` cover the date precisions, the resolvable
+narrative references and the unresolvable ones; the typed-date fixture converts, imports and
+validates through the CLI with zero violations.
+
 ## [0.14.0] - 2026-08-08
 
 ### Changed

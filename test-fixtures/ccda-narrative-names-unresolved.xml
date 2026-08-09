@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic C-CDA whose narrative references do NOT resolve. It exists to pin the
+  guard: the converter must not invent a name, and must not emit an empty one.
+
+    NR-LAB-DANGLING   originalText references #missing, which no narrative
+                      element declares
+    NR-LAB-BLANK      originalText references #blank, whose narrative element
+                      contains only whitespace
+
+  Both lab results must therefore carry NO health:testName, which makes the
+  LabResultRecordShape minCount violation TRUE and correct. A fixture that
+  validated cleanly here would mean the converter had made a name up.
+
+  Authored for this repository. No content is derived from a real record.
+-->
+<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <realmCode code="US"/>
+  <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>
+  <templateId root="2.16.840.1.113883.10.20.22.1.1"/>
+  <id root="2.16.840.1.113883.3.88.11.32.1" extension="NARRATIVE-UNRESOLVED-001"/>
+  <code code="34133-9" displayName="Summarization of Episode Note" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+  <title>Unresolvable Narrative Reference Fixture</title>
+  <effectiveTime value="20260327120000+0000"/>
+  <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>
+  <languageCode code="en-US"/>
+  <recordTarget>
+    <patientRole>
+      <id root="2.16.840.1.113883.4.1" extension="000-00-0000"/>
+      <patient>
+        <name use="L"><given>Jane</given><family>Doe</family></name>
+        <administrativeGenderCode code="F" codeSystem="2.16.840.1.113883.5.1"/>
+        <birthTime value="19650101"/>
+      </patient>
+    </patientRole>
+  </recordTarget>
+  <custodian>
+    <assignedCustodian>
+      <representedCustodianOrganization>
+        <id root="2.16.840.1.113883.3.88.11.32.1"/>
+        <name>Fixture Health</name>
+      </representedCustodianOrganization>
+    </assignedCustodian>
+  </custodian>
+  <component>
+    <structuredBody>
+      <component>
+        <section>
+          <templateId root="2.16.840.1.113883.10.20.22.2.3.1"/>
+          <code code="30954-2" displayName="Relevant Diagnostic Tests and/or Laboratory Data" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+          <title>Results</title>
+          <text>
+            <table>
+              <tbody>
+                <tr>
+                  <td><content ID="blank">   </content></td>
+                  <td>123 10*3/uL</td>
+                </tr>
+              </tbody>
+            </table>
+          </text>
+          <entry typeCode="DRIV">
+            <organizer classCode="BATTERY" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.1"/>
+              <id root="2.16.840.1.113883.3.88.11.32.1" extension="NR-ORG-001"/>
+              <code code="58410-2" displayName="CBC panel" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+              <statusCode code="completed"/>
+              <effectiveTime value="20250311"/>
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.3.88.11.32.1" extension="NR-LAB-DANGLING"/>
+                  <code code="30313-1" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC">
+                    <originalText><reference value="#missing"/></originalText>
+                  </code>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250311"/>
+                  <value xsi:type="PQ" value="13.2" unit="g/dL"/>
+                </observation>
+              </component>
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.3.88.11.32.1" extension="NR-LAB-BLANK"/>
+                  <code code="26515-7" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC">
+                    <originalText><reference value="#blank"/></originalText>
+                  </code>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250311"/>
+                  <value xsi:type="PQ" value="123" unit="10*3/uL"/>
+                </observation>
+              </component>
+            </organizer>
+          </entry>
+        </section>
+      </component>
+    </structuredBody>
+  </component>
+</ClinicalDocument>

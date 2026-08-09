@@ -83,13 +83,12 @@ describe('pod import: re-import keeps exactly one importedAt (symptom 3)', () =>
     expect(out).not.toMatch(/exactly one importedAt/i);
     expect(out).not.toMatch(/Property: importedAt/);
 
-    // This used to assert `0 failed`. It no longer can, and the reason is not a
-    // regression in this fix: health v2.5 shapes `health:LabResultRecord`, so
-    // this fixture's day-precision `performedDate` literals are checked against
-    // `sh:datatype xsd:dateTime` for the first time and fail. Asserting the
-    // failing file's identity keeps this a real check — a new failure anywhere
-    // else in the pod still breaks it — without pinning it to a count that a
-    // separate, tracked defect controls. See `known-shacl-gaps.ts`.
+    // `0 failed` again. This asserted 1 failing file for a while: health v2.5
+    // shaped `health:LabResultRecord`, so this fixture's day-precision
+    // `performedDate` literals were checked for the first time and failed for
+    // being untyped. The emitters type them now, so the whole pod validates and
+    // the assertion goes back to the strongest form: any failure anywhere in the
+    // pod breaks it.
     // Per-FILE status lines start at column 0; per-ISSUE lines are indented two
     // spaces and carry no path, so matching on the bare word would count them
     // too and make the assertion mean nothing.
@@ -97,7 +96,6 @@ describe('pod import: re-import keeps exactly one importedAt (symptom 3)', () =>
       .split('\n')
       .map((l) => l.replace(/\[[0-9;]*m/g, ''))
       .filter((l) => /^FAIL\s/.test(l));
-    expect(failingFiles.length, out).toBe(1);
-    expect(failingFiles[0], out).toContain('clinical/lab-results.ttl');
+    expect(failingFiles, out).toEqual([]);
   });
 });
