@@ -13,6 +13,52 @@
 # different data sources (EHR, device, patient-reported).
 #
 # Changelog:
+# v1.14 (2026-08-08): Align to ratified standards; add the missing Encounter
+#     shape. Shapes-only, and strictly widening apart from the new shape: every
+#     graph that validated before still validates.
+#
+#     Motivation: real-world Epic FHIR exports, and C-CDA documents through the
+#     same pipeline, fail validation on records that are correct at source.
+#
+#     1. clinical:interpretation is now bound to the HL7 v3
+#        ObservationInterpretation code system,
+#        http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation
+#        (version 3.0.0) — 49 selectable codes, abstract concepts excluded —
+#        plus the data-absent-reason code "unknown"
+#        (http://terminology.hl7.org/CodeSystem/data-absent-reason) and the ten
+#        retained legacy words. The previous five-member list was invented here
+#        and had no standards basis. Kept identical to health:interpretation.
+#     2. clinical:snomedCode (4 shapes) and clinical:icd10Code are now
+#        multi-valued: FHIR R4 CodeableConcept.coding is 0..*
+#        (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept).
+#     3. clinical:cptCode accepted only five digits, which is Category I only.
+#        The AMA CPT code set also defines Category II (four digits + F),
+#        Category III (four digits + T) and Proprietary Laboratory Analyses
+#        (four digits + U) codes, all five characters. Pattern widened to
+#        "^[0-9]{4}[0-9FTU]$".
+#     4. Date properties carried over from a source document —
+#        clinical:encounterDate, clinical:documentDate, clinical:onsetDate,
+#        clinical:procedureDate — now accept xsd:date as well as xsd:dateTime.
+#        FHIR's dateTime primitive is explicitly partial-precision ("YYYY,
+#        YYYY-MM, YYYY-MM-DD or YYYY-MM-DDThh:mm:ss+zz:zz",
+#        https://build.fhir.org/datatypes.html) and C-CDA effectiveTime is
+#        commonly date-precision, so demanding an instant forced importers to
+#        invent a midnight the source never stated. Timestamps Cascade itself
+#        generates (clinical:importedAt, the derived episode dates) are
+#        unchanged and still require xsd:dateTime.
+#     5. NEW clinical:EncounterShape + clinical:EncounterTemporalShape.
+#        clinical:Encounter has existed since v1.7 with no shape, so encounters
+#        validated to PASS without a single constraint being evaluated. The new
+#        shape is deliberately minimal — cardinality, datatype, provenance, and
+#        an IRI requirement implied by the clinical:hasEncounter edge. See the
+#        long note above the shape for what is deliberately NOT constrained.
+#
+#     Deliberately NOT changed: no sh:pattern is introduced on snomedCode or
+#     icd10Code. SNOMED CT identifiers are 6-18 digit integers and ICD-10-CM
+#     permits a letter in any character position (ICD-10-CM Official Guidelines
+#     for Coding and Reporting, Section I.A.2), so a pattern would reject valid
+#     codes without catching anything a code system lookup would not.
+#
 # v1.10 (2026-07-16): Add open-world PropertyShapes for the three record-to-record
 #     edges introduced in clinical v1.10 (hasEncounter, indicationReference,
 #     linkedCondition). Each targets the subjects that use the predicate, checks
@@ -215,7 +261,8 @@ clinical:ProgressNoteShape a sh:NodeShape ;
     # Progress notes should have encounterDate
     sh:property [
         sh:path clinical:encounterDate ;
-        sh:datatype xsd:dateTime ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Encounter Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Encounter Date"@en ;
@@ -237,7 +284,8 @@ clinical:DischargeSummaryShape a sh:NodeShape ;
     # Discharge summaries should have document date
     sh:property [
         sh:path clinical:documentDate ;
-        sh:datatype xsd:dateTime ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Document Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Document Date"@en ;
@@ -268,7 +316,8 @@ clinical:ConsultationNoteShape a sh:NodeShape ;
     # Consultation notes should record when the consultation happened
     sh:property [
         sh:path clinical:encounterDate ;
-        sh:datatype xsd:dateTime ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Encounter Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
         sh:maxCount 1 ;
         sh:name "Encounter Date"@en ;
         sh:message "Consultation note must not carry more than one encounter date"@en
@@ -289,7 +338,8 @@ clinical:LaboratoryReportShape a sh:NodeShape ;
     # Lab reports should have documentDate (when results were finalized)
     sh:property [
         sh:path clinical:documentDate ;
-        sh:datatype xsd:dateTime ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Document Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
         sh:minCount 1 ;
         sh:name "Document Date"@en ;
         sh:message "Lab reports must have a document date"@en
@@ -310,7 +360,8 @@ clinical:ImagingReportShape a sh:NodeShape ;
     # Imaging reports should have document date
     sh:property [
         sh:path clinical:documentDate ;
-        sh:datatype xsd:dateTime ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Document Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
         sh:minCount 1 ;
         sh:name "Document Date"@en ;
         sh:message "Imaging reports must have a document date"@en
@@ -331,7 +382,8 @@ clinical:VisitSummaryShape a sh:NodeShape ;
     # Visit summaries should have encounter date
     sh:property [
         sh:path clinical:encounterDate ;
-        sh:datatype xsd:dateTime ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Encounter Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Encounter Date"@en ;
@@ -401,10 +453,13 @@ clinical:MedicationShape a sh:NodeShape ;
         sh:name "RxNorm Code"@en
     ] ;
 
-    # Optional: snomedCode (can be string or URI reference)
+    # Optional: snomedCode (string or URI reference). Repeatable: FHIR R4
+    # CodeableConcept.coding is 0..*
+    # (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept). No sh:pattern:
+    # SNOMED CT identifiers are 6-18 digit integers and format belongs to the
+    # code system.
     sh:property [
         sh:path clinical:snomedCode ;
-        sh:maxCount 1 ;
         sh:name "SNOMED Code"@en
     ] ;
 
@@ -604,10 +659,13 @@ clinical:AllergyShape a sh:NodeShape ;
         sh:name "Allergy Category"@en
     ] ;
 
-    # Optional: snomedCode (can be string or URI reference)
+    # Optional: snomedCode (string or URI reference). Repeatable: FHIR R4
+    # CodeableConcept.coding is 0..*
+    # (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept). No sh:pattern:
+    # SNOMED CT identifiers are 6-18 digit integers and format belongs to the
+    # code system.
     sh:property [
         sh:path clinical:snomedCode ;
-        sh:maxCount 1 ;
         sh:name "SNOMED Code"@en
     ] ;
 
@@ -673,13 +731,41 @@ clinical:LabResultShape a sh:NodeShape ;
         sh:name "Reference Range"@en
     ] ;
 
-    # Optional: interpretation (accepts both cases)
+    # Optional: interpretation
+    #
+    # Bound to the HL7 v3 ObservationInterpretation code system, the code system
+    # FHIR R4 binds Observation.interpretation to. This list is the 49
+    # SELECTABLE codes of
+    # http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation
+    # (version 3.0.0), verbatim; the eight abstract (notSelectable) hierarchy
+    # concepts are excluded because they are not values. Deprecated codes are
+    # accepted: historical results carry them.
+    #
+    # Plus "unknown" from
+    # http://terminology.hl7.org/CodeSystem/data-absent-reason, written by
+    # importers when the source Observation carried no interpretation, and the
+    # ten words of the previous enum, retained so data written against earlier
+    # clinical versions keeps validating.
+    #
+    # Kept byte-identical to the health:interpretation list in
+    # health.shapes.ttl. These are two spellings of one record (clinical:LabResult
+    # is deprecated in favour of health:LabResultRecord since clinical v1.13) and
+    # letting them drift is how one spelling silently becomes the lenient one.
     sh:property [
         sh:path clinical:interpretation ;
         sh:datatype xsd:string ;
         sh:maxCount 1 ;
-        sh:in ("normal" "high" "low" "abnormal" "critical" "Normal" "High" "Low" "Abnormal" "Critical") ;
-        sh:name "Interpretation"@en
+        sh:in ("EX" "HM" "OBX" "CAR" "Carrier" "B" "D" "U" "W"
+               "<" ">" "AC" "IE" "QCF" "TOX"
+               "A" "N" "I" "MS" "NCL" "NS" "R" "S" "VS"
+               "AA" "H" "L" "HH" "LL" "HX" "LX" "H>" "HU" "E" "L<" "LU"
+               "ND" "IND" "NEG" "POS" "EXP" "UNE" "DET"
+               "SYN-R" "NR" "RR" "WR" "SDD" "SYN-S"
+               "unknown"
+               "normal" "high" "low" "abnormal" "critical"
+               "Normal" "High" "Low" "Abnormal" "Critical") ;
+        sh:name "Interpretation"@en ;
+        sh:message "Interpretation must be a code from the HL7 v3 ObservationInterpretation code system (http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation), the data-absent-reason code 'unknown', or one of the retained legacy words"@en
     ] ;
 
     # Optional: loincCode (can be string or URI reference)
@@ -749,22 +835,29 @@ clinical:ConditionShape a sh:NodeShape ;
     # Optional: onsetDate
     sh:property [
         sh:path clinical:onsetDate ;
-        sh:datatype xsd:dateTime ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Onset Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
         sh:maxCount 1 ;
         sh:name "Onset Date"@en
     ] ;
 
-    # Optional: snomedCode (can be string or URI reference)
+    # Optional: snomedCode (string or URI reference). Repeatable: FHIR R4
+    # CodeableConcept.coding is 0..*
+    # (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept). No sh:pattern:
+    # SNOMED CT identifiers are 6-18 digit integers and format belongs to the
+    # code system.
     sh:property [
         sh:path clinical:snomedCode ;
-        sh:maxCount 1 ;
         sh:name "SNOMED Code"@en
     ] ;
 
-    # Optional: icd10Code (can be string or URI reference)
+    # Optional: icd10Code (string or URI reference). Repeatable for the same
+    # reason as snomedCode above; problem-list entries are routinely dual coded.
+    # No sh:pattern: ICD-10-CM permits a letter in any character position
+    # (C4A, D3A and M1A are ordinary categories), per the ICD-10-CM Official
+    # Guidelines for Coding and Reporting, Section I.A.2.
     sh:property [
         sh:path clinical:icd10Code ;
-        sh:maxCount 1 ;
         sh:name "ICD-10 Code"@en
     ] ;
 
@@ -897,7 +990,8 @@ clinical:ProcedureShape a sh:NodeShape ;
     # Optional: procedureDate
     sh:property [
         sh:path clinical:procedureDate ;
-        sh:datatype xsd:dateTime ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Procedure Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
         sh:maxCount 1 ;
         sh:name "Procedure Date"@en
     ] ;
@@ -928,19 +1022,30 @@ clinical:ProcedureShape a sh:NodeShape ;
     ] ;
 
     # Optional: cptCode
+    #
+    # Every CPT code is five characters, but only Category I codes are five
+    # DIGITS. The AMA CPT code set also defines Category II codes (four digits
+    # followed by the letter F), Category III codes (four digits followed by the
+    # letter T) and Proprietary Laboratory Analyses codes (four digits followed
+    # by the letter U). "^[0-9]{5}$" rejected all three of those, so an ordinary
+    # emerging-technology or performance-measurement procedure failed validation.
+    # See https://www.ama-assn.org/practice-management/cpt/cpt-code-set-overview
     sh:property [
         sh:path clinical:cptCode ;
         sh:datatype xsd:string ;
         sh:maxCount 1 ;
-        sh:pattern "^[0-9]{5}$" ;
+        sh:pattern "^[0-9]{4}[0-9FTU]$" ;
         sh:name "CPT Code"@en ;
-        sh:message "CPT code must be 5 digits"@en
+        sh:message "CPT code must be five characters: five digits (Category I), or four digits followed by F (Category II), T (Category III) or U (Proprietary Laboratory Analyses)"@en
     ] ;
 
-    # Optional: snomedCode (can be string or URI reference)
+    # Optional: snomedCode (string or URI reference). Repeatable: FHIR R4
+    # CodeableConcept.coding is 0..*
+    # (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept). No sh:pattern:
+    # SNOMED CT identifiers are 6-18 digit integers and format belongs to the
+    # code system.
     sh:property [
         sh:path clinical:snomedCode ;
-        sh:maxCount 1 ;
         sh:name "SNOMED Code"@en
     ] ;
 
@@ -1421,6 +1526,198 @@ clinical:SocialHistoryRecordShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Shape: Encounter (v1.14)
+# ============================================================================
+#
+# clinical:Encounter has existed since clinical v1.7 and until now had NO shape,
+# so every encounter a pod contained was imported and stored unvalidated:
+# validating a file of encounters checked nothing and returned PASS. This shape
+# closes that hole. It is deliberately minimal.
+#
+# WHY IT IS MINIMAL, STATED SO IT IS NOT "TIGHTENED" LATER BY MISTAKE
+# -------------------------------------------------------------------
+# Encounters vary more than any other record here: a same-day telephone note, a
+# three-week inpatient admission, a planned appointment that has no period at
+# all, and a historical visit reconstructed from a summary document are all
+# legitimately clinical:Encounter. So this shape constrains SHAPE, not content:
+# cardinality and datatype on the properties importers actually write, the
+# standard Cascade provenance pair, and nothing else at Violation severity.
+#
+# In particular:
+#   - clinical:encounterClass carries NO sh:in. FHIR R4 binds Encounter.class
+#     EXTENSIBLY to the v3-ActCode ActEncounterCode value set, and servers send
+#     either the abbreviation (AMB, EMER, IMP, HH) or a display string. An enum
+#     here would reject conformant data in both directions.
+#   - clinical:encounterStatus DOES carry an sh:in, because FHIR R4 binds
+#     Encounter.status with REQUIRED strength, and the list below is that value
+#     set verbatim (https://hl7.org/fhir/R4/valueset-encounter-status.html).
+#     It is sh:Warning, not sh:Violation: an unrecognised status is worth
+#     surfacing but is not a reason to reject the record and lose the visit.
+#   - Dates accept xsd:date as well as xsd:dateTime. FHIR's dateTime primitive
+#     is explicitly partial-precision ("YYYY, YYYY-MM, YYYY-MM-DD or
+#     YYYY-MM-DDThh:mm:ss+zz:zz", https://build.fhir.org/datatypes.html) and
+#     C-CDA effectiveTime is commonly date-precision, so requiring an instant
+#     would force importers to invent a midnight that the source never stated.
+#
+# WHAT THE clinical:hasEncounter EDGE IMPLIES, AND WHAT IT DOES NOT
+# -----------------------------------------------------------------
+# clinical:hasEncounter is the panel-to-visit edge: a lab result, medication,
+# condition, procedure or report points at the visit it happened in.
+# HasEncounterEdgeShape (below) already requires that object to be an IRI. Two
+# consequences are carried here:
+#   1. sh:nodeKind sh:IRI on the Encounter itself. An edge can only resolve to a
+#      node that HAS an IRI, so a blank-node encounter is unreachable by the very
+#      edge the class exists to serve.
+#   2. An encounter should be placeable in time, since grouping events "by visit"
+#      is only meaningful if the visit has one. That is expressed as a
+#      sh:Warning requiring a start, an end or an encounter date — NOT a
+#      Violation, because FHIR R4 Encounter.period is 0..1 and a planned or
+#      referenced-only encounter legitimately has none.
+# What is deliberately NOT added is an sh:class check back along the edge; see
+# the v1.11 note under HasEncounterEdgeShape for why that produced only false
+# positives under per-file validation.
+
+clinical:EncounterShape a sh:NodeShape ;
+    sh:targetClass clinical:Encounter ;
+    sh:nodeKind sh:IRI ;
+    rdfs:label "Encounter Shape"@en ;
+    rdfs:comment "Minimal validation constraints for clinical encounters (visits). Constrains cardinality, datatype and provenance; deliberately does not constrain what kind of visit an encounter may be."@en ;
+    sh:message "A clinical:Encounter must be identified by an IRI so that clinical:hasEncounter edges can resolve to it"@en ;
+
+    # Optional: encounterClass. No enum — FHIR R4 binds Encounter.class
+    # extensibly to v3-ActCode ActEncounterCode and servers send codes or
+    # display strings.
+    sh:property [
+        sh:path clinical:encounterClass ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Class"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: encounterStatus. FHIR R4 EncounterStatus, verbatim.
+    sh:property [
+        sh:path clinical:encounterStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("planned" "arrived" "triaged" "in-progress" "onleave" "finished"
+               "cancelled" "entered-in-error" "unknown") ;
+        sh:name "Encounter Status"@en ;
+        sh:message "Encounter status should be one of the FHIR R4 EncounterStatus codes: planned, arrived, triaged, in-progress, onleave, finished, cancelled, entered-in-error, unknown"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # Optional: encounterType (display name from a SNOMED CT / FHIR code)
+    sh:property [
+        sh:path clinical:encounterType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Type"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: encounterStart / encounterEnd. Date precision accepted.
+    sh:property [
+        sh:path clinical:encounterStart ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Encounter Start must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Start"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:encounterEnd ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:message "Encounter End must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:maxCount 1 ;
+        sh:name "Encounter End"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: snomedCode for the encounter type. Repeatable and unpatterned,
+    # for the reasons given on the other snomedCode shapes above.
+    sh:property [
+        sh:path clinical:snomedCode ;
+        sh:name "SNOMED Code"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: who and where.
+    sh:property [
+        sh:path clinical:providerName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Provider Name"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:facilityName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Facility Name"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Optional: source linkage back to the record this was converted from.
+    sh:property [
+        sh:path clinical:sourceRecordId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Source Record ID"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:sourceEHR ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:maxLength 100 ;
+        sh:name "Source EHR"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Required: provenance (accepts multiple valid sources)
+    sh:property [
+        sh:path cascade:dataProvenance ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Data Provenance"@en ;
+        sh:message "Encounter must declare exactly one valid cascade:dataProvenance"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Required: schemaVersion
+    sh:property [
+        sh:path cascade:schemaVersion ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9]+\\.[0-9]+$" ;
+        sh:name "Schema Version"@en ;
+        sh:severity sh:Violation
+    ] .
+
+# An encounter should be placeable in time, because grouping clinical events
+# "by visit" is only useful if the visit has a position in the timeline. Kept in
+# its own shape so that its severity is unambiguous: this is sh:Warning, while
+# EncounterShape's own constraints (including sh:nodeKind sh:IRI) stay at the
+# default sh:Violation. It is not a Violation because FHIR R4 Encounter.period
+# is 0..1 and a planned or merely referenced encounter legitimately has none.
+clinical:EncounterTemporalShape a sh:NodeShape ;
+    sh:targetClass clinical:Encounter ;
+    rdfs:label "Encounter Temporal Shape"@en ;
+    sh:or (
+        [ sh:path clinical:encounterStart ; sh:minCount 1 ]
+        [ sh:path clinical:encounterEnd ; sh:minCount 1 ]
+        [ sh:path clinical:encounterDate ; sh:minCount 1 ]
+    ) ;
+    sh:message "Encounter should carry a start, an end or an encounter date so that records linked to it can be placed in time"@en ;
+    sh:severity sh:Warning .
+
+# ============================================================================
 # Graph Edge Property Shapes (v1.10)
 # Open-world, non-required constraints for the record-to-record edges added in
 # clinical v1.10. Each targets the subjects that USE the predicate (so nothing
@@ -1484,7 +1781,7 @@ clinical:ParsedIndicationReferenceEdgeShape a sh:PropertyShape ;
 #   deliberately NOT constrained, both because FHIR permits a Condition or an
 #   Observation as the reason and because cascade-cli validates each per-type
 #   pod file independently, so a cross-file sh:class check produces false
-#   positives (the v1.11 rationale).
+#   positives (the v1.11 rationale,).
 #
 # Version 1.11 (2026-07-16)
 # - Removed the sh:class constraint from HasEncounterEdgeShape (clinical:Encounter)

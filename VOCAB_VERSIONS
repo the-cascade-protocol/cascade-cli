@@ -56,9 +56,34 @@
 #   fails the suite.
 # Updated 2026-08-04: removed internal tracker references from the bundled
 #   shapes comments. Comment-only; no vocabulary version changed.
+# Updated 2026-08-08: health v2.6 + clinical v1.14 + coverage v1.4 + checkup v3.3.
+#   Shapes-only alignment to ratified standards, after real-world Epic FHIR
+#   exports (and C-CDA documents through the same pipeline) failed validation on
+#   records that are correct at source:
+#     - interpretation bound to the HL7 v3 ObservationInterpretation code system
+#       plus the data-absent-reason code "unknown"; the previous five-member
+#       enum was invented in spec and rejected susceptibility, detection,
+#       reactivity and change results;
+#     - labCategory, testCode, icd10Code and snomedCode made multi-valued, per
+#       FHIR R4 Observation.category 0..* and CodeableConcept.coding 0..*;
+#     - source-carried date properties accept xsd:date alongside xsd:dateTime,
+#       per FHIR's partial-precision dateTime primitive;
+#     - cptCode and checkup:icd10Code patterns corrected;
+#     - coverage:coverageType value check demoted to Warning (FHIR binds
+#       Coverage.type extensibly); subscriberRelationship enum completed;
+#     - NEW clinical:EncounterShape + EncounterTemporalShape. clinical:Encounter
+#       had no shape at all, so encounters validated to PASS with zero
+#       constraints evaluated.
+#   spec PR the-cascade-protocol/spec#16; tags vocab/health-v2.6,
+#   vocab/clinical-v1.14, vocab/coverage-v1.4, vocab/checkup-v3.3.
+#   NOT synced in this pass: the draft evidence.ttl and genomics.shapes.ttl
+#   diffs the sync script also produces are pre-existing drift from spec's
+#   2026-08-03 Validation Profile release and are unrelated to this change; they
+#   are left for their own sync so a genomics sh:class semantics change is not
+#   folded into a clinical alignment.
 core=3.4
-health=2.5
-clinical=1.13
-coverage=1.3
-checkup=3.2
+health=2.6
+clinical=1.14
+coverage=1.4
+checkup=3.3
 pots=1.4

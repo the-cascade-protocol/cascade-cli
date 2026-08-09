@@ -51,14 +51,34 @@ coverage:InsurancePlanShape a sh:NodeShape ;
     ] ;
 
     # Required: coverageType
+    #
+    # PRESENCE is required. The VALUE is checked separately, at sh:Warning, by
+    # coverage:CoverageTypeVocabularyShape below.
+    #
+    # WHY THE VALUE CHECK IS NOT A VIOLATION
+    # --------------------------------------
+    # This property maps to FHIR R4 Coverage.type, whose binding to
+    # http://hl7.org/fhir/ValueSet/coverage-type is EXTENSIBLE, not required.
+    # FHIR defines extensible as: codes SHALL come from the value set if one of
+    # them applies, and "if the value set does not cover the concept, alternate
+    # codes MAY be used" (https://hl7.org/fhir/R4/terminologies.html#extensible).
+    # A closed enum at Violation severity therefore contradicted the binding
+    # strength of the element the data is converted from: a payer sending a
+    # v3-ActCode coverage-type code such as EHCPOL, or its own local code, had a
+    # conformant Coverage resource rejected outright.
+    #
+    # Note also that the original four values conflated two different FHIR
+    # elements: "primary"/"secondary" describe Coverage.order (which plan pays
+    # first), while "dental"/"vision" describe Coverage.type (what is covered).
+    # Both spellings are retained below for backward compatibility.
     sh:property [
         sh:path coverage:coverageType ;
         sh:datatype xsd:string ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
-        sh:in ("primary" "secondary" "dental" "vision") ;
+        sh:minLength 1 ;
         sh:name "Coverage Type"@en ;
-        sh:message "Coverage type must be primary, secondary, dental, or vision"@en ;
+        sh:message "Coverage type is required"@en ;
         sh:severity sh:Violation
     ] ;
 
@@ -98,13 +118,20 @@ coverage:InsurancePlanShape a sh:NodeShape ;
     ] ;
 
     # Warning: subscriberRelationship
+    #
+    # The list is the SubscriberPolicyholder code system in full and verbatim,
+    # http://terminology.hl7.org/CodeSystem/subscriber-relationship, which is
+    # what FHIR R4 Coverage.relationship binds to. The previous list held five
+    # of its seven codes; "common" (Common Law Spouse) and "injured" (Injured
+    # Party) were simply missing, so an export carrying either produced a
+    # warning for being correct.
     sh:property [
         sh:path coverage:subscriberRelationship ;
         sh:datatype xsd:string ;
         sh:maxCount 1 ;
-        sh:in ("self" "spouse" "child" "parent" "other") ;
+        sh:in ("child" "parent" "spouse" "common" "other" "self" "injured") ;
         sh:name "Subscriber Relationship"@en ;
-        sh:message "Subscriber relationship needed for dependent verification"@en ;
+        sh:message "Subscriber relationship should be a code from the HL7 SubscriberPolicyholder code system (http://terminology.hl7.org/CodeSystem/subscriber-relationship): child, parent, spouse, common, other, self, injured"@en ;
         sh:severity sh:Warning
     ] ;
 
@@ -201,8 +228,67 @@ coverage:InsurancePlanShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Shape: Coverage Type vocabulary (advisory)
+# ============================================================================
+#
+# Split out of InsurancePlanShape so that the REQUIREMENT (a coverage type is
+# present) and the RECOMMENDATION (it comes from the value set FHIR names) can
+# carry different severities, which a single sh:property cannot do.
+#
+# The list is the union of:
+#   - the v3-ActCode coverage-type codes reachable from
+#     http://hl7.org/fhir/ValueSet/coverage-type, the value set FHIR R4 binds
+#     Coverage.type to;
+#   - the four values this vocabulary has accepted since v1.0, retained so no
+#     existing record starts warning.
+#
+# Severity is sh:Warning because the FHIR binding is EXTENSIBLE: alternate codes
+# MAY be used where the value set does not cover the concept
+# (https://hl7.org/fhir/R4/terminologies.html#extensible). A payer's local code
+# is therefore worth flagging for review and is not grounds for rejecting the
+# record.
+
+coverage:CoverageTypeVocabularyShape a sh:NodeShape ;
+    sh:targetClass coverage:InsurancePlan ;
+    rdfs:label "Coverage Type Vocabulary Shape"@en ;
+    rdfs:comment "Advisory check that coverage:coverageType comes from the value set FHIR R4 binds Coverage.type to. Warning severity, because that binding is extensible."@en ;
+
+    sh:property [
+        sh:path coverage:coverageType ;
+        sh:in (
+            # Retained Cascade values (v1.0-v1.3).
+            "primary" "secondary" "dental" "vision"
+            # v3-ActCode coverage types.
+            "EHCPOL" "HSAPOL" "AUTOPOL" "COL" "UNINSMOT" "PUBLICPOL"
+            "DENTPRG" "DISEASEPRG" "CANPRG" "ENDRENAL" "HIVAIDS" "MANDPOL"
+            "MENTPRG" "SAFNET" "SUBPRG" "SUBSIDIZ" "SUBSIDMC" "SUBSUPP"
+            "WCBPOL" "DENTAL" "DISEASE" "DRUGPOL" "HIP" "LTC" "MCPOL"
+            "POS" "HMO" "PPO" "MENTPOL" "SUBPOL" "VISPOL"
+        ) ;
+        sh:name "Coverage Type Vocabulary"@en ;
+        sh:message "Coverage type should come from the value set FHIR R4 binds Coverage.type to (http://hl7.org/fhir/ValueSet/coverage-type), or one of the retained Cascade values primary, secondary, dental, vision. That binding is extensible, so a payer-local code is acceptable where no listed code applies."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.1 (2026-08-08) — coverage v1.4
+# - coverage:subscriberRelationship: the sh:in list is now the HL7
+#   SubscriberPolicyholder code system in full,
+#   http://terminology.hl7.org/CodeSystem/subscriber-relationship, which is what
+#   FHIR R4 Coverage.relationship binds to. Two of its seven codes were missing:
+#   "common" (Common Law Spouse) and "injured" (Injured Party). An export
+#   carrying either was warned for being correct.
+# - coverage:coverageType: the closed four-member enum was a sh:Violation on an
+#   element FHIR R4 binds EXTENSIBLY (Coverage.type), so a payer sending a
+#   conformant v3-ActCode code such as EHCPOL had the record rejected. The
+#   Violation now checks presence only; the value is checked against the FHIR
+#   value set plus the four retained Cascade values by the new
+#   coverage:CoverageTypeVocabularyShape, at sh:Warning.
+# - Strictly widening: nothing that validated under v1.0 fails under v1.1, and
+#   two classes of previously-rejected conformant record now pass.
 #
 # Version 1.0 (2026-02-18)
 # - Initial release with InsurancePlanShape

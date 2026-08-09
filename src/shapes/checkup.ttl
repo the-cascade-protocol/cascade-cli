@@ -21,8 +21,8 @@
     dct:description "Structured health data for patient intake forms and pre-visit preparation. Enables aggregation of EHR, HealthKit, and manually entered health data."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-01-03"^^xsd:date ;
-    dct:modified "2026-02-26"^^xsd:date ;
-    owl:versionInfo "3.2" ;
+    dct:modified "2026-08-08"^^xsd:date ;
+    owl:versionInfo "3.3" ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/checkup/v1/> .
 
 # ============================================================================
@@ -1791,6 +1791,17 @@ checkup:supplementUPC a owl:DatatypeProperty ;
 # ============================================================================
 # CHANGELOG
 # ============================================================================
+#
+# v3.3 (2026-08-08): SHACL only; no class or property added, removed or
+# renamed. The checkup:icd10Code sh:pattern required a digit in the second and
+# third characters of an ICD-10-CM code. The ICD-10-CM Official Guidelines for
+# Coding and Reporting, Section I.A.2, state that "Characters for categories,
+# subcategories and codes may be either a letter or a number" and that codes may
+# be 3, 4, 5, 6 or 7 characters. Live categories with a letter in the third
+# position (C4A Merkel cell carcinoma, D3A benign neuroendocrine tumors, M1A
+# chronic gout) and every code beneath them failed the pattern. Corrected to
+# "^[A-Z][0-9A-Z]{2}(\\.[0-9A-Z]{1,4})?$". Info severity, so this fixes an
+# advisory that fired on valid codes rather than a rejection.
 #
 # v3.2 (2026-02-26, BUG-002): Added checkup:supplyEndDate DatatypeProperty on
 # MedicationSummary. Computed as startDate + supplyDurationDays, this field

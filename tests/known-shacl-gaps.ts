@@ -11,6 +11,30 @@
  * checked. Everything below is a finding of that kind: the converter's output
  * did not change, the constraints did.
  *
+ * WHAT CHANGED AT health v2.6 / clinical v1.14
+ * --------------------------------------------
+ * The vocabulary question this file said the emitter fix was blocked on has
+ * been answered, in the direction this file argued for. The date properties
+ * below are no longer `sh:datatype xsd:dateTime`; they are
+ * `sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] )`, because
+ * FHIR's `dateTime` primitive is explicitly partial-precision and a C-CDA
+ * `<effectiveTime value="20250311"/>` states a calendar day and nothing more.
+ * Appending `T00:00:00` to satisfy a validator would have fabricated precision
+ * the source never had.
+ *
+ * THE GAP DID NOT GO AWAY, AND IS NOW SMALLER AND SHARPER. The remaining
+ * violation is no longer a disagreement about which datatype is right. It is
+ * that the emitters write `literal(dateStr)` — a PLAIN literal, which is
+ * `xsd:string` — and `xsd:string` is neither `xsd:date` nor `xsd:dateTime`. The
+ * shapes now accept exactly what the source can honestly say; the converter
+ * still has to say it, by typing the literal. `2025-03-11`^^`xsd:date`
+ * validates today, with no invented time and no shape change.
+ *
+ * That emitter fix is deliberately still not made here, for reason 1 below: a
+ * change that syncs vocabulary and shapes must not also alter what the
+ * converter writes. Reason 2 — "the correct fix is not obvious" — no longer
+ * applies and has been struck.
+ *
  * THE ONE FINDING, STATED PRECISELY
  * ---------------------------------
  * Four C-CDA section handlers read `<effectiveTime value="20250311"/>`, slice it
@@ -23,11 +47,11 @@
  *   sections/problems.ts      -> health:onsetDate
  *   sections/immunizations.ts -> health:administrationDate
  *
- * health v2.5 constrains all three predicates with `sh:datatype xsd:dateTime`.
- * That constraint is not new and not an overreach: `health.ttl` declares
- * `rdfs:range xsd:dateTime` on each of the three, and it is the same constraint
- * `clinical:onsetDate` has carried since before this release. The emitters have
- * disagreed with the ratified vocabulary the whole time; nothing was checking.
+ * health v2.5 constrained all three predicates with `sh:datatype xsd:dateTime`;
+ * health v2.6 widened them to `xsd:date` OR `xsd:dateTime`. Either way the
+ * emitters disagree with the ratified vocabulary, because a plain literal is
+ * `xsd:string` and always was. Nothing was checking until v2.5 shaped these
+ * classes at all.
  *
  * `labs.ts:292` already writes `clinical:performedDate` through a
  * `tripleDateTime()` helper that types the literal correctly. The helper exists.
@@ -36,23 +60,18 @@
  *
  * WHY THIS IS PINNED RATHER THAN FIXED HERE
  * -----------------------------------------
- * Two reasons, and the second is why it is not a one-line change.
+ * One reason now, not two.
  *
  * 1. This change syncs vocabulary and shapes; it deliberately alters no emission
  *    site. Fixing a converter here would mix a data-output change into a
  *    vocabulary sync, and the two need to be reviewed and released separately.
  *
- * 2. The correct fix is not obvious. The source carries DAY precision. Typing
- *    `2025-03-11` as `xsd:dateTime` requires appending a time — `T00:00:00` —
- *    which fabricates precision the C-CDA never had, and midnight-local is a
- *    real value that downstream arithmetic will treat as real. FHIR R4's
- *    `dateTime` primitive accepts `YYYY`, `YYYY-MM`, `YYYY-MM-DD` and full
- *    instants precisely to avoid this, and `health:administrationDate`'s own
- *    comment says it "Corresponds to FHIR R4 Immunization.occurrence". A single
- *    `sh:datatype` cannot express that; expressing it needs `sh:or` over
- *    `xsd:date` / `xsd:dateTime` in the shapes. So the emitter fix is blocked on
- *    a vocabulary decision, and guessing at it in this change would ratify the
- *    guess.
+ * 2. STRUCK at health v2.6. It read: "the correct fix is not obvious", because
+ *    a single `sh:datatype` could not express FHIR's partial-precision
+ *    `dateTime` and the emitter fix was therefore blocked on a vocabulary
+ *    decision. That decision is made. The fix is now obvious and small: type
+ *    the literal `xsd:date` at the five sites listed above, using the same
+ *    kind of helper `labs.ts:292` already uses for `clinical:performedDate`.
  *
  * HOW THIS STAYS HONEST
  * ---------------------
@@ -72,8 +91,8 @@ export interface SeverityIssue {
 }
 
 /**
- * Local names of the properties whose `sh:datatype xsd:dateTime` constraint the
- * C-CDA converter currently violates by emitting an untyped day-precision string.
+ * Local names of the properties whose date-datatype constraint the C-CDA
+ * converter currently violates by emitting an untyped day-precision string.
  */
 export const KNOWN_DATE_DATATYPE_PROPERTIES = new Set([
   'performedDate',
@@ -81,10 +100,23 @@ export const KNOWN_DATE_DATATYPE_PROPERTIES = new Set([
   'administrationDate',
 ]);
 
+/**
+ * The substring that identifies the date-datatype finding specifically.
+ *
+ * At health v2.5 this was the `xsd:dateTime` IRI, which appeared in the
+ * `sh:datatype` report. health v2.6 replaced that constraint with an `sh:or`
+ * over `xsd:date` and `xsd:dateTime`, and an `sh:or` report carries the
+ * property shape's own `sh:message` instead. So the matcher keys on that
+ * message. This is deliberately a phrase from the SHAPES, not a phrase invented
+ * here: if `spec` reworded or dropped the message, the match stops and this
+ * file is forced open rather than silently widening.
+ */
+const DATE_DATATYPE_MESSAGE = 'must be an xsd:date or an xsd:dateTime';
+
 function isKnownDateDatatypeViolation(v: SeverityIssue): boolean {
   return (
     KNOWN_DATE_DATATYPE_PROPERTIES.has(v.property) &&
-    v.message.includes('http://www.w3.org/2001/XMLSchema#dateTime')
+    v.message.includes(DATE_DATATYPE_MESSAGE)
   );
 }
 

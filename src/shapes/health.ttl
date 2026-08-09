@@ -21,8 +21,8 @@
     dct:description "Vocabulary for consumer-generated wellness observations from wearable devices and HealthKit. Maps Cascade wellness properties to established SNOMED CT and LOINC codes following the three-layer ontology architecture."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-01-29"^^xsd:date ;
-    dct:modified "2026-08-03"^^xsd:date ;
-    owl:versionInfo "2.5" ;
+    dct:modified "2026-08-08"^^xsd:date ;
+    owl:versionInfo "2.6" ;
     rdfs:comment """Three-layer ontology for wellness data:
         Layer 1 (Established standards): SNOMED CT concept IDs + LOINC observation codes
         Layer 2 (Cascade health vocabulary): health: namespace properties linking to Layer 1
@@ -30,6 +30,45 @@
     rdfs:seeAlso <https://cascadeprotocol.org/docs/health/v1/> .
 
 # Changelog:
+# v2.6 (2026-08-08): Align the lab-result constraints to the ratified standards
+#     they claim to follow. Shapes-only; no class or property is added, removed
+#     or renamed, and nothing that validated under v2.5 stops validating.
+#
+#     Motivation: real-world Epic FHIR exports fail validation on records that
+#     are correct FHIR. Four constraints on health:LabResultRecordShape and
+#     health:ConditionRecordShape were narrower than the resource definitions
+#     the data is converted from.
+#
+#     1. health:interpretation was constrained to a five-member set Cascade
+#        invented (normal/high/low/abnormal/critical). It is now the 49
+#        selectable codes of the HL7 v3 ObservationInterpretation code system,
+#        http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation
+#        (version 3.0.0) — the code system FHIR R4 binds
+#        Observation.interpretation to — plus the data-absent-reason code
+#        "unknown" (http://terminology.hl7.org/CodeSystem/data-absent-reason)
+#        for the very common case of a source Observation that carried no
+#        interpretation at all. The ten v2.5 words are retained so existing
+#        data keeps validating; they are not recommended for new writes.
+#        The eight abstract (notSelectable) concepts of the code system are
+#        excluded: they are hierarchy nodes, not values.
+#     2. health:labCategory is now multi-valued. FHIR R4 Observation.category
+#        is 0..* (https://hl7.org/fhir/R4/observation-definitions.html#Observation.category)
+#        and real exports categorise one result several ways at once.
+#     3. health:testCode is now multi-valued, and
+#     4. health:icd10Code and health:snomedCode are now multi-valued, all three
+#        because FHIR R4 CodeableConcept.coding is 0..*
+#        (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept). Dual coding
+#        of a problem-list entry, and multiple LOINC codings of one test, are
+#        the normal shape of EHR output.
+#
+#     Deliberately NOT changed: no sh:pattern is introduced on any code
+#     property. ICD-10-CM permits a letter in any character position (per the
+#     ICD-10-CM Official Guidelines for Coding and Reporting, Section I.A.2:
+#     "Characters for categories, subcategories and codes may be either a letter
+#     or a number"), and SNOMED CT identifiers are 6-18 digit integers, so a
+#     pattern would reject valid codes for no gain. Format stays with the code
+#     system that defines it.
+#
 # v2.5 (2026-08-03): Clinical record classes. Five classes that serializers have
 #     emitted since v1.3 but that this ontology never defined are now defined:
 #     health:LabResultRecord, health:ConditionRecord, health:AllergyRecord,
@@ -1143,11 +1182,12 @@ health:resultUnit a owl:DatatypeProperty ;
 
 health:interpretation a owl:DatatypeProperty ;
     rdfs:label "Interpretation"@en ;
-    rdfs:comment "Categorical reading of the result against its reference range."@en ;
+    rdfs:comment "Categorical reading of the result, as a code from the HL7 v3 ObservationInterpretation code system: normality (N, A, H, L, HH, LL, ...), susceptibility (S, I, R, SDD, ...), detection (POS, NEG, DET, ND, IND), reactivity (RR, WR, NR), change (B, D, U, W) and the exception codes. The data-absent-reason code 'unknown' is also accepted, for a source observation that carried no interpretation. At most one value per record."@en ;
     rdfs:domain health:LabResultRecord ;
     rdfs:range xsd:string ;
+    rdfs:seeAlso <http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation> ;
     rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-observation-interpretation.html> ;
-    owl:versionInfo "Added in health v2.5" .
+    owl:versionInfo "Added in health v2.5; bound to HL7 v3 ObservationInterpretation in health v2.6" .
 
 health:performedDate a owl:DatatypeProperty ;
     rdfs:label "Performed Date"@en ;
@@ -1165,17 +1205,19 @@ health:reportedDate a owl:DatatypeProperty ;
 
 health:testCode a owl:ObjectProperty ;
     rdfs:label "Test Code"@en ;
-    rdfs:comment "LOINC reference for the test performed, as an IRI."@en ;
+    rdfs:comment "LOINC reference for the test performed, as an IRI. Repeatable: FHIR R4 CodeableConcept.coding is 0..*, and one test is often carried under more than one LOINC coding."@en ;
     rdfs:domain health:LabResultRecord ;
     rdfs:seeAlso <http://loinc.org/> ;
-    owl:versionInfo "Added in health v2.5" .
+    rdfs:seeAlso <https://hl7.org/fhir/R4/datatypes.html#CodeableConcept> ;
+    owl:versionInfo "Added in health v2.5; made repeatable in health v2.6" .
 
 health:labCategory a owl:DatatypeProperty ;
     rdfs:label "Lab Category"@en ;
-    rdfs:comment "Laboratory department or panel grouping (for example Chemistry, Hematology). Free text: laboratories do not agree on a common set."@en ;
+    rdfs:comment "Laboratory department or panel grouping (for example Chemistry, Hematology). Free text: laboratories do not agree on a common set. Repeatable, mirroring FHIR R4 Observation.category, which is 0..*."@en ;
     rdfs:domain health:LabResultRecord ;
     rdfs:range xsd:string ;
-    owl:versionInfo "Added in health v2.5" .
+    rdfs:seeAlso <https://hl7.org/fhir/R4/observation-definitions.html#Observation.category> ;
+    owl:versionInfo "Added in health v2.5; made repeatable in health v2.6" .
 
 health:referenceRange a owl:DatatypeProperty ;
     rdfs:label "Reference Range"@en ;
@@ -1211,10 +1253,11 @@ health:performingLab a owl:DatatypeProperty ;
 
 health:icd10Code a owl:ObjectProperty ;
     rdfs:label "ICD-10-CM Code"@en ;
-    rdfs:comment "ICD-10-CM reference for the condition, as an IRI."@en ;
+    rdfs:comment "ICD-10-CM reference for the condition, as an IRI. Repeatable: FHIR R4 CodeableConcept.coding is 0..*, and problem-list entries are routinely dual coded. Note that ICD-10-CM permits a letter in any character position (C4A, D3A and M1A are ordinary categories), so no lexical pattern is imposed here."@en ;
     rdfs:domain health:ConditionRecord ;
     rdfs:seeAlso <https://hl7.org/fhir/R4/codesystem-icd10.html> ;
-    owl:versionInfo "Added in health v2.5" .
+    rdfs:seeAlso <https://hl7.org/fhir/R4/datatypes.html#CodeableConcept> ;
+    owl:versionInfo "Added in health v2.5; made repeatable in health v2.6" .
 
 health:conditionClass a owl:DatatypeProperty ;
     rdfs:label "Condition Class"@en ;
