@@ -27,10 +27,6 @@ import { fileURLToPath } from 'node:url';
 import { Parser } from 'n3';
 import { convertCcda } from '../src/lib/ccda-converter/index.js';
 import { loadShapes, validateTurtle } from '../src/lib/shacl-validator.js';
-import {
-  assertOnlyKnownViolations,
-  expectKnownViolationsStillPresent,
-} from './known-shacl-gaps.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -189,7 +185,7 @@ describe('C-CDA converter — full summarization (P4-A)', () => {
     expect(result.output).toContain('"TestSystem"');
   });
 
-  it('output passes SHACL validation with no violation beyond the known date-datatype gap', async () => {
+  it('output passes SHACL validation with no violations', async () => {
     const xml = readFixture('full-summarization.xml');
     const result = await convertCcda(xml, { sourceSystem: 'TestSystem' });
 
@@ -203,17 +199,16 @@ describe('C-CDA converter — full summarization (P4-A)', () => {
     // filtered out.
     //
     // This asserted zero violations until health v2.5 gave the five health:*Record
-    // classes shapes. The converter's output is byte-identical; three predicates
-    // are simply now checked against the `xsd:dateTime` range they always had.
-    // See `known-shacl-gaps.ts` — that list is exact in both directions, so this
-    // still fails on any new violation AND once the gap is closed.
+    // classes shapes, at which point three date predicates started being checked
+    // and the converter's untyped literals started failing. Those emitters now
+    // type their literals from the precision the source stated (see
+    // `src/lib/ccda-converter/dates.ts`), so the assertion is back to zero — which
+    // is the only assertion that cannot quietly absorb a new defect.
     const violations = validation.results.filter((r) => r.severity === 'violation');
-    assertOnlyKnownViolations(violations);
-    expectKnownViolationsStillPresent(violations, [
-      'performedDate',
-      'onsetDate',
-      'administrationDate',
-    ]);
+    expect(
+      violations,
+      violations.map((v) => `  ${v.shape}: ${v.message} (${v.property})`).join('\n'),
+    ).toHaveLength(0);
   });
 });
 

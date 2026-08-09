@@ -48,6 +48,7 @@ import {
   pushIndicationEdges,
   pushParsedIndicationCandidates,
 } from './reference-resolution.js';
+import { interpretationValue } from './interpretation.js';
 
 // ---------------------------------------------------------------------------
 // Medication converter
@@ -662,17 +663,17 @@ export function convertObservationLab(resource: any): ConversionResult & { _quad
     warnings.push('No result value found in Observation resource');
   }
 
-  if (resource.interpretation && Array.isArray(resource.interpretation) && resource.interpretation.length > 0) {
-    const interpCode = resource.interpretation[0]?.coding?.[0]?.code ?? 'unknown';
-    const interpMap: Record<string, string> = {
-      N: 'normal', H: 'abnormal', L: 'abnormal', A: 'abnormal',
-      HH: 'critical', LL: 'critical', AA: 'critical',
-      HU: 'critical', LU: 'critical',
-    };
-    quads.push(tripleStr(subjectUri, NS.health + 'interpretation', interpMap[interpCode] ?? 'unknown'));
-  } else {
-    quads.push(tripleStr(subjectUri, NS.health + 'interpretation', 'unknown'));
-  }
+  // The source's own ObservationInterpretation code, carried through. health v2.6
+  // binds health:interpretation to that code system, so there is nothing left to
+  // translate and no reason to collapse H and L onto one word. See
+  // `interpretation.ts` for what the accepted set is and what happens outside it.
+  quads.push(
+    tripleStr(
+      subjectUri,
+      NS.health + 'interpretation',
+      interpretationValue(resource.interpretation, warnings),
+    ),
+  );
 
   const effectiveDate = resource.effectiveDateTime ?? resource.effectivePeriod?.start ?? resource.issued;
   if (effectiveDate) {

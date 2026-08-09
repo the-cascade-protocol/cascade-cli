@@ -14,6 +14,7 @@ import { NS, VITAL_LOINC_CODES } from '../../fhir-converter/types.js';
 import { firstOf, listOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { resolveCodeUri } from '../code-systems.js';
+import { ccdaDateQuad } from '../dates.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
 
@@ -109,7 +110,7 @@ export function extractVitalQuads(
         // canonical enum). Preserve the value as a lab result rather than drop it.
         quads.push(...buildLabFallback({
           sourceSystem, loincCode, isLoinc, loincOid,
-          displayName, dateStr, value, unit, sourceId, source: obs, warnings,
+          displayName, dateStr, dateVal, value, unit, sourceId, source: obs, warnings,
         }));
         continue;
       }
@@ -161,7 +162,10 @@ function buildLabFallback(args: {
   isLoinc: boolean;
   loincOid: string;
   displayName: string;
+  /** Day-truncated. Identity key only — see `dateVal` for what gets emitted. */
   dateStr: string;
+  /** The raw `<effectiveTime>` value, at whatever precision the source stated. */
+  dateVal: string;
   value: string;
   unit: string;
   sourceId: string | undefined;
@@ -170,7 +174,7 @@ function buildLabFallback(args: {
   source: unknown;
   warnings: string[] | undefined;
 }): Quad[] {
-  const { sourceSystem, loincCode, isLoinc, loincOid, displayName, dateStr, value, unit, sourceId, source, warnings } = args;
+  const { sourceSystem, loincCode, isLoinc, loincOid, displayName, dateStr, dateVal, value, unit, sourceId, source, warnings } = args;
   const quads: Quad[] = [];
 
   const uri = ccdaRecordUri({
@@ -193,7 +197,9 @@ function buildLabFallback(args: {
   quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(sourceSystem)));
   if (isLoinc && loincCode) quads.push(makeQuad(subj, namedNode(NS.health + 'testCode'), namedNode(resolveCodeUri(loincOid, loincCode))));
   if (displayName) quads.push(makeQuad(subj, namedNode(NS.health + 'testName'), literal(displayName)));
-  if (dateStr) quads.push(makeQuad(subj, namedNode(NS.health + 'performedDate'), literal(dateStr)));
+  // Typed from the raw effectiveTime; see `dates.ts`.
+  const performedQuad = ccdaDateQuad(uri, NS.health + 'performedDate', dateVal);
+  if (performedQuad) quads.push(performedQuad);
   if (value) quads.push(makeQuad(subj, namedNode(NS.health + 'resultValue'), literal(String(value))));
   if (unit) quads.push(makeQuad(subj, namedNode(NS.health + 'resultUnit'), literal(String(unit))));
   if (sourceId) quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceRecordId'), literal(sourceId)));
