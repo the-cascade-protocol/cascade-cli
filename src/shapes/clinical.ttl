@@ -21,8 +21,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-08-03"^^xsd:date ;
-    owl:versionInfo "1.13" ;
+    dct:modified "2026-08-08"^^xsd:date ;
+    owl:versionInfo "1.14" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -1330,6 +1330,36 @@ clinical:isActive a owl:DatatypeProperty ;
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.14 (2026-08-08)
+# - SHACL only; no class or property added, removed, renamed or deprecated.
+#   Aligns four constraint families to the ratified standards they describe, and
+#   shapes a class that had no shape. Full detail in clinical.shapes.ttl's own
+#   changelog; summarised here because the version number lives in this file.
+# - clinical:interpretation bound to the HL7 v3 ObservationInterpretation code
+#   system (http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation,
+#   version 3.0.0), the code system FHIR R4 binds Observation.interpretation to,
+#   plus the data-absent-reason code "unknown"
+#   (http://terminology.hl7.org/CodeSystem/data-absent-reason). The previous
+#   five-member enum was invented here; real exports carry susceptibility,
+#   detection, reactivity and change codes that have no member of it.
+# - clinical:snomedCode and clinical:icd10Code made multi-valued, per FHIR R4
+#   CodeableConcept.coding 0..*
+#   (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept).
+# - clinical:cptCode pattern widened from five digits to the full AMA CPT code
+#   set structure: five digits (Category I) or four digits plus F, T or U
+#   (Category II, Category III, Proprietary Laboratory Analyses).
+# - Source-carried date properties (encounterDate, documentDate, onsetDate,
+#   procedureDate) now accept xsd:date alongside xsd:dateTime, because FHIR's
+#   dateTime primitive is explicitly partial-precision
+#   (https://build.fhir.org/datatypes.html) and C-CDA effectiveTime is commonly
+#   date-precision. Cascade-generated timestamps are unchanged.
+# - Added clinical:EncounterShape and clinical:EncounterTemporalShape.
+#   clinical:Encounter has been defined since v1.7 and targeted by no shape, so
+#   validating an encounter checked nothing and returned PASS. Encounters vary
+#   widely, so the shape constrains cardinality, datatype, provenance and the
+#   IRI requirement that clinical:hasEncounter implies, and leaves the kind of
+#   visit unconstrained.
 #
 # Version 1.13 (2026-08-03)
 # - Deprecated 4 classes: clinical:LabResult, clinical:Condition,

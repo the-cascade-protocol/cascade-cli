@@ -11,6 +11,56 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+**Bundled shapes synced to health 2.6 / clinical 1.14 / coverage 1.4 / checkup 3.3, so a conformant
+FHIR record validates.** Real-world Epic FHIR exports, and C-CDA documents through the same
+pipeline, were failing `cascade validate` on records that are correct at source. Every failure was a
+Cascade constraint narrower than the standard the data had been converted from, not a defect in the
+converter and not a defect in the data.
+
+Measured on a synthetic Epic-shaped bundle carrying one susceptibility lab, one dual-coded
+problem-list entry, one visit, one employer-sponsored policy and one Category III procedure: **7
+violations and 1 warning before, 0 and 0 after**, and the Encounter went from "no applicable shape"
+to checked. What the old shapes rejected:
+
+- `interpretation` accepted five words invented in `spec` (normal / high / low / abnormal /
+  critical). FHIR R4 binds `Observation.interpretation` to the HL7 v3 ObservationInterpretation code
+  system, which also carries susceptibility (S/I/R), detection (POS/NEG/DET/ND/IND), reactivity
+  (RR/WR/NR) and change (B/D/U/W) results. The converter writes the data-absent-reason code
+  `unknown` when a source Observation carries no interpretation, and that was not in the enum
+  either, so the single most common value in a real export was also a Violation.
+- `labCategory` was single-valued while `Observation.category` is 0..\*, and `testCode`,
+  `icd10Code` and `snomedCode` were single-valued while `CodeableConcept.coding` is 0..\*. Records
+  were rejected for preserving what the source sent.
+- `cptCode` required five digits, which is CPT Category I only.
+- `coverageType` enforced a closed four-member enum at Violation severity on an element FHIR binds
+  extensibly, and `subscriberRelationship` held five of the seven codes in the value set it points
+  at.
+- `clinical:Encounter` had no shape at all, so `validate` reported PASS on encounters having
+  evaluated zero constraints. clinical v1.14 adds `EncounterShape` and `EncounterTemporalShape`.
+- Date properties carried over from a source document now accept `xsd:date` as well as
+  `xsd:dateTime`, because FHIR's `dateTime` primitive is explicitly partial-precision and C-CDA
+  `effectiveTime` commonly states a calendar day and nothing more.
+
+New `tests/fhir-standards-alignment.test.ts` converts that bundle through the real converter and
+validates it against the real bundled shapes, asserting zero violations and full shape coverage. It
+also pins what the converter EMITS, which is what separates "the shapes were widened" from "the
+converter started dropping the values that used to fail". Verified RED against the previous shapes
+before being kept: 3 of its 6 assertions fail there.
+
+`tests/known-shacl-gaps.ts` is updated rather than deleted. It had argued that the C-CDA
+day-precision emitters could not be fixed until the vocabulary decided how to express partial
+precision; that decision is now made, in the direction it argued for. The gap it records is smaller
+and sharper: the five emitters write a PLAIN literal, which is `xsd:string`, and `xsd:string` is
+neither `xsd:date` nor `xsd:dateTime`. Typing the literal `xsd:date` now validates with no invented
+time and no further shape change. That emitter fix is still deliberately out of scope for a
+vocabulary sync.
+
+Not synced in this pass: the sync script also produces diffs for the draft `evidence.ttl` and
+`genomics.shapes.ttl`, which are pre-existing drift from spec's 2026-08-03 Validation Profile
+release. They are left for their own sync so that a genomics `sh:class` semantics change is not
+folded into a clinical alignment.
+
+
 **`cascade capabilities` is generated from the command registry instead of being maintained by
 hand.** The document is what an AI agent reads to learn what this CLI can do, and the hand-written
 version described 12 of the 34 invocable commands: every write verb and every recovery verb was

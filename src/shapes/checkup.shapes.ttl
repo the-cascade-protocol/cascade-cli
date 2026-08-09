@@ -688,13 +688,22 @@ checkup:ConditionSummaryShape a sh:NodeShape ;
         sh:message "Condition status should be a recognized value"
     ] ;
 
-    # ICD-10 code pattern if present
+    # ICD-10-CM code pattern if present.
+    #
+    # The previous pattern required the second AND third characters to be
+    # digits. The ICD-10-CM Official Guidelines for Coding and Reporting,
+    # Section I.A.2, say the opposite: "Characters for categories, subcategories
+    # and codes may be either a letter or a number. All categories are 3
+    # characters. ... Codes may be 3, 4, 5, 6 or 7 characters." Categories with
+    # a letter in the third position are ordinary, not exotic — C4A (Merkel cell
+    # carcinoma), D3A (benign neuroendocrine tumors) and M1A (chronic gout) are
+    # all live ICD-10-CM categories, and every code under them was rejected.
     sh:property [
         sh:path checkup:icd10Code ;
         sh:datatype xsd:string ;
-        sh:pattern "^[A-Z][0-9]{2}(\\.[0-9A-Z]{1,4})?$" ;
+        sh:pattern "^[A-Z][0-9A-Z]{2}(\\.[0-9A-Z]{1,4})?$" ;
         sh:severity sh:Info ;
-        sh:message "ICD-10 code should follow standard format (e.g., I10, E11.9)"
+        sh:message "ICD-10-CM code should be 3 to 7 characters: a letter, two letters-or-digits, then optionally a dot and 1 to 4 more (e.g., I10, E11.9, C4A.51, M1A.0110)"
     ] .
 
 # ============================================================================
@@ -1414,6 +1423,16 @@ checkup:DiscussionTopicShape a sh:NodeShape ;
 # ============================================================================
 # CHANGELOG
 # ============================================================================
+#
+# v2.1 (2026-08-08) - checkup v3.3
+# - checkup:icd10Code pattern corrected. It required digits in the second and
+#   third characters; the ICD-10-CM Official Guidelines for Coding and
+#   Reporting, Section I.A.2, state that "Characters for categories,
+#   subcategories and codes may be either a letter or a number" and that codes
+#   may be 3 to 7 characters. Categories such as C4A, D3A and M1A are ordinary
+#   ICD-10-CM, and every code under them failed the old pattern. Info severity
+#   throughout, so this changed an advisory that fired wrongly, not a rejection.
+#   No other checkup shape changed.
 #
 # v2.0 (2026-02-18): WS8 - Shapes for v1.5-v2.0 ontology classes
 # - Added health: and clinical: prefix declarations for cross-namespace shapes
