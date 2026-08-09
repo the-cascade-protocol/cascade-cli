@@ -1,0 +1,29 @@
+{
+  "_comment": "Baseline reconciliation scorecard for the pathology-corpus scenarios that carry a constructed ground truth. REPORT-ONLY: nothing here asserts these numbers are good, and two of the recalls are 0. The harness asserts they are KNOWN, so a change to matching has to move this file on purpose, in the same commit as the change that moved it. Scored over merge PAIRS: precision = correctPairs / predictedPairs (1 when the reconciler predicted nothing, since predicting nothing asserts nothing wrong), recall = correctPairs / truthPairs.",
+  "scores": {
+    "P07": {
+      "universe": 10,
+      "truthPairs": 4,
+      "predictedPairs": 4,
+      "correctPairs": 4,
+      "precision": 1,
+      "recall": 1
+    },
+    "P07-SHARED-LABEL": {
+      "universe": 10,
+      "truthPairs": 4,
+      "predictedPairs": 0,
+      "correctPairs": 0,
+      "precision": 1,
+      "recall": 0
+    },
+    "P08": {
+      "universe": 8,
+      "truthPairs": 2,
+      "predictedPairs": 0,
+      "correctPairs": 0,
+      "precision": 1,
+      "recall": 0
+    }
+  }
+}

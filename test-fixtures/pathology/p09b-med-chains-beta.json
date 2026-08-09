@@ -1,0 +1,101 @@
+{
+  "_comment": "P09b - MEDICATION CHAINS (source B: the specialist practice). The other end of all four chains from p09a-med-chains-alpha.json. DOSE SUPERSESSION: lisinopril 20 mg, active, authored a year after the 10 mg the primary-care list still carries as stopped. STALE-ACTIVE: metformin stopped twice by this prescriber (an immediate-release order and its extended-release replacement, both now stopped), against the primary-care list's still-active metformin. The second stopped metformin is the interesting one: it arrives after its sibling has already been paired with the active record, so whether it is examined at all is a property of iteration order rather than of clinical meaning. The levothyroxine and sertraline pairs raise the same dose disagreement (75 vs 100 mcg, 50 vs 100 mg) through two different FHIR shapes, so a divergence between them is a property of the transport and not of the medicine. 100% synthetic.",
+  "resourceType": "Bundle",
+  "id": "p09b-beta",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "https://fhir.ridgecrestcardiology.example/r4/Patient/rc-2210",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "rc-2210",
+        "name": [{ "use": "official", "family": "Anselminho", "given": ["Rosalind"] }],
+        "gender": "female",
+        "birthDate": "1968-02-14"
+      }
+    },
+    {
+      "fullUrl": "https://fhir.ridgecrestcardiology.example/r4/MedicationRequest/rc-lisinopril-20",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "rc-lisinopril-20",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "314077", "display": "Lisinopril 20 MG Oral Tablet" }],
+          "text": "Lisinopril 20 mg oral tablet"
+        },
+        "subject": { "reference": "https://fhir.ridgecrestcardiology.example/r4/Patient/rc-2210" },
+        "requester": { "display": "Yusuf Oyelaran-Steed, MD" },
+        "authoredOn": "2024-08-15",
+        "dosageInstruction": [{ "text": "Take 1 tablet (20 mg) by mouth once daily" }]
+      }
+    },
+    {
+      "fullUrl": "https://fhir.ridgecrestcardiology.example/r4/MedicationRequest/rc-metformin-stopped-1",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "rc-metformin-stopped-1",
+        "status": "stopped",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "861007", "display": "Metformin hydrochloride 500 MG Oral Tablet" }],
+          "text": "Metformin 500 mg oral tablet"
+        },
+        "subject": { "reference": "https://fhir.ridgecrestcardiology.example/r4/Patient/rc-2210" },
+        "requester": { "display": "Yusuf Oyelaran-Steed, MD" },
+        "authoredOn": "2023-06-01",
+        "dosageInstruction": [{ "text": "Take 1 tablet (500 mg) by mouth twice daily" }]
+      }
+    },
+    {
+      "fullUrl": "https://fhir.ridgecrestcardiology.example/r4/MedicationRequest/rc-metformin-stopped-2",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "rc-metformin-stopped-2",
+        "status": "stopped",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "861763", "display": "Metformin hydrochloride 500 MG Extended Release Oral Tablet" }],
+          "text": "Metformin 500 mg extended release oral tablet"
+        },
+        "subject": { "reference": "https://fhir.ridgecrestcardiology.example/r4/Patient/rc-2210" },
+        "requester": { "display": "Yusuf Oyelaran-Steed, MD" },
+        "authoredOn": "2024-02-10",
+        "dosageInstruction": [{ "text": "Take 1 tablet (500 mg) by mouth twice daily" }]
+      }
+    },
+    {
+      "fullUrl": "https://fhir.ridgecrestcardiology.example/r4/MedicationStatement/rc-levothyroxine-100",
+      "resource": {
+        "resourceType": "MedicationStatement",
+        "id": "rc-levothyroxine-100",
+        "status": "active",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "966224", "display": "Levothyroxine Sodium 0.1 MG Oral Tablet" }],
+          "text": "Levothyroxine 100 mcg oral tablet"
+        },
+        "subject": { "reference": "https://fhir.ridgecrestcardiology.example/r4/Patient/rc-2210" },
+        "effectiveDateTime": "2024-10-03",
+        "dosage": [{ "text": "100 mcg by mouth every morning", "timing": { "repeat": { "frequency": 1, "period": 1, "periodUnit": "d" } } }]
+      }
+    },
+    {
+      "fullUrl": "https://fhir.ridgecrestcardiology.example/r4/MedicationRequest/rc-sertraline-100",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "rc-sertraline-100",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "312941", "display": "Sertraline 100 MG Oral Tablet" }],
+          "text": "Sertraline 100 mg oral tablet"
+        },
+        "subject": { "reference": "https://fhir.ridgecrestcardiology.example/r4/Patient/rc-2210" },
+        "requester": { "display": "Yusuf Oyelaran-Steed, MD" },
+        "authoredOn": "2024-11-12",
+        "dosageInstruction": [{ "text": "100 mg by mouth every morning", "timing": { "repeat": { "frequency": 1, "period": 1, "periodUnit": "d" } } }]
+      }
+    }
+  ]
+}

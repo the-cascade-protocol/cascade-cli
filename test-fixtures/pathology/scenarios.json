@@ -1,0 +1,284 @@
+{
+  "tier": "authored-synthetic",
+  "description": "Import pathologies authored for this repository. Every fixture is 100% synthetic: invented people, organizations, endpoints, identifiers, dates and values. What is reproduced is the SHAPE of a phenomenon that appears in real exports, never the content of any document. See INVENTORY.md.",
+  "scenarios": [
+    {
+      "id": "P01",
+      "pathology": "dual-label split: one health system, two source labels",
+      "batches": [
+        { "file": "p01-dual-label-fhir.json", "from": "fhir" },
+        { "file": "p01-dual-label-ccda.xml", "from": "c-cda" }
+      ],
+      "expect": {
+        "convertedRecords": [4, 6],
+        "reportedResourceCount": [4, 3],
+        "podRecords": 8,
+        "podRecordsByType": {
+          "ClinicalDocument": 2,
+          "ConditionRecord": 1,
+          "ImmunizationRecord": 1,
+          "LaboratoryReport": 1,
+          "LabResultRecord": 2,
+          "PatientProfile": 1
+        },
+        "merges": 2,
+        "conflicts": 0,
+        "edgesInPod": 1,
+        "violations": 0,
+        "importWarnings": 0
+      }
+    },
+    {
+      "id": "P02",
+      "pathology": "duplicate source-id collision: one <id> across three distinct lab observations",
+      "batches": [{ "file": "p02-duplicate-source-id-ccda.xml", "from": "c-cda" }],
+      "expect": {
+        "convertedRecords": [5],
+        "reportedResourceCount": [2],
+        "podRecords": 5,
+        "podRecordsByType": {
+          "ClinicalDocument": 1,
+          "LaboratoryReport": 1,
+          "LabResultRecord": 2,
+          "PatientProfile": 1
+        },
+        "merges": 0,
+        "conflicts": 0,
+        "edgesInPod": 2,
+        "violations": 2,
+        "importWarnings": 0
+      }
+    },
+    {
+      "id": "P03",
+      "pathology": "narrative-only test names, one reference dangling",
+      "batches": [{ "file": "p03-narrative-names-ccda.xml", "from": "c-cda" }],
+      "expect": {
+        "convertedRecords": [8],
+        "reportedResourceCount": [2],
+        "podRecords": 8,
+        "podRecordsByType": {
+          "ClinicalDocument": 1,
+          "LaboratoryReport": 1,
+          "LabResultRecord": 5,
+          "PatientProfile": 1
+        },
+        "merges": 0,
+        "conflicts": 0,
+        "edgesInPod": 5,
+        "violations": 2,
+        "importWarnings": 0
+      }
+    },
+    {
+      "id": "P04",
+      "pathology": "date-precision variety: day, timed with offset, and a month that must not be emitted",
+      "batches": [{ "file": "p04-date-precision-ccda.xml", "from": "c-cda" }],
+      "expect": {
+        "convertedRecords": [8],
+        "reportedResourceCount": [3],
+        "podRecords": 8,
+        "podRecordsByType": {
+          "ClinicalDocument": 2,
+          "LaboratoryReport": 1,
+          "LabResultRecord": 3,
+          "PatientProfile": 1,
+          "Procedure": 1
+        },
+        "merges": 0,
+        "conflicts": 0,
+        "edgesInPod": 3,
+        "violations": 1,
+        "importWarnings": 0
+      }
+    },
+    {
+      "id": "P05",
+      "pathology": "HL7 interpretation codes across the set, and multi-category observations",
+      "batches": [{ "file": "p05-interpretation-categories-fhir.json", "from": "fhir" }],
+      "expect": {
+        "convertedRecords": [8],
+        "reportedResourceCount": [8],
+        "podRecords": 8,
+        "podRecordsByType": { "LabResultRecord": 6, "PatientProfile": 1, "VitalSign": 1 },
+        "merges": 0,
+        "conflicts": 0,
+        "edgesInPod": 0,
+        "violations": 0,
+        "importWarnings": 1
+      }
+    },
+    {
+      "id": "P06",
+      "pathology": "indication absence: reasonReference, resolvable reasonCode, unresolvable reasonCode, and neither",
+      "batches": [{ "file": "p06-indication-absence-fhir.json", "from": "fhir" }],
+      "expect": {
+        "convertedRecords": [8],
+        "reportedResourceCount": [8],
+        "podRecords": 8,
+        "podRecordsByType": { "ConditionRecord": 2, "Medication": 5, "PatientProfile": 1 },
+        "merges": 0,
+        "conflicts": 0,
+        "edgesInPod": 1,
+        "violations": 0,
+        "importWarnings": 0
+      }
+    },
+    {
+      "id": "P07",
+      "pathology": "cross-source exact lab duplicates across two import batches",
+      "batches": [
+        { "file": "p07a-crosssource-labs-alpha.json", "from": "fhir" },
+        { "file": "p07b-crosssource-labs-beta.json", "from": "fhir" }
+      ],
+      "expect": {
+        "convertedRecords": [6, 6],
+        "reportedResourceCount": [6, 6],
+        "podRecords": 7,
+        "podRecordsByType": { "LabResultRecord": 6, "PatientProfile": 1 },
+        "merges": 5,
+        "conflicts": 0,
+        "edgesInPod": 0,
+        "violations": 0,
+        "importWarnings": 0
+      },
+      "groundTruth": [
+        ["p07a-sodium", "lf-na"],
+        ["p07a-potassium", "lf-k"],
+        ["p07a-bun", "lf-bun"],
+        ["p07a-calcium", "lf-ca"],
+        ["p07a-only-magnesium"],
+        ["lf-only-phosphorus"]
+      ]
+    },
+    {
+      "id": "P07-SHARED-LABEL",
+      "pathology": "the same two exports under ONE import-batch label: the same-source guard suppresses every cross-source comparison",
+      "batches": [
+        { "file": "p07a-crosssource-labs-alpha.json", "from": "fhir", "sourceSystem": "Household export" },
+        { "file": "p07b-crosssource-labs-beta.json", "from": "fhir", "sourceSystem": "Household export" }
+      ],
+      "expect": {
+        "convertedRecords": [6, 6],
+        "reportedResourceCount": [6, 6],
+        "podRecords": 12,
+        "podRecordsByType": { "LabResultRecord": 10, "PatientProfile": 2 },
+        "merges": 0,
+        "conflicts": 0,
+        "edgesInPod": 0,
+        "violations": 0,
+        "importWarnings": 0
+      },
+      "groundTruth": [
+        ["p07a-sodium", "lf-na"],
+        ["p07a-potassium", "lf-k"],
+        ["p07a-bun", "lf-bun"],
+        ["p07a-calcium", "lf-ca"],
+        ["p07a-only-magnesium"],
+        ["lf-only-phosphorus"]
+      ]
+    },
+    {
+      "id": "P08",
+      "pathology": "three same-source readings hours apart that must never merge, plus a clock-skew duplicate from a second source that should",
+      "batches": [
+        { "file": "p08a-repeat-vitals-alpha.json", "from": "fhir" },
+        { "file": "p08b-repeat-vitals-beta.json", "from": "fhir" }
+      ],
+      "expect": {
+        "convertedRecords": [7, 3],
+        "reportedResourceCount": [7, 3],
+        "podRecords": 9,
+        "podRecordsByType": { "PatientProfile": 1, "VitalSign": 8 },
+        "merges": 1,
+        "conflicts": 0,
+        "edgesInPod": 0,
+        "violations": 0,
+        "importWarnings": 0
+      },
+      "groundTruth": [
+        ["hv-sys-morning"],
+        ["hv-dia-morning"],
+        ["hv-sys-midday"],
+        ["hv-dia-midday"],
+        ["hv-sys-evening", "rc-sys-skew"],
+        ["hv-dia-evening", "rc-dia-skew"]
+      ]
+    },
+    {
+      "id": "P09",
+      "pathology": "medication chains: dose supersession, stale-active, and one dose disagreement asked through two FHIR shapes",
+      "batches": [
+        { "file": "p09a-med-chains-alpha.json", "from": "fhir" },
+        { "file": "p09b-med-chains-beta.json", "from": "fhir" }
+      ],
+      "expect": {
+        "convertedRecords": [5, 6],
+        "reportedResourceCount": [5, 6],
+        "podRecords": 5,
+        "podRecordsByType": { "Medication": 4, "PatientProfile": 1 },
+        "merges": 2,
+        "conflicts": 3,
+        "edgesInPod": 0,
+        "violations": 0,
+        "importWarnings": 0
+      }
+    },
+    {
+      "id": "P10",
+      "pathology": "allergy sentinels: a real allergen, a No Known Allergies negation, and an Unknown Allergen data-absent marker",
+      "batches": [{ "file": "p10-allergy-sentinels-fhir.json", "from": "fhir" }],
+      "expect": {
+        "convertedRecords": [5],
+        "reportedResourceCount": [5],
+        "podRecords": 5,
+        "podRecordsByType": { "AllergyRecord": 4, "PatientProfile": 1 },
+        "merges": 0,
+        "conflicts": 0,
+        "edgesInPod": 0,
+        "violations": 0,
+        "importWarnings": 0
+      }
+    },
+    {
+      "id": "P11",
+      "pathology": "one lipid draw reported three times under three display names, over shared results",
+      "batches": [{ "file": "p11-panel-name-variants-fhir.json", "from": "fhir" }],
+      "expect": {
+        "convertedRecords": [8],
+        "reportedResourceCount": [8],
+        "podRecords": 8,
+        "podRecordsByType": { "LaboratoryReport": 3, "LabResultRecord": 4, "PatientProfile": 1 },
+        "merges": 0,
+        "conflicts": 0,
+        "edgesInPod": 12,
+        "violations": 0,
+        "importWarnings": 0
+      }
+    },
+    {
+      "id": "P12",
+      "pathology": "vendor-shipped defects: an unsubstituted template placeholder as the document id, a malformed 9-digit date, an empty nullFlavor section, and nullFlavor variety on values",
+      "batches": [
+        { "file": "p12-vendor-defects-a-ccda.xml", "from": "c-cda" },
+        { "file": "p12-vendor-defects-b-ccda.xml", "from": "c-cda" }
+      ],
+      "expect": {
+        "convertedRecords": [8, 5],
+        "reportedResourceCount": [2, 2],
+        "podRecords": 12,
+        "podRecordsByType": {
+          "ClinicalDocument": 3,
+          "LaboratoryReport": 2,
+          "LabResultRecord": 6,
+          "PatientProfile": 1
+        },
+        "merges": 1,
+        "conflicts": 0,
+        "edgesInPod": 6,
+        "violations": 0,
+        "importWarnings": 0
+      }
+    }
+  ]
+}

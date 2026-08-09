@@ -1,0 +1,127 @@
+{
+  "_comment": "P11 - PANEL DISPLAY-NAME VARIANTS OVER SHARED RESULTS. One lipid panel, drawn once, reported three times: as 'Lipid Panel' when the order was placed, as 'Lipid Profile' by the performing laboratory, and as 'LIPID PROFILE - Final result' by the results-delivery system that appended its own status wording to the name. All three reports point at the SAME four Observation resources, so the results underneath are identical by construction and only the panel NAME differs. The pathology: a panel whose identity is read off its display name fragments into three panels, each apparently carrying the same four results, and a patient sees their cholesterol reported three times. It is also where display-name normalization is tempting and dangerous, since 'Final result' is a status word and 'Profile' is not. 100% synthetic.",
+  "resourceType": "Bundle",
+  "id": "p11-panels",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:p11-patient",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "p11-pt",
+        "name": [{ "use": "official", "family": "Okonkwo-Lindqvist", "given": ["Emeka"] }],
+        "gender": "male",
+        "birthDate": "1979-05-16"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p11-chol",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "p11-chol",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "2093-3", "display": "Cholesterol [Mass/volume] in Serum or Plasma" }], "text": "Total cholesterol" },
+        "subject": { "reference": "urn:uuid:p11-patient" },
+        "effectiveDateTime": "2025-04-09T07:55:00-05:00",
+        "valueQuantity": { "value": 214, "unit": "mg/dL" }
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p11-hdl",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "p11-hdl",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "2085-9", "display": "Cholesterol in HDL [Mass/volume] in Serum or Plasma" }], "text": "HDL cholesterol" },
+        "subject": { "reference": "urn:uuid:p11-patient" },
+        "effectiveDateTime": "2025-04-09T07:55:00-05:00",
+        "valueQuantity": { "value": 48, "unit": "mg/dL" }
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p11-ldl",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "p11-ldl",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "13457-7", "display": "Cholesterol in LDL [Mass/volume] in Serum or Plasma by calculation" }], "text": "LDL cholesterol (calculated)" },
+        "subject": { "reference": "urn:uuid:p11-patient" },
+        "effectiveDateTime": "2025-04-09T07:55:00-05:00",
+        "valueQuantity": { "value": 138, "unit": "mg/dL" }
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p11-trig",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "p11-trig",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "2571-8", "display": "Triglyceride [Mass/volume] in Serum or Plasma" }], "text": "Triglycerides" },
+        "subject": { "reference": "urn:uuid:p11-patient" },
+        "effectiveDateTime": "2025-04-09T07:55:00-05:00",
+        "valueQuantity": { "value": 141, "unit": "mg/dL" }
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p11-report-ordered",
+      "resource": {
+        "resourceType": "DiagnosticReport",
+        "id": "p11-report-ordered",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/v2-0074", "code": "LAB" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "57698-3", "display": "Lipid panel with direct LDL - Serum or Plasma" }], "text": "Lipid Panel" },
+        "subject": { "reference": "urn:uuid:p11-patient" },
+        "effectiveDateTime": "2025-04-09T07:55:00-05:00",
+        "issued": "2025-04-09T14:02:00-05:00",
+        "result": [
+          { "reference": "urn:uuid:p11-chol" },
+          { "reference": "urn:uuid:p11-hdl" },
+          { "reference": "urn:uuid:p11-ldl" },
+          { "reference": "urn:uuid:p11-trig" }
+        ]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p11-report-performed",
+      "resource": {
+        "resourceType": "DiagnosticReport",
+        "id": "p11-report-performed",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/v2-0074", "code": "LAB" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "57698-3", "display": "Lipid panel with direct LDL - Serum or Plasma" }], "text": "Lipid Profile" },
+        "subject": { "reference": "urn:uuid:p11-patient" },
+        "effectiveDateTime": "2025-04-09T07:55:00-05:00",
+        "issued": "2025-04-09T14:07:00-05:00",
+        "result": [
+          { "reference": "urn:uuid:p11-chol" },
+          { "reference": "urn:uuid:p11-hdl" },
+          { "reference": "urn:uuid:p11-ldl" },
+          { "reference": "urn:uuid:p11-trig" }
+        ]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p11-report-delivered",
+      "resource": {
+        "resourceType": "DiagnosticReport",
+        "id": "p11-report-delivered",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/v2-0074", "code": "LAB" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "57698-3", "display": "Lipid panel with direct LDL - Serum or Plasma" }], "text": "LIPID PROFILE - Final result" },
+        "subject": { "reference": "urn:uuid:p11-patient" },
+        "effectiveDateTime": "2025-04-09T07:55:00-05:00",
+        "issued": "2025-04-09T14:31:00-05:00",
+        "result": [
+          { "reference": "urn:uuid:p11-chol" },
+          { "reference": "urn:uuid:p11-hdl" },
+          { "reference": "urn:uuid:p11-ldl" },
+          { "reference": "urn:uuid:p11-trig" }
+        ]
+      }
+    }
+  ]
+}
