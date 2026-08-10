@@ -26,7 +26,10 @@ import { fileURLToPath } from 'node:url';
 import { convertObservationLab } from '../src/lib/fhir-converter/converters-clinical.js';
 import { restoreLabResultRecord } from '../src/lib/fhir-converter/cascade-to-fhir-clinical.js';
 import { NS } from '../src/lib/fhir-converter/types.js';
-import { ACCEPTED_INTERPRETATION_CODES } from '../src/lib/fhir-converter/interpretation.js';
+import {
+  ACCEPTED_INTERPRETATION_CODES,
+  interpretationValue,
+} from '../src/lib/fhir-converter/interpretation.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -114,17 +117,37 @@ describe('FHIR lab interpretation — "unknown" means the source said nothing', 
 });
 
 describe('FHIR lab interpretation — a code outside the accepted set', () => {
-  it('falls back to the nearest previous mapping and says so in a warning', () => {
+  it('drops the property rather than writing "unknown", and warns naming the code', () => {
+    // The property is absent, and that is the POINT rather than an oversight.
+    // Writing "unknown" here was the defect: "unknown" is the data-absent-reason
+    // code, and this module's contract is that it means the source carried NO
+    // interpretation. Using it for a code the vocabulary cannot express asserts
+    // something the source never said, and stores two different facts as one
+    // string — while the warning that distinguishes them lasts only as long as
+    // the import.
     const result = convertObservationLab(labWith([{ coding: [{ code: 'ZZZ-not-a-code' }] }]));
     const value = result._quads.find(
       (x: any) => x.predicate.value === NS.health + 'interpretation',
     )?.object.value;
-    expect(value).toBe('unknown');
+    expect(value).toBeUndefined();
     expect(result.warnings.join(' ')).toContain('ZZZ-not-a-code');
   });
 
-  it('does not silently drop the interpretation property', () => {
-    expect(interpretationOf(labWith([{ coding: [{ code: 'ZZZ-not-a-code' }] }]))).toBeDefined();
+  it('is distinguishable in the pod from an Observation that stated none', () => {
+    // The whole distinction, in one assertion: the two cases must not produce
+    // the same triple. Absent for the code this vocabulary cannot express;
+    // "unknown" for the source that reported nothing.
+    expect(interpretationOf(labWith([{ coding: [{ code: 'ZZZ-not-a-code' }] }]))).toBeUndefined();
+    expect(interpretationOf(labWith(undefined))).toBe('unknown');
+  });
+
+  it('still uses the nearest legacy mapping where one applies', () => {
+    // The fallback map is not dead: a code IN it is mapped rather than dropped.
+    // Reached through the function directly, since every key of that map is also
+    // in the accepted set and so takes the verbatim path from a real resource.
+    const warnings: string[] = [];
+    expect(interpretationValue([{ coding: [{ code: 'N' }] }], warnings)).toBe('N');
+    expect(warnings).toEqual([]);
   });
 });
 

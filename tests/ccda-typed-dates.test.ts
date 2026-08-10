@@ -130,10 +130,22 @@ describe('ccdaDateTerm — HL7 v3 TS precision to RDF datatype', () => {
     });
   });
 
-  it('falls back to day precision when the digits past the day are malformed', () => {
+  it('falls back to day precision when the digits past the day are malformed, and says it salvaged it', () => {
     // 9 digits: the calendar day is known, the time is not. Reporting the day is
     // honest; reporting "T0:00:00" from a stray digit would not be.
-    expect(ccdaDateTerm('202503111')).toEqual({ value: '2025-03-11', datatype: XSD_DATE });
+    //
+    // `salvaged` is what stops the day being reported as if the source had
+    // stated it. Without it the term is byte-identical to a well-formed
+    // 8-digit day, so a reader has no way to tell a stated date from a
+    // recovered one, and the import has nothing to warn about. The pair of
+    // assertions below is the whole distinction: the flag must be on the
+    // recovered day and off the stated one.
+    expect(ccdaDateTerm('202503111')).toEqual({
+      value: '2025-03-11',
+      datatype: XSD_DATE,
+      salvaged: true,
+    });
+    expect(ccdaDateTerm('20250311')).toEqual({ value: '2025-03-11', datatype: XSD_DATE });
   });
 });
 

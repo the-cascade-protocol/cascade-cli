@@ -16,7 +16,7 @@ import {
   isReferencePlaceholder,
 } from './fhir-converter/reference-resolution.js';
 import { normalizeMedName, normalizeDose, normalizeFrequency, type DrugNameNormalizer } from './medication-normalize.js';
-import { medicationCodeKeys, sharedMedicationCodeKey } from './code-keys.js';
+import { medicationCodeKeys, sharedMedicationCodeKey, extractCodeValue } from './code-keys.js';
 import { cascadeTerminologyResolver } from './terminology.js';
 import { relBase, relBaseFor, derelativizeQuads } from './bucket-write.js';
 
@@ -54,6 +54,21 @@ export interface ReconcilerOptions {
 export interface ReconcilerInput {
   content: string;    // Turtle string
   systemName: string;
+  /**
+   * True when this input is the POD'S OWN existing content, fed back in so the
+   * new batch can be reconciled against what is already stored
+   * (`pod import --reconcile-existing`).
+   *
+   * This is a property of WHERE THE TEXT CAME FROM, and it has to be carried
+   * separately from `systemName` because `systemName` is only a DEFAULT: a
+   * parsed record takes its source system from its own `cascade:sourceSystem`
+   * triple, and every record the pod holds carries one (the reconciler re-states
+   * it on every write). So the caller's `systemName: 'existing-pod'` was
+   * overwritten for every pod record without exception, `hasExistingPod` was
+   * therefore never true, and the cross-batch path below — the entire reason
+   * `--reconcile-existing` exists — had never run.
+   */
+  existingPod?: boolean;
 }
 
 export interface ReconcilerResult {
@@ -156,10 +171,21 @@ interface ParsedRecord {
   uri: string;
   type: CascadeRecordType;
   sourceSystem: string;
+  /**
+   * True when this record was read out of the pod rather than out of the batch
+   * being imported. See {@link ReconcilerInput.existingPod}: it is deliberately
+   * NOT derived from `sourceSystem`, which the record itself states and which
+   * therefore cannot say how the record reached this run.
+   */
+  fromExistingPod: boolean;
   properties: Map<string, RdfValue[]>;
 }
 
-export async function parseTurtle(turtle: string, defaultSystem: string): Promise<ParsedRecord[]> {
+export async function parseTurtle(
+  turtle: string,
+  defaultSystem: string,
+  fromExistingPod = false,
+): Promise<ParsedRecord[]> {
   return new Promise((resolve, reject) => {
     // Sentinel base: pod content arrives here on its way back to the pod, and a
     // relative IRI must survive the trip. N3's default resolves
@@ -190,7 +216,13 @@ export async function parseTurtle(turtle: string, defaultSystem: string): Promis
           }
 
           const sourceSystem = properties.get(NS.cascade + 'sourceSystem')?.[0]?.value ?? defaultSystem;
-          records.push({ uri, type: KNOWN_TYPES[typeTriple.obj.value], sourceSystem, properties });
+          records.push({
+            uri,
+            type: KNOWN_TYPES[typeTriple.obj.value],
+            sourceSystem,
+            fromExistingPod,
+            properties,
+          });
         }
         resolve(records);
         return;
@@ -750,9 +782,29 @@ function getProp(r: ParsedRecord, pred: string): string | undefined {
   return r.properties.get(pred)?.[0]?.value;
 }
 
-function codeFromUri(uri: string): string {
-  return uri.split('/').pop() ?? uri.split('#').pop() ?? uri;
-}
+/**
+ * The bare code value a code URI carries.
+ *
+ * Delegates to `extractCodeValue`, the definition shared with the SDK, rather
+ * than keeping a second copy. The copy this replaces was
+ *
+ *     uri.split('/').pop() ?? uri.split('#').pop() ?? uri
+ *
+ * whose second operand is unreachable: `String.split('/').pop()` on a non-empty
+ * string is always a non-empty string, so `??` never falls through to the
+ * fragment branch. Every LOINC URI this repo mints is
+ * `http://loinc.org/rdf#3094-0`, which therefore came back as `rdf#3094-0`.
+ *
+ * That had two consequences beyond the ugly string. The C-CDA converter writes
+ * its LOINC as `http://loinc.org/3094-0` (no `rdf#` — see `OID_TO_URI`), so the
+ * two importers' spellings of ONE code compared unequal and a FHIR lab never
+ * matched the same lab from a C-CDA. And the mangled form is interpolated into
+ * `matchedOn`, which `generateConflictId` turns into the id persisted in
+ * `settings/pending-conflicts.ttl` — so it reached disk. See
+ * {@link legacyConflictIds} in `user-resolutions.ts` for what that means for a
+ * pod written by an earlier version.
+ */
+const codeFromUri = extractCodeValue;
 
 function dateOnly(dt: string): string { return dt.split('T')[0] ?? dt; }
 
@@ -838,8 +890,26 @@ function matchMedications(a: ParsedRecord, b: ParsedRecord, resolver?: DrugNameN
     return { match: true, confidence, matchedOn };
   }
 
-  // Partial-name fallback (substring containment), unchanged from the prior matcher.
-  if (nA && nB && (nA.includes(nB) || nB.includes(nA))) return { match: true, confidence: 0.70, matchedOn: `partial-name` };
+  // Partial-name fallback (substring containment).
+  //
+  // `matchedOn` NAMES THE DRUG, and that is load-bearing rather than cosmetic:
+  // `generateConflictId` builds the persisted conflict id out of this string, so
+  // the bare constant `partial-name` gave EVERY partial-name medication conflict
+  // in every pod one id. Two consequences, both silent:
+  // `settings/user-resolutions.ttl` is keyed by conflict id and cannot hold two
+  // rows under one key, so resolving a lisinopril conflict overwrote the
+  // recorded decision for an amlodipine one; and `pod resolve` removes every
+  // pending conflict whose id matches, so answering one question cleared the
+  // others from the queue unanswered.
+  //
+  // The CONTAINED name is the shared identity — "lisinopril" out of
+  // {"lisinopril", "lisinopril oral tablet"} — and choosing by length rather
+  // than by which record happened to be `a` keeps the id independent of the
+  // order the inputs were enumerated.
+  if (nA && nB && (nA.includes(nB) || nB.includes(nA))) {
+    const shared = nA.length <= nB.length ? nA : nB;
+    return { match: true, confidence: 0.70, matchedOn: `partial-name:"${shared}"` };
+  }
   return { match: false, confidence: 0, matchedOn: '' };
 }
 
@@ -889,15 +959,37 @@ function matchLabs(a: ParsedRecord, b: ParsedRecord, tol: number): MatchResult {
   return { match: false, confidence: 0, matchedOn: '' };
 }
 
+/**
+ * The bare CVX code an immunization record carries, whichever predicate its
+ * importer used and whichever spelling that importer wrote.
+ *
+ * The two importers disagree on both, which is why the CVX tier below had never
+ * fired on a FHIR record:
+ *
+ *   C-CDA  health:cvxCode      <http://hl7.org/fhir/sid/cvx/207>
+ *   FHIR   health:vaccineCode  "CVX-207"
+ *
+ * The matcher read only the first, so every FHIR immunization fell through to
+ * the name tier and two records for one shot matched only when their display
+ * names happened to agree verbatim. Normalizing both spellings to `207` is what
+ * lets a C-CDA immunization and a FHIR one for the same shot compare at all.
+ */
+function immunizationCvxCode(r: ParsedRecord): string | undefined {
+  const raw = getProp(r, NS.health + 'cvxCode') ?? getProp(r, NS.health + 'vaccineCode');
+  if (!raw) return undefined;
+  const code = extractCodeValue(raw);
+  return code.startsWith('CVX-') ? code.slice(4) : code;
+}
+
 function matchImmunizations(a: ParsedRecord, b: ParsedRecord): MatchResult {
   // Tier 1: CVX code + exact date (high confidence)
-  const cA = getProp(a, NS.health + 'cvxCode');
-  const cB = getProp(b, NS.health + 'cvxCode');
+  const cA = immunizationCvxCode(a);
+  const cB = immunizationCvxCode(b);
   const dA = dateOnly(getProp(a, NS.health + 'administrationDate') ?? getProp(a, NS.health + 'startDate') ?? '');
   const dB = dateOnly(getProp(b, NS.health + 'administrationDate') ?? getProp(b, NS.health + 'startDate') ?? '');
 
-  if (cA && cB && codeFromUri(cA) === codeFromUri(cB) && dA && dA === dB)
-    return { match: true, confidence: 1.0, matchedOn: `cvx:${codeFromUri(cA)}+${dA}` };
+  if (cA && cB && cA === cB && dA && dA === dB)
+    return { match: true, confidence: 1.0, matchedOn: `cvx:${cA}+${dA}` };
 
   // Tier 2: Vaccine name (normalized) + date -- fallback when CVX absent
   const nA = (getProp(a, NS.health + 'vaccineName') ?? '').toLowerCase().trim();
@@ -912,24 +1004,98 @@ function matchImmunizations(a: ParsedRecord, b: ParsedRecord): MatchResult {
   return { match: false, confidence: 0, matchedOn: '' };
 }
 
-function matchVitalSigns(a: ParsedRecord, b: ParsedRecord): MatchResult {
-  const lcA = getProp(a, NS.health + 'testCode');  // LOINC
-  const lcB = getProp(b, NS.health + 'testCode');
-  const dtA = dateOnly(getProp(a, NS.health + 'effectiveDate') ?? getProp(a, NS.health + 'performedDate') ?? '');
-  const dtB = dateOnly(getProp(b, NS.health + 'effectiveDate') ?? getProp(b, NS.health + 'performedDate') ?? '');
+/**
+ * How far apart two readings of one vital sign may be recorded and still be the
+ * same reading arriving twice.
+ *
+ * A vital sign is an instant, not a day. The rule this replaces was "same LOINC,
+ * same calendar day", which is the wrong shape for the data: a morning, a midday
+ * and an evening blood pressure share a calendar day and are three separate
+ * clinical events, while one cuff reading forwarded to a second system 17
+ * minutes later is one event under two clocks. A day-wide window merges the
+ * first group and a zero-width window keeps the second apart; both lose real
+ * information, in opposite directions.
+ *
+ * Thirty minutes is chosen against what the window has to separate — repeat
+ * measurements, which clinical protocol spaces in hours (a repeat BP at 1-5
+ * minutes is the same encounter and SHOULD collapse) — rather than against a
+ * particular export. It is not a claim that clocks never drift further; a source
+ * that stamps its records an hour out will still keep both copies, which is the
+ * recoverable error of the two.
+ */
+const VITAL_SAME_READING_WINDOW_MS = 30 * 60 * 1000;
 
-  if (lcA && lcB && codeFromUri(lcA) === codeFromUri(lcB) && dtA && dtA === dtB) {
-    // Same LOINC, same day -- check value proximity
-    const vA = parseFloat(getProp(a, NS.health + 'value') ?? 'NaN');
-    const vB = parseFloat(getProp(b, NS.health + 'value') ?? 'NaN');
-    if (!isNaN(vA) && !isNaN(vB)) {
-      const diff = Math.abs(vA - vB) / Math.max(Math.abs(vA), 0.001);
-      if (diff <= 0.05) return { match: true, confidence: 0.95, matchedOn: `loinc:${codeFromUri(lcA)}+${dtA}` };
-      if (diff <= 0.15) return { match: true, confidence: 0.75, matchedOn: `loinc-approx:${codeFromUri(lcA)}+${dtA}` };
-    }
-    return { match: true, confidence: 0.85, matchedOn: `loinc:${codeFromUri(lcA)}+${dtA}` };
+/**
+ * The instant a vital sign was taken, in epoch milliseconds.
+ *
+ * `clinical:effectiveDate` is what BOTH converters write (`converters-clinical.ts`
+ * for FHIR, `sections/vitals.ts` for C-CDA); the `health:` predicates are read
+ * after it only so a record written by some other producer is not ignored.
+ *
+ * A day-precision value parses to that day's midnight UTC, so two day-precision
+ * readings of one vital on one day are zero apart. That is the truth available:
+ * the source did not say when, and inventing a separation it never stated would
+ * be the same fabrication as inventing a time of day.
+ */
+function vitalInstantMs(r: ParsedRecord): number | undefined {
+  const raw =
+    getProp(r, NS.clinical + 'effectiveDate') ??
+    getProp(r, NS.health + 'effectiveDate') ??
+    getProp(r, NS.health + 'performedDate');
+  if (!raw) return undefined;
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+/**
+ * Do two vital-sign records denote one reading?
+ *
+ * WHAT THIS USED TO READ. `health:testCode`, `health:effectiveDate` /
+ * `health:performedDate` and `health:value` — three predicates no converter in
+ * this repository has ever written for a vital sign. Both of them write
+ * `clinical:loincCode`, `clinical:effectiveDate` and `clinical:value`. All three
+ * lookups returned undefined, the date guard therefore failed, and the function
+ * returned no-match for EVERY pair: no two vital signs in any pod had ever
+ * matched. The "three same-day readings must never merge" property held, but for
+ * the wrong reason, and the price was that a genuine cross-source duplicate was
+ * kept as a second record.
+ *
+ * The value tolerance is symmetric (the larger magnitude is the denominator), so
+ * the verdict does not depend on which record is `a`; `matchedOn` keys on the
+ * EARLIER instant for the same reason, since it becomes a persisted id.
+ */
+function matchVitalSigns(a: ParsedRecord, b: ParsedRecord): MatchResult {
+  const noMatch: MatchResult = { match: false, confidence: 0, matchedOn: '' };
+
+  const lcA = getProp(a, NS.clinical + 'loincCode');
+  const lcB = getProp(b, NS.clinical + 'loincCode');
+  if (!lcA || !lcB) return noMatch;
+  const code = codeFromUri(lcA);
+  if (code !== codeFromUri(lcB)) return noMatch;
+
+  const tA = vitalInstantMs(a);
+  const tB = vitalInstantMs(b);
+  if (tA === undefined || tB === undefined) return noMatch;
+  if (Math.abs(tA - tB) > VITAL_SAME_READING_WINDOW_MS) return noMatch;
+
+  const at = new Date(Math.min(tA, tB)).toISOString();
+  const vA = parseFloat(getProp(a, NS.clinical + 'value') ?? 'NaN');
+  const vB = parseFloat(getProp(b, NS.clinical + 'value') ?? 'NaN');
+
+  if (!isNaN(vA) && !isNaN(vB)) {
+    const diff = Math.abs(vA - vB) / Math.max(Math.abs(vA), Math.abs(vB), 0.001);
+    if (diff === 0) return { match: true, confidence: 1.0, matchedOn: `loinc:${code}+${at}` };
+    if (diff <= 0.05) return { match: true, confidence: 0.95, matchedOn: `loinc:${code}+${at}` };
+    if (diff <= 0.15) return { match: true, confidence: 0.75, matchedOn: `loinc-approx:${code}+${at}` };
+    // Inside the window but disagreeing by more than a rounding difference: two
+    // measurements, not one measurement recorded twice. Keeping both is the
+    // recoverable answer.
+    return noMatch;
   }
-  return { match: false, confidence: 0, matchedOn: '' };
+
+  // A non-numeric or absent reading on either side. The code and the instant
+  // still agree, which is as much as there is to go on.
+  return { match: true, confidence: 0.85, matchedOn: `loinc:${code}+${at}` };
 }
 
 function matchPatientProfiles(a: ParsedRecord, b: ParsedRecord): MatchResult {
@@ -1431,7 +1597,7 @@ export async function runReconciliation(
 
   for (let i = 0; i < inputs.length; i++) {
     const input = inputs[i];
-    const records = await parseTurtle(input.content, input.systemName);
+    const records = await parseTurtle(input.content, input.systemName, input.existingPod === true);
     allRecords.push(...records);
     sourceInfo.push({ system: input.systemName, count: records.length });
 
@@ -1493,15 +1659,34 @@ export async function runReconciliation(
   const groups: Group[] = [];
   const assigned = new Set<string>();
 
-  const hasExistingPod = allRecords.some(r => r.sourceSystem === 'existing-pod');
+  // Keyed on WHERE THE INPUT CAME FROM, not on a label the record could restate.
+  // The test was `r.sourceSystem === 'existing-pod'`, and a pod record's
+  // `sourceSystem` is read from its own `cascade:sourceSystem` triple, which it
+  // always has — so this was permanently false and `--reconcile-existing` always
+  // fell through to the single-batch branch.
+  const hasExistingPod = allRecords.some(r => r.fromExistingPod);
 
   if (hasExistingPod) {
     // ---------------------------------------------------------------------------
     // Fast path: O(n_new × k) type-indexed matching for --reconcile-existing mode
     // ---------------------------------------------------------------------------
 
-    const existingRecords = allRecords.filter(r => r.sourceSystem === 'existing-pod');
-    const newRecords = allRecords.filter(r => r.sourceSystem !== 'existing-pod');
+    const existingRecords = allRecords.filter(r => r.fromExistingPod);
+
+    // A new record whose subject IRI the pod ALREADY holds is a re-import of that
+    // record, and the pod's own copy is the one that is kept. Cascade subjects are
+    // content-hashed and `splitIdentityCollisions` has already moved apart any two
+    // records that merely LOOK the same, so a shared IRI here means the two agree
+    // on everything except ingestion bookkeeping — and of the two, the stored copy
+    // is the one whose `importedAt` says when the record first arrived and whose
+    // record-to-record edges are already resolved to real subjects rather than
+    // still being placeholders. Letting the fresh copy win instead re-stamped the
+    // timestamp and re-resolved edges that were never unresolved, i.e. churn with
+    // nothing gained. Dropping them here (rather than inside the loops) also keeps
+    // them out of `groupedRecords`, so `duplicateSubjectsDropped` counts them,
+    // which is exactly what that number is for.
+    const existingUris = new Set(existingRecords.map(r => r.uri));
+    const newRecords = allRecords.filter(r => !r.fromExistingPod && !existingUris.has(r.uri));
 
     // Build a type index over existing records only
     const existingIndex = new Map<string, ParsedRecord[]>();

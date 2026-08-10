@@ -49,6 +49,18 @@ const XSD_DATETIME = NS.xsd + 'dateTime';
 export interface CcdaDateTerm {
   value: string;
   datatype: string;
+  /**
+   * True when the source value was MALFORMED and the day below it was salvaged.
+   *
+   * `effectiveTime="201102013"` is nine digits: neither the 8-digit calendar day
+   * nor the 10-digit hour precision, so the value is wrong past the day. Taking
+   * the first eight digits is the right call — throwing a record's date away
+   * over a stray digit loses more than it saves — but the result is then a
+   * calendar day stated with full confidence on the strength of a value the
+   * source got wrong, and byte-indistinguishable from a well-formed day. This
+   * flag is what lets the caller say which of the two it is holding.
+   */
+  salvaged?: boolean;
 }
 
 /** `Z` or `±HHMM` / `±HH:MM` at the end of an HL7 TS value. */
@@ -90,9 +102,11 @@ export function ccdaDateTerm(raw: unknown): CcdaDateTerm | null {
   if (digits.length === 8) return { value: day, datatype: XSD_DATE };
 
   // Hour, minute or second precision. An odd length past the day means the value
-  // is malformed beyond the day; the day is still known and is what gets said.
+  // is malformed beyond the day; the day is still known and is what gets said —
+  // flagged, so the caller can report that the day was salvaged rather than
+  // stated.
   if (digits.length !== 10 && digits.length !== 12 && digits.length < 14) {
-    return { value: day, datatype: XSD_DATE };
+    return { value: day, datatype: XSD_DATE, salvaged: true };
   }
 
   const hh = digits.slice(8, 10);
@@ -110,10 +124,27 @@ export function ccdaDateTerm(raw: unknown): CcdaDateTerm | null {
  *
  * Callers emit conditionally — `const q = ccdaDateQuad(...); if (q) quads.push(q)`
  * — which is the same shape as the `if (dateStr)` guard they had before.
+ *
+ * `warnings` is where a SALVAGED day is reported. Pass it wherever the import
+ * report is reachable: without it a malformed source value becomes a confident
+ * calendar day and the import says nothing, so a reader has no way to tell a
+ * date the document stated from one this function recovered. The record still
+ * gets its day either way — the warning is the only thing that changes.
  */
-export function ccdaDateQuad(subject: string, predicate: string, raw: unknown): Quad | null {
+export function ccdaDateQuad(
+  subject: string,
+  predicate: string,
+  raw: unknown,
+  warnings?: string[],
+): Quad | null {
   const term = ccdaDateTerm(raw);
   if (!term) return null;
+  if (term.salvaged) {
+    warnings?.push(
+      `C-CDA date "${String(raw).trim()}" is malformed past the calendar day ` +
+        `(HL7 v3 TS is YYYYMMDD[HHMMSS]); recorded as ${term.value} from its first eight digits.`,
+    );
+  }
   return makeQuad(
     namedNode(subject),
     namedNode(predicate),

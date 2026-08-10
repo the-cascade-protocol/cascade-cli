@@ -147,8 +147,8 @@ function extractObservationQuads(
   // what the converter can read. A placeholder would hide that.
   const testName =
     displayName ||
-    resolveNarrativeName(codeEl, narrativeIdMap) ||
-    narrativeTextFor(obs?.text, narrativeIdMap);
+    resolveNarrativeName(codeEl, narrativeIdMap, warnings) ||
+    narrativeTextFor(obs?.text, narrativeIdMap, warnings);
 
   // Extract effective date
   const effTime = obs?.effectiveTime;
@@ -217,7 +217,7 @@ function extractObservationQuads(
   // Typed from the RAW effectiveTime, not from the day-truncated `dateStr`: a
   // source that stated a time keeps it, a source that stated a day gets no
   // invented one. See `dates.ts`.
-  const performedQuad = ccdaDateQuad(uri, NS.health + 'performedDate', dateVal);
+  const performedQuad = ccdaDateQuad(uri, NS.health + 'performedDate', dateVal, warnings);
   if (performedQuad) quads.push(performedQuad);
   if (value) quads.push(makeQuad(subj, namedNode(NS.health + 'resultValue'), literal(value)));
   if (unit) quads.push(makeQuad(subj, namedNode(NS.health + 'resultUnit'), literal(unit)));

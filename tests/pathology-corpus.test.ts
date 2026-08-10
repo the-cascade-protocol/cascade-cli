@@ -67,6 +67,24 @@ const BASELINE_PATH = path.join(REPO, 'tests', 'pathology-reconciliation-baselin
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
 const MERGED_FROM = CASCADE + 'mergedFrom';
+
+/** Prefixes a manifest may use in a `values` expectation. */
+const PREFIXES: Record<string, string> = {
+  cascade: CASCADE,
+  health: 'https://ns.cascadeprotocol.org/health/v1#',
+  clinical: 'https://ns.cascadeprotocol.org/clinical/v1#',
+  coverage: 'https://ns.cascadeprotocol.org/coverage/v1#',
+};
+
+/** `health:labCategory` -> the full IRI. Throws on an unknown prefix. */
+function expandPrefixed(name: string): string {
+  const [prefix, local] = name.split(':', 2);
+  const ns = PREFIXES[prefix];
+  if (!ns || local === undefined) {
+    throw new Error(`scenario names "${name}", whose prefix the harness does not know`);
+  }
+  return ns + local;
+}
 /** Every predicate any importer uses to carry the source's own record id. */
 const SOURCE_RECORD_ID = [
   CASCADE + 'sourceRecordId',
@@ -84,6 +102,26 @@ interface Batch {
   from: string;
   /** `--source-system` passed to BOTH convert and import, when present. */
   sourceSystem?: string;
+}
+
+/**
+ * One predicate's object values, as the pod must hold them.
+ *
+ * The count fields below say how many records came out; this says WHAT THEY SAY.
+ * It exists because retiring a KNOWN_OUTCOMES entry has to move its expectation
+ * into the scenario rather than delete it: several of those entries were about a
+ * single predicate's values (which categories a lab carries, which interpretation
+ * codes reached the pod, which doses a medication states), and a record census
+ * cannot tell whether those are right. Without a slot for them, "the ledger is
+ * allowed to shrink" would quietly mean "the pin is allowed to disappear".
+ */
+interface ValueExpectation {
+  /** Prefixed class name whose subjects are read (`health:LabResultRecord`). */
+  on: string;
+  /** Prefixed predicate name (`health:labCategory`). */
+  predicate: string;
+  /** Every object value, sorted, duplicates included. */
+  values: string[];
 }
 
 interface Expectations {
@@ -105,6 +143,14 @@ interface Expectations {
   violations: number;
   /** Import-time warnings across every batch. */
   importWarnings: number;
+  /** Object values the pod must hold, per predicate. Optional. */
+  values?: ValueExpectation[];
+  /**
+   * `sourceBreakdown` on the FIRST batch's import report. Optional, and present
+   * where WHICH source label the records land under is the point rather than
+   * merely how many there are.
+   */
+  sourceBreakdown?: Record<string, number>;
 }
 
 interface Scenario {
@@ -482,6 +528,29 @@ describe.each(ALL_SCENARIOS)('$scenario.id  $scenario.pathology', ({ scenario })
     expect(obs().importWarnings.length, obs().importWarnings.join('\n')).toBe(
       scenario.expect.importWarnings,
     );
+  });
+
+  it('holds the expected object values for every pinned predicate', () => {
+    for (const v of scenario.expect.values ?? []) {
+      const actual = obs().valuesOn(expandPrefixed(v.on), expandPrefixed(v.predicate));
+      expect(actual, `${v.on} ${v.predicate}`).toEqual(v.values);
+    }
+  });
+
+  it('accounts every imported record on the source axis', () => {
+    // The invariant behind the retired P05 entry, held for EVERY scenario rather
+    // than only the one that tripped over it: a record that reached the pod
+    // appears in sourceBreakdown, under the ratified "unknown" token when its EHR
+    // of origin cannot be determined. A breakdown that silently omits what it
+    // could not attribute reads as "this pod has no data".
+    for (const [i, report] of obs().importReports.entries()) {
+      const accountedFor = Object.values(report.sourceBreakdown).reduce((a, b) => a + b, 0);
+      expect(accountedFor, `batch ${i} sourceBreakdown: ${JSON.stringify(report.sourceBreakdown)}`)
+        .toBe(report.totalRecordsImported);
+    }
+    if (scenario.expect.sourceBreakdown) {
+      expect(obs().importReports[0].sourceBreakdown).toEqual(scenario.expect.sourceBreakdown);
+    }
   });
 
   it('matches every known-outcome entry recorded against it', () => {

@@ -91,6 +91,7 @@ export function collapseText(node: any): string {
 export function narrativeTextFor(
   container: any,
   narrativeIdMap: Record<string, string>,
+  warnings?: string[],
 ): string {
   if (container == null) return '';
 
@@ -100,6 +101,17 @@ export function narrativeTextFor(
     if (resolved) return resolved;
     // A dangling reference is not a name. Fall through to any inline text rather
     // than returning early, then give up.
+    //
+    // But say so. In the pod a record whose reference did not resolve is
+    // byte-indistinguishable from one that carried no name anywhere, so "the
+    // rendering we were given was incomplete" and "this test was never named"
+    // arrive as the same absence. The warning is the only place the difference
+    // still exists, and it costs nothing: the record still gains NO name, since
+    // inventing one from the code would fabricate the attested rendering.
+    warnings?.push(
+      `C-CDA narrative reference "${ref}" does not resolve: no element in the section's ` +
+        `<text> declares that ID. The record is imported without the name it pointed at.`,
+    );
   }
 
   const inline = typeof container === 'string' ? container : container?.['#text'];
@@ -115,6 +127,7 @@ export function narrativeTextFor(
 export function resolveNarrativeName(
   codeEl: any,
   narrativeIdMap: Record<string, string>,
+  warnings?: string[],
 ): string {
-  return narrativeTextFor(codeEl?.originalText, narrativeIdMap);
+  return narrativeTextFor(codeEl?.originalText, narrativeIdMap, warnings);
 }

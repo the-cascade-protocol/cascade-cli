@@ -198,7 +198,7 @@ function buildLabFallback(args: {
   if (isLoinc && loincCode) quads.push(makeQuad(subj, namedNode(NS.health + 'testCode'), namedNode(resolveCodeUri(loincOid, loincCode))));
   if (displayName) quads.push(makeQuad(subj, namedNode(NS.health + 'testName'), literal(displayName)));
   // Typed from the raw effectiveTime; see `dates.ts`.
-  const performedQuad = ccdaDateQuad(uri, NS.health + 'performedDate', dateVal);
+  const performedQuad = ccdaDateQuad(uri, NS.health + 'performedDate', dateVal, warnings);
   if (performedQuad) quads.push(performedQuad);
   if (value) quads.push(makeQuad(subj, namedNode(NS.health + 'resultValue'), literal(String(value))));
   if (unit) quads.push(makeQuad(subj, namedNode(NS.health + 'resultUnit'), literal(String(unit))));

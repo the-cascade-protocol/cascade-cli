@@ -306,9 +306,16 @@ describe('a conformant Epic-shaped FHIR bundle converts and validates', () => {
   it('preserves every category and code the source sent', () => {
     // Pins CONVERTER behaviour. Widening a shape and dropping the values that
     // used to trip it produce the same green suite; this separates them.
+    //
+    // `laboratory` is in the list because the source sent it. It used to be
+    // filtered out on the reading that the record's type implies it, which cost
+    // nothing here but dropped the ONLY category of a result categorised both
+    // laboratory and something else — so a pod filtered by labCategory omitted a
+    // record filed as a lab.
     expect(objects(`${NS.health}labCategory`)).toEqual([
       'Antimicrobial Susceptibility',
       'MICROBIOLOGY',
+      'laboratory',
     ]);
     expect(objects(`${NS.health}testCode`)).toHaveLength(2);
     expect(objects(`${NS.health}icd10Code`)).toEqual([

@@ -96,7 +96,6 @@ export async function convertCcda(
   const warnings: string[] = [];
   const allQuads: any[] = [];
   const sectionCensus: SectionCensusEntry[] = [];
-  let resourceCount = 0;
 
   const importedAt = options.importedAt ?? new Date().toISOString();
 
@@ -123,7 +122,6 @@ export async function convertCcda(
     try {
       const result = convertSingleCcda(xml, options, importedAt, warnings);
       allQuads.push(...result.quads);
-      resourceCount += result.count;
       mergeSectionCensus(sectionCensus, result.census);
     } catch (err) {
       warnings.push(`Failed to convert C-CDA document: ${err instanceof Error ? err.message : String(err)}`);
@@ -154,6 +152,26 @@ export async function convertCcda(
     seen.add(key);
     return true;
   });
+
+  // `resourceCount` means THE NUMBER OF RECORDS THE CONVERSION PRODUCED, which
+  // is the number of distinct subjects it gave an rdf:type — the same thing the
+  // FHIR importer reports, so a caller reading the field gets one meaning
+  // whatever `--from` it used.
+  //
+  // It used to be documents-and-sections: one for the patient, plus
+  // `entries.length` per handled section. A C-CDA `<entry>` routinely holds an
+  // `<organizer>` wrapping several observations, so a document producing 8
+  // records reported 2. A caller deciding whether an import is worth running, or
+  // showing "N records found", was told a number four times too small, and the
+  // two importers disagreed about what the field meant. Counting after the
+  // cross-document dedup below is deliberate: for an IHE XDM zip whose documents
+  // repeat a record, the count is what the pod will receive, not the sum of what
+  // each document claimed.
+  const recordSubjects = new Set<string>();
+  for (const q of uniqueQuads) {
+    if (q.predicate.value === NS.rdf + 'type') recordSubjects.add(q.subject.value);
+  }
+  const resourceCount = recordSubjects.size;
 
   // Serialize all quads to Turtle
   const output = await new Promise<string>((resolve, reject) => {
@@ -243,7 +261,7 @@ function convertSingleCcda(
   options: CcdaConversionOptions,
   importedAt: string,
   warnings: string[],
-): { quads: any[]; count: number; census: SectionCensusEntry[] } {
+): { quads: any[]; census: SectionCensusEntry[] } {
   const parsed = parseCcdaXml(xml);
 
   // Detect vendor and apply normalization
@@ -285,13 +303,12 @@ function convertSingleCcda(
 
   const allQuads: any[] = [];
   const census: SectionCensusEntry[] = [];
-  let count = 0;
 
   // Extract patient demographics
   const recordTarget = ccdaDoc?.recordTarget;
   if (!recordTarget) {
     warnings.push('C-CDA document has no recordTarget — patient demographics not extracted');
-    return { quads: allQuads, count, census };
+    return { quads: allQuads, census };
   }
 
   // The patient profile is a record like any other. Its IRI is NOT threaded into
@@ -302,7 +319,6 @@ function convertSingleCcda(
     warnings,
   );
   allQuads.push(...patientQuads);
-  count++;
 
   // Process each section
   // `<component>` is a repeatable element and is therefore always an array (see
@@ -340,7 +356,15 @@ function convertSingleCcda(
 
     // Extract narrative — always attempt, even if section also has entries
     const sectionText = section?.text;
-    const requiresLLMExtraction = entries.length === 0;
+    // A section that carries a nullFlavor has ALREADY said, in the ratified way,
+    // that it holds no information (HL7 v3 NullFlavor: NI and its children UNK,
+    // NAV, ASKU, NASK, MSK, NA, OTH). Queueing such a section for extraction
+    // offers a model the sentence "No information available." and asks it what
+    // allergies the patient has — the one input from which any answer at all is
+    // a fabrication. The narrative record is still produced; it is only the
+    // extraction flag that changes.
+    const sectionNullFlavor = section?.['@_nullFlavor'] ?? section?.nullFlavor;
+    const requiresLLMExtraction = entries.length === 0 && !sectionNullFlavor;
     if (sectionText || requiresLLMExtraction) {
       const effectiveLoinc =
         sectionCode || (matchedTemplateId ? (SECTION_HANDLERS[matchedTemplateId]?.loinc ?? '') : '');
@@ -377,7 +401,6 @@ function convertSingleCcda(
       }
 
       allQuads.push(...quads);
-      count += entries.length;
 
       // Entries read versus records written, for THIS section. Counted from the
       // handler's own output — the distinct subjects it gave an rdf:type — so it
@@ -426,5 +449,5 @@ function convertSingleCcda(
   ensureProvenanceQuads(allQuads);
   ensureSourceEhrQuads(allQuads, sourceEhr);
 
-  return { quads: allQuads, count, census };
+  return { quads: allQuads, census };
 }

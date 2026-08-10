@@ -49,7 +49,7 @@ export function extractProcedureQuads(
     // The same narrative recovery the results and problems sections do: a
     // procedure whose code carries no `@displayName` normally names itself in the
     // section narrative behind `<originalText><reference value="#id"/>`.
-    const procedureName = displayName || resolveNarrativeName(codeEl, narrativeIdMap);
+    const procedureName = displayName || resolveNarrativeName(codeEl, narrativeIdMap, warnings);
 
     const effTime = proc?.effectiveTime ?? {};
     const dateVal =
@@ -78,7 +78,7 @@ export function extractProcedureQuads(
     quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(sourceSystem)));
     if (procedureName) quads.push(makeQuad(subj, namedNode(NS.health + 'procedureName'), literal(procedureName)));
     // Typed from the raw effectiveTime; see `dates.ts`.
-    const performedQuad = ccdaDateQuad(uri, NS.health + 'performedDate', dateVal);
+    const performedQuad = ccdaDateQuad(uri, NS.health + 'performedDate', dateVal, warnings);
     if (performedQuad) quads.push(performedQuad);
     if (code) {
       if (codeSystem.includes('6.96') || codeSystem === snomedOid) {
