@@ -19,6 +19,7 @@ import { normalizeMedName, normalizeDose, normalizeFrequency, type DrugNameNorma
 import { medicationCodeKeys, sharedMedicationCodeKey, extractCodeValue } from './code-keys.js';
 import { cascadeTerminologyResolver } from './terminology.js';
 import { relBase, relBaseFor, derelativizeQuads } from './bucket-write.js';
+import { SOURCE_IDENTITY_PREDICATE, isKnownOrigin } from './source-identity.js';
 
 // Re-export so existing consumers of the reconciler's normalizeMedName keep
 // working. The canonical definition now lives in ./medication-normalize.ts
@@ -170,6 +171,7 @@ interface RdfValue {
 interface ParsedRecord {
   uri: string;
   type: CascadeRecordType;
+  /** INGESTION axis: the import batch this record arrived in. Never an origin. */
   sourceSystem: string;
   /**
    * True when this record was read out of the pod rather than out of the batch
@@ -178,6 +180,12 @@ interface ParsedRecord {
    * therefore cannot say how the record reached this run.
    */
   fromExistingPod: boolean;
+  /**
+   * ORIGIN axis: `cascade:sourceIdentity`, the canonical organization identity.
+   * Undefined for a record written before core v3.5 — see {@link sameSourceStatement},
+   * which is the only thing that reads it and which falls back safely.
+   */
+  sourceIdentity?: string;
   properties: Map<string, RdfValue[]>;
 }
 
@@ -216,10 +224,12 @@ export async function parseTurtle(
           }
 
           const sourceSystem = properties.get(NS.cascade + 'sourceSystem')?.[0]?.value ?? defaultSystem;
+          const sourceIdentity = properties.get(SOURCE_IDENTITY_PREDICATE)?.[0]?.value;
           records.push({
             uri,
             type: KNOWN_TYPES[typeTriple.obj.value],
             sourceSystem,
+            sourceIdentity,
             fromExistingPod,
             properties,
           });
@@ -551,6 +561,13 @@ const COLLISION_IGNORED_PREDICATES: ReadonlySet<string> = new Set<string>([
   NS.clinical + 'sourceRecordId',
   NS.health + 'sourceRecordId',
   NS.clinical + 'sourceEHR',
+  // The ORIGIN axis, for the same reason as the display label directly above:
+  // two copies of ONE result retrieved from two organizations differ here while
+  // saying the same clinical thing. Where they differ is exactly what the
+  // same-source guard reads to decide they are worth comparing at all, so
+  // treating the difference ALSO as evidence of a collision would raise a
+  // conflict on every cross-source duplicate the guard just admitted.
+  SOURCE_IDENTITY_PREDICATE,
 ]);
 
 /**
@@ -1255,7 +1272,7 @@ interface Resolution {
 }
 
 function completeness(r: ParsedRecord): number {
-  const skip = new Set([NS.rdf + 'type', NS.cascade + 'dataProvenance', NS.cascade + 'schemaVersion', NS.cascade + 'sourceSystem']);
+  const skip = new Set([NS.rdf + 'type', NS.cascade + 'dataProvenance', NS.cascade + 'schemaVersion', NS.cascade + 'sourceSystem', SOURCE_IDENTITY_PREDICATE]);
   let n = 0;
   for (const [p] of r.properties) if (!skip.has(p)) n++;
   return n;
@@ -1345,7 +1362,11 @@ function resolveGroup(
   let canonical: ParsedRecord = winner;
   if (strategy === 'merge_values') {
     const mergedProps = new Map(winner.properties);
-    const metaPreds = new Set([NS.rdf + 'type', NS.cascade + 'dataProvenance', NS.cascade + 'schemaVersion', NS.cascade + 'sourceSystem']);
+    // Provenance bookkeeping, not content. sourceIdentity in particular must NOT
+    // be filled in from a loser: a winner that carries no origin has no origin,
+    // and inheriting the loser's would attribute it to an organization it never
+    // came from.
+    const metaPreds = new Set([NS.rdf + 'type', NS.cascade + 'dataProvenance', NS.cascade + 'schemaVersion', NS.cascade + 'sourceSystem', SOURCE_IDENTITY_PREDICATE]);
     for (const src of losers) {
       for (const [pred, vals] of src.properties) {
         if (!metaPreds.has(pred) && !mergedProps.has(pred)) mergedProps.set(pred, vals);
@@ -1655,6 +1676,64 @@ export async function runReconciliation(
     return ga !== undefined && ga === split.collisionGroupByUri.get(b.uri);
   };
 
+  /**
+   * THE SAME-SOURCE GUARD. True when two records must NOT be compared, because
+   * they are two things ONE organization stated in ONE ingestion.
+   *
+   * WHAT THE GUARD IS ACTUALLY FOR
+   * ------------------------------
+   * A source does not restate the same record twice inside one export. Three
+   * blood-pressure readings hours apart in one download are three readings, and
+   * a matcher let loose on them merges away two real measurements. That is what
+   * the guard protects.
+   *
+   * It is NOT for holding apart two exports. One organization exporting FHIR in
+   * January and a C-CDA in March is the re-sync case that reconciliation exists
+   * to handle, and the same is true of the same system's two transports.
+   *
+   * WHY KEYING ON `sourceSystem` ALONE WAS WRONG
+   * --------------------------------------------
+   * `sourceSystem` is the INGESTION axis — the import-batch label, which defaults
+   * to the file name and is set by `--source-system`. It answers neither half of
+   * the question. Measured on the pathology corpus (P07-SHARED-LABEL): give two
+   * different health systems' exports ONE batch label, which is the ordinary
+   * shape when a consumer health app exports several connected accounts, and the
+   * guard suppresses every cross-source comparison. None of four byte-identical
+   * duplicates merges, and the pod holds 12 records where 7 is right. On one real
+   * corpus the same defect hid 148 cross-source duplicates.
+   *
+   * WHY IT IS NOT KEYED ON THE ORIGIN ALONE EITHER
+   * ----------------------------------------------
+   * Because that breaks the other half. Corpus scenario P01 is one health system
+   * exporting FHIR and a C-CDA; both halves now correctly carry ONE origin, so an
+   * origin-only guard would stop the two transports from ever being compared and
+   * the duplicate condition and lab would both survive. Measured: P01 falls from
+   * 2 merges to 0 and from 8 records to 10.
+   *
+   * So both axes, and the AND is the load-bearing part. This suppresses a STRICT
+   * SUBSET of what the old guard suppressed: nothing that merges today stops
+   * merging, and the only pairs newly admitted are those with DIFFERENT known
+   * origins under one batch label — exactly the defect.
+   *
+   * ABSENT OR UNKNOWN ORIGIN BEHAVES CONSERVATIVELY
+   * -----------------------------------------------
+   * `isKnownOrigin` is false for a record written before core v3.5 (no value at
+   * all) and for one whose origin honestly landed on the `transport:` tier
+   * (nothing in the document named or located an organization). In both cases the
+   * origin is UNKNOWN, and two unknowns are not evidence of two different
+   * organizations. So the guard declines to use the axis and falls back to the
+   * batch label, which is the pre-v3.5 behaviour: it suppresses MORE comparison,
+   * leaving duplicates in the pod, which is the recoverable direction. A pod
+   * imported by an older CLI therefore reconciles exactly as it did before.
+   */
+  const sameSourceStatement = (a: ParsedRecord, b: ParsedRecord): boolean => {
+    if (a.sourceSystem !== b.sourceSystem) return false;
+    if (isKnownOrigin(a.sourceIdentity) && isKnownOrigin(b.sourceIdentity)) {
+      return a.sourceIdentity === b.sourceIdentity;
+    }
+    return true;
+  };
+
   // Match and group
   const groups: Group[] = [];
   const assigned = new Set<string>();
@@ -1711,7 +1790,7 @@ export async function runReconciliation(
 
       const candidates = existingIndex.get(a.type) ?? [];
       for (const b of candidates) {
-        if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem || sameCollision(a, b)) continue;
+        if (assigned.has(b.uri) || sameSourceStatement(a, b) || sameCollision(a, b)) continue;
         const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
@@ -1731,7 +1810,8 @@ export async function runReconciliation(
     }
 
     // Within-batch pass: pairwise loop over newRecords only (existing-pod records
-    // from the same sourceSystem never match each other)
+    // that are the same organization's same ingestion never match each other; see
+    // sameSourceStatement)
     for (let i = 0; i < newRecords.length; i++) {
       const a = newRecords[i];
       if (assigned.has(a.uri)) continue;
@@ -1746,7 +1826,7 @@ export async function runReconciliation(
 
       for (let j = i + 1; j < newRecords.length; j++) {
         const b = newRecords[j];
-        if (assigned.has(b.uri) || a.sourceSystem === b.sourceSystem || sameCollision(a, b)) continue;
+        if (assigned.has(b.uri) || sameSourceStatement(a, b) || sameCollision(a, b)) continue;
         const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
@@ -1800,7 +1880,7 @@ export async function runReconciliation(
 
       const candidates = typeIndex.get(a.type) ?? [];
       for (const b of candidates) {
-        if (b === a || assigned.has(b.uri) || a.sourceSystem === b.sourceSystem || sameCollision(a, b)) continue;
+        if (b === a || assigned.has(b.uri) || sameSourceStatement(a, b) || sameCollision(a, b)) continue;
         const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {

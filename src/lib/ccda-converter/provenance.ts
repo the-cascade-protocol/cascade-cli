@@ -24,6 +24,8 @@ import {
   commonTriples,
 } from '../fhir-converter/types.js';
 import { SOURCE_EHR_UNKNOWN } from '../fhir-converter/provenance.js';
+import { SOURCE_IDENTITY_PREDICATE, type SourceIdentity } from '../source-identity.js';
+import { firstOf, listOf } from './multivalued.js';
 
 const { namedNode } = DataFactory;
 
@@ -121,6 +123,72 @@ export function ensureSourceEhrQuads(quads: Quad[], sourceEhr: string): void {
         ),
       );
     }
+  }
+}
+
+/**
+ * The assigning authority for this document's identifiers, for the `ns:` tier of
+ * `cascade:sourceIdentity`.
+ *
+ * Preference order, and each is the same KIND of fact — an OID root that a
+ * particular organization was allocated:
+ *   1. the custodian organization's own `<id root>`. It names the organization
+ *      that holds the legal record, which is exactly the thing the origin axis
+ *      is trying to identify;
+ *   2. the document's `<id root>`;
+ *   3. the patient role's `<id root>` (the MRN's assigning authority).
+ *
+ * Returns `undefined` when the document carries none, in which case the caller
+ * falls through to the transport tier and says so honestly.
+ */
+export function deriveCcdaIdNamespace(ccdaDoc: any): string | undefined {
+  // `<id>` and `<recordTarget>` are both repeatable, so both are arrays on every
+  // document (see multivalued.ts, and tests/ccda-multivalued-shape.test.ts, which
+  // fails the build for reading one raw).
+  const custodianOrg = ccdaDoc?.custodian?.assignedCustodian?.representedCustodianOrganization;
+  const patientRole = firstOf<any>(ccdaDoc?.recordTarget)?.patientRole;
+  const idSets: any[][] = [
+    listOf<any>(custodianOrg?.id),
+    listOf<any>(ccdaDoc?.id),
+    listOf<any>(patientRole?.id),
+  ];
+  for (const ids of idSets) {
+    for (const el of ids) {
+      const root = el?.['@_root'] ?? el?.root;
+      if (typeof root === 'string' && root.trim()) return root.trim();
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Stamp `cascade:sourceIdentity` (the ORIGIN axis) onto every record subject
+ * that does not already carry one.
+ *
+ * Document-level, exactly like {@link ensureSourceEhrQuads}: a C-CDA has one
+ * custodian, so every record it yields has one origin. The two are deliberately
+ * separate predicates carrying different things — the label is what the document
+ * called the organization, the identity is the canonical form both transports
+ * agree on. See `src/lib/source-identity.ts`.
+ */
+export function ensureSourceIdentityQuads(quads: Quad[], identity: SourceIdentity | undefined): void {
+  if (!identity) return;
+  const subjects = new Set<string>();
+  const hasIdentity = new Set<string>();
+  for (const q of quads) {
+    const p = q.predicate.value;
+    if (p === NS.rdf + 'type') subjects.add(q.subject.value);
+    else if (p === SOURCE_IDENTITY_PREDICATE) hasIdentity.add(q.subject.value);
+  }
+  for (const subject of subjects) {
+    if (hasIdentity.has(subject)) continue;
+    quads.push(
+      DataFactory.quad(
+        namedNode(subject),
+        namedNode(SOURCE_IDENTITY_PREDICATE),
+        DataFactory.literal(identity.value, namedNode(NS.xsd + 'string')),
+      ),
+    );
   }
 }
 

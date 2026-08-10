@@ -19,8 +19,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-08-03"^^xsd:date ;
-    owl:versionInfo "3.4" ;
+    dct:modified "2026-08-09"^^xsd:date ;
+    owl:versionInfo "3.5" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -550,11 +550,66 @@ cascade:advanceDirectiveNotes a owl:DatatypeProperty ;
 # Used by the Cascade reconciliation pipeline to annotate merged records with
 # provenance and conflict resolution metadata.
 
+# ----------------------------------------------------------------------------
+# THE THREE SOURCE AXES (v3.5)
+# ----------------------------------------------------------------------------
+# A record carries three different answers to three different questions, and
+# collapsing any two of them is a defect that has been measured on real pods.
+#
+#   ORIGIN      cascade:sourceIdentity  WHICH ORGANIZATION the record came from,
+#                                       as a canonical token that is the SAME
+#                                       whatever transport carried it. This is
+#                                       the only one of the three that may be
+#                                       used as a reconciliation key.
+#
+#   LABEL       clinical:sourceEHR      what to CALL that organization on screen.
+#                                       Human-readable, source-worded, and not an
+#                                       identity: two spellings of one
+#                                       organization are two labels.
+#
+#   INGESTION   cascade:sourceSystem    HOW AND WHEN the data entered the Pod:
+#                                       the import batch. Explicitly NEVER an
+#                                       origin. One batch routinely carries
+#                                       several organizations (a consumer health
+#                                       app exports every connected account under
+#                                       one label), and one organization
+#                                       routinely arrives in many batches.
+#
+# The failure this section exists to end: a reconciler that keys "are these two
+# records from the same source?" on the INGESTION axis answers "yes" for every
+# pair on a single-batch Pod, so no duplicate is ever compared, and answers "no"
+# for two exports of one organization, so one organization occupies two rows of
+# any source view.
+
 cascade:sourceSystem a owl:DatatypeProperty ;
     rdfs:label "Source System"@en ;
-    rdfs:comment "The name of the EHR or health system that originally held this record (e.g. 'primary-care', 'hospital'). Added during cross-system conversion to enable reconciliation."@en ;
+    rdfs:comment "INGESTION AXIS. The import batch a record entered the Pod through (e.g. 'Apple Health export', 'primary-care'). It records HOW AND WHEN data arrived, NOT where it came from, and it MUST NOT be used as a source identity: one batch commonly carries records from several organizations, and one organization commonly arrives in many batches. Use cascade:sourceIdentity for origin."@en ;
     rdfs:domain owl:Thing ;
     rdfs:range xsd:string .
+
+cascade:sourceIdentity a owl:DatatypeProperty ;
+    rdfs:label "Source Identity"@en ;
+    rdfs:comment """ORIGIN AXIS. The canonical, transport-independent identity of the organization a record came from. Two records that a FHIR export and a C-CDA document of the SAME health system produced carry the same value here, which is what makes it usable as a reconciliation key where clinical:sourceEHR (a display label) and cascade:sourceSystem (an ingestion batch) are not.
+
+VALUE FORM. A scheme-prefixed token, so a consumer can always tell how much the producer actually knew:
+  org:{slug}       an organization was derivable. {slug} is the normalized form below.
+  ns:{namespace}   no organization was derivable, but the record's identifiers have an assigning authority: the FHIR server base URL, or the C-CDA <id> root OID. Records agree on origin only if they agree on the namespace.
+  transport:{label}  LAST RESORT. Nothing in the document named or located an organization, so the value restates cascade:sourceSystem, honestly prefixed. It is not an origin claim, and a consumer must treat two transport: values as 'origin unknown' rather than as evidence of a shared source.
+
+THE SLUG NORMALIZATION, which both transports must implement identically:
+  1. The input is either an organization NAME (a C-CDA custodian/author organization name, a FHIR Organization.name or an institution-looking performer display) or a HOST (the registrable domain of the source FHIR endpoint).
+  2. HOST: lowercase; drop a leading 'www.'; drop the public-suffix label(s), keeping the registrable name label ('fhir.meridianhealth.example' -> 'meridianhealth'). Then repeatedly strip any generic organization word that forms a whole prefix or suffix of that label ('meridianhealth' -> 'meridian'), never stripping to fewer than three characters.
+  3. NAME: lowercase; fold diacritics to ASCII; replace every run of non-alphanumeric characters with a single space; split on spaces.
+  4. Drop generic organization words, legal-form words and pure-number tokens from the token list. Generic means institution-or-specialty vocabulary that names no particular organization: health, healthcare, system(s), service(s), medical, medicine, center/centre, hospital(s), clinic(s), care, group, associates, association, network, partners, physicians, practice, regional, community, memorial, university, institute, foundation, laboratory/laboratories/lab(s), diagnostics, imaging, radiology, pathology, family, urgent, primary, specialty, and the specialty names cardiology, oncology, orthopedics, pediatrics; legal-form means inc, llc, llp, ltd, plc, corp, corporation, co, pc, pa, pllc; and the English stopwords of, and, the, for, at, in, on, a, an.
+  5. If no token survives step 4, use the whole normalized string with separators removed, so an organization named only in generic words still gets a stable identity.
+  6. The slug is the FIRST surviving token. 'Meridian Health System' and 'meridianhealth.example' both give 'meridian'; 'Providence Health and Services Washington and Montana' and 'providence.org' both give 'providence'.
+
+WHY THE LEADING TOKEN AND NOT ALL OF THEM. The two failure directions are not symmetric. Collapsing two different organizations onto one identity suppresses comparisons between their records, so duplicates simply remain in the Pod: visible, and recoverable later. Splitting ONE organization across two identities lets records the organization deliberately kept apart be compared and merged, which destroys content. So the normalization is deliberately biased toward collapsing, and regional and specialty qualifiers ('... Washington and Montana', '... Cardiology') are dropped rather than being allowed to split a system.
+
+WHAT IT IS NOT. It is not a registry key and does not attempt to resolve two organizations that name themselves differently in different documents with no shared token; it canonicalizes what the documents themselves state. It is not a display value: show clinical:sourceEHR. It is not the transport: that is cascade:sourceSystem."""@en ;
+    rdfs:domain owl:Thing ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.5" .
 
 cascade:reconciliationStatus a owl:ObjectProperty ;
     rdfs:label "Reconciliation Status"@en ;
@@ -677,6 +732,40 @@ cascade:forSystem a owl:DatatypeProperty ;
 
 # ============================================================================
 # Changelog
+#
+# Version 3.5 (2026-08-09)
+# - Added cascade:sourceIdentity (owl:DatatypeProperty, range xsd:string): the
+#   ORIGIN axis. A canonical, transport-independent identity for the
+#   organization a record came from, so that a FHIR export and a C-CDA document
+#   of one health system agree. The full value form and the slug normalization
+#   both transports must implement are stated on the property itself; the short
+#   version is a scheme-prefixed token, org: / ns: / transport:, where
+#   transport: is an honestly-labelled last resort and NOT an origin claim.
+# - Stated the three source axes explicitly in this file, because two of them
+#   were already here and being used interchangeably: ORIGIN
+#   (cascade:sourceIdentity, new), LABEL (clinical:sourceEHR, unchanged, a
+#   display value), INGESTION (cascade:sourceSystem, the import batch).
+#   cascade:sourceSystem's comment now says what it is NOT: it records how and
+#   when data arrived, never where it came from, and it must not be used as a
+#   reconciliation key. One batch commonly carries several organizations, and
+#   one organization commonly arrives in many batches; a reconciler keyed on it
+#   compares nothing on a single-batch Pod and splits one system across two
+#   rows on a mixed one. No property was removed or renamed and no emitted
+#   value changes meaning, so existing pods keep reading correctly.
+# - COMPATIBILITY. Absence of cascade:sourceIdentity is NOT a validation
+#   finding at any severity in this version. The shape that constrains it
+#   (cascade:SourceIdentityShape) targets sh:targetSubjectsOf
+#   cascade:sourceIdentity, so it evaluates only records that CARRY the
+#   property: every pod written before v3.5 continues to validate exactly as it
+#   did. The alternative considered was sh:minCount 1 at sh:Warning on each
+#   record shape, which would have turned every previously-valid pod amber on
+#   upgrade for a property no producer had yet had the chance to write, and
+#   would have taught readers to ignore the warning. The ratchet path is
+#   deliberate and stated here so the next step is not a judgement call: once
+#   the reference producers emit the property, add sh:minCount 1 at sh:Warning
+#   to the record shapes in health: and clinical:, and only after a release in
+#   which that warning is observably absent from conforming output, raise it to
+#   sh:Violation. Each step is its own vocabulary version.
 #
 # Version 3.4 (2026-08-03)
 # - Defined the pod export manifest vocabulary. 32 cascade: terms appearing in

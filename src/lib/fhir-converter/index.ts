@@ -57,7 +57,8 @@ const { namedNode, literal, quad: makeQuad } = DataFactory;
 import { convertFhirResourceToQuads } from './fhir-to-cascade.js';
 import { convertCascadeToFhir } from './cascade-to-fhir.js';
 import { EXCLUDED_TYPES } from './converters-passthrough.js';
-import { SOURCE_EHR_UNKNOWN } from './provenance.js';
+import { SOURCE_EHR_UNKNOWN, deriveBundleOrigin } from './provenance.js';
+import { SOURCE_IDENTITY_PREDICATE } from '../source-identity.js';
 import { resolveReferenceEdges, type ConvertedResourceRef } from './reference-resolution.js';
 import { liftTrappedLiterals, type LiteralLiftSummary } from '../literal-lifting.js';
 
@@ -225,16 +226,31 @@ export async function convert(
         );
       }
     }
-    // Authoritative per-record source override (e.g. the Apple Health export.xml
-    // <ClinicalRecord sourceName> the container adapter recovered). The container
-    // knows the EHR/account of origin even when the FHIR payload does not (Epic
-    // records carry only relative references + OID identifiers, no absolute org
-    // host), so this label is authoritative for EVERY record from the input: it is
-    // what the user sees in the Health app and it is consistent across the account.
-    // It REPLACES any host-derived sourceEHR (so one account groups under one name
-    // instead of splitting "Swedish" vs "swedish.org") and pre-empts the "unknown"
-    // fallback below. The import-batch tag stays separately on cascade:sourceSystem.
-    if (sourceEhrOverride) {
+    // THE SOURCE AXES, derived once for the whole input.
+    //
+    // `sourceEhrOverride` is the container adapter's authoritative account name
+    // (Apple Health's export.xml <ClinicalRecord sourceName>). The container knows
+    // the EHR/account of origin even when the FHIR payload does not — Epic records
+    // carry only relative references and OID identifiers, no absolute org host —
+    // so it beats anything derivable from the resources themselves.
+    //
+    // Absent an override, the bundle's own organization name beats its endpoint
+    // host, which is the P01 fix: the C-CDA path already labels records with the
+    // custodian ORGANIZATION NAME, so a system exporting both transports was
+    // rendering as "meridianhealth.example" here and "Meridian Health System"
+    // there. Deriving it per BUNDLE rather than per resource matters just as much:
+    // per-resource, one export produced two labels depending on which resources
+    // happened to carry a `recorder.display`.
+    //
+    // Whatever wins REPLACES the per-resource host-derived clinical:sourceEHR and
+    // pre-empts the "unknown" fallback below, so one input groups under one label.
+    // The import-batch tag stays separately on cascade:sourceSystem, and the
+    // canonical ORIGIN goes on cascade:sourceIdentity.
+    const bundleOrigin = deriveBundleOrigin(fhirResources, {
+      override: sourceEhrOverride,
+      transportLabel: sourceSystem,
+    });
+    if (bundleOrigin.label) {
       for (let i = allQuads.length - 1; i >= 0; i--) {
         const q = allQuads[i];
         if (
@@ -249,7 +265,18 @@ export async function convert(
           makeQuad(
             namedNode(subjectUri),
             namedNode(NS.clinical + 'sourceEHR'),
-            literal(sourceEhrOverride),
+            literal(bundleOrigin.label),
+          ),
+        );
+      }
+    }
+    if (bundleOrigin.identity) {
+      for (const subjectUri of recordSubjects) {
+        allQuads.push(
+          makeQuad(
+            namedNode(subjectUri),
+            namedNode(SOURCE_IDENTITY_PREDICATE),
+            literal(bundleOrigin.identity.value),
           ),
         );
       }

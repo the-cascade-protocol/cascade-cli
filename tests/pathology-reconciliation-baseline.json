@@ -1,5 +1,6 @@
 {
-  "_comment": "Baseline reconciliation scorecard for the pathology-corpus scenarios that carry a constructed ground truth. REPORT-ONLY: nothing here asserts these numbers are good, and one of the recalls is 0. The harness asserts they are KNOWN, so a change to matching has to move this file on purpose, in the same commit as the change that moved it. Scored over merge PAIRS: precision = correctPairs / predictedPairs (1 when the reconciler predicted nothing, since predicting nothing asserts nothing wrong), recall = correctPairs / truthPairs. P08 moved from recall 0 to recall 1 when the vital-sign matcher was pointed at the predicates the converters actually write and given a time-proximity rule: it now merges the clock-skew pair (systolic and diastolic, 17 minutes apart across two sources) and nothing else, so it predicts exactly the two pairs the truth names. P07-SHARED-LABEL's recall of 0 belongs to the same-source guard and is unchanged.",
+  "_comment": "Baseline reconciliation scorecard for the pathology-corpus scenarios that carry a constructed ground truth. REPORT-ONLY: nothing here asserts these numbers are good. The harness asserts they are KNOWN, so a change to matching has to move this file on purpose, in the same commit as the change that moved it. Scored over merge PAIRS: precision = correctPairs / predictedPairs (1 when the reconciler predicted nothing, since predicting nothing asserts nothing wrong), recall = correctPairs / truthPairs. P08 moved from recall 0 to recall 1 when the vital-sign matcher was pointed at the predicates the converters actually write and given a time-proximity rule: it now merges the clock-skew pair (systolic and diastolic, 17 minutes apart across two sources) and nothing else, so it predicts exactly the two pairs the truth names.",
+  "_moved_2026-08-09": "P07-SHARED-LABEL recall 0.0 -> 1.0, deliberately, in the commit that moved it. The same-source guard used to key on cascade:sourceSystem, the import-batch label, so two health systems' exports arriving under ONE label suppressed every cross-source comparison and the reconciler predicted nothing at all. It now keys on cascade:sourceIdentity, the canonical ORIGIN, and this scenario reconciles identically to the distinct-label P07 beside it: same universe, same four truth pairs, all four predicted, all four correct. Nothing about the MATCHING changed, which is why P07 and P08 are byte-identical to the entries the matcher sweep left them at. Note that the score objects themselves are compared with toEqual, so no annotation may be added inside them.",
   "scores": {
     "P07": {
       "universe": 10,
@@ -12,10 +13,10 @@
     "P07-SHARED-LABEL": {
       "universe": 10,
       "truthPairs": 4,
-      "predictedPairs": 0,
-      "correctPairs": 0,
+      "predictedPairs": 4,
+      "correctPairs": 4,
       "precision": 1,
-      "recall": 0
+      "recall": 1
     },
     "P08": {
       "universe": 8,

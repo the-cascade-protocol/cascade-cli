@@ -4,7 +4,7 @@
   "scenarios": [
     {
       "id": "P01",
-      "pathology": "dual-label split: one health system, two source labels",
+      "pathology": "one health system exporting two transports resolves to ONE source identity",
       "batches": [
         { "file": "p01-dual-label-fhir.json", "from": "fhir" },
         { "file": "p01-dual-label-ccda.xml", "from": "c-cda" }
@@ -12,6 +12,11 @@
       "expect": {
         "convertedRecords": [4, 6],
         "reportedResourceCount": [4, 6],
+        "_comment_distinctValuesByPredicate": "The invariant this scenario exists for, folded in from the retired KNOWN_OUTCOMES entry P01-one-system-two-source-labels. One health system exporting FHIR and a C-CDA must occupy ONE row on the pod's source axis, whichever axis is read: one canonical ORIGIN (cascade:sourceIdentity, org:meridian, derived identically from the endpoint domain and from the custodian organization name) and one display LABEL (clinical:sourceEHR). The merge count below is the other half of the same invariant: an origin-only same-source guard would make the two transports uncomparable and drop it to 0.",
+        "distinctValuesByPredicate": {
+          "https://ns.cascadeprotocol.org/core/v1#sourceIdentity": 1,
+          "https://ns.cascadeprotocol.org/clinical/v1#sourceEHR": 1
+        },
         "podRecords": 7,
         "podRecordsByType": {
           "ClinicalDocument": 2,
@@ -30,22 +35,23 @@
     },
     {
       "id": "P02",
-      "pathology": "duplicate source-id collision: one <id> across three distinct lab observations",
+      "pathology": "one <id> across three contradicting lab observations mints three subjects, not one",
       "batches": [{ "file": "p02-duplicate-source-id-ccda.xml", "from": "c-cda" }],
       "expect": {
-        "convertedRecords": [5],
-        "reportedResourceCount": [5],
-        "podRecords": 5,
+        "_comment": "Folded in from the retired KNOWN_OUTCOMES entry P02-duplicate-source-id-collision-undetected. The document states four results and the pod holds four: the three that share a root-only <id> disagree about their code, name, value, unit and reference range, so the id has stopped identifying and each claimant mints its own subject. The two SHACL maxCount violations are gone because the multi-valued subject that caused them is gone, not because anything was silenced, and the panel's four hasLabResult edges now point at four distinct members instead of collapsing to two.",
+        "convertedRecords": [7],
+        "reportedResourceCount": [7],
+        "podRecords": 7,
         "podRecordsByType": {
           "ClinicalDocument": 1,
           "LaboratoryReport": 1,
-          "LabResultRecord": 2,
+          "LabResultRecord": 4,
           "PatientProfile": 1
         },
         "merges": 0,
         "conflicts": 0,
-        "edgesInPod": 2,
-        "violations": 2,
+        "edgesInPod": 4,
+        "violations": 0,
         "importWarnings": 0
       }
     },
@@ -179,17 +185,21 @@
     },
     {
       "id": "P07-SHARED-LABEL",
-      "pathology": "the same two exports under ONE import-batch label: the same-source guard suppresses every cross-source comparison",
+      "pathology": "the same two exports under ONE import-batch label still reconcile: the guard reads the origin, not the transport",
       "batches": [
         { "file": "p07a-crosssource-labs-alpha.json", "from": "fhir", "sourceSystem": "Household export" },
         { "file": "p07b-crosssource-labs-beta.json", "from": "fhir", "sourceSystem": "Household export" }
       ],
       "expect": {
+        "_comment": "Folded in from the retired KNOWN_OUTCOMES entry P07-shared-transport-label-blocks-cross-source-dedup. Two different health systems' exports arrive under one batch label, which is the ordinary shape when a consumer health app exports several connected accounts. The same-source guard now reads cascade:sourceIdentity (org:stonebridge against org:larkfield), so the shared label no longer suppresses the comparison and this run reconciles identically to the distinct-label P07: 7 records, 5 merges. The two distinct origins below are what the guard is reading; if that ever collapses to 1, the merges collapse to 0.",
         "convertedRecords": [6, 6],
         "reportedResourceCount": [6, 6],
-        "podRecords": 12,
-        "podRecordsByType": { "LabResultRecord": 10, "PatientProfile": 2 },
-        "merges": 0,
+        "distinctValuesByPredicate": {
+          "https://ns.cascadeprotocol.org/core/v1#sourceIdentity": 2
+        },
+        "podRecords": 7,
+        "podRecordsByType": { "LabResultRecord": 6, "PatientProfile": 1 },
+        "merges": 5,
         "conflicts": 0,
         "edgesInPod": 0,
         "violations": 0,

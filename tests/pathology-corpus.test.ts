@@ -151,6 +151,19 @@ interface Expectations {
    * merely how many there are.
    */
   sourceBreakdown?: Record<string, number>;
+  /**
+   * Distinct object values of a predicate across the whole pod, by full
+   * predicate IRI. Optional, and asserted only where a scenario declares it.
+   *
+   * This exists because the census fields above count RECORDS, and two of the
+   * corpus's invariants are about how many distinct SOURCES those records
+   * resolve to: P01 must hold one health system to one identity across two
+   * transports, and P07-SHARED-LABEL must keep two systems distinct under one
+   * import-batch label. Both arrived here as KNOWN_OUTCOMES entries, and the
+   * ledger's retirement path is to fold the corrected expectation into the
+   * scenario — which needs a field that can hold it.
+   */
+  distinctValuesByPredicate?: Record<string, number>;
 }
 
 interface Scenario {
@@ -522,6 +535,15 @@ describe.each(ALL_SCENARIOS)('$scenario.id  $scenario.pathology', ({ scenario })
         .violations.map((v) => `  ${v.property}: ${v.message}`)
         .join('\n')}`,
     ).toBe(scenario.expect.violations);
+  });
+
+  it('resolves the expected number of distinct values per declared predicate', () => {
+    const declared = scenario.expect.distinctValuesByPredicate;
+    if (!declared) return;
+    for (const [predicate, expected] of Object.entries(declared)) {
+      const values = obs().values(predicate);
+      expect(values.length, `${predicate} across the pod: ${JSON.stringify(values)}`).toBe(expected);
+    }
   });
 
   it('emits the expected number of import warnings', () => {
