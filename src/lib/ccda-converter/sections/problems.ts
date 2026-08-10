@@ -58,7 +58,7 @@ export function extractProblemQuads(
       // `health:conditionName` is `sh:minCount 1`, so reading `@displayName` only
       // meant an invalid record for a problem the document named in words.
       // Unresolvable stays empty and emits nothing.
-      const conditionName = displayName || resolveNarrativeName(valueEl, narrativeIdMap);
+      const conditionName = displayName || resolveNarrativeName(valueEl, narrativeIdMap, warnings);
 
       const isSnomed = codeSystem.includes('6.96') || codeSystem === snomedOid;
       const isIcd10 = codeSystem.includes('6.90') || codeSystem === icd10Oid;
@@ -127,7 +127,7 @@ export function extractProblemQuads(
       if (conditionName) quads.push(makeQuad(subj, namedNode(NS.health + 'conditionName'), literal(conditionName)));
       if (status) quads.push(makeQuad(subj, namedNode(NS.health + 'status'), literal(status.toLowerCase())));
       // Typed from the raw effectiveTime; see `dates.ts`.
-      const onsetQuad = ccdaDateQuad(uri, NS.health + 'onsetDate', onsetVal);
+      const onsetQuad = ccdaDateQuad(uri, NS.health + 'onsetDate', onsetVal, warnings);
       if (onsetQuad) quads.push(onsetQuad);
       if (sourceId) quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceRecordId'), literal(sourceId)));
     }

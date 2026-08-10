@@ -24,6 +24,7 @@ import type { Quad } from 'n3';
 import { printResult, printError, printVerbose, printWarning, type OutputOptions } from '../../lib/output.js';
 import { convert } from '../../lib/fhir-converter/index.js';
 import { type SectionCensusEntry } from '../../lib/fhir-converter/types.js';
+import { SOURCE_EHR_UNKNOWN } from '../../lib/fhir-converter/provenance.js';
 import {
   resolveReferenceEdges,
   buildResourceRefsFromQuads,
@@ -189,7 +190,11 @@ async function loadExistingPodData(
         // any bucket it cannot parse — the records in it are never lost, and
         // never silently replaced by a partial rewrite either.
         await parseTurtleToQuads(content);
-        inputs.push({ content, systemName: 'existing-pod' });
+        // `existingPod` is the marker the reconciler actually keys its
+        // cross-batch path on. `systemName` cannot carry it: it is only the
+        // DEFAULT source system for records that state none, and every record
+        // the pod holds states one.
+        inputs.push({ content, systemName: 'existing-pod', existingPod: true });
       } catch {
         unreadable.push(`${dir}/${file}`);
       }
@@ -894,13 +899,23 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // Source breakdown by EHR of origin (clinical:sourceEHR), for the pre-import
       // plan: exactly what the source-organized Records view will show, computed
       // from the merged/deduped quads so a --dry-run preview matches the real run.
+      //
+      // A subject carrying no clinical:sourceEHR is accounted under the ratified
+      // Data Absent Reason token "unknown", not omitted. Omitting it made the
+      // breakdown silently disagree with the record count beside it: a FHIR
+      // bundle whose references are all `urn:uuid:` gives the provenance pass no
+      // host to read and no institution-looking display, so eight records
+      // imported and the source axis accounted for none of them — which reads as
+      // "this pod has no data" rather than "we could not tell where this came
+      // from". The token is the same one the C-CDA path already writes
+      // (`deriveSourceEhr`), and it is deliberately NOT the import-batch label,
+      // which says how the data got in rather than where it came from.
       const sourceBreakdown: Record<string, number> = {};
       const SRC_EHR_IRI = 'https://ns.cascadeprotocol.org/clinical/v1#sourceEHR';
       for (const [, quads] of subjectQuads) {
         const ehr = quads.find((q) => q.predicate.value === SRC_EHR_IRI);
-        if (ehr) {
-          sourceBreakdown[ehr.object.value] = (sourceBreakdown[ehr.object.value] ?? 0) + 1;
-        }
+        const key = ehr ? ehr.object.value : SOURCE_EHR_UNKNOWN;
+        sourceBreakdown[key] = (sourceBreakdown[key] ?? 0) + 1;
       }
 
       // --- Step 5: Route subjects to DATA_TYPES buckets ---

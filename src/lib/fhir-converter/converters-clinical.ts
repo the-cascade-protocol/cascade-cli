@@ -54,6 +54,28 @@ import { interpretationValue } from './interpretation.js';
 // Medication converter
 // ---------------------------------------------------------------------------
 
+/**
+ * The first FHIR `Dosage` element a medication resource carries, under either of
+ * the two field names R4 gives it.
+ *
+ * `MedicationStatement.dosage` and `MedicationRequest.dosageInstruction` are
+ * both `Dosage 0..*` — the same datatype, the same `text`/`route`/`timing`
+ * children. They differ only in the name of the field that holds them, and a
+ * reader that knows one name sees no dose on half the medication resources that
+ * exist.
+ *
+ * `dosage` is preferred when a resource somehow carries both, since only
+ * MedicationStatement declares it and that is then the resource's own field.
+ *
+ * @see https://hl7.org/fhir/R4/medicationstatement-definitions.html#MedicationStatement.dosage
+ * @see https://hl7.org/fhir/R4/medicationrequest-definitions.html#MedicationRequest.dosageInstruction
+ */
+function firstDosageElement(resource: any): any | undefined {
+  const stated = Array.isArray(resource?.dosage) ? resource.dosage[0] : undefined;
+  if (stated) return stated;
+  return Array.isArray(resource?.dosageInstruction) ? resource.dosageInstruction[0] : undefined;
+}
+
 export function convertMedicationStatement(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const patientRef = resource.subject?.reference ?? resource.patient?.reference ?? '';
@@ -111,8 +133,22 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
     }
   }
 
-  // Dosage
-  const dosage = Array.isArray(resource.dosage) ? resource.dosage[0] : undefined;
+  // Dosage.
+  //
+  // ONE Dosage element, under two field names. FHIR R4 gives
+  // MedicationStatement a `dosage` array and MedicationRequest a
+  // `dosageInstruction` array; both are the same `Dosage` datatype with the same
+  // `text`, `route` and `timing`. Reading only `dosage` meant a prescription's
+  // dose was dropped in silence, and the loss did not stop at the missing
+  // triple: dose is deliberately stripped out of the medication identity key, so
+  // "sertraline 50 mg" and "sertraline 100 mg" match as one drug and the dose
+  // check is what is supposed to raise the disagreement. With both doses absent
+  // that check compared two undefineds, found nothing to disagree about, and
+  // merged a dose change away with no conflict — while the identical
+  // disagreement expressed as a MedicationStatement raised its conflict
+  // correctly. Which of the two ordinary FHIR shapes the source happened to use
+  // decided whether a dose change survived the import.
+  const dosage = firstDosageElement(resource);
   if (dosage) {
     if (dosage.text) {
       quads.push(tripleStr(subjectUri, NS.clinical + 'dosage', dosage.text));
@@ -667,13 +703,10 @@ export function convertObservationLab(resource: any): ConversionResult & { _quad
   // binds health:interpretation to that code system, so there is nothing left to
   // translate and no reason to collapse H and L onto one word. See
   // `interpretation.ts` for what the accepted set is and what happens outside it.
-  quads.push(
-    tripleStr(
-      subjectUri,
-      NS.health + 'interpretation',
-      interpretationValue(resource.interpretation, warnings),
-    ),
-  );
+  const interpretation = interpretationValue(resource.interpretation, warnings);
+  if (interpretation !== undefined) {
+    quads.push(tripleStr(subjectUri, NS.health + 'interpretation', interpretation));
+  }
 
   const effectiveDate = resource.effectiveDateTime ?? resource.effectivePeriod?.start ?? resource.issued;
   if (effectiveDate) {
@@ -689,11 +722,22 @@ export function convertObservationLab(resource: any): ConversionResult & { _quad
     }
   }
 
+  // EVERY category the source stated, `laboratory` included.
+  //
+  // `laboratory` used to be filtered out on the reading that it is implied by the
+  // record's type. It is not: it is a value FHIR R4 asks the server to state, and
+  // the record it identifies is exactly the one that needs it. An Observation
+  // categorised BOTH laboratory and procedure therefore reached the pod carrying
+  // `labCategory "procedure"` alone — the category that DECIDED the routing was
+  // the one dropped, so a pod filtered by labCategory omitted a record filed as a
+  // lab. health:labCategory is repeatable as of health v2.6 (sh:maxCount removed,
+  // mirroring Observation.category 0..*), so there is nothing left to choose
+  // between.
   if (Array.isArray(resource.category)) {
     for (const cat of resource.category) {
       if (Array.isArray(cat.coding)) {
         for (const c of cat.coding) {
-          if (c.code && c.code !== 'laboratory') {
+          if (c.code) {
             quads.push(tripleStr(subjectUri, NS.health + 'labCategory', c.code));
           }
         }

@@ -71,7 +71,7 @@ export function extractImmunizationQuads(
       quads.push(makeQuad(subj, namedNode(NS.health + 'cvxCode'), namedNode(resolveCodeUri(cvxOid, code))));
     }
     // Typed from the raw effectiveTime; see `dates.ts`.
-    const administrationQuad = ccdaDateQuad(uri, NS.health + 'administrationDate', dateVal);
+    const administrationQuad = ccdaDateQuad(uri, NS.health + 'administrationDate', dateVal, warnings);
     if (administrationQuad) quads.push(administrationQuad);
     if (sourceId) {
       quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceRecordId'), literal(sourceId)));

@@ -161,26 +161,6 @@ export const KNOWN_OUTCOMES: KnownOutcome[] = [
     fixed: { labRecords: 4, conflicts: 0, violations: 0 },
   },
   {
-    id: 'P03-dangling-narrative-reference-is-silent',
-    scenario: 'P03',
-    currentWrongOutcome:
-      'An <originalText><reference value="#id"/> pointing at an element the narrative does not ' +
-      'contain resolves to nothing, the record imports with no testName, and the import reports ' +
-      'no warning. In the pod it is byte-indistinguishable from the observation that carried no ' +
-      'name anywhere, so "the rendering we were given was incomplete" and "this test was never ' +
-      'named" arrive as the same absence.',
-    expectedOnceFixed:
-      'The record still gains NO name — inventing one from the LOINC code would be fabricating ' +
-      'the attested rendering — but the import emits one warning naming the unresolved reference, ' +
-      'so the two absences are told apart at the point where the information still exists.',
-    probe: (o) => ({
-      importWarnings: o.importWarnings.length,
-      labsWithoutTestName: o.countMissing(NS.health + 'LabResultRecord', NS.health + 'testName'),
-    }),
-    current: { importWarnings: 0, labsWithoutTestName: 2 },
-    fixed: { importWarnings: 1, labsWithoutTestName: 2 },
-  },
-  {
     id: 'P04-procedure-name-written-off-shape',
     scenario: 'P04',
     currentWrongOutcome:
@@ -227,62 +207,6 @@ export const KNOWN_OUTCOMES: KnownOutcome[] = [
     },
   },
   {
-    id: 'P05-unmapped-interpretation-collapses-onto-absent',
-    scenario: 'P05',
-    currentWrongOutcome:
-      'An Observation.interpretation code outside the set health:interpretation accepts is written ' +
-      'as "unknown" — the SAME value that means "the source carried no interpretation at all". The ' +
-      'import does warn, but a warning is transient and the pod is what survives, so two different ' +
-      'facts are stored as one string.',
-    expectedOnceFixed:
-      'The pod distinguishes "the source stated an interpretation this vocabulary cannot express" ' +
-      'from "the source stated none", so exactly ONE record in this scenario reads as absent. The ' +
-      'import warning stays either way; it is the pod that has to stop losing the distinction.',
-    probe: (o) => ({
-      unknownInterpretations: o
-        .valuesOn(NS.health + 'LabResultRecord', NS.health + 'interpretation')
-        .filter((v) => v === 'unknown').length,
-      warnings: o.importWarnings.filter((w) => w.includes('ZQ7')).length,
-    }),
-    current: { unknownInterpretations: 2, warnings: 1 },
-    fixed: { unknownInterpretations: 1, warnings: 1 },
-  },
-  {
-    id: 'P05-multi-category-observation-keeps-one-category',
-    scenario: 'P05',
-    currentWrongOutcome:
-      'An Observation categorised BOTH laboratory and procedure records health:labCategory ' +
-      '"procedure" only: the last category wins and the category that DECIDED the routing is the ' +
-      'one dropped. A pod filtered by labCategory therefore omits a record that is filed as a lab.',
-    expectedOnceFixed:
-      'Every category the source stated is carried, so the record is findable under the category it ' +
-      'was routed by as well as the one it also claims.',
-    probe: (o) => o.valuesOn(NS.health + 'LabResultRecord', NS.health + 'labCategory'),
-    current: ['procedure'],
-    fixed: ['laboratory', 'procedure'],
-  },
-  {
-    id: 'P05-records-without-a-derivable-ehr-leave-the-source-axis',
-    scenario: 'P05',
-    currentWrongOutcome:
-      'A bundle whose references are all urn:uuid: gives the provenance pass no host to read and no ' +
-      'institution-looking display, so no clinical:sourceEHR is written at all and the import ' +
-      "report's sourceBreakdown is empty. Eight records were imported and the source axis accounts " +
-      'for none of them, which reads as "this pod has no data" rather than "we could not tell where ' +
-      'this came from". The ClinicalDocument path already solves this with the ratified ' +
-      'data-absent token.',
-    expectedOnceFixed:
-      'Every imported record appears in sourceBreakdown, with the ratified "unknown" token where the ' +
-      'EHR of origin genuinely cannot be determined — never the import-batch label, which is how the ' +
-      'data got in rather than where it came from.',
-    probe: (o) => ({
-      imported: o.importReports[0].totalRecordsImported,
-      accountedFor: Object.values(o.importReports[0].sourceBreakdown).reduce((a, b) => a + b, 0),
-    }),
-    current: { imported: 8, accountedFor: 0 },
-    fixed: { imported: 8, accountedFor: 8 },
-  },
-  {
     id: 'P07-shared-transport-label-blocks-cross-source-dedup',
     scenario: 'P07-SHARED-LABEL',
     currentWrongOutcome:
@@ -299,47 +223,6 @@ export const KNOWN_OUTCOMES: KnownOutcome[] = [
     probe: (o) => ({ podRecords: o.podRecords, merges: merges(o) }),
     current: { podRecords: 12, merges: 0 },
     fixed: { podRecords: 7, merges: 5 },
-  },
-  {
-    id: 'P08-vital-matcher-reads-predicates-the-converter-never-writes',
-    scenario: 'P08',
-    currentWrongOutcome:
-      'matchVitalSigns reads health:testCode, health:effectiveDate / health:performedDate and ' +
-      'health:value. The converter writes clinical:loincCode, clinical:effectiveDate and ' +
-      'clinical:value. All three lookups return undefined, the date guard fails, and the function ' +
-      'returns no-match for EVERY pair — so no two vital signs in any pod have ever matched. The ' +
-      '"three same-day readings must never merge" property holds here for the wrong reason, and ' +
-      'the price is the clock-skew duplicate 17 minutes later, which is the same cuff reading and ' +
-      'is kept as a second record.',
-    expectedOnceFixed:
-      'The matcher reads the predicates the converter emits. The clock-skew pair (systolic and ' +
-      'diastolic) merges and nothing else does, leaving 6 vital records. Restoring the matcher ' +
-      'without a time-proximity rule would instead merge all four same-day readings, which is why ' +
-      'this scenario carries three readings hours apart rather than one.',
-    probe: (o) => ({ vitalRecords: o.podRecordsByType['VitalSign'] ?? 0, merges: merges(o) }),
-    current: { vitalRecords: 8, merges: 1 },
-    fixed: { vitalRecords: 6, merges: 3 },
-  },
-  {
-    id: 'P09-medicationrequest-dose-is-dropped-then-silently-merged',
-    scenario: 'P09',
-    currentWrongOutcome:
-      'The medication converter reads dose text from resource.dosage (the MedicationStatement ' +
-      'field) and never from resource.dosageInstruction (the MedicationRequest field). So ' +
-      'sertraline 50 mg and sertraline 100 mg arrive carrying no dose, the dose-conflict check ' +
-      'compares two absent values, finds no disagreement, and merges them into ONE record with no ' +
-      'conflict raised — a dose change silently disappears. The levothyroxine pair, the same ' +
-      'disagreement expressed as MedicationStatement, does raise its conflict, so the outcome ' +
-      'depends on which FHIR shape the source used.',
-    expectedOnceFixed:
-      'dosageInstruction is read the way dosage is, both pairs carry their dose, and both raise a ' +
-      'dose conflict: 4 unresolved conflicts, and 2 medication records carrying clinical:dosage.',
-    probe: (o) => ({
-      conflicts: o.conflicts.length,
-      medsCarryingDosage: o.subjectsWith(NS.clinical + 'dosage').length,
-    }),
-    current: { conflicts: 3, medsCarryingDosage: 1 },
-    fixed: { conflicts: 4, medsCarryingDosage: 2 },
   },
   {
     id: 'P10-negation-and-data-absent-sentinels-stored-as-allergens',
@@ -380,28 +263,6 @@ export const KNOWN_OUTCOMES: KnownOutcome[] = [
     fixed: { reports: 1, edges: 4 },
   },
   {
-    id: 'P12-malformed-nine-digit-date-accepted-silently',
-    scenario: 'P12',
-    currentWrongOutcome:
-      'effectiveTime="201102013" is nine digits: neither the 8-digit calendar day nor the 10-digit ' +
-      'hour precision, so the value is malformed past the day. The date rule takes the first eight ' +
-      'digits and emits "2011-02-01"^^xsd:date with no warning, which states a calendar day with ' +
-      'full confidence on the strength of a value the source got wrong. The guess is a REASONABLE ' +
-      'one — the defect is that it is indistinguishable from a well-formed day.',
-    expectedOnceFixed:
-      'The day is still emitted (throwing the record\'s date away over a stray digit would lose more ' +
-      'than it saves), but the import warns that the source value was malformed, so a reader can ' +
-      'tell a stated date from a salvaged one.',
-    probe: (o) => ({
-      malformedDateWarnings: o.importWarnings.filter((w) => w.includes('201102013')).length,
-      dates: o
-        .valuesOn(NS.health + 'LabResultRecord', NS.health + 'performedDate')
-        .filter((d) => d.startsWith('2011')),
-    }),
-    current: { malformedDateWarnings: 0, dates: ['2011-02-01', '2011-02-01', '2011-02-01', '2011-02-01'] },
-    fixed: { malformedDateWarnings: 1, dates: ['2011-02-01', '2011-02-01', '2011-02-01', '2011-02-01'] },
-  },
-  {
     id: 'P12-nullflavor-variety-collapses-to-one-absence',
     scenario: 'P12',
     currentWrongOutcome:
@@ -413,45 +274,20 @@ export const KNOWN_OUTCOMES: KnownOutcome[] = [
     expectedOnceFixed:
       'The nullFlavor is carried, so "we never measured it", "the result is coming" and "we asked ' +
       'and were not told" stay three different answers. The records still carry no resultValue — ' +
-      'inventing one is not the fix.',
+      'inventing one is not the fix. BLOCKED ON VOCABULARY, deliberately: the predicate this entry ' +
+      'names, health:dataAbsentReason, does not exist. No property in health, clinical or core ' +
+      'carries a reason-for-absence today, and vocabulary is authored in `spec/` and synced into ' +
+      'src/shapes/ — emitting a term the ontology does not define would put an unvalidatable ' +
+      'predicate in every pod and is not a smaller change than adding it properly. So the CONVERTER ' +
+      'fix waits on a spec addition binding health:dataAbsentReason to the HL7 v3 NullFlavor / FHIR ' +
+      'data-absent-reason value set, and this entry stays open to say so rather than being answered ' +
+      'with an invented term.',
     probe: (o) => ({
       labsWithoutValue: o.countMissing(NS.health + 'LabResultRecord', NS.health + 'resultValue'),
       dataAbsentReasons: o.values(NS.health + 'dataAbsentReason').length,
     }),
     current: { labsWithoutValue: 3, dataAbsentReasons: 0 },
     fixed: { labsWithoutValue: 3, dataAbsentReasons: 3 },
-  },
-  {
-    id: 'P12-nullflavor-empty-section-queued-for-extraction',
-    scenario: 'P12',
-    currentWrongOutcome:
-      'An Allergies section carrying nullFlavor="NI" and no entries becomes a ClinicalDocument ' +
-      'narrative record with cascade:requiresLLMExtraction true. The section has already said, in ' +
-      'the ratified way, that it holds no information; queueing it for extraction offers a model ' +
-      'the sentence "No information available." and asks what allergies it contains.',
-    expectedOnceFixed:
-      'A section whose nullFlavor says there is no information is not queued for extraction. ' +
-      'Whether it should produce a record at all (an explicit "this section was empty" is more than ' +
-      'the pod knows otherwise) is the open question; not asking a model to read it is not.',
-    probe: (o) => o.valuesOn(NS.clinical + 'ClinicalDocument', NS.cascade + 'requiresLLMExtraction'),
-    current: ['false', 'false', 'true'],
-    fixed: ['false', 'false', 'false'],
-  },
-  {
-    id: 'P12-ccda-convert-under-reports-what-it-produced',
-    scenario: 'P12',
-    currentWrongOutcome:
-      '`cascade convert --json --from c-cda` reports resourceCount 2 for a document from which it ' +
-      'emits 8 record subjects, because the C-CDA importer counts documents-and-sections where the ' +
-      'FHIR importer counts records. A caller reading resourceCount to decide whether an import is ' +
-      'worth running, or to show "N records found", is told a number four times too small, and the ' +
-      'two importers disagree about what the field means.',
-    expectedOnceFixed:
-      'resourceCount means the same thing for every importer: the number of records the conversion ' +
-      'produced. For this document that is 8 and 5.',
-    probe: (o) => ({ reported: o.reportedResourceCount, produced: o.convertedRecords }),
-    current: { reported: [2, 2], produced: [8, 5] },
-    fixed: { reported: [8, 5], produced: [8, 5] },
   },
 ];
 

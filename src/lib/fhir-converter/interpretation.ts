@@ -65,18 +65,32 @@ const NEAREST_LEGACY_MAPPING: Record<string, string> = {
 
 /**
  * The `health:interpretation` value for one FHIR `Observation.interpretation`
- * array.
+ * array, or `undefined` when there is no honest value to write.
  *
  * - No interpretation, or one carrying no code  -> `unknown`
  * - A code the shapes accept                    -> that code, verbatim
- * - Anything else                               -> nearest legacy mapping, else
- *                                                  `unknown`, and a warning
- *                                                  naming the code that was lost
+ * - Anything else                               -> nearest legacy mapping if one
+ *                                                  applies, else `undefined`,
+ *                                                  and a warning naming the code
+ *
+ * WHY THE LAST CASE IS NOT `unknown`. It was, and that put two different facts
+ * in the pod as one string. `unknown` is the data-absent-reason code, and this
+ * module's own contract is that it means ONE thing: the source Observation
+ * carried no interpretation. Writing it for a code the vocabulary cannot express
+ * asserts something the source never said — that it reported nothing — on a
+ * record where it reported a local flag. The import does warn, but a warning is
+ * transient and the pod is what survives, so the distinction has to survive in
+ * the pod: "the source stated something this vocabulary cannot express" is now
+ * an ABSENT `health:interpretation`, and "the source stated none" is `unknown`.
+ *
+ * The record does not carry the source's own uninterpretable code, because there
+ * is no ratified Cascade property to carry it under; that wants a vocabulary
+ * addition authored in `spec/`, not a term invented here.
  */
 export function interpretationValue(
   interpretation: unknown,
   warnings?: string[],
-): string {
+): string | undefined {
   if (!Array.isArray(interpretation) || interpretation.length === 0) {
     return INTERPRETATION_ABSENT;
   }
@@ -89,7 +103,11 @@ export function interpretationValue(
   const nearest = NEAREST_LEGACY_MAPPING[code];
   warnings?.push(
     `Observation.interpretation code "${code}" is not in the ObservationInterpretation ` +
-      `set health:interpretation accepts; recorded as "${nearest ?? INTERPRETATION_ABSENT}"`,
+      `set health:interpretation accepts; ` +
+      (nearest
+        ? `recorded as "${nearest}"`
+        : 'no interpretation recorded for this result (recording it as "unknown" would ' +
+          'be indistinguishable from a source that stated none)'),
   );
-  return nearest ?? INTERPRETATION_ABSENT;
+  return nearest;
 }

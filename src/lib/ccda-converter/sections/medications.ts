@@ -58,7 +58,7 @@ export function extractMedicationQuads(
     //   2. the narrative paragraph the code's originalText references (#medNN)
     //      — this is where Epic puts the human-readable name
     //   3. RxNorm ingredient lookup by RXCUI (only resolves ingredient-level codes)
-    const narrativeName = resolveNarrativeName(codeEl, narrativeIdMap);
+    const narrativeName = resolveNarrativeName(codeEl, narrativeIdMap, warnings);
     const displayName =
       (typeof rawDisplayName === 'string' ? rawDisplayName.trim() : '') ||
       narrativeName ||

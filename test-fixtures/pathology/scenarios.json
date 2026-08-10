@@ -11,17 +11,17 @@
       ],
       "expect": {
         "convertedRecords": [4, 6],
-        "reportedResourceCount": [4, 3],
-        "podRecords": 8,
+        "reportedResourceCount": [4, 6],
+        "podRecords": 7,
         "podRecordsByType": {
           "ClinicalDocument": 2,
           "ConditionRecord": 1,
           "ImmunizationRecord": 1,
           "LaboratoryReport": 1,
-          "LabResultRecord": 2,
+          "LabResultRecord": 1,
           "PatientProfile": 1
         },
-        "merges": 2,
+        "merges": 3,
         "conflicts": 0,
         "edgesInPod": 1,
         "violations": 0,
@@ -34,7 +34,7 @@
       "batches": [{ "file": "p02-duplicate-source-id-ccda.xml", "from": "c-cda" }],
       "expect": {
         "convertedRecords": [5],
-        "reportedResourceCount": [2],
+        "reportedResourceCount": [5],
         "podRecords": 5,
         "podRecordsByType": {
           "ClinicalDocument": 1,
@@ -55,7 +55,7 @@
       "batches": [{ "file": "p03-narrative-names-ccda.xml", "from": "c-cda" }],
       "expect": {
         "convertedRecords": [8],
-        "reportedResourceCount": [2],
+        "reportedResourceCount": [8],
         "podRecords": 8,
         "podRecordsByType": {
           "ClinicalDocument": 1,
@@ -67,7 +67,15 @@
         "conflicts": 0,
         "edgesInPod": 5,
         "violations": 2,
-        "importWarnings": 0
+        "importWarnings": 1,
+        "_valuesNote": "Three of the five results are named; the dangling reference and the one nothing names anywhere carry NO testName. That is the point of the one warning above: the record still gains no name, because inventing one from the LOINC code would fabricate the attested rendering, and the warning is the only place 'the rendering we were given was incomplete' is still distinguishable from 'this test was never named'.",
+        "values": [
+          {
+            "on": "health:LabResultRecord",
+            "predicate": "health:testName",
+            "values": ["Free thyroxine", "Thyroid stimulating hormone", "Triiodothyronine"]
+          }
+        ]
       }
     },
     {
@@ -76,7 +84,7 @@
       "batches": [{ "file": "p04-date-precision-ccda.xml", "from": "c-cda" }],
       "expect": {
         "convertedRecords": [8],
-        "reportedResourceCount": [3],
+        "reportedResourceCount": [8],
         "podRecords": 8,
         "podRecordsByType": {
           "ClinicalDocument": 2,
@@ -105,7 +113,25 @@
         "conflicts": 0,
         "edgesInPod": 0,
         "violations": 0,
-        "importWarnings": 1
+        "importWarnings": 1,
+        "_valuesNote": "interpretation: H, S and POS are carried verbatim; exactly ONE record reads as absent, and it is the one whose source stated no interpretation. The record carrying the unmapped local flag ZQ7 has NO interpretation at all rather than 'unknown', because 'unknown' is the data-absent-reason code and means the source stated none. labCategory: every category the source stated, 'laboratory' included, so the multi-category result is findable under the category that decided its routing as well as the one it also claims.",
+        "values": [
+          {
+            "on": "health:LabResultRecord",
+            "predicate": "health:interpretation",
+            "values": ["H", "H", "POS", "S", "unknown"]
+          },
+          {
+            "on": "health:LabResultRecord",
+            "predicate": "health:labCategory",
+            "values": [
+              "laboratory", "laboratory", "laboratory",
+              "laboratory", "laboratory", "laboratory",
+              "procedure"
+            ]
+          }
+        ],
+        "sourceBreakdown": { "unknown": 8 }
       }
     },
     {
@@ -188,9 +214,9 @@
       "expect": {
         "convertedRecords": [7, 3],
         "reportedResourceCount": [7, 3],
-        "podRecords": 9,
-        "podRecordsByType": { "PatientProfile": 1, "VitalSign": 8 },
-        "merges": 1,
+        "podRecords": 7,
+        "podRecordsByType": { "PatientProfile": 1, "VitalSign": 6 },
+        "merges": 3,
         "conflicts": 0,
         "edgesInPod": 0,
         "violations": 0,
@@ -215,13 +241,27 @@
       "expect": {
         "convertedRecords": [5, 6],
         "reportedResourceCount": [5, 6],
-        "podRecords": 5,
-        "podRecordsByType": { "Medication": 4, "PatientProfile": 1 },
-        "merges": 2,
-        "conflicts": 3,
+        "podRecords": 6,
+        "podRecordsByType": { "Medication": 5, "PatientProfile": 1 },
+        "merges": 1,
+        "conflicts": 4,
         "edgesInPod": 0,
         "violations": 0,
-        "importWarnings": 0
+        "importWarnings": 0,
+        "_valuesNote": "Every medication carries the dose its source stated, whether that rode on MedicationStatement.dosage or on MedicationRequest.dosageInstruction. Both dose disagreements (levothyroxine 75/100 mcg, sertraline 50/100 mg) therefore raise a conflict, so the outcome no longer depends on which FHIR shape the source used. The list has five entries and four drugs because the two stopped metformin orders are different products (immediate and extended release, different RxNorm codes) and are kept apart.",
+        "values": [
+          {
+            "on": "clinical:Medication",
+            "predicate": "clinical:dosage",
+            "values": [
+              "100 mcg by mouth every morning",
+              "100 mg by mouth every morning",
+              "Take 1 tablet (20 mg) by mouth once daily",
+              "Take 1 tablet (500 mg) by mouth twice daily",
+              "Take 1 tablet (500 mg) by mouth twice daily"
+            ]
+          }
+        ]
       }
     },
     {
@@ -265,7 +305,7 @@
       ],
       "expect": {
         "convertedRecords": [8, 5],
-        "reportedResourceCount": [2, 2],
+        "reportedResourceCount": [8, 5],
         "podRecords": 12,
         "podRecordsByType": {
           "ClinicalDocument": 3,
@@ -273,11 +313,19 @@
           "LabResultRecord": 6,
           "PatientProfile": 1
         },
-        "merges": 1,
+        "merges": 0,
         "conflicts": 0,
         "edgesInPod": 6,
         "violations": 0,
-        "importWarnings": 0
+        "importWarnings": 1,
+        "_valuesNote": "The one warning is the malformed 9-digit effectiveTime: the day is still emitted, so no record loses its date, but the import says the value was salvaged rather than stated. requiresLLMExtraction is false on all three narrative documents, including the Allergies section carrying nullFlavor=\"NI\": a section that has already said in the ratified way that it holds no information is not offered to a model with the question of what allergies it contains.",
+        "values": [
+          {
+            "on": "clinical:ClinicalDocument",
+            "predicate": "cascade:requiresLLMExtraction",
+            "values": ["false", "false", "false"]
+          }
+        ]
       }
     }
   ]

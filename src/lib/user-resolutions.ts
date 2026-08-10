@@ -123,11 +123,79 @@ export interface PendingConflict {
 /**
  * Generate a deterministic conflict ID from record type and identity fields.
  * Same inputs always produce the same conflict ID (stable across re-imports).
+ *
+ * The FORMULA is unchanged and deliberately so; what changed is the `matchedOn`
+ * strings the reconciler feeds it. See {@link legacyConflictIds}.
  */
 export function generateConflictId(recordType: string, matchedOn: string): string {
   // Simple deterministic ID — use the matchedOn string from the reconciler
   const safe = `${recordType}::${matchedOn}`.replace(/[^a-zA-Z0-9:+./-]/g, '_');
   return safe.slice(0, 80);  // Truncate to avoid overly long IDs
+}
+
+/**
+ * The conflict ids an EARLIER version of this CLI would have written for the same
+ * conflict, for reading a pod it wrote. Never for writing.
+ *
+ * Two reconciler defects put ids on disk that this version no longer produces,
+ * and both were in `matchedOn` rather than in the formula above:
+ *
+ *   1. A code URI was reduced by `uri.split('/').pop() ?? uri.split('#').pop()`,
+ *      whose second operand is unreachable, so every LOINC code reached the id as
+ *      `rdf#3094-0` instead of `3094-0`.
+ *   2. A medication matched on partial name reported the bare constant
+ *      `partial-name`, so EVERY partial-name medication conflict in a pod shared
+ *      one id — which is why this matters beyond cosmetics:
+ *      `settings/user-resolutions.ttl` is keyed by conflict id and cannot hold
+ *      two rows under one key.
+ *
+ * `settings/pending-conflicts.ttl` re-keys itself, because every import rewrites
+ * it wholesale from the run's own conflicts; `pod resolve` matches the id the
+ * user pasted against that file, so it needs nothing from here. What does NOT
+ * re-key itself is the decision log: a row recorded before this change carries
+ * the id from the old formula forever, and a lookup by the new id would miss it.
+ * This function is how such a row is still found.
+ *
+ * Returns only ids that DIFFER from the current one, so a caller can treat a
+ * non-empty result as "there is an older spelling to look for".
+ */
+export function legacyConflictIds(recordType: string, matchedOn: string): string[] {
+  const current = generateConflictId(recordType, matchedOn);
+  const candidates = new Set<string>();
+
+  // (2) `partial-name:"lisinopril"` -> `partial-name`
+  const bareName = matchedOn.replace(/^partial-name:".*"$/, 'partial-name');
+  if (bareName !== matchedOn) candidates.add(generateConflictId(recordType, bareName));
+
+  // (1) `loinc:3094-0+…` -> `loinc:rdf#3094-0+…`. Only LOINC is affected: it is
+  // the one system whose URI carries a fragment (`http://loinc.org/rdf#3094-0`).
+  const mangledLoinc = matchedOn.replace(/\b(loinc|loinc-approx):(?!rdf#)/g, '$1:rdf#');
+  if (mangledLoinc !== matchedOn) candidates.add(generateConflictId(recordType, mangledLoinc));
+
+  candidates.delete(current);
+  return [...candidates].sort();
+}
+
+/**
+ * The stored decision for a conflict, looked up under the id this version
+ * generates and then under any id an earlier version would have written.
+ *
+ * Read-old, write-new: `saveUserResolution` always records under the current id,
+ * so a pod converges on the new spelling as its conflicts are answered, while an
+ * answer given before this change is still found.
+ */
+export function findUserResolution(
+  resolutions: Map<string, UserResolution>,
+  recordType: string,
+  matchedOn: string,
+): UserResolution | undefined {
+  const current = resolutions.get(generateConflictId(recordType, matchedOn));
+  if (current) return current;
+  for (const id of legacyConflictIds(recordType, matchedOn)) {
+    const found = resolutions.get(id);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 /**

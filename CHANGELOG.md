@@ -37,15 +37,116 @@ Tiers that must not be committed are passed as absolute paths in `CASCADE_PATHOL
 Two gates run over the result. `tests/pathology-known-outcomes.ts` is a known-defect ledger built as
 a ratchet rather than a filter: each entry records what the pipeline does today AND what it must do
 once fixed, and the gate fails in both directions, so a new deviation is caught and a silently
-corrected one is caught too. The ledger can only shrink deliberately. It currently carries seventeen
-entries. `tests/pathology-reconciliation-baseline.json` is a report-only scorecard: for the
+corrected one is caught too. The ledger can only shrink deliberately. It carried seventeen entries
+when it landed and carries eight now; the nine that were retired are the subject of the Fixed
+section below. `tests/pathology-reconciliation-baseline.json` is a report-only scorecard: for the
 scenarios that carry a constructed ground truth about which records denote the same clinical event,
 the harness measures the reconciler's precision and recall over merge pairs and compares them to a
-committed baseline. It does not assert the numbers are good — two of the recalls are 0. It asserts
-they are known, so a change to matching has to move the baseline on purpose.
+committed baseline. It does not assert the numbers are good — one of the recalls is still 0. It
+asserts they are known, so a change to matching has to move the baseline on purpose.
 
 No converter or reconciler behaviour changes in this entry. The harness documents; fixes come
 separately.
+
+**A slot in the fixture manifest for the values a scenario expects, not only the counts.** A
+scenario's `expect` block may now carry `values` (per-predicate object values on subjects of a named
+class) and `sourceBreakdown`. Retiring a ledger entry has to MOVE its expectation into the scenario
+rather than delete it, and several of the retired entries were about one predicate's values, which a
+record census cannot check. Without somewhere to put them, "the ledger is allowed to shrink" would
+quietly have meant "the pin is allowed to disappear". The harness also now asserts, for every
+scenario and every batch, that `sourceBreakdown` accounts for every record the batch imported.
+
+### Fixed
+
+**A prescription's dose was read from a field MedicationRequest does not have, and the loss was
+silent in both directions.** FHIR R4 gives `MedicationStatement` a `dosage` array and
+`MedicationRequest` a `dosageInstruction` array; they are the same `Dosage` datatype under two field
+names. The converter read `resource.dosage` only, so every prescription reached the pod with no
+dose. Dose is deliberately not part of the medication identity key, so two doses of one drug match
+as one drug and it is the dose-disagreement check that is supposed to raise the difference for a
+person to answer. With both doses absent, that check compared two undefineds, found no disagreement,
+and merged a dose change away as a near-duplicate, with no conflict and no warning — while the
+identical change expressed as a `MedicationStatement` raised its conflict correctly. Which of two
+ordinary FHIR shapes the source used decided whether a dose change survived the import.
+
+**`pod import --reconcile-existing` never took the cross-batch path.** `loadExistingPodData` labelled
+its inputs `existing-pod`, but that label is only the DEFAULT source system for records that state
+none, and every record a pod holds states one (the reconciler re-states `cascade:sourceSystem` on
+every write). So the `hasExistingPod` test was permanently false and every import fell through to
+the single-batch branch. The marker is now carried on the input itself (`ReconcilerInput.existingPod`)
+rather than inferred from a label a record can overwrite. A new record whose subject IRI the pod
+already holds is now dropped in favour of the stored copy, so a re-import does not re-stamp
+`clinical:importedAt` or re-resolve edges that were already resolved.
+
+**Four matcher defects, each a lookup of a predicate no converter writes.** None of them could
+produce a wrong record, which is why a green suite held all four: a matcher that never fires produces
+no output, and "these two did not merge" reads the same as "there was nothing to merge".
+
+- `matchVitalSigns` read `health:testCode`, `health:effectiveDate` and `health:value`. Both
+  converters write `clinical:loincCode`, `clinical:effectiveDate` and `clinical:value`, so every
+  lookup returned undefined and no two vital signs in any pod had ever matched. It now reads the
+  predicates that are written, and matches on a THIRTY-MINUTE window rather than a calendar day: a
+  vital sign is an instant, so a day-wide rule merges a morning and an evening blood pressure while a
+  zero-width one keeps one cuff reading forwarded to a second system seventeen minutes later as two
+  records. A disagreement beyond the value tolerance inside the window is two measurements, and both
+  are kept.
+- `matchImmunizations` read `health:cvxCode`, which only the C-CDA importer writes; the FHIR importer
+  writes `health:vaccineCode` carrying `CVX-<code>`. Both spellings are now read and normalized, so a
+  C-CDA immunization and a FHIR one for the same shot can compare at all. The name tier is unchanged.
+- `codeFromUri` was `uri.split('/').pop() ?? uri.split('#').pop()`, whose second operand is
+  unreachable because the first is always truthy. Every LOINC URI this repo mints
+  (`http://loinc.org/rdf#3094-0`) came back as `rdf#3094-0`, so a FHIR lab never matched the same lab
+  from a C-CDA (`http://loinc.org/3094-0`), and the mangled form was interpolated into the conflict
+  ids persisted in `settings/pending-conflicts.ttl`. It now delegates to `extractCodeValue`, the
+  definition shared with the SDK.
+- `matchMedications` reported the bare constant `partial-name` for a containment match, and
+  `generateConflictId` builds the stored id out of that string, so every partial-name medication
+  conflict in a pod shared ONE id. `settings/user-resolutions.ttl` is keyed by conflict id and cannot
+  hold two rows under one key, and `pod resolve` removes every pending conflict whose id matches, so
+  answering one question overwrote the record of another and cleared the rest of the queue
+  unanswered. The id now names the drug.
+
+Conflict ids written by an earlier version are read, not orphaned: `legacyConflictIds` reproduces the
+pre-fix id for both changed shapes, and `findUserResolution` looks up the current id first and falls
+back to the older spelling. New decisions are always recorded under the new id, so a pod converges as
+its conflicts are answered. `settings/pending-conflicts.ttl` needs nothing, since every import
+rewrites it wholesale.
+
+**Six places a converter stated something the source had not.**
+
+- A malformed `effectiveTime` past the calendar day (`201102013`) was salvaged down to its first
+  eight digits and the day was then emitted as though the source had stated it, with no warning. The
+  day is still emitted; the import now says it was salvaged and names the value.
+- A C-CDA section carrying a `nullFlavor` was queued for LLM extraction. The section had already
+  said, in the ratified way, that it holds no information; queueing it offers a model the sentence
+  "No information available." and asks what allergies it contains. Sections that made no such
+  statement are still queued.
+- A narrative `<reference>` pointing at an ID the section does not declare resolved to nothing in
+  silence, so in the pod it was byte-indistinguishable from a record that was never named anywhere.
+  The record still gains no name; the import now warns, naming the unresolved reference.
+- `cascade convert --json --from c-cda` reported `resourceCount` as documents-and-sections while the
+  FHIR importer reported records, so one field meant two things depending on `--from`. A C-CDA
+  `<entry>` routinely wraps an organizer holding several observations, so a document producing eight
+  records reported two. It now reports the records the conversion produced.
+- The import report's `sourceBreakdown` omitted every record whose EHR of origin could not be
+  determined, so a FHIR bundle with only `urn:uuid:` references imported eight records and accounted
+  for none of them, which reads as "this pod has no data" rather than "we could not tell where this
+  came from". Unattributed records are now counted under the ratified `unknown` data-absent token,
+  the same one the C-CDA path already writes. This is a change to the REPORT, not to what is stored.
+- `health:labCategory` dropped the value `laboratory`, on the reading that the record's type implies
+  it. An Observation categorised both laboratory and procedure therefore carried only `procedure`:
+  the category that decided the routing was the one dropped, and a pod filtered by `labCategory`
+  omitted a record filed as a lab. Every category the source stated is now carried, which
+  `health:labCategory` has accepted since health v2.6.
+
+**An unmappable interpretation code and a source that stated none are no longer the same string.**
+An `Observation.interpretation` outside the set `health:interpretation` accepts was written as
+`unknown`, which is the data-absent-reason code and means exactly one thing: the source carried no
+interpretation. Writing it for a local flag asserts something the source never said, and the import
+warning that distinguished them lasts only as long as the import while the pod is what survives. The
+unmappable case now writes no `health:interpretation` at all and keeps its warning; `unknown` is
+reserved for the source that reported nothing. The record does not carry the source's own
+uninterpretable code, because no ratified Cascade property exists to carry it under.
 
 ---
 
