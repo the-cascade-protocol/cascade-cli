@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  P02 - DUPLICATE SOURCE ID COLLISION.
+
+  One <id> value, reused verbatim across three DISTINCT laboratory observations
+  in the same organizer. This is not a malformed document invented to break
+  something: the public HL7 Continuity of Care Document sample distributes a
+  single root-only <id> across every result observation in its Results section,
+  and vendors that copied that sample inherited the shape. HL7 v3 II says a root
+  alone may be the entire instance identifier, so the converter takes the source
+  at its word and mints ONE subject IRI for all three.
+
+  The three observations disagree about everything a lab result is: different
+  LOINC code, different name, different value, different unit, different
+  reference range. So the collision is not a re-import; it is three records
+  claiming one identity.
+
+  The fourth observation in this organizer carries a DISTINCT id and is the
+  control: whatever happens to the first three must not happen to it.
+
+  Authored for this repository. Invented person, organization, identifiers,
+  dates and values. No content is derived from a real record.
+-->
+<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <realmCode code="US"/>
+  <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>
+  <templateId root="2.16.840.1.113883.10.20.22.1.1"/>
+  <id root="2.16.840.1.113883.19.5.99992.1" extension="P02-CCDA-001"/>
+  <code code="34133-9" displayName="Summarization of Episode Note" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+  <title>Northgate Regional Laboratory Results Summary</title>
+  <effectiveTime value="20250406101000-0500"/>
+  <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>
+  <languageCode code="en-US"/>
+  <recordTarget>
+    <patientRole>
+      <id root="2.16.840.1.113883.19.5.99992.2" extension="MRN-6620"/>
+      <patient>
+        <name use="L"><given>Teodoro</given><family>Halvane</family></name>
+        <administrativeGenderCode code="M" codeSystem="2.16.840.1.113883.5.1"/>
+        <birthTime value="19580922"/>
+      </patient>
+    </patientRole>
+  </recordTarget>
+  <custodian>
+    <assignedCustodian>
+      <representedCustodianOrganization>
+        <id root="2.16.840.1.113883.19.5.99992.1"/>
+        <name>Northgate Regional Laboratory</name>
+      </representedCustodianOrganization>
+    </assignedCustodian>
+  </custodian>
+  <component>
+    <structuredBody>
+
+      <component>
+        <section>
+          <templateId root="2.16.840.1.113883.10.20.22.2.3.1"/>
+          <code code="30954-2" displayName="Relevant Diagnostic Tests and/or Laboratory Data" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+          <title>Results</title>
+          <text>
+            <table>
+              <tbody>
+                <tr><td>Sodium</td><td>139 mmol/L</td></tr>
+                <tr><td>Potassium</td><td>4.2 mmol/L</td></tr>
+                <tr><td>Chloride</td><td>104 mmol/L</td></tr>
+                <tr><td>Creatinine</td><td>1.1 mg/dL</td></tr>
+              </tbody>
+            </table>
+          </text>
+          <entry typeCode="DRIV">
+            <organizer classCode="BATTERY" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.1"/>
+              <id root="2.16.840.1.113883.19.5.99992.4" extension="P02-ORG-BMP"/>
+              <code code="51990-0" displayName="Basic metabolic panel" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+              <statusCode code="completed"/>
+              <effectiveTime value="20250406094500-0500"/>
+
+              <!-- COLLIDING #1 - shares the root-only id below with #2 and #3. -->
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="a1d84b70-5c31-11ef-9c1d-0800200c9a66"/>
+                  <code code="2951-2" displayName="Sodium [Moles/volume] in Serum or Plasma" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250406094500-0500"/>
+                  <value xsi:type="PQ" value="139" unit="mmol/L"/>
+                  <interpretationCode code="N" codeSystem="2.16.840.1.113883.5.83"/>
+                  <referenceRange>
+                    <observationRange>
+                      <text>135 - 145 mmol/L</text>
+                    </observationRange>
+                  </referenceRange>
+                </observation>
+              </component>
+
+              <!-- COLLIDING #2 -->
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="a1d84b70-5c31-11ef-9c1d-0800200c9a66"/>
+                  <code code="2823-3" displayName="Potassium [Moles/volume] in Serum or Plasma" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250406094500-0500"/>
+                  <value xsi:type="PQ" value="4.2" unit="mmol/L"/>
+                  <interpretationCode code="N" codeSystem="2.16.840.1.113883.5.83"/>
+                  <referenceRange>
+                    <observationRange>
+                      <text>3.5 - 5.1 mmol/L</text>
+                    </observationRange>
+                  </referenceRange>
+                </observation>
+              </component>
+
+              <!-- COLLIDING #3 -->
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="a1d84b70-5c31-11ef-9c1d-0800200c9a66"/>
+                  <code code="2075-0" displayName="Chloride [Moles/volume] in Serum or Plasma" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250406094500-0500"/>
+                  <value xsi:type="PQ" value="104" unit="mmol/L"/>
+                  <interpretationCode code="N" codeSystem="2.16.840.1.113883.5.83"/>
+                  <referenceRange>
+                    <observationRange>
+                      <text>98 - 107 mmol/L</text>
+                    </observationRange>
+                  </referenceRange>
+                </observation>
+              </component>
+
+              <!-- CONTROL - a distinct id, so it must survive as its own record. -->
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.19.5.99992.5" extension="P02-OBS-CREAT"/>
+                  <code code="2160-0" displayName="Creatinine [Mass/volume] in Serum or Plasma" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250406094500-0500"/>
+                  <value xsi:type="PQ" value="1.1" unit="mg/dL"/>
+                  <interpretationCode code="N" codeSystem="2.16.840.1.113883.5.83"/>
+                  <referenceRange>
+                    <observationRange>
+                      <text>0.7 - 1.3 mg/dL</text>
+                    </observationRange>
+                  </referenceRange>
+                </observation>
+              </component>
+
+            </organizer>
+          </entry>
+        </section>
+      </component>
+
+    </structuredBody>
+  </component>
+</ClinicalDocument>

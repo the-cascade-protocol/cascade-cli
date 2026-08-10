@@ -1,0 +1,96 @@
+{
+  "_comment": "P08a - SAME-SOURCE REPEAT VITALS (source A). Three blood-pressure readings taken hours apart on ONE day at ONE practice, each a separate clinical event: a morning reading, a midday recheck, and an evening reading after a dose change. Nothing about them is a duplicate. A matcher that keys on 'same LOINC + same calendar day' sees three identical keys, so the only thing standing between these and a merge is the guard that refuses to compare two records from the same source. The pathology this fixture exists to catch: that guard keys on the TRANSPORT label, not on the clinical source, so it can be defeated from outside (see p08b-repeat-vitals-beta.json, which introduces a fourth reading from a second system 17 minutes after the third). Systolic and diastolic are separate observations, which is how a great many real exports carry them. 100% synthetic.",
+  "resourceType": "Bundle",
+  "id": "p08a-alpha",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/Patient/hv-551",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "hv-551",
+        "name": [{ "use": "official", "family": "Delacroix-Rue", "given": ["Bartholomew"] }],
+        "gender": "male",
+        "birthDate": "1955-07-09"
+      }
+    },
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/Observation/hv-sys-morning",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "hv-sys-morning",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "vital-signs" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8480-6", "display": "Systolic blood pressure" }], "text": "Systolic blood pressure" },
+        "subject": { "reference": "https://fhir.harborviewfamily.example/r4/Patient/hv-551" },
+        "effectiveDateTime": "2025-06-11T08:05:00-07:00",
+        "valueQuantity": { "value": 138, "unit": "mm[Hg]" }
+      }
+    },
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/Observation/hv-dia-morning",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "hv-dia-morning",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "vital-signs" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8462-4", "display": "Diastolic blood pressure" }], "text": "Diastolic blood pressure" },
+        "subject": { "reference": "https://fhir.harborviewfamily.example/r4/Patient/hv-551" },
+        "effectiveDateTime": "2025-06-11T08:05:00-07:00",
+        "valueQuantity": { "value": 86, "unit": "mm[Hg]" }
+      }
+    },
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/Observation/hv-sys-midday",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "hv-sys-midday",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "vital-signs" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8480-6", "display": "Systolic blood pressure" }], "text": "Systolic blood pressure" },
+        "subject": { "reference": "https://fhir.harborviewfamily.example/r4/Patient/hv-551" },
+        "effectiveDateTime": "2025-06-11T12:40:00-07:00",
+        "valueQuantity": { "value": 129, "unit": "mm[Hg]" }
+      }
+    },
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/Observation/hv-dia-midday",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "hv-dia-midday",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "vital-signs" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8462-4", "display": "Diastolic blood pressure" }], "text": "Diastolic blood pressure" },
+        "subject": { "reference": "https://fhir.harborviewfamily.example/r4/Patient/hv-551" },
+        "effectiveDateTime": "2025-06-11T12:40:00-07:00",
+        "valueQuantity": { "value": 81, "unit": "mm[Hg]" }
+      }
+    },
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/Observation/hv-sys-evening",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "hv-sys-evening",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "vital-signs" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8480-6", "display": "Systolic blood pressure" }], "text": "Systolic blood pressure" },
+        "subject": { "reference": "https://fhir.harborviewfamily.example/r4/Patient/hv-551" },
+        "effectiveDateTime": "2025-06-11T17:20:00-07:00",
+        "valueQuantity": { "value": 144, "unit": "mm[Hg]" }
+      }
+    },
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/Observation/hv-dia-evening",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "hv-dia-evening",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "vital-signs" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8462-4", "display": "Diastolic blood pressure" }], "text": "Diastolic blood pressure" },
+        "subject": { "reference": "https://fhir.harborviewfamily.example/r4/Patient/hv-551" },
+        "effectiveDateTime": "2025-06-11T17:20:00-07:00",
+        "valueQuantity": { "value": 90, "unit": "mm[Hg]" }
+      }
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "_comment": "P09a - MEDICATION CHAINS (source A: the primary-care practice). Four chains start here. DOSE SUPERSESSION: lisinopril 10 mg, stopped last year, whose successor at 20 mg lives in p09b. STALE-ACTIVE: metformin 500 mg, still marked active in this practice's list, which the specialist in p09b stopped twice over. DOSE DISAGREEMENT, DOSE CARRIED: levothyroxine 75 mcg as a MedicationStatement, whose dose text rides on the resource's own `dosage` array. DOSE DISAGREEMENT, DOSE ON THE ORDER: sertraline 50 mg as a MedicationRequest, whose dose text rides on `dosageInstruction` instead. The last two are the same clinical question asked through two ordinary FHIR shapes, and they exist to show whether the answer depends on which shape the source happened to use. Dose is deliberately stripped by the matcher's name normalization, so '10 mg' and '20 mg' are one drug with a dose disagreement rather than two drugs; the question the pipeline has to keep open is which one the patient is taking TODAY. 100% synthetic.",
+  "resourceType": "Bundle",
+  "id": "p09a-alpha",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/Patient/hv-903",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "hv-903",
+        "name": [{ "use": "official", "family": "Anselminho", "given": ["Rosalind"] }],
+        "gender": "female",
+        "birthDate": "1968-02-14"
+      }
+    },
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/MedicationRequest/hv-lisinopril-10",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "hv-lisinopril-10",
+        "status": "stopped",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "314076", "display": "Lisinopril 10 MG Oral Tablet" }],
+          "text": "Lisinopril 10 mg oral tablet"
+        },
+        "subject": { "reference": "https://fhir.harborviewfamily.example/r4/Patient/hv-903" },
+        "requester": { "display": "Adaeze Nwankwo-Barrett, MD" },
+        "authoredOn": "2023-05-02",
+        "dosageInstruction": [{ "text": "Take 1 tablet (10 mg) by mouth once daily" }]
+      }
+    },
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/MedicationRequest/hv-metformin-active",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "hv-metformin-active",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "861007", "display": "Metformin hydrochloride 500 MG Oral Tablet" }],
+          "text": "Metformin 500 mg oral tablet"
+        },
+        "subject": { "reference": "https://fhir.harborviewfamily.example/r4/Patient/hv-903" },
+        "requester": { "display": "Adaeze Nwankwo-Barrett, MD" },
+        "authoredOn": "2022-11-04",
+        "dosageInstruction": [{ "text": "Take 1 tablet (500 mg) by mouth twice daily" }]
+      }
+    },
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/MedicationStatement/hv-levothyroxine-75",
+      "resource": {
+        "resourceType": "MedicationStatement",
+        "id": "hv-levothyroxine-75",
+        "status": "active",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "966221", "display": "Levothyroxine Sodium 0.075 MG Oral Tablet" }],
+          "text": "Levothyroxine 75 mcg oral tablet"
+        },
+        "subject": { "reference": "https://fhir.harborviewfamily.example/r4/Patient/hv-903" },
+        "effectiveDateTime": "2023-01-19",
+        "dosage": [{ "text": "75 mcg by mouth every morning", "timing": { "repeat": { "frequency": 1, "period": 1, "periodUnit": "d" } } }]
+      }
+    },
+    {
+      "fullUrl": "https://fhir.harborviewfamily.example/r4/MedicationRequest/hv-sertraline-50",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "hv-sertraline-50",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "312940", "display": "Sertraline 50 MG Oral Tablet" }],
+          "text": "Sertraline 50 mg oral tablet"
+        },
+        "subject": { "reference": "https://fhir.harborviewfamily.example/r4/Patient/hv-903" },
+        "requester": { "display": "Adaeze Nwankwo-Barrett, MD" },
+        "authoredOn": "2023-09-21",
+        "dosageInstruction": [{ "text": "50 mg by mouth every morning", "timing": { "repeat": { "frequency": 1, "period": 1, "periodUnit": "d" } } }]
+      }
+    }
+  ]
+}

@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  P03 - NARRATIVE-ONLY TEST NAMES, WITH ONE DANGLING REFERENCE.
+
+  In ordinary C-CDA the attested rendering is the section narrative, and the
+  structured entry points into it with <text><reference value="#id"/> rather
+  than repeating the name on the code element. A converter that reads only
+  @displayName therefore loses the name of every such test.
+
+  Four resolvable cases and one that does NOT resolve:
+
+    P03-RESOLVES-CODE   name behind code/originalText -> #p03name1
+    P03-RESOLVES-TEXT   name behind the observation's own <text> -> #p03name2
+    P03-RESOLVES-INLINE name inline in originalText, no reference at all
+    P03-DANGLING        reference to #p03missing, which the narrative does NOT
+                        contain. The pathology: a pointer into a rendering that
+                        was truncated, re-sectioned, or exported without the
+                        table it named. The record must still import, and must
+                        not acquire a fabricated name.
+    P03-NO-NAME-AT-ALL  no @displayName, no originalText, no <text>. The floor
+                        case: nothing anywhere names this test.
+
+  Authored for this repository. Invented person, organization, identifiers,
+  dates and values. No content is derived from a real record.
+-->
+<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <realmCode code="US"/>
+  <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>
+  <templateId root="2.16.840.1.113883.10.20.22.1.1"/>
+  <id root="2.16.840.1.113883.19.5.99993.1" extension="P03-CCDA-001"/>
+  <code code="34133-9" displayName="Summarization of Episode Note" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+  <title>Cascadia Valley Clinic Results</title>
+  <effectiveTime value="20250519134500-0700"/>
+  <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>
+  <languageCode code="en-US"/>
+  <recordTarget>
+    <patientRole>
+      <id root="2.16.840.1.113883.19.5.99993.2" extension="MRN-8115"/>
+      <patient>
+        <name use="L"><given>Perrine</given><family>Odalric</family></name>
+        <administrativeGenderCode code="F" codeSystem="2.16.840.1.113883.5.1"/>
+        <birthTime value="19880305"/>
+      </patient>
+    </patientRole>
+  </recordTarget>
+  <custodian>
+    <assignedCustodian>
+      <representedCustodianOrganization>
+        <id root="2.16.840.1.113883.19.5.99993.1"/>
+        <name>Cascadia Valley Clinic</name>
+      </representedCustodianOrganization>
+    </assignedCustodian>
+  </custodian>
+  <component>
+    <structuredBody>
+
+      <component>
+        <section>
+          <templateId root="2.16.840.1.113883.10.20.22.2.3.1"/>
+          <code code="30954-2" displayName="Relevant Diagnostic Tests and/or Laboratory Data" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+          <title>Results</title>
+          <text>
+            <table>
+              <tbody>
+                <tr><td><content ID="p03name1">Thyroid stimulating hormone</content></td><td>2.10 mIU/L</td></tr>
+                <tr><td><content ID="p03name2">Free thyroxine</content></td><td>1.20 ng/dL</td></tr>
+              </tbody>
+            </table>
+          </text>
+          <entry typeCode="DRIV">
+            <organizer classCode="BATTERY" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.1"/>
+              <id root="2.16.840.1.113883.19.5.99993.4" extension="P03-ORG-THY"/>
+              <code code="24348-5" displayName="Thyroid panel" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+              <statusCode code="completed"/>
+              <effectiveTime value="20250519"/>
+
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.19.5.99993.5" extension="P03-RESOLVES-CODE"/>
+                  <code code="3016-3" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC">
+                    <originalText><reference value="#p03name1"/></originalText>
+                  </code>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250519"/>
+                  <value xsi:type="PQ" value="2.10" unit="mIU/L"/>
+                </observation>
+              </component>
+
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.19.5.99993.5" extension="P03-RESOLVES-TEXT"/>
+                  <code code="3024-7" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <text><reference value="#p03name2"/></text>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250519"/>
+                  <value xsi:type="PQ" value="1.20" unit="ng/dL"/>
+                </observation>
+              </component>
+
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.19.5.99993.5" extension="P03-RESOLVES-INLINE"/>
+                  <code code="3026-2" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC">
+                    <originalText>Triiodothyronine</originalText>
+                  </code>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250519"/>
+                  <value xsi:type="PQ" value="110" unit="ng/dL"/>
+                </observation>
+              </component>
+
+              <!-- DANGLING: #p03missing is not in the narrative above. -->
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.19.5.99993.5" extension="P03-DANGLING"/>
+                  <code code="3051-0" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC">
+                    <originalText><reference value="#p03missing"/></originalText>
+                  </code>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250519"/>
+                  <value xsi:type="PQ" value="3.9" unit="pg/mL"/>
+                </observation>
+              </component>
+
+              <!-- FLOOR: nothing names this test anywhere. -->
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.19.5.99993.5" extension="P03-NO-NAME-AT-ALL"/>
+                  <code code="3013-0" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20250519"/>
+                  <value xsi:type="PQ" value="17" unit="ng/mL"/>
+                </observation>
+              </component>
+
+            </organizer>
+          </entry>
+        </section>
+      </component>
+
+    </structuredBody>
+  </component>
+</ClinicalDocument>

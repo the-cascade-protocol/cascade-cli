@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  P12a - VENDOR-SHIPPED DEFECTS (first document).
+
+  Four shapes that certified products have been observed to emit, all in one
+  document because they arrive together in one document:
+
+    1. AN UNSUBSTITUTED TEMPLATE PLACEHOLDER AS THE DOCUMENT ID. The <id> root
+       is the literal string "ClinicalDocumentGUID" — the variable name from the
+       vendor's template, never replaced at generation time. Every document that
+       product emits therefore claims the same document identifier, which is the
+       one thing a document identifier must not do. p12-vendor-defects-b-ccda.xml
+       is the same product's next document, carrying the same literal id and
+       different content, so the harness can see what two of them do to each
+       other.
+
+    2. A MALFORMED 9-DIGIT DATE. effectiveTime="201102013": nine digits, which is
+       neither the 8-digit calendar day nor the 10-digit hour precision. The
+       honest readings are "2011-02-01 with a stray digit" and "we cannot tell",
+       and they are not the same answer.
+
+    3. AN EMPTY SECTION CARRYING nullFlavor. The Allergies section states
+       nullFlavor="NI" and contains no entries: the source is saying "no
+       information", not "no allergies". A section that imports as silence is
+       indistinguishable from one that was never in the document.
+
+    4. nullFlavor VARIETY ON VALUES. UNK (unknown), NAV (temporarily
+       unavailable) and ASKU (asked but unknown) are three different statements
+       about why a value is missing, and HL7 v3 distinguishes them deliberately.
+
+  Authored for this repository from the C-CDA R2.1 specification. Invented
+  person, organization, identifiers, dates and values. No content is derived
+  from a real record or from any external document corpus.
+-->
+<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <realmCode code="US"/>
+  <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>
+  <templateId root="2.16.840.1.113883.10.20.22.1.1"/>
+  <id root="ClinicalDocumentGUID"/>
+  <code code="34133-9" displayName="Summarization of Episode Note" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+  <title>Thornfield Community Health Summary</title>
+  <effectiveTime value="20250912103000-0600"/>
+  <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>
+  <languageCode code="en-US"/>
+  <recordTarget>
+    <patientRole>
+      <id root="2.16.840.1.113883.19.5.99995.2" extension="MRN-3372"/>
+      <patient>
+        <name use="L"><given>Yevgenia</given><family>Thorncastle</family></name>
+        <administrativeGenderCode code="F" codeSystem="2.16.840.1.113883.5.1"/>
+        <birthTime value="19811104"/>
+      </patient>
+    </patientRole>
+  </recordTarget>
+  <custodian>
+    <assignedCustodian>
+      <representedCustodianOrganization>
+        <id root="2.16.840.1.113883.19.5.99995.1"/>
+        <name>Thornfield Community Health</name>
+      </representedCustodianOrganization>
+    </assignedCustodian>
+  </custodian>
+  <component>
+    <structuredBody>
+
+      <!-- Empty section carrying nullFlavor: "no information", not "none". -->
+      <component>
+        <section nullFlavor="NI">
+          <templateId root="2.16.840.1.113883.10.20.22.2.6.1"/>
+          <code code="48765-2" displayName="Allergies, Adverse Reactions, Alerts" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+          <title>Allergies</title>
+          <text>No information available.</text>
+        </section>
+      </component>
+
+      <component>
+        <section>
+          <templateId root="2.16.840.1.113883.10.20.22.2.3.1"/>
+          <code code="30954-2" displayName="Relevant Diagnostic Tests and/or Laboratory Data" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+          <title>Results</title>
+          <text>Hematocrit 41 %; Lead, unknown; Cortisol, unavailable; Prolactin, asked but unknown</text>
+          <entry typeCode="DRIV">
+            <organizer classCode="BATTERY" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.1"/>
+              <id root="2.16.840.1.113883.19.5.99995.4" extension="P12A-ORG"/>
+              <code code="58410-2" displayName="CBC panel" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+              <statusCode code="completed"/>
+              <effectiveTime value="20110201"/>
+
+              <!-- 9-digit effectiveTime: malformed past the calendar day. -->
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.19.5.99995.5" extension="P12A-MALFORMED-DATE"/>
+                  <code code="4544-3" displayName="Hematocrit [Volume Fraction] of Blood by Automated count" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="201102013"/>
+                  <value xsi:type="PQ" value="41" unit="%"/>
+                </observation>
+              </component>
+
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.19.5.99995.5" extension="P12A-NULL-UNK"/>
+                  <code code="10368-9" displayName="Lead [Mass/volume] in Blood" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20110201"/>
+                  <value xsi:type="PQ" nullFlavor="UNK"/>
+                </observation>
+              </component>
+
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.19.5.99995.5" extension="P12A-NULL-NAV"/>
+                  <code code="2143-6" displayName="Cortisol [Mass/volume] in Serum or Plasma" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20110201"/>
+                  <value xsi:type="PQ" nullFlavor="NAV"/>
+                </observation>
+              </component>
+
+              <component>
+                <observation classCode="OBS" moodCode="EVN">
+                  <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
+                  <id root="2.16.840.1.113883.19.5.99995.5" extension="P12A-NULL-ASKU"/>
+                  <code code="2842-3" displayName="Prolactin [Mass/volume] in Serum or Plasma" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <statusCode code="completed"/>
+                  <effectiveTime value="20110201"/>
+                  <value xsi:type="PQ" nullFlavor="ASKU"/>
+                </observation>
+              </component>
+
+            </organizer>
+          </entry>
+        </section>
+      </component>
+
+    </structuredBody>
+  </component>
+</ClinicalDocument>

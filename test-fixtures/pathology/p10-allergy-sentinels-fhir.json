@@ -1,0 +1,83 @@
+{
+  "_comment": "P10 - ALLERGY SENTINELS. An allergy list carries three things that look alike in a record store and mean nothing alike in a clinic. A REAL allergen (penicillin G, with a criticality and a reaction) is a fact about the patient. 'No Known Allergies' (SNOMED 716186003) is an assertion ABOUT the list: someone asked, and the answer was none. An 'Unknown Allergen' entry is a data-absent marker: the source recorded that something was recorded, but not what. The pathology is that all three land as one record type with an allergen string, so a list view renders 'No known allergy' as though the patient were allergic to it, and 'Unknown Allergen' as though that were the name of a substance. A fourth entry is the sentinel's near-miss: a real allergen whose criticality and reaction are absent, which must NOT be confused with the data-absent case. 100% synthetic.",
+  "resourceType": "Bundle",
+  "id": "p10-allergy",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:p10-patient",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "p10-pt",
+        "name": [{ "use": "official", "family": "Sandoval-Ihejirika", "given": ["Cordelia"] }],
+        "gender": "female",
+        "birthDate": "1990-11-23"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p10-real-allergen",
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "p10-real-allergen",
+        "clinicalStatus": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", "code": "active" }] },
+        "verificationStatus": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification", "code": "confirmed" }] },
+        "type": "allergy",
+        "category": ["medication"],
+        "criticality": "high",
+        "code": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "7980", "display": "Penicillin G" }],
+          "text": "Penicillin G"
+        },
+        "patient": { "reference": "urn:uuid:p10-patient" },
+        "recordedDate": "2018-04-12",
+        "reaction": [
+          {
+            "manifestation": [{ "coding": [{ "system": "http://snomed.info/sct", "code": "247472004", "display": "Hives" }], "text": "Hives" }],
+            "severity": "severe"
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p10-no-known-allergies",
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "p10-no-known-allergies",
+        "clinicalStatus": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", "code": "active" }] },
+        "verificationStatus": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification", "code": "confirmed" }] },
+        "code": {
+          "coding": [{ "system": "http://snomed.info/sct", "code": "716186003", "display": "No known allergy" }],
+          "text": "No Known Allergies"
+        },
+        "patient": { "reference": "urn:uuid:p10-patient" },
+        "recordedDate": "2024-01-05"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p10-unknown-allergen",
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "p10-unknown-allergen",
+        "clinicalStatus": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", "code": "active" }] },
+        "verificationStatus": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification", "code": "unconfirmed" }] },
+        "patient": { "reference": "urn:uuid:p10-patient" },
+        "recordedDate": "2022-08-30",
+        "note": [{ "text": "Reaction reported by patient; substance not identified." }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p10-real-allergen-sparse",
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "p10-real-allergen-sparse",
+        "clinicalStatus": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", "code": "active" }] },
+        "code": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "5640", "display": "Ibuprofen" }],
+          "text": "Ibuprofen"
+        },
+        "patient": { "reference": "urn:uuid:p10-patient" },
+        "recordedDate": "2023-03-17"
+      }
+    }
+  ]
+}

@@ -1,0 +1,123 @@
+{
+  "_comment": "P06 - INDICATION ABSENCE. 'What is this drug for?' is the question a patient most often brings to their own medication list, and FHIR answers it three different ways. reasonReference points at a Condition resource and becomes a real record-to-record edge. reasonCode carries a code or free text and becomes a candidate for literal lifting, which can only resolve if the named condition is somewhere in the pod. And a great many real MedicationRequests carry NEITHER, because the prescribing system never captured one. The pathology is that the third case is indistinguishable from the second-that-failed-to-resolve unless the pipeline keeps them apart: 'the source never said' and 'the source said, and we could not match it' are different answers and must not collapse into one silent blank. This bundle carries one of each, plus the Condition that the reasonReference case points at and the Condition that the reasonCode case names. 100% synthetic.",
+  "resourceType": "Bundle",
+  "id": "p06-indication",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:p06-patient",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "p06-pt",
+        "name": [{ "use": "official", "family": "Vashti", "given": ["Oberon"] }],
+        "gender": "male",
+        "birthDate": "1962-08-27"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p06-cond-htn",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "p06-cond-htn",
+        "clinicalStatus": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/condition-clinical", "code": "active" }] },
+        "code": { "coding": [{ "system": "http://snomed.info/sct", "code": "38341003", "display": "Hypertensive disorder" }], "text": "Hypertension" },
+        "subject": { "reference": "urn:uuid:p06-patient" },
+        "onsetDateTime": "2016-03-01"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p06-cond-gerd",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "p06-cond-gerd",
+        "clinicalStatus": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/condition-clinical", "code": "active" }] },
+        "code": { "coding": [{ "system": "http://snomed.info/sct", "code": "235595009", "display": "Gastroesophageal reflux disease" }], "text": "Gastroesophageal reflux disease" },
+        "subject": { "reference": "urn:uuid:p06-patient" },
+        "onsetDateTime": "2021-09-15"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p06-med-with-reference",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "p06-med-with-reference",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "197361", "display": "Amlodipine 5 MG Oral Tablet" }],
+          "text": "Amlodipine 5 mg oral tablet"
+        },
+        "subject": { "reference": "urn:uuid:p06-patient" },
+        "authoredOn": "2024-01-08",
+        "reasonReference": [{ "reference": "urn:uuid:p06-cond-htn" }],
+        "dosageInstruction": [{ "text": "Take 1 tablet by mouth once daily", "timing": { "repeat": { "frequency": 1, "period": 1, "periodUnit": "d" } } }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p06-med-with-reasoncode",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "p06-med-with-reasoncode",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "198211", "display": "Omeprazole 20 MG Delayed Release Oral Capsule" }],
+          "text": "Omeprazole 20 mg delayed release capsule"
+        },
+        "subject": { "reference": "urn:uuid:p06-patient" },
+        "authoredOn": "2024-02-19",
+        "reasonCode": [{ "text": "Gastroesophageal reflux disease" }],
+        "dosageInstruction": [{ "text": "Take 1 capsule by mouth once daily before breakfast" }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p06-med-no-indication",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "p06-med-no-indication",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "310798", "display": "Hydrochlorothiazide 25 MG Oral Tablet" }],
+          "text": "Hydrochlorothiazide 25 mg oral tablet"
+        },
+        "subject": { "reference": "urn:uuid:p06-patient" },
+        "authoredOn": "2024-03-27",
+        "dosageInstruction": [{ "text": "Take 1 tablet by mouth every morning" }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p06-med-no-indication-2",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "p06-med-no-indication-2",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "617314", "display": "Atorvastatin 40 MG Oral Tablet" }],
+          "text": "Atorvastatin 40 mg oral tablet"
+        },
+        "subject": { "reference": "urn:uuid:p06-patient" },
+        "authoredOn": "2024-04-02",
+        "dosageInstruction": [{ "text": "Take 1 tablet by mouth at bedtime" }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p06-med-unresolvable-reasoncode",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "p06-med-unresolvable-reasoncode",
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "308136", "display": "Amoxicillin 500 MG Oral Capsule" }],
+          "text": "Amoxicillin 500 mg oral capsule"
+        },
+        "subject": { "reference": "urn:uuid:p06-patient" },
+        "authoredOn": "2024-05-11",
+        "reasonCode": [{ "text": "Acute sinusitis" }],
+        "dosageInstruction": [{ "text": "Take 1 capsule by mouth three times daily for 10 days" }]
+      }
+    }
+  ]
+}

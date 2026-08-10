@@ -1,0 +1,67 @@
+{
+  "_comment": "P01a - DUAL-LABEL SPLIT (FHIR half). One synthetic health system, Meridian Health System, exporting FHIR. Every reference is an absolute URL on the system's own FHIR endpoint, which is how a real patient-facing FHIR export identifies its origin. The converter derives clinical:sourceEHR from the registrable domain of that host, so these records land under a DOMAIN-STYLE label. The C-CDA half of this scenario (p01-dual-label-ccda.xml) is the SAME system exporting a document, where the label is derived from the custodian ORGANIZATION NAME instead. The pathology is that one health system therefore occupies two rows on any source axis. 100% synthetic: invented person, invented organization, invented endpoint, invented values.",
+  "resourceType": "Bundle",
+  "id": "p01-meridian-fhir",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "https://fhir.meridianhealth.example/api/FHIR/R4/Patient/pt-4417",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "pt-4417",
+        "name": [{ "use": "official", "family": "Quintaine", "given": ["Marisol"] }],
+        "gender": "female",
+        "birthDate": "1971-04-18"
+      }
+    },
+    {
+      "fullUrl": "https://fhir.meridianhealth.example/api/FHIR/R4/Condition/cond-8801",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-8801",
+        "clinicalStatus": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/condition-clinical", "code": "active" }] },
+        "code": {
+          "coding": [{ "system": "http://snomed.info/sct", "code": "44054006", "display": "Type 2 diabetes mellitus" }],
+          "text": "Type 2 diabetes mellitus"
+        },
+        "subject": { "reference": "https://fhir.meridianhealth.example/api/FHIR/R4/Patient/pt-4417" },
+        "onsetDateTime": "2019-06-02",
+        "recorder": { "display": "Meridian Health System" }
+      }
+    },
+    {
+      "fullUrl": "https://fhir.meridianhealth.example/api/FHIR/R4/Observation/obs-7712",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "obs-7712",
+        "status": "final",
+        "category": [
+          {
+            "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory", "display": "Laboratory" }]
+          }
+        ],
+        "code": {
+          "coding": [{ "system": "http://loinc.org", "code": "4548-4", "display": "Hemoglobin A1c/Hemoglobin.total in Blood" }],
+          "text": "Hemoglobin A1c"
+        },
+        "subject": { "reference": "https://fhir.meridianhealth.example/api/FHIR/R4/Patient/pt-4417" },
+        "effectiveDateTime": "2025-02-11T09:15:00-08:00",
+        "valueQuantity": { "value": 7.4, "unit": "%", "system": "http://unitsofmeasure.org", "code": "%" }
+      }
+    },
+    {
+      "fullUrl": "https://fhir.meridianhealth.example/api/FHIR/R4/Immunization/imm-3390",
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "imm-3390",
+        "status": "completed",
+        "vaccineCode": {
+          "coding": [{ "system": "http://hl7.org/fhir/sid/cvx", "code": "141", "display": "Influenza, seasonal, injectable" }],
+          "text": "Influenza, seasonal, injectable"
+        },
+        "patient": { "reference": "https://fhir.meridianhealth.example/api/FHIR/R4/Patient/pt-4417" },
+        "occurrenceDateTime": "2024-10-14"
+      }
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "_comment": "P05 - INTERPRETATION CODES ACROSS THE HL7 SET, AND MULTI-CATEGORY LABS. FHIR R4 binds Observation.interpretation to the HL7 v3 ObservationInterpretation code system, which is far wider than high/low: susceptibility (S/I/R), detection (POS/NEG/DET/ND), reactivity, and change all live there. A converter that flattens the system onto a handful of English words makes 'the organism is resistant to this antibiotic' and 'the source said nothing' arrive as the same string. This bundle carries H (a high value), S (a susceptibility result), POS (a detection result), an UNMAPPED code that is not in the accepted set at all, and one observation with NO interpretation, which is the only case that legitimately means 'unknown'. It also carries two multi-category observations: one tagged both laboratory and a second category (which must stay a lab), and one tagged both vital-signs and laboratory (where the category order decides the routing, and the routing decides which shape validates it). 100% synthetic.",
+  "resourceType": "Bundle",
+  "id": "p05-interpretation",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:p05-patient",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "p05-pt",
+        "name": [{ "use": "official", "family": "Ferrowyn", "given": ["Lucienne"] }],
+        "gender": "female",
+        "birthDate": "1993-12-02"
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p05-h",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "p05-h",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "2345-7", "display": "Glucose [Mass/volume] in Serum or Plasma" }], "text": "Glucose" },
+        "subject": { "reference": "urn:uuid:p05-patient" },
+        "effectiveDateTime": "2025-03-04T07:40:00-06:00",
+        "valueQuantity": { "value": 168, "unit": "mg/dL" },
+        "interpretation": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation", "code": "H", "display": "High" }] }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p05-s",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "p05-s",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "18928-5", "display": "Ciprofloxacin [Susceptibility]" }], "text": "Ciprofloxacin susceptibility" },
+        "subject": { "reference": "urn:uuid:p05-patient" },
+        "effectiveDateTime": "2025-03-04T07:40:00-06:00",
+        "valueString": "Susceptible",
+        "interpretation": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation", "code": "S", "display": "Susceptible" }] }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p05-pos",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "p05-pos",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "5195-3", "display": "Hepatitis B virus surface Ag [Presence] in Serum" }], "text": "Hepatitis B surface antigen" },
+        "subject": { "reference": "urn:uuid:p05-patient" },
+        "effectiveDateTime": "2025-03-04T07:40:00-06:00",
+        "valueString": "Detected",
+        "interpretation": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation", "code": "POS", "display": "Positive" }] }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p05-unmapped",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "p05-unmapped",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "1751-7", "display": "Albumin [Mass/volume] in Serum or Plasma" }], "text": "Albumin" },
+        "subject": { "reference": "urn:uuid:p05-patient" },
+        "effectiveDateTime": "2025-03-04T07:40:00-06:00",
+        "valueQuantity": { "value": 4.1, "unit": "g/dL" },
+        "interpretation": [{ "coding": [{ "system": "http://example.org/local-flags", "code": "ZQ7", "display": "Local laboratory flag" }] }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p05-none",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "p05-none",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "2160-0", "display": "Creatinine [Mass/volume] in Serum or Plasma" }], "text": "Creatinine" },
+        "subject": { "reference": "urn:uuid:p05-patient" },
+        "effectiveDateTime": "2025-03-04T07:40:00-06:00",
+        "valueQuantity": { "value": 0.9, "unit": "mg/dL" }
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p05-multicat-lab",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "p05-multicat-lab",
+        "status": "final",
+        "category": [
+          { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] },
+          { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "procedure" }] }
+        ],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "2093-3", "display": "Cholesterol [Mass/volume] in Serum or Plasma" }], "text": "Total cholesterol" },
+        "subject": { "reference": "urn:uuid:p05-patient" },
+        "effectiveDateTime": "2025-03-04T07:40:00-06:00",
+        "valueQuantity": { "value": 202, "unit": "mg/dL" },
+        "interpretation": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation", "code": "H" }] }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:p05-multicat-vital",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "p05-multicat-vital",
+        "status": "final",
+        "category": [
+          { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory" }] },
+          { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "vital-signs" }] }
+        ],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8310-5", "display": "Body temperature" }], "text": "Body temperature" },
+        "subject": { "reference": "urn:uuid:p05-patient" },
+        "effectiveDateTime": "2025-03-04T07:40:00-06:00",
+        "valueQuantity": { "value": 37.1, "unit": "Cel" }
+      }
+    }
+  ]
+}

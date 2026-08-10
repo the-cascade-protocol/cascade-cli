@@ -7,6 +7,48 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+**A regression corpus of real-world import pathologies, and an end-to-end harness that runs it.**
+`test-fixtures/pathology/` holds thirteen scenarios, each reproducing ONE named phenomenon that
+appears in real health-data exports: the dual-label split (one health system landing under two
+`clinical:sourceEHR` labels because the FHIR path reads an endpoint domain and the C-CDA path reads a
+custodian name), a single `<id>` reused across three distinct lab observations, narrative-only test
+names including one dangling reference, date-precision variety, HL7 interpretation codes across the
+accepted set plus one outside it, indication absence, cross-source exact lab duplicates, same-source
+repeat vitals with a clock-skew duplicate from a second source, medication chains (dose supersession
+and stale-active), allergy sentinels, panel display-name variants over shared results, and a set of
+vendor-shipped defects (an unsubstituted template placeholder used as a document id, a malformed
+nine-digit date, an empty `nullFlavor` section, and `nullFlavor` variety on values). Every fixture is
+100% synthetic: invented people, organizations, endpoints, identifiers, dates and values. What is
+reproduced is the shape of the phenomenon, never the content of any document.
+
+`tests/pathology-corpus.test.ts` runs each scenario through the pipeline a person actually runs —
+`cascade convert`, `pod init`, `pod import --reconcile-existing` once per batch, `pod conflicts`,
+`cascade validate` — and pins the census: records in, records out, merges, conflicts, edges,
+violations, warnings.
+
+Fixture tiers are directory-discovered: a tier is any directory containing a `scenarios.json`
+manifest, so an additional corpus arrives as a sibling directory and needs no change to the harness.
+Tiers that must not be committed are passed as absolute paths in `CASCADE_PATHOLOGY_TIERS`.
+
+Two gates run over the result. `tests/pathology-known-outcomes.ts` is a known-defect ledger built as
+a ratchet rather than a filter: each entry records what the pipeline does today AND what it must do
+once fixed, and the gate fails in both directions, so a new deviation is caught and a silently
+corrected one is caught too. The ledger can only shrink deliberately. It currently carries seventeen
+entries. `tests/pathology-reconciliation-baseline.json` is a report-only scorecard: for the
+scenarios that carry a constructed ground truth about which records denote the same clinical event,
+the harness measures the reconciler's precision and recall over merge pairs and compares them to a
+committed baseline. It does not assert the numbers are good — two of the recalls are 0. It asserts
+they are known, so a change to matching has to move the baseline on purpose.
+
+No converter or reconciler behaviour changes in this entry. The harness documents; fixes come
+separately.
+
+---
+
 ## [0.15.0] - 2026-08-09
 
 ### Fixed

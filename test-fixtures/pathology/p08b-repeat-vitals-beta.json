@@ -1,0 +1,44 @@
+{
+  "_comment": "P08b - CLOCK-SKEW DUPLICATE FROM A SECOND SOURCE. One blood-pressure reading recorded by an urgent-care system 17 minutes after the third reading in p08a-repeat-vitals-alpha.json, with the same values. Clinically this is the SAME cuff reading: the patient walked next door and the receiving system stamped it with its own clock. So exactly one merge is correct here (this reading with the 17:20 reading), and every other pairing is wrong. Because this record arrives from a different source, the same-source guard does not apply to it, and 'same LOINC + same calendar day' matches it against ALL THREE of the day's readings at once. That is the pathology: a single cross-source arrival can pull apart-in-time same-source readings into one group that the guard alone would never have formed. 100% synthetic.",
+  "resourceType": "Bundle",
+  "id": "p08b-beta",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "https://fhir.ridgecresturgent.example/r4/Patient/rc-7788",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "rc-7788",
+        "name": [{ "use": "official", "family": "Delacroix-Rue", "given": ["Bartholomew"] }],
+        "gender": "male",
+        "birthDate": "1955-07-09"
+      }
+    },
+    {
+      "fullUrl": "https://fhir.ridgecresturgent.example/r4/Observation/rc-sys-skew",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "rc-sys-skew",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "vital-signs" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8480-6", "display": "Systolic blood pressure" }], "text": "Systolic blood pressure" },
+        "subject": { "reference": "https://fhir.ridgecresturgent.example/r4/Patient/rc-7788" },
+        "effectiveDateTime": "2025-06-11T17:37:00-07:00",
+        "valueQuantity": { "value": 144, "unit": "mm[Hg]" }
+      }
+    },
+    {
+      "fullUrl": "https://fhir.ridgecresturgent.example/r4/Observation/rc-dia-skew",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "rc-dia-skew",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "vital-signs" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8462-4", "display": "Diastolic blood pressure" }], "text": "Diastolic blood pressure" },
+        "subject": { "reference": "https://fhir.ridgecresturgent.example/r4/Patient/rc-7788" },
+        "effectiveDateTime": "2025-06-11T17:37:00-07:00",
+        "valueQuantity": { "value": 90, "unit": "mm[Hg]" }
+      }
+    }
+  ]
+}
