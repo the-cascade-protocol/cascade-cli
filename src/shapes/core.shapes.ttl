@@ -7,11 +7,12 @@
 # ============================================================================
 # Cascade Protocol -- Core Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.1 (2026-08-03)
+# Version: 1.5 (2026-08-09)
 # Validates: cascade:PatientProfile, cascade:Address, cascade:EmergencyContact,
 #            cascade:PharmacyInfo, cascade:AdvanceDirectives, cascade:ProxyAgent,
 #            cascade:ExportManifest, cascade:RecordSummary,
-#            cascade:InteractionScenario
+#            cascade:InteractionScenario, and the value of cascade:sourceIdentity
+#            wherever it appears
 #
 # Severity levels:
 #   sh:Violation -- Must fix (blocks operations)
@@ -610,8 +611,61 @@ cascade:AdvisoryApplicationActivityShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Shape: Source Identity (core v3.5)
+# ============================================================================
+# The ORIGIN axis. See cascade:sourceIdentity in core.ttl for the value form and
+# the slug normalization; this shape checks that a producer wrote a well-formed
+# one.
+#
+# WHY sh:targetSubjectsOf AND NOT sh:targetClass, AND WHY ABSENCE IS UNCHECKED
+# ---------------------------------------------------------------------------
+# This is an open-world property shape: it evaluates a record only if that record
+# ALREADY carries cascade:sourceIdentity. A pod written before core v3.5 carries
+# it nowhere, so this shape reports nothing on one, and every previously-valid
+# pod stays valid.
+#
+# That is a deliberate choice over the alternative, sh:minCount 1 at sh:Warning
+# on each record shape in health: and clinical:. Requiring presence the moment
+# the property is defined turns every existing pod amber for a property no
+# producer has yet had the opportunity to write, and a warning that fires on
+# correct historical data is a warning readers learn to skip. The ratchet is
+# stated in core.ttl's v3.5 changelog rather than left to judgement: presence
+# becomes a Warning on the record shapes once the reference producers emit it,
+# and a Violation only after a release in which that Warning is observably absent
+# from conforming output.
+#
+# What IS checked, whenever the property is present: exactly one value, a string,
+# and one of the three declared schemes. An unprefixed value is the specific
+# error this catches, because it is what a producer writes when it has stamped a
+# display label or an import-batch label into the origin axis, which is the
+# confusion the axis exists to end.
+
+cascade:SourceIdentityShape a sh:NodeShape ;
+    sh:targetSubjectsOf cascade:sourceIdentity ;
+    rdfs:label "Source Identity Shape"@en ;
+    rdfs:comment "Constrains the ORIGIN axis on any record that carries it. Open-world: absence is not a finding in core v3.5."@en ;
+
+    sh:property [
+        sh:path cascade:sourceIdentity ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^(org:[a-z0-9]+|ns:.+|transport:.+)$" ;
+        sh:name "Source Identity"@en ;
+        sh:message "cascade:sourceIdentity must be a single scheme-prefixed token: 'org:{slug}' for a derivable organization, 'ns:{namespace}' for an identifier assigning authority, or 'transport:{label}' as the honestly-labelled last resort. An unprefixed value is usually a display label or an import-batch label written into the origin axis."@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.5 (2026-08-09)
+# - Added SourceIdentityShape for core v3.5's cascade:sourceIdentity.
+#   sh:targetSubjectsOf, so it constrains the VALUE wherever the property
+#   appears and never requires its presence; pods written before v3.5 validate
+#   unchanged. VIOLATION for a non-string, a repeated value, or a value that
+#   does not carry one of the org: / ns: / transport: schemes.
 #
 # Version 1.4 (2026-05-06)
 # - Added cascade:appliedTriplesCount Info-severity property shape on

@@ -86,6 +86,7 @@ import {
   deterministicUuid,
   medicationUri,
 } from '../fhir-converter/types.js';
+import { contentFingerprint, EMPTY_SEED } from '../identity.js';
 
 /**
  * The single medication identity type, shared by every importer. Medication
@@ -193,6 +194,134 @@ function str(value: unknown): string {
   return '';
 }
 
+// ---------------------------------------------------------------------------
+// The id-collision scope
+// ---------------------------------------------------------------------------
+
+/**
+ * WHEN THE SOURCE'S OWN ID IS CONTRADICTED BY THE SOURCE'S OWN CONTENT
+ * --------------------------------------------------------------------
+ * `ccdaSourceId`'s header takes a root-only `<id>` at the source's word, because
+ * HL7 v3 II says a root alone may be the whole instance identifier, and it names
+ * the cost of doing so: "if a vendor misuses a shared assigning-authority OID as
+ * a root-only id, the cost is a merge; it is filed rather than guarded against
+ * by heuristic".
+ *
+ * That cost has now been measured, and it is not a merge of two similar records.
+ * The public HL7 Continuity of Care Document sample distributes ONE root-only
+ * `<id>` across every observation in its Results section, and vendors that
+ * copied the sample inherited the shape. Run the corpus fixture
+ * `p02-duplicate-source-id-ccda.xml` through the importer on `main`: three lab
+ * observations that disagree about their LOINC code, their name, their value,
+ * their unit and their reference range all mint one subject, so the pod holds 2
+ * lab records where the document stated 4, and the only trace is two SHACL
+ * maxCount violations naming the symptom.
+ *
+ * So the source's id is still believed — but only as far as the source's own
+ * content lets it be. When one id is claimed by entries whose content
+ * CONTRADICTS, the id has stopped identifying anything, and each claimant gets
+ * `{type}:{id}#{fingerprint}` instead of `{type}:{id}`.
+ *
+ * WHY A PRE-SCAN AND NOT A RUNNING REGISTRY
+ * -----------------------------------------
+ * A registry that disambiguated the SECOND and later claimants would make an
+ * IRI depend on the position of an entry in the document, so the same three
+ * observations in a different order would mint different subjects. This repo has
+ * an identity-determinism incident class and does not need a fourth entry in it.
+ * The scope is therefore built by walking the parsed document BEFORE any section
+ * runs, so "is this id contradicted?" is a property of the document, and every
+ * claimant of a contradicted id is disambiguated including the first.
+ *
+ * The `deterministicUuid` hash is untouched. This composes AROUND minting by
+ * choosing what to hash, which is the only layer that can see two entries at
+ * once.
+ *
+ * WHAT IT DOES NOT DO
+ * -------------------
+ * It does not disambiguate entries that share an id and are content-identical:
+ * those are one act restated, they mint one subject as they always have, and
+ * splitting them would recreate the duplicate-on-every-import defect.
+ *
+ * It does not look across documents. Two documents that reuse one id are a
+ * genuine cross-document collision, and the reconciler's `splitIdentityCollisions`
+ * already owns that case — it can see both records, which this layer cannot.
+ * The two are complementary: this one covers WITHIN a document, where there is
+ * no second record for the reconciler to compare because both were folded onto
+ * one subject before it ever ran.
+ */
+let contradictedIds: ReadonlySet<string> = new Set<string>();
+
+/**
+ * Collect every (sourceId, content fingerprint) pair in a parsed C-CDA, at any
+ * depth. Keyed on the id alone rather than on (type, id): a caller's `type` is
+ * not knowable here, and treating a cross-type id clash as contradicted splits
+ * rather than merges, which is the recoverable direction.
+ */
+function collectIdClaims(node: unknown, into: Map<string, Set<string>>, seen: Set<unknown>): void {
+  if (node == null || typeof node !== 'object') return;
+  if (seen.has(node)) return;
+  seen.add(node);
+  if (Array.isArray(node)) {
+    for (const item of node) collectIdClaims(item, into, seen);
+    return;
+  }
+  const obj = node as Record<string, unknown>;
+  if ('id' in obj) {
+    const sourceId = ccdaSourceId(obj);
+    if (sourceId) {
+      const fingerprint = contentFingerprint(obj);
+      // An element with no hashable content cannot be told apart from another
+      // one, so recording it would claim a contradiction nothing can resolve.
+      if (fingerprint !== EMPTY_SEED) {
+        const bucket = into.get(sourceId) ?? new Set<string>();
+        bucket.add(fingerprint);
+        into.set(sourceId, bucket);
+      }
+    }
+  }
+  for (const value of Object.values(obj)) collectIdClaims(value, into, seen);
+}
+
+/**
+ * Open the id-collision scope for ONE parsed document.
+ *
+ * Module-level state, which is safe here and only here: `convertSingleCcda` is
+ * synchronous from `beginCcdaIdScope` to `endCcdaIdScope`, so no second
+ * document's conversion can interleave with a first one's. `convertCcda` loops
+ * over the XML files of an IHE XDM zip synchronously for the same reason.
+ */
+export function beginCcdaIdScope(ccdaDoc: unknown): void {
+  const claims = new Map<string, Set<string>>();
+  collectIdClaims(ccdaDoc, claims, new Set<unknown>());
+  const contradicted = new Set<string>();
+  for (const [sourceId, fingerprints] of claims) {
+    if (fingerprints.size > 1) contradicted.add(sourceId);
+  }
+  contradictedIds = contradicted;
+}
+
+/** Close the scope. Always call from a `finally`, so a throw cannot leak it. */
+export function endCcdaIdScope(): void {
+  contradictedIds = new Set<string>();
+}
+
+/**
+ * The disambiguator to append to a tier-1 key, or `''` when the id identifies.
+ *
+ * Empty for the ordinary case, which is what keeps every id-bearing IRI this
+ * importer has already written exactly where it is: a document whose ids are
+ * used as ids produces byte-identical keys to before this existed.
+ */
+function idDisambiguator(sourceId: string, source: unknown): string {
+  if (!contradictedIds.has(sourceId)) return '';
+  const fingerprint = contentFingerprint(source);
+  // Nothing distinguishes this claimant from the others, so splitting it would
+  // mint an identity out of nothing. Fall back to the shared subject and let the
+  // shape violations stand: they are true.
+  if (fingerprint === EMPTY_SEED) return '';
+  return `#${fingerprint}`;
+}
+
 /**
  * THE DOOR. Mint the subject IRI for one C-CDA record.
  *
@@ -229,7 +358,11 @@ export function ccdaRecordUri(opts: {
   // `contentHashedUri(type, {}, id)` that the C-CDA lab observation path already
   // ships — so no id-bearing lab IRI moves for this reason.
   if (typeof sourceId === 'string' && sourceId.trim().length > 0) {
-    return `urn:uuid:${deterministicUuid(`${type}:${sourceId}`)}`;
+    // …unless the source's own content contradicts its own id, in which case the
+    // id has stopped identifying and the content decides which claimant this is.
+    // See "THE ID-COLLISION SCOPE" above. Empty for every document whose ids are
+    // used as ids, so no existing id-bearing IRI moves.
+    return `urn:uuid:${deterministicUuid(`${type}:${sourceId}${idDisambiguator(sourceId, source)}`)}`;
   }
 
   // Tiers 2-4 — the curated key, then the raw element, then a loud collapse.
@@ -259,7 +392,9 @@ export function ccdaMedicationRecordUri(opts: {
   const { sourceId, fields, source, warnings, label } = opts;
 
   if (typeof sourceId === 'string' && sourceId.trim().length > 0) {
-    return `urn:uuid:${deterministicUuid(`${MEDICATION_IDENTITY_TYPE}:${sourceId}`)}`;
+    return `urn:uuid:${deterministicUuid(
+      `${MEDICATION_IDENTITY_TYPE}:${sourceId}${idDisambiguator(sourceId, source)}`,
+    )}`;
   }
 
   // `undefined` in the fallbackId slot, for the same reason as above.

@@ -81,7 +81,21 @@
 #   2026-08-03 Validation Profile release and are unrelated to this change; they
 #   are left for their own sync so a genomics sh:class semantics change is not
 #   folded into a clinical alignment.
-core=3.4
+# Updated 2026-08-09: core v3.5 — cascade:sourceIdentity, the ORIGIN axis.
+#   A canonical, transport-independent identity for the organization a record
+#   came from, scheme-prefixed org: / ns: / transport:. cascade:sourceSystem is
+#   narrowed to say what it is NOT (the ingestion batch, never a reconciliation
+#   key) and clinical:sourceEHR is unchanged as the display label.
+#   core.shapes.ttl v1.5 adds cascade:SourceIdentityShape, an open-world
+#   sh:targetSubjectsOf shape: it constrains the VALUE wherever the property
+#   appears and never requires its presence, so every pod written before v3.5
+#   validates unchanged.
+#   spec PR the-cascade-protocol/spec#17; tag vocab/core-v3.5.
+#   NOT synced in this pass, again: the draft evidence.ttl and
+#   genomics.shapes.ttl diffs the sync script also produces are the same
+#   pre-existing drift the 2026-08-08 entry names, unrelated to this change, and
+#   left for their own sync.
+core=3.5
 health=2.6
 clinical=1.14
 coverage=1.4

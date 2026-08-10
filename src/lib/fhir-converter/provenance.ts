@@ -30,6 +30,7 @@
 import type { Quad } from 'n3';
 
 import { NS, tripleStr } from './types.js';
+import { sourceIdentity, type SourceIdentity } from '../source-identity.js';
 
 /**
  * The ratified "value is expected but not known" token, from the FHIR/HL7
@@ -162,6 +163,93 @@ export function extractSourceEhr(resource: any): string | undefined {
     return display;
   }
   return undefined;
+}
+
+/**
+ * The organization NAME a bundle states about itself, if any.
+ *
+ * An `Organization` resource's `name` first (the source saying who it is
+ * outright), then the first institution-looking provider display. Both go
+ * through the same institution / person filters `extractSourceEhr` uses, so a
+ * clinician's name can never become the bundle's organization.
+ *
+ * Document order, first match wins. A patient-facing export is one system's
+ * export; a bundle that genuinely aggregates several organizations is out of
+ * scope for a single document-level origin, and taking the first is at worst the
+ * collapsing failure, which is the recoverable one.
+ */
+export function extractBundleOrganizationName(resources: readonly any[]): string | undefined {
+  for (const res of resources) {
+    if (res?.resourceType === 'Organization' && typeof res.name === 'string' && res.name.trim()) {
+      return res.name.trim();
+    }
+  }
+  for (const res of resources) {
+    const display = extractProviderName(res);
+    if (display && INSTITUTION_KEYWORDS.test(display) && !PERSON_ROLE.test(display)) return display;
+  }
+  return undefined;
+}
+
+/** The first absolute-reference host anywhere in a bundle, as a registrable domain. */
+export function extractBundleHost(resources: readonly any[]): string | undefined {
+  for (const res of resources) {
+    const host = sourceHost(res);
+    if (host) return host;
+  }
+  return undefined;
+}
+
+/**
+ * The assigning authority for a bundle's identifiers, for the `ns:` tier: the
+ * first `identifier.system` any resource carries. Reached only when no
+ * organization was derivable, which in practice means a bundle whose references
+ * are all `urn:uuid:` and which therefore states no host either.
+ */
+export function extractBundleIdNamespace(resources: readonly any[]): string | undefined {
+  for (const res of resources) {
+    const identifiers = Array.isArray(res?.identifier) ? res.identifier : res?.identifier ? [res.identifier] : [];
+    for (const ident of identifiers) {
+      const system = ident?.system;
+      if (typeof system === 'string' && system.trim()) return system.trim();
+    }
+  }
+  return undefined;
+}
+
+/**
+ * THE BUNDLE'S ORIGIN, and its display label, derived ONCE for the whole input.
+ *
+ * DOCUMENT-LEVEL ON PURPOSE, and this is the P01 half of the fix. The per-record
+ * derivation below reads whatever each resource happens to carry, so within ONE
+ * bundle a Condition with a `recorder.display` of "Meridian Health System" and an
+ * Observation with only a subject reference produced TWO different sourceEHR
+ * values for one export. A source axis cannot be built out of a value that
+ * varies by which field a resource happened to populate.
+ *
+ * The label prefers the organization NAME over the endpoint host, which is what
+ * makes it agree with the C-CDA path: that path already derives its label from
+ * the custodian organization name, and a system exporting both transports was
+ * rendering as "meridianhealth.example" and "Meridian Health System". The host
+ * remains the fallback, and remains what most Apple Health-shaped exports land
+ * on, because they name no organization anywhere.
+ *
+ * `override` is the container adapter's authoritative account name (Apple
+ * Health's `export.xml` `<ClinicalRecord sourceName>`), which beats both.
+ */
+export function deriveBundleOrigin(
+  resources: readonly any[],
+  opts: { override?: string; transportLabel?: string } = {},
+): { label?: string; identity?: SourceIdentity } {
+  const organizationName = opts.override?.trim() || extractBundleOrganizationName(resources);
+  const endpointHost = extractBundleHost(resources);
+  const identity = sourceIdentity({
+    organizationName,
+    endpointHost,
+    idNamespace: extractBundleIdNamespace(resources),
+    transportLabel: opts.transportLabel,
+  });
+  return { label: organizationName ?? endpointHost, identity };
 }
 
 /**

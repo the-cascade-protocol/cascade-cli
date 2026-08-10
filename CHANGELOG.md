@@ -11,6 +11,76 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+**A record's source identity is declared, canonical across transports, and never the transport label.**
+Cascade records carried two source-shaped properties and needed three, and both of the two were being
+read as the third. `clinical:sourceEHR` is a display LABEL. `cascade:sourceSystem` is the INGESTION
+batch, which defaults to the file name. Neither is an origin, and using either as one fails in a
+different direction, both measured on the pathology corpus:
+
+- The reconciler's same-source guard keyed on `cascade:sourceSystem`, so on a pod imported under ONE
+  batch label no pair of records was ever compared. Scenario `P07-SHARED-LABEL` — two health systems'
+  exports under one label, the ordinary shape when a consumer health app exports several connected
+  accounts — held **12 records and performed 0 merges** where 7 and 5 are right. On one real corpus the
+  same defect hid 148 cross-source duplicates.
+- The two converters derived the display label by different rules, so ONE health system rendered as
+  TWO sources the moment a patient downloaded both transports. Scenario `P01`.
+
+`cascade:sourceIdentity` (core v3.5) is the ORIGIN axis: a canonical, transport-independent identity
+for the organization a record came from, minted at ONE chokepoint (`src/lib/source-identity.ts`) that
+both converters call. Its value is scheme-prefixed so a consumer can always tell how much the producer
+knew — `org:{slug}` when an organization was derivable, `ns:{namespace}` when only an identifier
+assigning authority was (the FHIR server base URL, or the C-CDA `<id>` root OID), and
+`transport:{label}` as an honestly-labelled last resort that is explicitly not an origin claim. The
+slug normalization reduces an organization name or a registrable domain to its leading distinctive
+token, so `Meridian Health System` and `meridianhealth.example` both give `org:meridian`. It is
+deliberately biased toward collapsing two organizations rather than splitting one: a collapse leaves
+duplicates in the pod, visible and recoverable, while a split lets records an organization
+deliberately kept apart be compared and merged.
+
+### Changed
+
+**The reconciler's same-source guard reads the ORIGIN and the ingestion together.** Two records are
+held apart from comparison only when they are two things ONE organization stated in ONE ingestion,
+which is what the guard was always for: three blood-pressure readings hours apart in one download are
+three readings. One organization's two exports, or its two transports, are the re-sync case
+reconciliation exists to handle. The new rule suppresses a STRICT SUBSET of what the old one
+suppressed, so nothing that merged before stops merging; the only pairs newly admitted are those with
+different KNOWN origins under one batch label. A record with no origin, or one whose origin honestly
+landed on the `transport:` tier, falls back to the batch label alone — the pre-v3.5 behaviour — so a
+pod written by an older CLI reconciles exactly as it did.
+
+**Both converters emit the origin, and the FHIR path derives its display label per BUNDLE.** The FHIR
+converter previously derived `clinical:sourceEHR` per resource from whatever each one carried, so a
+single export produced two labels depending on which resources happened to have a `recorder.display`.
+It is now derived once for the whole input, preferring a stated organization NAME over the endpoint
+host — which is the rule the C-CDA path already used, and what makes one system resolve to one label
+across both transports. `cascade:sourceSystem` and `clinical:sourceEHR` keep their meanings.
+
+### Fixed
+
+**A C-CDA `<id>` contradicted by the document's own content stops identifying.** The public HL7
+Continuity of Care Document sample distributes ONE root-only `<id>` across every observation in its
+Results section, and vendors that copied it inherited the shape. Believing the id outright folded
+three observations that disagree about their LOINC code, name, value, unit and reference range onto one
+subject: scenario `P02` held **2 lab records where the document stated 4**, with two SHACL maxCount
+violations naming the symptom and two results simply gone. When one id is claimed by entries whose
+content contradicts, each claimant now mints `{type}:{id}#{fingerprint}`. Entries that share an id and
+are content-identical still mint one subject, because those are one act restated. The scope is built
+by pre-scanning the parsed document rather than by disambiguating the second and later claimants, so an
+IRI never depends on the position of an entry in the document. `deterministicUuid` is untouched: this
+composes around minting by choosing what to hash.
+
+**Corpus outcomes.** `P01` resolves to one origin and one label across two transports while keeping its
+2 merges; `P02` yields 4 lab records, 4 edges and 0 violations; `P07-SHARED-LABEL` yields 7 records and
+5 merges, and its reconciliation-scorecard recall moves 0.0 to 1.0. The three corresponding
+`KNOWN_OUTCOMES` entries are removed and their expectations folded into the scenarios, which is the
+ledger's designed retirement path. The ledger now carries five entries.
+
+**Vocabulary.** `src/shapes/core.ttl` and `core.shapes.ttl` synced to spec core v3.5 /
+core.shapes.ttl v1.5; `VOCAB_VERSIONS` `core=3.5`. Absence of `cascade:sourceIdentity` is not a
+validation finding at any severity, so every pod written before v3.5 validates unchanged.
+
+
 **A regression corpus of real-world import pathologies, and an end-to-end harness that runs it.**
 `test-fixtures/pathology/` holds thirteen scenarios, each reproducing ONE named phenomenon that
 appears in real health-data exports: the dual-label split (one health system landing under two

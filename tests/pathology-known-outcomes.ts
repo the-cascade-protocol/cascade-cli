@@ -119,48 +119,6 @@ function merges(o: ScenarioObservation): number {
 
 export const KNOWN_OUTCOMES: KnownOutcome[] = [
   {
-    id: 'P01-one-system-two-source-labels',
-    scenario: 'P01',
-    currentWrongOutcome:
-      'One health system occupies two rows on the pod source axis. The FHIR path derives ' +
-      'clinical:sourceEHR from the registrable domain of the first absolute reference URL ' +
-      '("meridianhealth.example"); the C-CDA path derives it from the custodian organization ' +
-      'name ("Meridian Health System"). Both are defensible readings of their own document and ' +
-      'neither knows about the other, so a patient who downloaded both transports from one ' +
-      'system sees two sources.',
-    expectedOnceFixed:
-      'One system yields ONE label. Which label wins (organization name, endpoint domain, or a ' +
-      'user-visible alias resolved from both) is the open design question; the invariant the ' +
-      'harness holds is that the count of distinct labels for one system is 1, whichever is chosen.',
-    probe: (o) => ({ distinctSourceEhrLabels: o.values(NS.clinical + 'sourceEHR').length }),
-    current: { distinctSourceEhrLabels: 2 },
-    fixed: { distinctSourceEhrLabels: 1 },
-  },
-  {
-    id: 'P02-duplicate-source-id-collision-undetected',
-    scenario: 'P02',
-    currentWrongOutcome:
-      'Three lab observations that share one root-only <id> mint one subject IRI, and because ' +
-      'they are one subject inside a single converted document there is no second record for the ' +
-      'reconciler to compare: splitIdentityCollisions only ever sees ONE parsed record. So the ' +
-      'three results pile onto one subject as multi-valued testCode/testName/resultValue, the pod ' +
-      'holds 2 lab records where the document stated 4, `pod conflicts` reports nothing, and the ' +
-      'only trace is two SHACL maxCount violations that name the symptom rather than the cause.',
-    expectedOnceFixed:
-      'The four observations become four lab records with zero violations, either by minting ' +
-      'distinct IRIs when a shared id is contradicted by the entry content, or by raising the ' +
-      'collision as a conflict the way the reconciler already does for records that arrive ' +
-      'separately. The failure mode to avoid is a fix that silences the SHACL violations without ' +
-      'recovering the two lost results.',
-    probe: (o) => ({
-      labRecords: o.podRecordsByType['LabResultRecord'] ?? 0,
-      conflicts: o.conflicts.length,
-      violations: o.violations.length,
-    }),
-    current: { labRecords: 2, conflicts: 0, violations: 2 },
-    fixed: { labRecords: 4, conflicts: 0, violations: 0 },
-  },
-  {
     id: 'P04-procedure-name-written-off-shape',
     scenario: 'P04',
     currentWrongOutcome:
@@ -205,24 +163,6 @@ export const KNOWN_OUTCOMES: KnownOutcome[] = [
       reportDates: ['2025-07-03'],
       observationDates: ['2025-07-03', '2025-07-03T14:22:15-04:00'],
     },
-  },
-  {
-    id: 'P07-shared-transport-label-blocks-cross-source-dedup',
-    scenario: 'P07-SHARED-LABEL',
-    currentWrongOutcome:
-      'The guard that stops two records from the same source being compared keys on ' +
-      'cascade:sourceSystem — the IMPORT-BATCH label, set by --source-system. Give two different ' +
-      "health systems' exports one batch label (the Apple Health shape, where one export carries " +
-      'several connected accounts) and the guard suppresses every cross-source comparison: none of ' +
-      'the four byte-identical duplicates merges, and the pod ends up holding two patient profiles ' +
-      'and twelve records where the same data under distinct labels yields seven.',
-    expectedOnceFixed:
-      'The guard keys on the CLINICAL source (clinical:sourceEHR, or an explicit per-record source ' +
-      'identity), not on how the records were transported, so the shared-label run reconciles ' +
-      'identically to the distinct-label run: 7 records, 5 merges.',
-    probe: (o) => ({ podRecords: o.podRecords, merges: merges(o) }),
-    current: { podRecords: 12, merges: 0 },
-    fixed: { podRecords: 7, merges: 5 },
   },
   {
     id: 'P10-negation-and-data-absent-sentinels-stored-as-allergens',

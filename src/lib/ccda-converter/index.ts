@@ -39,8 +39,16 @@ import { extractFamilyHistoryQuads, FAMILY_HISTORY_TEMPLATE_ID } from './section
 import { extractDeviceQuads, DEVICES_TEMPLATE_ID } from './sections/devices.js';
 import { extractSocialHistoryQuads, SOCIAL_HISTORY_TEMPLATE_ID } from './sections/social-history.js';
 import { extractNarrativeQuads } from './narrative.js';
-import { deriveSourceEhr, ensureProvenanceQuads, ensureSourceEhrQuads } from './provenance.js';
+import {
+  deriveCcdaIdNamespace,
+  deriveSourceEhr,
+  ensureProvenanceQuads,
+  ensureSourceEhrQuads,
+  ensureSourceIdentityQuads,
+} from './provenance.js';
 import { identityKey } from '../identity.js';
+import { beginCcdaIdScope, endCcdaIdScope } from './record-identity.js';
+import { sourceIdentity } from '../source-identity.js';
 
 // Map templateId → extractor function and LOINC code.
 //
@@ -256,6 +264,17 @@ function censusForwardEdges(quads: any[]): EdgeResolutionSummary {
   return stats;
 }
 
+/**
+ * Convert one C-CDA document, with the id-collision scope open for its whole
+ * conversion.
+ *
+ * The scope is module state in `record-identity.ts` and is opened and closed
+ * here, around a synchronous body, so no second document's scope can interleave
+ * with this one's. The `finally` matters: a document that throws mid-conversion
+ * (the caller catches and records a warning, then converts the next file of an
+ * IHE XDM zip) must not leave the previous document's contradicted-id set in
+ * place for its successor.
+ */
 function convertSingleCcda(
   xml: string,
   options: CcdaConversionOptions,
@@ -271,12 +290,40 @@ function convertSingleCcda(
     warnings.push(`Detected EHR vendor: ${vendor}`);
   }
 
+  // The scope is opened over the NORMALIZED document, because that is the tree
+  // the section handlers hand to the identity door: pre-scanning the raw parse
+  // would fingerprint objects the mint never sees.
+  beginCcdaIdScope(normalizedDoc?.ClinicalDocument ?? normalizedDoc);
+  try {
+    return convertNormalizedCcda(normalizedDoc, options, importedAt, warnings);
+  } finally {
+    endCcdaIdScope();
+  }
+}
+
+function convertNormalizedCcda(
+  normalizedDoc: any,
+  options: CcdaConversionOptions,
+  importedAt: string,
+  warnings: string[],
+): { quads: any[]; census: SectionCensusEntry[] } {
   const ccdaDoc = normalizedDoc?.ClinicalDocument ?? normalizedDoc;
   const sourceSystem = options.sourceSystem ?? getSourceSystemName(normalizedDoc);
   const documentType = detectDocumentType(normalizedDoc);
   // The EHR of origin is the document's custodian organization (ratified CDA
   // signal), independent of the import-batch label that drives `sourceSystem`.
   const sourceEhr = deriveSourceEhr(ccdaDoc);
+  // The ORIGIN axis, derived once per document through the shared door. The
+  // custodian organization NAME is the input, not the label: the label is what
+  // this document called the organization, and the identity is the canonical
+  // form the FHIR path independently arrives at from the endpoint host. If the
+  // custodian named nobody, the document's own id namespace is the next-best
+  // fact, and the import-batch label is the last resort and says so.
+  const documentOrigin = sourceIdentity({
+    organizationName: sourceEhr,
+    idNamespace: deriveCcdaIdNamespace(ccdaDoc),
+    transportLabel: sourceSystem,
+  });
 
   // Document ID for narrative linking
   const docIdEl = firstOf<any>(ccdaDoc?.id);
@@ -448,6 +495,7 @@ function convertSingleCcda(
   // Both are additive + idempotent: they never overwrite a value a handler set.
   ensureProvenanceQuads(allQuads);
   ensureSourceEhrQuads(allQuads, sourceEhr);
+  ensureSourceIdentityQuads(allQuads, documentOrigin);
 
   return { quads: allQuads, census };
 }
