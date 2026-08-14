@@ -21,8 +21,8 @@
     dct:description "Vocabulary for consumer-generated wellness observations from wearable devices and HealthKit. Maps Cascade wellness properties to established SNOMED CT and LOINC codes following the three-layer ontology architecture."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-01-29"^^xsd:date ;
-    dct:modified "2026-08-08"^^xsd:date ;
-    owl:versionInfo "2.6" ;
+    dct:modified "2026-08-14"^^xsd:date ;
+    owl:versionInfo "2.7" ;
     rdfs:comment """Three-layer ontology for wellness data:
         Layer 1 (Established standards): SNOMED CT concept IDs + LOINC observation codes
         Layer 2 (Cascade health vocabulary): health: namespace properties linking to Layer 1
@@ -30,6 +30,42 @@
     rdfs:seeAlso <https://cascadeprotocol.org/docs/health/v1/> .
 
 # Changelog:
+# v2.7 (2026-08-14): Let a source's absence and a source's unrecognised code
+#     both survive import. Additive: one new property, one widened value set,
+#     and nothing that validated under v2.6 stops validating.
+#
+#     1. health:interpretation's value set is widened from the single
+#        data-absent-reason code "unknown" to all 15 codes of
+#        http://terminology.hl7.org/CodeSystem/data-absent-reason (value set
+#        http://hl7.org/fhir/ValueSet/data-absent-reason). v2.6 already
+#        accepted one code from that system for the case of a source that
+#        carried no interpretation; accepting only one of the fifteen made
+#        every reason for the absence identical. FHIR's own pattern for a
+#        CodeableConcept element that is absent for a stated reason is a
+#        data-absent-reason coding in that element, so this is the ratified
+#        spelling rather than a Cascade convention. It is what lets a C-CDA
+#        <interpretationCode nullFlavor="NASK"/> ("nobody asked") arrive
+#        distinguishable from nullFlavor="ASKU" ("asked, did not know") and
+#        nullFlavor="NAV" ("known later"); the nullFlavor mapping table is
+#        stated once, on cascade:dataAbsentReason in core v3.6.
+#     2. NEW health:interpretationSourceCode: the source's verbatim
+#        interpretation code, written ONLY when that code is a member of
+#        neither bound value set. The alternative considered and rejected was
+#        accepting the loss with a warning. A closed value set plus a lossy
+#        importer means a laboratory's local flag is either dropped on the
+#        floor or written into a field that then fails validation, and in both
+#        cases the Pod can no longer answer what the source actually said.
+#        Unconstrained by design: it is a verbatim carbon copy, not a code.
+#     3. NOT changed, and stated here so its absence is not read as an
+#        oversight: no interpretation constraint was added to
+#        health:DailyVitalReadingShape. health:interpretation's rdfs:domain is
+#        health:LabResultRecord and health's only vital class,
+#        health:DailyVitalReading, carries no interpretation predicate at all,
+#        so a shape there would constrain a triple no conforming record can
+#        write. The vital-sign interpretation binding this release adds lives
+#        in clinical v1.15 on clinical:VitalSignShape, which is the vital
+#        shape that actually exists.
+#
 # v2.6 (2026-08-08): Align the lab-result constraints to the ratified standards
 #     they claim to follow. Shapes-only; no class or property is added, removed
 #     or renamed, and nothing that validated under v2.5 stops validating.
@@ -1182,12 +1218,27 @@ health:resultUnit a owl:DatatypeProperty ;
 
 health:interpretation a owl:DatatypeProperty ;
     rdfs:label "Interpretation"@en ;
-    rdfs:comment "Categorical reading of the result, as a code from the HL7 v3 ObservationInterpretation code system: normality (N, A, H, L, HH, LL, ...), susceptibility (S, I, R, SDD, ...), detection (POS, NEG, DET, ND, IND), reactivity (RR, WR, NR), change (B, D, U, W) and the exception codes. The data-absent-reason code 'unknown' is also accepted, for a source observation that carried no interpretation. At most one value per record."@en ;
+    rdfs:comment "Categorical reading of the result, as a code from the HL7 v3 ObservationInterpretation code system: normality (N, A, H, L, HH, LL, ...), susceptibility (S, I, R, SDD, ...), detection (POS, NEG, DET, ND, IND), reactivity (RR, WR, NR), change (B, D, U, W) and the exception codes. Any of the 15 data-absent-reason codes is also accepted, for a source observation whose interpretation element was absent or null-flavoured; that is FHIR's own spelling for a CodeableConcept that is missing for a stated reason, and it is what keeps 'nobody asked' distinguishable from 'asked, did not know'. A source code that is a member of neither value set is carried verbatim on health:interpretationSourceCode instead of being forced into this one. At most one value per record."@en ;
     rdfs:domain health:LabResultRecord ;
     rdfs:range xsd:string ;
     rdfs:seeAlso <http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation> ;
+    rdfs:seeAlso <http://terminology.hl7.org/CodeSystem/data-absent-reason> ;
     rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-observation-interpretation.html> ;
-    owl:versionInfo "Added in health v2.5; bound to HL7 v3 ObservationInterpretation in health v2.6" .
+    owl:versionInfo "Added in health v2.5; bound to HL7 v3 ObservationInterpretation in health v2.6; data-absent-reason codes admitted in health v2.7" .
+
+health:interpretationSourceCode a owl:DatatypeProperty ;
+    rdfs:label "Interpretation Source Code"@en ;
+    rdfs:comment """The interpretation code the SOURCE wrote, copied verbatim, for the case where that code is a member of neither value set health:interpretation is bound to (HL7 v3 ObservationInterpretation, and data-absent-reason). A laboratory's local abnormality flag is the ordinary case.
+
+WRITE IT ONLY THEN. A code that IS in one of the bound value sets belongs on health:interpretation and must not be duplicated here; this property is the escape hatch for the residue, not a parallel spelling.
+
+It is deliberately unconstrained: no value set, no pattern, no case folding. The whole point is that the value is whatever the source said, so a reader can recover the original assertion and a later mapping can be built from real observed codes rather than guesses. Constraining it would recreate the loss it exists to prevent.
+
+A producer that recognises the source code's INTENT should also write its best ratified equivalent on health:interpretation, so that a consumer reading only the bound property still gets a usable reading. The pair 'interpretation A, interpretationSourceCode elevated' says: the source said "elevated", and the nearest ratified code is A (Abnormal)."""@en ;
+    rdfs:domain health:LabResultRecord ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso health:interpretation ;
+    owl:versionInfo "Added in health v2.7" .
 
 health:performedDate a owl:DatatypeProperty ;
     rdfs:label "Performed Date"@en ;

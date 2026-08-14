@@ -47,6 +47,7 @@ import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { contentFingerprint, EMPTY_SEED } from '../../identity.js';
 import { resolveCodeUri } from '../code-systems.js';
 import { ccdaDateQuad } from '../dates.js';
+import { mapNullFlavorToDataAbsentReason } from '../null-flavor.js';
 import { buildNarrativeIdMap, narrativeTextFor, resolveNarrativeName } from '../narrative-reference.js';
 import { buildEncounterRecord } from './encounters.js';
 import { DataFactory } from 'n3';
@@ -162,6 +163,24 @@ function extractObservationQuads(
   const value = valueEl?.['@_value'] ?? valueEl?.value ?? valueEl?.['#text'] ?? '';
   const unit = valueEl?.['@_unit'] ?? valueEl?.unit ?? '';
 
+  // A <value nullFlavor="..."/> carries no number and IS a statement: HL7 v3
+  // separates UNK ("a value applies, nobody knows it"), NAV ("we will know
+  // later"), NASK ("nobody asked") and ASKU ("we asked, the patient did not
+  // know") deliberately, and the last one means somebody had the conversation.
+  // Reading only @_value dropped all four to the same empty string, so three
+  // different clinical facts became one indistinguishable blank and re-asking
+  // was the only recovery.
+  //
+  // core v3.6 defines cascade:dataAbsentReason and states the mapping this call
+  // implements. Note the value set is FHIR data-absent-reason, not v3-NullFlavor:
+  // the raw nullFlavor code is deliberately NOT written through, because an
+  // absence with two encodings turns "is this the same absence?" into a
+  // string-comparison question. No value is invented for the record; only the
+  // reason is recovered.
+  const dataAbsentReason = mapNullFlavorToDataAbsentReason(
+    valueEl?.['@_nullFlavor'] ?? valueEl?.nullFlavor,
+  );
+
   // Extract reference range
   const refRange = obs?.referenceRange?.observationRange;
   const refRangeText = refRange?.text?.['#text'] ?? refRange?.text ?? '';
@@ -221,6 +240,12 @@ function extractObservationQuads(
   if (performedQuad) quads.push(performedQuad);
   if (value) quads.push(makeQuad(subj, namedNode(NS.health + 'resultValue'), literal(value)));
   if (unit) quads.push(makeQuad(subj, namedNode(NS.health + 'resultUnit'), literal(unit)));
+  // Only when there is no value: cascade:dataAbsentReason explains an ABSENT
+  // value (FHIR R4 Observation.dataAbsentReason), so a record carrying both
+  // would be asserting that the value it just stated is missing.
+  if (!value && dataAbsentReason) {
+    quads.push(makeQuad(subj, namedNode(NS.cascade + 'dataAbsentReason'), literal(dataAbsentReason)));
+  }
   if (refRangeText) quads.push(makeQuad(subj, namedNode(NS.health + 'referenceRangeText'), literal(refRangeText)));
   if (sourceId) quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceRecordId'), literal(sourceId)));
 

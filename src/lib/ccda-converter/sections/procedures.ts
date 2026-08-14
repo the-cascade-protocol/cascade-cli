@@ -76,7 +76,23 @@ export function extractProcedureQuads(
     const subj = namedNode(uri);
     quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Procedure')));
     quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(sourceSystem)));
-    if (procedureName) quads.push(makeQuad(subj, namedNode(NS.health + 'procedureName'), literal(procedureName)));
+    // clinical:procedureName, NOT health:procedureName. The record above is typed
+    // clinical:Procedure, clinical:ProcedureShape targets that class and names
+    // this property, and clinical:procedureName is the only spelling any Cascade
+    // vocabulary defines: health: has no procedure class and no procedure-name
+    // property at all. Writing the health: spelling made every converted
+    // procedure fail the shape's name requirement WHILE CARRYING A NAME, and put
+    // that name on a predicate no shape targets, so the name itself was
+    // validated by nothing.
+    //
+    // Ratified in clinical v1.15, which also opened the migration window: the
+    // shape accepts a name in either spelling through an sh:or so pods already
+    // holding health:procedureName triples do not have to be rewritten, and
+    // clinical:ProcedureNameSpellingShape warns wherever the old spelling
+    // appears. Producers write the canonical spelling only — dual-writing would
+    // add a duplicate triple to every new record for no validation benefit,
+    // since the sh:or already covers the old pods.
+    if (procedureName) quads.push(makeQuad(subj, namedNode(NS.clinical + 'procedureName'), literal(procedureName)));
     // Typed from the raw effectiveTime; see `dates.ts`.
     const performedQuad = ccdaDateQuad(uri, NS.health + 'performedDate', dateVal, warnings);
     if (performedQuad) quads.push(performedQuad);

@@ -19,8 +19,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-08-09"^^xsd:date ;
-    owl:versionInfo "3.5" ;
+    dct:modified "2026-08-14"^^xsd:date ;
+    owl:versionInfo "3.6" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -201,8 +201,30 @@ cascade:addedInSchemaVersion a owl:AnnotationProperty ;
 
 cascade:cascadeUri a owl:DatatypeProperty ;
     rdfs:label "Cascade URI"@en ;
-    rdfs:comment "Stable identifier URI for a Cascade data element. Used across vocabularies to mint persistent identifiers for supplements, medications, and other resources."@en ;
-    rdfs:range xsd:anyURI .
+    rdfs:comment """Stable identifier URI for a Cascade data element. Used across vocabularies to mint persistent identifiers for supplements, medications, and other resources.
+
+CANONICAL FORM OF A MULTI-VALUED IDENTITY INPUT (v3.6, NORMATIVE).
+
+An implementation that derives a record's identifier from the record's own content hashes a set of named content fields. Since health v2.6 and clinical v1.14 made the code fields (icd10Code, snomedCode, testCode, labCategory) 0..* to match FHIR R4 CodeableConcept.coding, one of those fields can hold several values, and a hash taken over an unordered field is only stable if the field is first put into a canonical form. Without one, two exports of the SAME record that list the same codings in a different order mint two different identifiers and the record silently splits in two.
+
+The canonical form of a multi-valued identity input is:
+  1. Discard members that are null or empty after trimming; trim each surviving member.
+  2. Deduplicate the survivors.
+  3. Sort ascending by Unicode code point. (Code point, not locale collation: a locale-dependent order would make identity depend on the machine.)
+  4. Join with a single separator character that the implementation fixes and documents. U+002C COMMA is the RECOMMENDED separator and new implementations MUST use it.
+  5. A one-element sequence MUST canonicalize to exactly the bare scalar form.
+  6. A sequence with no surviving member is treated as an absent field, exactly as a null scalar is.
+
+THE THREE INVARIANTS, which are normative independently of the separator and are what the conformance vectors check:
+  ORDER INDEPENDENCE     Shuffling the members of a multi-valued identity input MUST NOT change the identifier.
+  SCALAR AGREEMENT       A field holding exactly one value MUST mint the same identifier whether it is spelled as a scalar or as a one-element sequence. This is what keeps every identifier written before the fields became 0..* exactly where it is.
+  DUPLICATE INDEPENDENCE Repeating a member MUST NOT change the identifier.
+
+SCOPE, AND THE ONE PLACE THIS RULE MUST NOT BE APPLIED. It governs identity inputs whose source element is a SET: FHIR CodeableConcept.coding and the repeating code fields named above. It MUST NOT be applied to an input whose source order carries meaning, because sorting there merges records that the source deliberately distinguished. FHIR name[0] is the primary name, and a component or note list is a sequence, not a set. An implementation that already hashes such a list in document order MUST keep doing so; widening this rule to cover it is a data change, not a canonicalization.
+
+MIGRATION. An implementation that already ships a fixed separator other than U+002C at an existing identity site KEEPS that separator. Changing it re-mints every identifier the site has ever produced, which is precisely the harm this rule exists to prevent; the cross-implementation contract is the three invariants above, not the byte string. Adding the dedupe and the sort where they are missing moves an identifier only for a record that carried duplicate or unsorted members, which is the defect being corrected."""@en ;
+    rdfs:range xsd:anyURI ;
+    owl:versionInfo "Canonical form of multi-valued identity inputs stated in core v3.6" .
 
 # ============================================================================
 # Shared Preference Properties (v1.3)
@@ -711,6 +733,64 @@ cascade:forSystem a owl:DatatypeProperty ;
     rdfs:range xsd:string .
 
 # ============================================================================
+# Data Absence (v3.6)
+# ============================================================================
+# WHY THIS EXISTS. A source document distinguishes several reasons a value is
+# missing, and every one of them currently arrives in a Pod as the same thing:
+# nothing. A C-CDA <value nullFlavor="NAV"/> ("we will know this later"), a
+# <value nullFlavor="NASK"/> ("nobody asked") and a <value nullFlavor="ASKU"/>
+# ("we asked, the patient did not know") are three different clinical facts, and
+# an importer that drops all three writes one indistinguishable blank. A reader
+# then cannot tell a test that was never ordered from one whose result is still
+# pending, and re-asking is the only recovery.
+#
+# The distinction is already ratified twice over, so none of it is invented
+# here: HL7 v3 NullFlavor (http://terminology.hl7.org/CodeSystem/v3-NullFlavor,
+# OID 2.16.840.1.113883.5.1008) is what C-CDA writes, and FHIR
+# data-absent-reason
+# (http://terminology.hl7.org/CodeSystem/data-absent-reason, value set
+# http://hl7.org/fhir/ValueSet/data-absent-reason) is the harmonized flat set
+# FHIR R4 binds Observation.dataAbsentReason to.
+#
+# Cascade binds to data-absent-reason, for three reasons stated here so the
+# choice is not re-litigated: (1) it is already the code system this vocabulary
+# cites — health:interpretation and clinical:interpretation have accepted its
+# "unknown" code since health v2.6 / clinical v1.14, so binding elsewhere would
+# put two absence vocabularies in one record; (2) its 15 codes are all
+# selectable, whereas v3-NullFlavor marks NI, UNK, OTH and INV abstract, and
+# this repository's own Validation Profile treats abstract concepts as hierarchy
+# nodes rather than values; (3) FHIR is the transport Cascade converts from on
+# both paths. The C-CDA importer maps nullFlavor to data-absent-reason on the
+# way in; the mapping is stated on the property below.
+
+cascade:dataAbsentReason a owl:DatatypeProperty ;
+    rdfs:label "Data Absent Reason"@en ;
+    rdfs:comment """Why this record's primary value is absent. Semantics are exactly FHIR R4 Observation.dataAbsentReason (https://hl7.org/fhir/R4/observation-definitions.html#Observation.dataAbsentReason): it explains the absence of the record's VALUE, and it is meaningful only when that value is in fact absent. A record that carries a value MUST NOT also carry this property.
+
+VALUE SET. One of the 15 codes of http://terminology.hl7.org/CodeSystem/data-absent-reason, as gathered by the value set http://hl7.org/fhir/ValueSet/data-absent-reason: unknown, asked-unknown, temp-unknown, not-asked, asked-declined, masked, not-applicable, unsupported, as-text, error, not-a-number, negative-infinity, positive-infinity, not-performed, not-permitted.
+
+MAPPING FROM HL7 v3 NullFlavor, which is what a C-CDA document writes (http://terminology.hl7.org/CodeSystem/v3-NullFlavor, OID 2.16.840.1.113883.5.1008). An importer reading a nullFlavor attribute MUST map it as follows and MUST NOT write the raw nullFlavor code into this property:
+  UNK  -> unknown          a proper value applies but is not known
+  ASKU -> asked-unknown    the source was asked and did not know
+  NASK -> not-asked        the information was never sought
+  NAV  -> temp-unknown     not available now, expected later
+  NAVU -> unknown          not available, with no expectation of later
+  MSK  -> masked           withheld for security or privacy
+  NA   -> not-applicable   known to have no proper value
+  OTH  -> unsupported      the real value is outside the permitted value domain
+  NI   -> unknown          no information, and no reason given
+  NINF -> negative-infinity
+  PINF -> positive-infinity
+Any other nullFlavor maps to "unknown", which is the code that asserts only that a value was expected and is missing.
+
+WHAT THIS IS NOT. It is not an interpretation, and it is not a substitute for one: an absent interpretation on a record whose value IS present is recorded on the interpretation property itself, whose value set accepts the same data-absent-reason codes. It is not a validation finding: absence of this property means only that the producer said nothing about why a value is missing."""@en ;
+    rdfs:domain owl:Thing ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso <http://terminology.hl7.org/CodeSystem/data-absent-reason> ;
+    rdfs:seeAlso <http://terminology.hl7.org/CodeSystem/v3-NullFlavor> ;
+    owl:versionInfo "Added in core v3.6" .
+
+# ============================================================================
 # Alignment with W3C PROV-O
 # ============================================================================
 
@@ -732,6 +812,37 @@ cascade:forSystem a owl:DatatypeProperty ;
 
 # ============================================================================
 # Changelog
+#
+# Version 3.6 (2026-08-14)
+# - Added cascade:dataAbsentReason (owl:DatatypeProperty, domain owl:Thing,
+#   range xsd:string): why a record's primary VALUE is absent, bound to the 15
+#   codes of http://terminology.hl7.org/CodeSystem/data-absent-reason. Semantics
+#   are exactly FHIR R4 Observation.dataAbsentReason. The nullFlavor-to-
+#   data-absent-reason mapping a C-CDA importer must implement is stated on the
+#   property, so the four distinctions a real document draws (UNK, NAV, NASK,
+#   ASKU) stop collapsing into one indistinguishable blank on import. Nothing is
+#   invented: both code systems are ratified and cited by canonical URL.
+#   Binding to data-absent-reason rather than to v3-NullFlavor is deliberate and
+#   its three reasons are recorded above the property.
+# - Stated the CANONICAL FORM of a multi-valued identity input on
+#   cascade:cascadeUri. Vocabulary-wise this file is unchanged by it: no term is
+#   added, and the statement constrains implementations rather than data. It is
+#   here because health v2.6 and clinical v1.14 made four code fields 0..* and
+#   an identifier hashed over an unordered field is not stable until the field
+#   has a canonical form. The rule is dedupe, sort by code point, join with a
+#   fixed separator, and a one-element sequence canonicalizes to the bare
+#   scalar, so no identifier written before those fields became repeatable
+#   moves. The three invariants (order independence, scalar agreement,
+#   duplicate independence) are normative independently of the separator, which
+#   is what lets an implementation that already ships a different separator
+#   comply without re-minting. The scope limit is as load-bearing as the rule:
+#   it applies to inputs that are SETS and must never be applied to an input
+#   whose source order carries meaning, because sorting there merges records the
+#   source deliberately distinguished.
+# - COMPATIBILITY. Both changes are additive. cascade:DataAbsentReasonShape
+#   targets sh:targetSubjectsOf, so it evaluates only records that CARRY the new
+#   property and every pod written before v3.6 validates exactly as it did. No
+#   class or property was removed, renamed or deprecated.
 #
 # Version 3.5 (2026-08-09)
 # - Added cascade:sourceIdentity (owl:DatatypeProperty, range xsd:string): the

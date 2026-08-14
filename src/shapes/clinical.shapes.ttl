@@ -1,6 +1,7 @@
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
 @prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 
@@ -13,6 +14,35 @@
 # different data sources (EHR, device, patient-reported).
 #
 # Changelog:
+# v1.15 (2026-08-14): Check what was unchecked, keep what was being dropped, and
+#     stop failing records that carry the thing they are failing for missing.
+#     Additive and strictly widening: no graph that validated under v1.14 stops
+#     validating, and the only new finding anywhere is at sh:Warning.
+#
+#     1. clinical:VitalSignShape's clinical:interpretation is bound to the same
+#        value set the lab shapes use, at sh:Warning. v1.14 put the sh:in on the
+#        LAB shapes only, so the identical predicate was checked on a lab result
+#        and unchecked on a vital sign. sh:Warning first and sh:Violation in a
+#        later version is the ratchet core v3.5 wrote down for a value that
+#        existing data carries. See the long note above the property.
+#     2. Both interpretation value sets gain the fourteen data-absent-reason
+#        codes they did not carry. v1.14 accepted "unknown" alone, so every
+#        reason for an absent interpretation was the same reason; C-CDA
+#        nullFlavor NASK, ASKU and NAV are three different clinical facts.
+#        Still byte-identical to health:interpretation.
+#     3. NEW property shapes for clinical:interpretationSourceCode on the lab
+#        and vital shapes: a single string, no value set and no pattern, holding
+#        a source code that is in neither bound value set, verbatim.
+#     4. clinical:ProcedureShape's name requirement becomes an sh:or over
+#        clinical:procedureName and health:procedureName, plus the new
+#        warning-severity clinical:ProcedureNameSpellingShape. A C-CDA import
+#        path writes the name to the health: spelling on records typed
+#        clinical:Procedure, so every converted procedure failed the name
+#        requirement while carrying a name, on a predicate no shape targeted.
+#        This is a MIGRATION WINDOW and both halves are removed together in a
+#        later version; the rationale is on clinical:procedureName in
+#        clinical.ttl.
+#
 # v1.14 (2026-08-08): Align to ratified standards; add the missing Encounter
 #     shape. Shapes-only, and strictly widening apart from the new shape: every
 #     graph that validated before still validates.
@@ -741,11 +771,12 @@ clinical:LabResultShape a sh:NodeShape ;
     # concepts are excluded because they are not values. Deprecated codes are
     # accepted: historical results carry them.
     #
-    # Plus "unknown" from
-    # http://terminology.hl7.org/CodeSystem/data-absent-reason, written by
-    # importers when the source Observation carried no interpretation, and the
-    # ten words of the previous enum, retained so data written against earlier
-    # clinical versions keeps validating.
+    # Plus ALL FIFTEEN codes of
+    # http://terminology.hl7.org/CodeSystem/data-absent-reason (v1.15; v1.14
+    # accepted only "unknown"), for a source Observation whose interpretation
+    # element was absent or null-flavoured, and the ten words of the previous
+    # enum, retained so data written against earlier clinical versions keeps
+    # validating.
     #
     # Kept byte-identical to the health:interpretation list in
     # health.shapes.ttl. These are two spellings of one record (clinical:LabResult
@@ -761,11 +792,23 @@ clinical:LabResultShape a sh:NodeShape ;
                "AA" "H" "L" "HH" "LL" "HX" "LX" "H>" "HU" "E" "L<" "LU"
                "ND" "IND" "NEG" "POS" "EXP" "UNE" "DET"
                "SYN-R" "NR" "RR" "WR" "SDD" "SYN-S"
-               "unknown"
+               "unknown" "asked-unknown" "temp-unknown" "not-asked"
+               "asked-declined" "masked" "not-applicable" "unsupported"
+               "as-text" "error" "not-a-number" "negative-infinity"
+               "positive-infinity" "not-performed" "not-permitted"
                "normal" "high" "low" "abnormal" "critical"
                "Normal" "High" "Low" "Abnormal" "Critical") ;
         sh:name "Interpretation"@en ;
-        sh:message "Interpretation must be a code from the HL7 v3 ObservationInterpretation code system (http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation), the data-absent-reason code 'unknown', or one of the retained legacy words"@en
+        sh:message "Interpretation must be a code from the HL7 v3 ObservationInterpretation code system (http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation), a code from http://terminology.hl7.org/CodeSystem/data-absent-reason, or one of the retained legacy words. A source code in none of those is carried verbatim on clinical:interpretationSourceCode."@en
+    ] ;
+
+    # v1.15: the verbatim escape hatch. Single string, no value set, no pattern.
+    sh:property [
+        sh:path clinical:interpretationSourceCode ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Interpretation Source Code"@en ;
+        sh:message "Interpretation source code must be a single string: the source's verbatim code, unmodified"@en
     ] ;
 
     # Optional: loincCode (can be string or URI reference)
@@ -976,15 +1019,53 @@ clinical:ProcedureShape a sh:NodeShape ;
     rdfs:label "Procedure Shape"@en ;
     rdfs:comment "Validation constraints for procedure records"@en ;
 
-    # Required: procedureName
+    # Required: a name, in either spelling (v1.15 RULING).
+    #
+    # Through v1.14 this was a bare sh:minCount 1 on clinical:procedureName. A
+    # C-CDA import path writes the name to health:procedureName instead, on
+    # records it types clinical:Procedure, so every converted procedure failed
+    # this constraint WHILE CARRYING A NAME, and carried it on a predicate no
+    # shape targets, so the name itself was validated by nothing. Measured 2 of
+    # 2, 7 of 7 and 1 of 1 across three public sample documents.
+    #
+    # This is a MIGRATION WINDOW, not a ratified dual spelling. The health:
+    # vocabulary defines neither health:procedureName nor a procedure class, and
+    # the record is typed clinical:Procedure, so clinical:procedureName is the
+    # only defined spelling and the only one a producer may write. The full
+    # rationale, and what a consumer must re-query, is on clinical:procedureName
+    # in clinical.ttl.
+    #
+    # The requirement moves to a node-level sh:or so that a Pod already holding
+    # the health: triples stops failing without any data being rewritten. The
+    # form follows health:DailyVitalReadingShape, which requires a timestamp in
+    # either of two spellings the same way. Per-spelling datatype, length and
+    # cardinality constraints stay below, so neither spelling is unchecked.
+    #
+    # BOTH the sh:or alternative and ProcedureNameSpellingShape below are removed
+    # in a later clinical version, once the warning is observably absent from
+    # conforming output, restoring a bare sh:minCount 1 on clinical:procedureName.
+    sh:or (
+        [ sh:property [ sh:path clinical:procedureName ; sh:minCount 1 ] ]
+        [ sh:property [ sh:path health:procedureName ; sh:minCount 1 ] ]
+    ) ;
+    sh:message "Procedure must have a name, as clinical:procedureName (canonical) or health:procedureName (deprecated import spelling, accepted during the clinical v1.15 migration window)"@en ;
+
     sh:property [
         sh:path clinical:procedureName ;
         sh:datatype xsd:string ;
-        sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:minLength 1 ;
         sh:name "Procedure Name"@en ;
-        sh:message "Procedure must have a name"@en
+        sh:message "Procedure name must be a single non-empty string"@en
+    ] ;
+
+    sh:property [
+        sh:path health:procedureName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Procedure Name (deprecated spelling)"@en ;
+        sh:message "Procedure name must be a single non-empty string"@en
     ] ;
 
     # Optional: procedureDate
@@ -1068,6 +1149,31 @@ clinical:ProcedureShape a sh:NodeShape ;
         sh:name "Schema Version"@en
     ] .
 
+# The migration signal for the procedure-name spelling (clinical v1.15).
+#
+# Kept in its own shape so that its severity is unambiguous: this is sh:Warning,
+# while ProcedureShape's own constraints stay at the default sh:Violation. It
+# targets the SUBJECTS OF the deprecated predicate rather than the class, so it
+# fires exactly once per record that carries the health: spelling and never on a
+# record that does not, whatever that record is typed.
+#
+# It exists so that the sh:or above cannot quietly become permanent. The window
+# closes when this warning is observably absent from conforming output; at that
+# point this shape and the health: branch of the sh:or are both removed and
+# clinical:procedureName goes back to a bare sh:minCount 1.
+clinical:ProcedureNameSpellingShape a sh:NodeShape ;
+    sh:targetSubjectsOf health:procedureName ;
+    rdfs:label "Procedure Name Spelling Shape"@en ;
+    rdfs:comment "Warns that a record carries the deprecated health:procedureName spelling. Accepted during the clinical v1.15 migration window; removed with the window."@en ;
+
+    sh:property [
+        sh:path health:procedureName ;
+        sh:maxCount 0 ;
+        sh:name "Procedure Name (deprecated spelling)"@en ;
+        sh:message "Procedure name is written on health:procedureName, which no Cascade vocabulary defines. Write clinical:procedureName instead: it is the property whose domain is clinical:Procedure and the one clinical:ProcedureShape names. Accepted during the clinical v1.15 migration window; this becomes a VIOLATION when the window closes."@en ;
+        sh:severity sh:Warning
+    ] .
+
 # ============================================================================
 # Shape: Vital Sign
 # ============================================================================
@@ -1117,11 +1223,71 @@ clinical:VitalSignShape a sh:NodeShape ;
     ] ;
 
     # Optional: interpretation
+    #
+    # v1.15 RULING: the lab value set now applies here too, at sh:Warning.
+    #
+    # Through v1.14 this property shape carried sh:datatype and sh:maxCount and
+    # no sh:in, while the two LAB shapes (clinical:LabResultShape and
+    # health:LabResultRecordShape) bound the identical predicate to the 49
+    # selectable HL7 v3 ObservationInterpretation codes. So the same
+    # interpretation string was checked on a lab result and unchecked on a vital
+    # sign, and the vital path was the one an importer could write anything to.
+    # clinical.ttl v1.13 recorded that gap as intentional, because emitted vital
+    # data uses "elevated", which is in neither ratified set, and a Violation
+    # here would have rejected records that already exist.
+    #
+    # That reasoning justified not making it a VIOLATION. It never justified
+    # leaving the property unchecked. So the binding is applied at sh:Warning,
+    # which is exactly the ratchet core v3.5 wrote down for this situation: a
+    # value existing data carries is REPORTED, not rejected, and the severity is
+    # raised to sh:Violation in a later clinical version only after a release in
+    # which the warning is observably absent from conforming output. Each step
+    # is its own vocabulary version, so this is not a judgement call later.
+    #
+    # The migration for the affected records is not "pick a different word": it
+    # is clinical:interpretation "H" plus clinical:interpretationSourceCode
+    # "elevated", which states the ratified reading AND keeps what the source
+    # said. That is the whole reason the source-code property is in the same
+    # release.
+    #
+    # The list is byte-identical to the one on clinical:LabResultShape above and
+    # to health:interpretation in health.shapes.ttl. Three copies of one value
+    # set is a drift hazard and is accepted deliberately: SHACL has no value-set
+    # include, and the alternative (a shared shape reached by sh:node) would
+    # bring the lab shape's Violation severity with it, which is the one thing
+    # this constraint must not do on vitals yet.
     sh:property [
         sh:path clinical:interpretation ;
         sh:datatype xsd:string ;
         sh:maxCount 1 ;
-        sh:name "Interpretation"@en
+        sh:in ("EX" "HM" "OBX" "CAR" "Carrier" "B" "D" "U" "W"
+               "<" ">" "AC" "IE" "QCF" "TOX"
+               "A" "N" "I" "MS" "NCL" "NS" "R" "S" "VS"
+               "AA" "H" "L" "HH" "LL" "HX" "LX" "H>" "HU" "E" "L<" "LU"
+               "ND" "IND" "NEG" "POS" "EXP" "UNE" "DET"
+               "SYN-R" "NR" "RR" "WR" "SDD" "SYN-S"
+               "unknown" "asked-unknown" "temp-unknown" "not-asked"
+               "asked-declined" "masked" "not-applicable" "unsupported"
+               "as-text" "error" "not-a-number" "negative-infinity"
+               "positive-infinity" "not-performed" "not-permitted"
+               "normal" "high" "low" "abnormal" "critical"
+               "Normal" "High" "Low" "Abnormal" "Critical") ;
+        sh:name "Interpretation"@en ;
+        sh:message "Interpretation should be a code from the HL7 v3 ObservationInterpretation code system (http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation), a code from http://terminology.hl7.org/CodeSystem/data-absent-reason, or one of the retained legacy words. Carry a code the value sets do not contain verbatim on clinical:interpretationSourceCode and put the nearest ratified reading here. WARNING in clinical v1.15; this becomes a VIOLATION in a later version."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # v1.15: the verbatim escape hatch, same as on the lab shape. sh:Violation
+    # (the shape's default) rather than sh:Warning, because unlike the value set
+    # above there is no existing data to be lenient toward: the property is new
+    # in this version, so the only records carrying it are records written
+    # against this version.
+    sh:property [
+        sh:path clinical:interpretationSourceCode ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Interpretation Source Code"@en ;
+        sh:message "Interpretation source code must be a single string: the source's verbatim code, unmodified"@en
     ] ;
 
     # Optional: deviceName

@@ -41,6 +41,7 @@ import {
   codeableConceptKey,
   codeableConceptSetKey,
   structuredKey,
+  canonicalSetKey,
 } from './types.js';
 import {
   referencePlaceholder,
@@ -575,6 +576,11 @@ function labMeasuredValueKey(resource: any): string | undefined {
  * and two servers may enumerate the same categories in different order. Sorting
  * therefore removes a source of spurious SPLITS; it can never cause a merge,
  * since a differing set still sorts to a differing string.
+ *
+ * Deduplicated as well, since core v3.6: a repeated category is the same claim
+ * twice and must not split the record from one that states it once. The
+ * canonical form is shared with the other set-valued key builders rather than
+ * respelled here. Separator stays ',' — the one this site already shipped.
  */
 function labCategoryKey(resource: any): string | undefined {
   if (!Array.isArray(resource?.category)) return undefined;
@@ -587,7 +593,7 @@ function labCategoryKey(resource: any): string | undefined {
     }
     if (typeof cat?.text === 'string' && cat.text.trim().length > 0) parts.push(cat.text.trim());
   }
-  return parts.length > 0 ? parts.sort().join(',') : undefined;
+  return canonicalSetKey(parts, ',');
 }
 
 /**

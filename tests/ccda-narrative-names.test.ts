@@ -36,7 +36,6 @@ import {
 import { loadShapes, validateTurtle } from '../src/lib/shacl-validator.js';
 import {
   assertOnlyKnownViolations,
-  expectKnownViolationsStillPresent,
 } from './known-shacl-gaps.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -45,6 +44,7 @@ const __dirname = path.dirname(__filename);
 const FIXTURES = path.resolve(__dirname, '../test-fixtures');
 
 const HEALTH = 'https://ns.cascadeprotocol.org/health/v1#';
+const CLINICAL = 'https://ns.cascadeprotocol.org/clinical/v1#';
 const CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
 
 async function convertFixture(name: string): Promise<Quad[]> {
@@ -208,7 +208,14 @@ describe('C-CDA condition and procedure names from the section narrative', () =>
 
   it('procedures: procedureName resolves from the code originalText reference', async () => {
     const quads = await convertFixture('ccda-narrative-names.xml');
-    expect(recordBySourceId(quads, 'NN-PROC-001')[HEALTH + 'procedureName']).toEqual(['Colonoscopy']);
+    const rec = recordBySourceId(quads, 'NN-PROC-001');
+    // On clinical:procedureName since clinical v1.15, and BOTH halves are pinned.
+    // Asserting only the first would still pass if the converter dual-wrote, and a
+    // dual write is the outcome the ruling explicitly did not take: the shape's
+    // sh:or already covers pods holding the old spelling, so writing both would add
+    // a duplicate triple to every new record for no validation benefit.
+    expect(rec[CLINICAL + 'procedureName']).toEqual(['Colonoscopy']);
+    expect(rec[HEALTH + 'procedureName']).toBeUndefined();
   });
 });
 
@@ -246,14 +253,13 @@ describe('C-CDA narrative names — SHACL', () => {
     const validation = validateTurtle(result.output, store, shapeFiles, 'ccda-narrative-names.xml');
     const violations = validation.results.filter((r) => r.severity === 'violation');
 
-    // `procedureName` is a DIFFERENT, pre-existing defect: `clinical:ProcedureShape`
-    // requires `clinical:procedureName`, and `procedures.ts` writes the name to
-    // `health:procedureName`. Resolving the name from the narrative — which the
-    // test above proves happened — cannot satisfy a constraint on a predicate the
-    // handler does not write. It is documented in `known-shacl-gaps.ts` and
-    // asserted through that file's matchers, which fail both on a NEW violation
-    // and on this one silently disappearing.
+    // The `procedureName` gap this file used to document is CLOSED as of clinical
+    // v1.15: `procedures.ts` writes `clinical:procedureName`, the spelling
+    // `clinical:ProcedureShape` names, so the record no longer fails for missing a
+    // name it was carrying. `known-shacl-gaps.ts` now holds no entries, and its
+    // matcher is kept here rather than deleted so the assertion stays "no
+    // violations except the known ones" and the next gap has somewhere to land.
     assertOnlyKnownViolations(violations);
-    expectKnownViolationsStillPresent(violations, ['procedureName']);
+    expect(violations, 'the C-CDA converter leaves no SHACL violation on this fixture').toEqual([]);
   });
 });

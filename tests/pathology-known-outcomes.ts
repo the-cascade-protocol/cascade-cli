@@ -119,26 +119,6 @@ function merges(o: ScenarioObservation): number {
 
 export const KNOWN_OUTCOMES: KnownOutcome[] = [
   {
-    id: 'P04-procedure-name-written-off-shape',
-    scenario: 'P04',
-    currentWrongOutcome:
-      'The C-CDA procedures handler writes the procedure name to health:procedureName, which no ' +
-      'shape targeting clinical:Procedure declares, while clinical:ProcedureShape requires ' +
-      'clinical:procedureName. So the record CARRIES a name, validates as though it had none, and ' +
-      'the name it carries is validated by nothing.',
-    expectedOnceFixed:
-      'The name lands on clinical:procedureName and the violation goes away. Moving it is a data ' +
-      'change for every consumer already querying health:procedureName, which is why it wants its ' +
-      'own change with its own note about what to re-query.',
-    probe: (o) => ({
-      violations: o.violations.filter((v) => v.property === 'procedureName').length,
-      onHealth: o.valuesOn(NS.clinical + 'Procedure', NS.health + 'procedureName'),
-      onClinical: o.valuesOn(NS.clinical + 'Procedure', NS.clinical + 'procedureName'),
-    }),
-    current: { violations: 1, onHealth: ['Colonoscopy'], onClinical: [] },
-    fixed: { violations: 0, onHealth: [], onClinical: ['Colonoscopy'] },
-  },
-  {
     id: 'P04-lab-report-date-promoted-to-midnight',
     scenario: 'P04',
     currentWrongOutcome:
@@ -201,33 +181,6 @@ export const KNOWN_OUTCOMES: KnownOutcome[] = [
     }),
     current: { reports: 3, edges: 12 },
     fixed: { reports: 1, edges: 4 },
-  },
-  {
-    id: 'P12-nullflavor-variety-collapses-to-one-absence',
-    scenario: 'P12',
-    currentWrongOutcome:
-      'UNK ("unknown"), NAV ("temporarily unavailable") and ASKU ("asked but unknown") are three ' +
-      'different statements about WHY a value is missing, and HL7 v3 separates them deliberately: ' +
-      'the third one means somebody asked the patient. All three produce a lab record with no ' +
-      'health:resultValue and nothing else, so the three become one indistinguishable blank and the ' +
-      'reason the source took the trouble to state is discarded.',
-    expectedOnceFixed:
-      'The nullFlavor is carried, so "we never measured it", "the result is coming" and "we asked ' +
-      'and were not told" stay three different answers. The records still carry no resultValue — ' +
-      'inventing one is not the fix. BLOCKED ON VOCABULARY, deliberately: the predicate this entry ' +
-      'names, health:dataAbsentReason, does not exist. No property in health, clinical or core ' +
-      'carries a reason-for-absence today, and vocabulary is authored in `spec/` and synced into ' +
-      'src/shapes/ — emitting a term the ontology does not define would put an unvalidatable ' +
-      'predicate in every pod and is not a smaller change than adding it properly. So the CONVERTER ' +
-      'fix waits on a spec addition binding health:dataAbsentReason to the HL7 v3 NullFlavor / FHIR ' +
-      'data-absent-reason value set, and this entry stays open to say so rather than being answered ' +
-      'with an invented term.',
-    probe: (o) => ({
-      labsWithoutValue: o.countMissing(NS.health + 'LabResultRecord', NS.health + 'resultValue'),
-      dataAbsentReasons: o.values(NS.health + 'dataAbsentReason').length,
-    }),
-    current: { labsWithoutValue: 3, dataAbsentReasons: 0 },
-    fixed: { labsWithoutValue: 3, dataAbsentReasons: 3 },
   },
 ];
 
