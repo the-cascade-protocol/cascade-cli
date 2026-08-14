@@ -61,6 +61,8 @@ import {
 import { obtainPassphrase } from '../../lib/passphrase.js';
 import { classifyImportInput, isPathInsidePod } from '../../lib/import-input.js';
 import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket-write.js';
+import { toJsonText } from '../../lib/json-output.js';
+import { appendTier0Journal, TIER0_JOURNAL_RELATIVE_PATH } from '../../lib/tier0-journal.js';
 
 // ---------------------------------------------------------------------------
 // Import report type
@@ -796,6 +798,23 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           if (pendingConflicts.length > 0) {
             printVerbose(`  ${pendingConflicts.length} unresolved conflict(s) written to settings/pending-conflicts.ttl`, globalOpts);
           }
+
+          // Tier-0 merges applied WITHOUT asking. Journaled with the discarded
+          // records' full content, which is the condition on which the ruling
+          // allows them to be silent at all. Not printVerbose for the same
+          // reason the identity-collision warning is not: a user who is never
+          // told cannot review a decision that was made for them.
+          const tier0 = reconcileResult.report.tier0Merges;
+          if (tier0.length > 0) {
+            appendTier0Journal(podDir, tier0, 'pod import', dek);
+            printWarning(
+              `${tier0.length} cross-source exact lab duplicate(s) merged automatically. ` +
+                `Identical result, same instant, different known sources, merged without raising a ` +
+                `conflict. Every one is recorded with the discarded records in ` +
+                `${TIER0_JOURNAL_RELATIVE_PATH}, and can be undone from it.`,
+              globalOpts,
+            );
+          }
         }
       } else {
         mergedTurtle = allInputs.map(i => i.content).join('\n\n');
@@ -1179,7 +1198,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // The report file is a user-named output path, not pod content, so writing
       // it does not break the dry-run promise of leaving the pod untouched.
       if (options.report) {
-        await fs.writeFile(options.report, JSON.stringify(importReport, null, 2), 'utf-8');
+        await fs.writeFile(options.report, toJsonText(importReport), 'utf-8');
         printVerbose(
           `${dryRun ? '[dry-run] ' : ''}Import report written to: ${options.report}`,
           globalOpts,

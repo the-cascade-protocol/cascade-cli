@@ -55,6 +55,31 @@ cascade pod init ./my-pod
 cascade capabilities
 ```
 
+## Reconciling a pod's own duplicates
+
+`pod import` compares arriving records against stored ones, and never two stored records with each
+other. So duplicates a pod already holds stay there. `pod reconcile` is the verb that finds them.
+
+It reports first, and writes nothing until you say so:
+
+```bash
+# What WOULD merge. Reads the pod, changes nothing.
+cascade pod reconcile ./my-pod
+cascade --json pod reconcile ./my-pod
+cascade pod reconcile ./my-pod --report duplicates.json
+
+# Merge, having read the report above.
+cascade pod reconcile ./my-pod --apply
+```
+
+Two organizations reporting the same lab result, at the same instant, with identical values, are
+merged without raising a conflict. Every such merge is appended to `settings/tier0-merge-journal.json`
+with the full content of the record it discarded, so it can be reviewed or undone afterwards.
+Anything less certain than that is reported for review and reaches `cascade pod conflicts`.
+
+If a record file cannot be read, the command refuses to run at all (exit 2) rather than report counts
+about a pod it only partly opened.
+
 ## Pod graph queries
 
 A pod is a typed RDF graph. Beyond the flat per-type buckets of `pod query --all`,

@@ -35,6 +35,7 @@ import {
 import { shortenIRI } from '../lib/turtle-parser.js';
 import { isPodEncrypted, resolveDek, PodDecryptError } from '../lib/pod-encryption.js';
 import { obtainPassphrase } from '../lib/passphrase.js';
+import { toJsonText } from '../lib/json-output.js';
 
 /** ANSI color codes for terminal output */
 const colors = {
@@ -267,7 +268,7 @@ export function registerValidateCommand(program: Command): void {
       // Check if path exists
       if (!fs.existsSync(targetPath)) {
         if (globalOpts.json) {
-          console.log(JSON.stringify({ error: `Path not found: ${targetPath}` }, null, 2));
+          console.log(toJsonText({ error: `Path not found: ${targetPath}` }));
         } else {
           console.error(`${colors.red}ERROR${colors.reset}: Path not found: ${targetPath}`);
         }
@@ -288,7 +289,7 @@ export function registerValidateCommand(program: Command): void {
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         if (globalOpts.json) {
-          console.log(JSON.stringify({ error: msg }, null, 2));
+          console.log(toJsonText({ error: msg }));
         } else {
           console.error(`${colors.red}ERROR${colors.reset}: ${msg}`);
         }
@@ -308,7 +309,7 @@ export function registerValidateCommand(program: Command): void {
           const msg =
             e instanceof PodDecryptError ? e.message : e instanceof Error ? e.message : String(e);
           if (globalOpts.json) {
-            console.log(JSON.stringify({ error: `Cannot read encrypted pod: ${msg}` }, null, 2));
+            console.log(toJsonText({ error: `Cannot read encrypted pod: ${msg}` }));
           } else {
             console.error(`${colors.red}ERROR${colors.reset}: Cannot read encrypted pod: ${msg}`);
           }
@@ -325,7 +326,7 @@ export function registerValidateCommand(program: Command): void {
         filesToValidate = findTurtleFiles(targetPath);
         if (filesToValidate.length === 0) {
           if (globalOpts.json) {
-            console.log(JSON.stringify({ error: `No .ttl files found in ${targetPath}` }, null, 2));
+            console.log(toJsonText({ error: `No .ttl files found in ${targetPath}` }));
           } else {
             console.error(`${colors.yellow}WARNING${colors.reset}: No .ttl files found in ${targetPath}`);
           }
@@ -336,7 +337,7 @@ export function registerValidateCommand(program: Command): void {
       } else if (stat.isFile()) {
         if (!targetPath.endsWith('.ttl')) {
           if (globalOpts.json) {
-            console.log(JSON.stringify({ error: `Not a Turtle file: ${targetPath}` }, null, 2));
+            console.log(toJsonText({ error: `Not a Turtle file: ${targetPath}` }));
           } else {
             console.error(`${colors.red}ERROR${colors.reset}: Not a Turtle file (expected .ttl): ${targetPath}`);
           }
@@ -346,7 +347,7 @@ export function registerValidateCommand(program: Command): void {
         filesToValidate = [targetPath];
       } else {
         if (globalOpts.json) {
-          console.log(JSON.stringify({ error: `Not a file or directory: ${targetPath}` }, null, 2));
+          console.log(toJsonText({ error: `Not a file or directory: ${targetPath}` }));
         } else {
           console.error(`${colors.red}ERROR${colors.reset}: Not a file or directory: ${targetPath}`);
         }
@@ -406,7 +407,7 @@ export function registerValidateCommand(program: Command): void {
 
       // Output JSON
       if (globalOpts.json) {
-        console.log(JSON.stringify(results, null, 2));
+        console.log(toJsonText(results));
       } else {
         // Print summary for multiple files
         if (results.length > 1) {

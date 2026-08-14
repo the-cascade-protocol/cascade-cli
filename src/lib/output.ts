@@ -2,8 +2,14 @@
  * Output formatting utilities for consistent CLI output.
  *
  * Supports both human-readable text and machine-readable JSON output modes.
+ *
+ * Every JSON encode here goes through {@link toJsonText} rather than
+ * `JSON.stringify`, because a pod literal can hold an unpaired surrogate and
+ * `JSON.stringify` re-emits it as an escape that jq rejects and the whole
+ * document with it. See `lib/json-output.ts` for the measurement.
  */
 
+import { toJsonText } from './json-output.js';
 
 export interface OutputOptions {
   json: boolean;
@@ -15,7 +21,7 @@ export interface OutputOptions {
  */
 export function formatOutput(data: unknown, opts: OutputOptions): string {
   if (opts.json) {
-    return JSON.stringify(data, null, 2);
+    return toJsonText(data);
   }
 
   if (typeof data === 'string') {
@@ -62,7 +68,7 @@ export function printResult(data: unknown, opts: OutputOptions): void {
  */
 export function printError(message: string, opts: OutputOptions): void {
   if (opts.json) {
-    console.error(JSON.stringify({ error: message }));
+    console.error(toJsonText({ error: message }, 0));
   } else {
     console.error(`ERROR: ${message}`);
   }
@@ -83,7 +89,7 @@ export function printErrorDetail(
   opts: OutputOptions,
 ): void {
   if (opts.json) {
-    console.error(JSON.stringify({ error: message, ...detail }));
+    console.error(toJsonText({ error: message, ...detail }, 0));
   } else {
     console.error(`ERROR: ${message}`);
   }
@@ -98,7 +104,7 @@ export function printErrorDetail(
  */
 export function printWarning(message: string, opts: OutputOptions): void {
   if (opts.json) {
-    console.error(JSON.stringify({ warning: message }));
+    console.error(toJsonText({ warning: message }, 0));
   } else {
     console.error(`WARNING: ${message}`);
   }
@@ -110,7 +116,7 @@ export function printWarning(message: string, opts: OutputOptions): void {
 export function printVerbose(message: string, opts: OutputOptions): void {
   if (opts.verbose) {
     if (opts.json) {
-      console.error(JSON.stringify({ debug: message }));
+      console.error(toJsonText({ debug: message }, 0));
     } else {
       console.error(`[verbose] ${message}`);
     }

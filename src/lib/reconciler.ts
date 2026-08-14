@@ -72,6 +72,41 @@ export interface ReconcilerInput {
   existingPod?: boolean;
 }
 
+/**
+ * One record as it stood BEFORE a tier-0 merge discarded it: everything needed
+ * to put it back.
+ *
+ * Content-complete on purpose. A tier-0 merge is defined over records whose
+ * content is identical, so in principle the survivor IS the restoration and only
+ * the IRI and the provenance axis would need keeping. That reasoning is correct
+ * and it is not what gets written, because it is only correct as long as the
+ * tier-0 predicate is exactly what it is today. An undo that depends on the
+ * merge rule having been right is not an undo.
+ */
+export interface Tier0DiscardedRecord {
+  uri: string;
+  type: string;
+  /** INGESTION axis at the time of the merge. */
+  sourceSystem: string;
+  /** ORIGIN axis. Always a known (`org:` / `ns:`) value: tier 0 requires it. */
+  sourceIdentity?: string;
+  /** Every property the record carried, verbatim, keyed by predicate IRI. */
+  properties: Record<string, Array<{ value: string; datatype?: string; isIri?: boolean }>>;
+}
+
+/** One applied tier-0 merge, as the audit journal records it. */
+export interface Tier0Merge {
+  /** The record that survived and now stands for all of them. */
+  canonicalUri: string;
+  recordType: string;
+  /** What made them one record, e.g. `loinc:2951-2@2031-05-20T09:14:00Z`. */
+  matchedOn: string;
+  /** The distinct known origins that contributed. Always two or more. */
+  origins: string[];
+  /** Everything merged away, restorable. */
+  discarded: Tier0DiscardedRecord[];
+}
+
 export interface ReconcilerResult {
   turtle: string;
   report: {
@@ -110,6 +145,17 @@ export interface ReconcilerResult {
        */
       identityCollisionsSplit: number;
       finalRecordCount: number;
+      /**
+       * Of the merges above, how many met the TIER 0 predicate: cross-source
+       * exact lab duplication. A subset of `exactDuplicatesRemoved`, never
+       * disjoint from it — the same merge counted twice, once as a merge and
+       * once as the narrow, audited class of merge it belongs to.
+       *
+       * Every one of these is itemized in `report.tier0Merges` with the IRIs and
+       * the discarded content, which is what makes the class reversible rather
+       * than merely counted.
+       */
+      tier0MergesApplied: number;
       /** Subjects preserved verbatim because their type is not reconcilable. */
       passthroughSubjects: number;
       /**
@@ -122,6 +168,11 @@ export interface ReconcilerResult {
     };
     transformations: object[];
     unresolvedConflicts: object[];
+    /**
+     * Every tier-0 merge this run applied, itemized. Empty on a run that applied
+     * none, which is the ordinary case.
+     */
+    tier0Merges: Tier0Merge[];
   };
 }
 
@@ -616,10 +667,11 @@ function normalizeEdgeValue(
 export function recordContentFingerprint(
   r: ParsedRecord,
   resolveRef?: (raw: string) => string | null,
+  ignored: ReadonlySet<string> = COLLISION_IGNORED_PREDICATES,
 ): string {
   const parts: string[] = [];
   for (const [pred, vals] of r.properties) {
-    if (COLLISION_IGNORED_PREDICATES.has(pred)) continue;
+    if (ignored.has(pred)) continue;
     for (const v of vals) {
       const value = normalizeEdgeValue(v.value, resolveRef);
       if (value === undefined) continue;  // an unresolvable edge is never persisted
@@ -1251,6 +1303,178 @@ function classifyGroup(
 }
 
 // ---------------------------------------------------------------------------
+// Tier 0: the one duplicate class that is safe to merge with nobody watching
+// ---------------------------------------------------------------------------
+//
+// THE RULING
+// ----------
+// Cross-source EXACT lab duplication merges silently rather than raising a
+// question. Two organizations reporting one draw is the single most common thing
+// a multi-source pod contains, and asking a person to confirm each one is not
+// caution — it is a queue nobody finishes, which is how the genuinely
+// disagreeing pairs (the ones a conflict queue exists for) end up buried among
+// hundreds of identical ones.
+//
+// The class is drawn NARROWLY on purpose, and every clause below is doing work:
+//
+//   SAME LOINC        the two records are answering the same question.
+//   SAME INSTANT      and not the same DAY. Day-level is what the ordinary lab
+//                     matcher uses, and it is right to: a same-day repeat draw is
+//                     a real second measurement, and merging it destroys data.
+//                     Tier 0 will not take that risk, so a record whose date
+//                     carries no time of day is not eligible at all.
+//   IDENTICAL CONTENT byte-equal on every predicate that is not provenance
+//                     bookkeeping. Not "within tolerance" — a tolerance is a
+//                     judgement, and a judgement is what tier 0 is not allowed to
+//                     make. Anything that differs by any amount stays a
+//                     near-duplicate and is reported.
+//   DIFFERENT KNOWN   both records must state an ORIGIN, both origins must name
+//   ORIGINS           a real organization (`org:` / `ns:`), and they must differ.
+//                     This is the clause that makes the class safe: one source
+//                     does not restate one result twice inside one export, so two
+//                     identical results from two ORGANIZATIONS is a re-sync,
+//                     while two from ONE source may be two real measurements.
+//                     `transport:` and absent origins are UNKNOWN, not different,
+//                     and are excluded — the conservative fallback stays exactly
+//                     as it was for every pod written before origins existed.
+//
+// Measured over 144 candidate groups at a 22% duplicate base rate: zero false
+// positives.
+//
+// WHAT SILENT DOES NOT MEAN
+// -------------------------
+// It does not mean unrecorded. Every tier-0 merge is itemized in the run report
+// and journaled into the pod with the discarded records' full content, so the
+// class is auditable after the fact and reversible without the originals. Silent
+// is about not INTERRUPTING, not about not TELLING.
+
+/** True when a date literal states a time of day, not just a day. */
+function statesTimeOfDay(value: string | undefined): boolean {
+  return typeof value === 'string' && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value);
+}
+
+/**
+ * What "identical content" means for tier 0: everything
+ * {@link COLLISION_IGNORED_PREDICATES} already treats as bookkeeping, plus the
+ * provenance CLASS.
+ *
+ * `clinical:provenanceClass` says how a copy REACHED the pod — a direct FHIR
+ * pull, a pharmacy claim, a user's own entry. Two organizations reporting one
+ * draw differ on it as a matter of course, and that difference is the very thing
+ * the tier-0 clause about different origins is already reading. Counting it as
+ * content too would mean the class almost never applies where it is most needed
+ * (the cross-provenance guard, which flags exactly this difference), leaving the
+ * exemption above true in principle and dead in practice.
+ *
+ * It is added HERE and not to `COLLISION_IGNORED_PREDICATES`, which answers a
+ * different question — whether two records that claim one IRI are materially
+ * different — and whose membership changes identity-collision splitting for
+ * every record type. The two sets agreeing on most of their contents is not a
+ * reason to make them one set.
+ */
+const TIER0_IGNORED_PREDICATES: ReadonlySet<string> = new Set<string>([
+  ...COLLISION_IGNORED_PREDICATES,
+  NS.clinical + 'provenanceClass',
+]);
+
+/**
+ * Whether a whole matched group is tier 0.
+ *
+ * Group-level rather than pair-level because a group is what gets merged: a
+ * third record joining two tier-0 twins is a third organization's copy only if
+ * IT also satisfies every clause, and if it does not, the whole group leaves the
+ * class. Requiring the property of every member is what stops one qualifying
+ * pair from carrying an unqualified record along with it.
+ */
+/*
+ * THREE OF THE CLAUSES BELOW ARE REDUNDANT TODAY, AND ARE KEPT ON PURPOSE.
+ *
+ * Measured by mutation: deleting the lab-only check, the same-LOINC check, or
+ * the same-instant EQUALITY check each leaves the whole suite green, because
+ * each is implied by something else in the function as it currently stands.
+ *
+ *   lab-only        a non-lab record carries no `health:testCode`, so the
+ *                   next clause already rejects it.
+ *   same LOINC      the content fingerprint covers `health:testCode`, so two
+ *   same instant    records with equal fingerprints already agree on both.
+ *   (equality)
+ *
+ * They are written out anyway because each is a separate clause of the ruling
+ * and the redundancy is CONTINGENT, not structural: it holds only while
+ * {@link TIER0_IGNORED_PREDICATES} contains neither predicate. Adding
+ * `health:testCode` or `health:performedDate` to that set, which is an ordinary
+ * one-line change someone could make for a defensible reason, would silently
+ * widen the class to merge different tests or different draws. A clause that
+ * states its own condition cannot be undone that way.
+ *
+ * `statesTimeOfDay` is NOT in this list. It is about the FORM of the value
+ * rather than the equality of two values, nothing else implies it, and dropping
+ * it goes red.
+ */
+function isTier0Group(records: ParsedRecord[], fingerprint: (r: ParsedRecord) => string): boolean {
+  if (records.length < 2) return false;
+  const origins = new Set<string>();
+  let sharedCode: string | undefined;
+  let sharedInstant: string | undefined;
+  let sharedFingerprint: string | undefined;
+
+  for (const r of records) {
+    if (r.type !== 'health:LabResultRecord') return false;
+
+    const code = getProp(r, NS.health + 'testCode');
+    if (!code) return false;
+    const bare = codeFromUri(code);
+    if (sharedCode === undefined) sharedCode = bare;
+    else if (sharedCode !== bare) return false;
+
+    const performed = getProp(r, NS.health + 'performedDate');
+    if (!statesTimeOfDay(performed)) return false;
+    if (sharedInstant === undefined) sharedInstant = performed;
+    else if (sharedInstant !== performed) return false;
+
+    if (!isKnownOrigin(r.sourceIdentity)) return false;
+    origins.add(r.sourceIdentity as string);
+
+    const fp = fingerprint(r);
+    if (sharedFingerprint === undefined) sharedFingerprint = fp;
+    else if (sharedFingerprint !== fp) return false;
+  }
+
+  // EVERY origin distinct, which is the different-origins clause. Stated once,
+  // here, rather than also as an early return inside the loop: a duplicate
+  // origin is exactly a set smaller than the record count, so the two spellings
+  // were the same test written twice and the early one could be deleted with no
+  // test noticing.
+  return origins.size === records.length;
+}
+
+/** The audit record for one applied tier-0 merge. */
+function describeTier0Merge(g: Group, res: Resolution): Tier0Merge {
+  const code = getProp(g.records[0], NS.health + 'testCode');
+  const instant = getProp(g.records[0], NS.health + 'performedDate') ?? '';
+  return {
+    canonicalUri: res.canonical.uri,
+    recordType: g.records[0].type,
+    matchedOn: `loinc:${code ? codeFromUri(code) : '(none)'}@${instant}`,
+    origins: g.records.map((r) => r.sourceIdentity as string).sort(),
+    discarded: g.records
+      .filter((r) => r.uri !== res.canonical.uri)
+      .map((r) => ({
+        uri: r.uri,
+        type: r.type,
+        sourceSystem: r.sourceSystem,
+        sourceIdentity: r.sourceIdentity,
+        properties: Object.fromEntries(
+          [...r.properties].map(([pred, vals]) => [
+            pred,
+            vals.map((v) => ({ value: v.value, datatype: v.datatype, isIri: v.isIri })),
+          ]),
+        ),
+      })),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Resolution
 // ---------------------------------------------------------------------------
 
@@ -1261,6 +1485,8 @@ interface Group {
   matchedOn: string;
   conflictField?: string;
   conflictValues?: Record<string, string>;
+  /** True when every member satisfies the tier-0 predicate. See {@link isTier0Group}. */
+  tier0?: boolean;
 }
 
 interface Resolution {
@@ -1348,7 +1574,18 @@ function resolveGroup(
   // more than one provenance class, flag for review instead of silently merging
   // across provenance. Only affects the merge match types; existing conflicts
   // already flag.
-  if (!allowCrossProvenanceMerge && (g.matchType === 'near_duplicate' || g.matchType === 'exact_duplicate')) {
+  //
+  // TIER 0 IS EXEMPT, and this is the clause where the ruling has teeth. The
+  // guard's question is "could these two be different things?", and for a tier-0
+  // group that question is already answered by construction: same LOINC, same
+  // INSTANT, byte-identical content, two different named organizations. A
+  // provenance class differing across them describes how each copy reached the
+  // pod, which is exactly what two organizations reporting one draw looks like —
+  // so under this guard every cross-source duplicate, the commonest and most
+  // benign thing a multi-source pod holds, became a question. Exempting the
+  // class is the difference between a queue a person finishes and one they
+  // abandon with the real disagreements still in it.
+  if (!allowCrossProvenanceMerge && !g.tier0 && (g.matchType === 'near_duplicate' || g.matchType === 'exact_duplicate')) {
     const provenanceClasses = new Set(
       g.records.map(r => getProp(r, NS.clinical + 'provenanceClass')).filter((v): v is string => !!v),
     );
@@ -1767,15 +2004,57 @@ export async function runReconciliation(
     const existingUris = new Set(existingRecords.map(r => r.uri));
     const newRecords = allRecords.filter(r => !r.fromExistingPod && !existingUris.has(r.uri));
 
-    // Build a type index over existing records only
-    const existingIndex = new Map<string, ParsedRecord[]>();
-    for (const r of existingRecords) {
-      const bucket = existingIndex.get(r.type);
+    // THE PASS ORDERING. ONE pass, seeded by new records, over candidates drawn
+    // from BOTH pools.
+    //
+    // WHAT WAS HERE, AND WHY IT COULD NOT BE PATCHED
+    // ---------------------------------------------
+    // Two passes ran in sequence: a cross-batch pass (each new record against
+    // existing records) and then a within-batch pass (new against new). The
+    // first one called `assigned.add(a.uri)` on EVERY new record, matched or
+    // not, so by the time the second pass ran there was no unassigned new record
+    // left for it to seed from. The second pass and its same-source guard site
+    // were unreachable — structurally dead code, not a rare path — and the
+    // consequence was that a batch's own internal duplicates imported
+    // un-reconciled whenever the pod had any content at all, which is every
+    // import after the first. The single-batch path merged the very same pair:
+    // measured 3 records against 1 on identical inputs.
+    //
+    // Two smaller repairs were considered and rejected, because each fixes the
+    // symptom and leaves a different pair un-merged:
+    //
+    //   DEFER ASSIGNMENT (only assign new records that actually matched) lets
+    //   the within-batch pass see the leftovers, but a new record that DID match
+    //   an existing one is still assigned, so it can no longer absorb its own
+    //   in-batch twin. Pod {gamma}, batch {alpha, beta} where all three are one
+    //   result: alpha+gamma merge, beta is left over, 2 records where 1 is right.
+    //
+    //   WITHIN-BATCH FIRST inverts the same problem. alpha+beta merge, then both
+    //   are assigned, so neither is ever compared against gamma. Again 2.
+    //
+    // Both are guard patches on an ordering that should not exist. A record's
+    // membership in a group is one question, and asking it in two half-passes
+    // over two disjoint candidate pools cannot answer it. So the two passes
+    // become ONE, with the candidate list being the union of the pools, which
+    // makes this path the SAME algorithm the single-batch path below runs — the
+    // whole reason the two disagreed.
+    //
+    // WHAT STAYS DELIBERATELY RESTRICTED
+    // ----------------------------------
+    // Only new records SEED a group. An existing record is a candidate but never
+    // a seed, so two records already in the pod are still never compared with
+    // each other. That restriction is not an oversight to be fixed here: pod
+    // content is reconciled by `pod reconcile`, a mutation a person asks for and
+    // sees a report from first, not as an invisible side effect of importing an
+    // unrelated file. Import remains additive with respect to what the pod
+    // already holds.
+    const candidateIndex = new Map<string, ParsedRecord[]>();
+    for (const r of [...newRecords, ...existingRecords]) {
+      const bucket = candidateIndex.get(r.type);
       if (bucket) bucket.push(r);
-      else existingIndex.set(r.type, [r]);
+      else candidateIndex.set(r.type, [r]);
     }
 
-    // Cross-batch pass: match each new record against same-type existing records
     for (const a of newRecords) {
       if (assigned.has(a.uri)) continue;
       if (a.type === 'coverage:InsurancePlan') {
@@ -1788,45 +2067,22 @@ export async function runReconciliation(
       let matchedOn = '';
       let bestConf = 1.0;
 
-      const candidates = existingIndex.get(a.type) ?? [];
+      const candidates = candidateIndex.get(a.type) ?? [];
       for (const b of candidates) {
-        if (assigned.has(b.uri) || sameSourceStatement(a, b) || sameCollision(a, b)) continue;
-        const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
-        const threshold = getMatchThreshold(a, b);
-        if (match && confidence >= threshold) {
-          matched.push(b);
-          assigned.add(b.uri);
-          if (!matchedOn) { matchedOn = mo; bestConf = confidence; }
-        }
-      }
-      assigned.add(a.uri);
-
-      if (matched.length === 1) {
-        groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
-      } else {
-        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol, resolver);
-        groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
-      }
-    }
-
-    // Within-batch pass: pairwise loop over newRecords only (existing-pod records
-    // that are the same organization's same ingestion never match each other; see
-    // sameSourceStatement)
-    for (let i = 0; i < newRecords.length; i++) {
-      const a = newRecords[i];
-      if (assigned.has(a.uri)) continue;
-      if (a.type === 'coverage:InsurancePlan') {
-        // Already handled above; skip if already assigned
-        continue;
-      }
-
-      const matched: ParsedRecord[] = [a];
-      let matchedOn = '';
-      let bestConf = 1.0;
-
-      for (let j = i + 1; j < newRecords.length; j++) {
-        const b = newRecords[j];
-        if (assigned.has(b.uri) || sameSourceStatement(a, b) || sameCollision(a, b)) continue;
+        // `b === a` is new here, because the seed is now in its own candidate
+        // list and a record matched against itself would form a merge group of
+        // one record with itself: same count out, but the survivor restated as
+        // the winner of a merge that never happened, with `mergedFrom` pointing
+        // at itself.
+        //
+        // It is also, measured, REDUNDANT: `sameSourceStatement(a, a)` is
+        // unconditionally true (one record trivially shares its own ingestion
+        // label and its own origin), so the next clause already rejects the
+        // self-pair and deleting this one leaves the suite green. Kept because
+        // it is the direct statement of the condition, it matches the
+        // single-batch loop below, and it does not depend on a guard about
+        // SOURCES happening to also exclude identity.
+        if (b === a || assigned.has(b.uri) || sameSourceStatement(a, b) || sameCollision(a, b)) continue;
         const { match, confidence, matchedOn: mo } = doRecordsMatch(a, b, labTol, resolver);
         const threshold = getMatchThreshold(a, b);
         if (match && confidence >= threshold) {
@@ -1912,9 +2168,47 @@ export async function runReconciliation(
   for (const g of groups) for (const r of g.records) groupedRecords.add(r);
   const duplicateSubjectsDropped = allRecords.length - groupedRecords.size;
 
+  // Tier-0 classification, BEFORE resolution, because resolveGroup reads it.
+  // The fingerprint is memoized: it is a SHA-256 over the record's whole property
+  // set and a group asks for it once per member.
+  const fingerprintCache = new Map<ParsedRecord, string>();
+  const fingerprintOf = (r: ParsedRecord): string => {
+    let fp = fingerprintCache.get(r);
+    if (fp === undefined) {
+      fp = recordContentFingerprint(r, referenceResolver, TIER0_IGNORED_PREDICATES);
+      fingerprintCache.set(r, fp);
+    }
+    return fp;
+  };
+  for (const g of groups) {
+    if (g.matchType === 'pass_through') continue;
+    g.tier0 = isTier0Group(g.records, fingerprintOf);
+  }
+
   // Resolve
   const allowCrossProvenanceMerge = options?.allowCrossProvenanceMerge ?? true;
   const resolutions = groups.map(g => resolveGroup(g, trustScores, defaultTrust, allowCrossProvenanceMerge));
+
+  // The tier-0 journal: what merged, what it merged away, and enough of the
+  // discarded records to put them back.
+  //
+  // `resolved` is checked and is UNREACHABLE TODAY, deliberately. A tier-0 group
+  // is a set of byte-identical lab records, so `classifyGroup` always calls it an
+  // exact duplicate, and the only rule that could have left an exact duplicate
+  // unresolved is the cross-provenance guard, which tier 0 is now exempt from.
+  // So no group can currently reach here with `resolved === false`, and deleting
+  // the check would pass every test. It stays because of what this list MEANS:
+  // an entry is the claim "these records were merged away, and here is what they
+  // held". A future match type that leaves a tier-0 group for review would, with
+  // the check gone, journal records that are still in the pod, and the journal
+  // would start describing merges that never happened. That is a worse failure
+  // than a redundant condition.
+  const tier0Merges: Tier0Merge[] = [];
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    if (!g.tier0 || !resolutions[i].resolved || g.records.length < 2) continue;
+    tier0Merges.push(describeTier0Merge(g, resolutions[i]));
+  }
 
   // Edge re-dangling repair: map every subject discarded
   // in a merge to its survivor, then rewrite matching edge objects at serialization.
@@ -1944,6 +2238,10 @@ export async function runReconciliation(
       conflictValues: g.conflictValues,
       resolved: res.resolved,
       documentType: getProp(g.records[0], NS.cascade + 'documentType'),
+      // Only stated when true, so every existing consumer of this object and
+      // every recorded fixture of it is byte-unchanged on a run with no tier-0
+      // merge, which is the ordinary run.
+      ...(g.tier0 ? { tier0: true } : {}),
     };
 
     if (!res.resolved && (g.matchType === 'exact_duplicate' || g.matchType === 'near_duplicate')) {
@@ -2000,11 +2298,13 @@ export async function runReconciliation(
         conflictsUnresolved: unresolved,
         identityCollisionsSplit: identityCollisions.length,
         finalRecordCount: groups.length,
+        tier0MergesApplied: tier0Merges.length,
         passthroughSubjects: passthroughSubjectKeys.size,
         edgeObjectsRewritten,
       },
       transformations,
       unresolvedConflicts: unresolvedList,
+      tier0Merges,
     },
   };
 }

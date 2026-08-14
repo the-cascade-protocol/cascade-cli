@@ -7,6 +7,82 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+**`cascade pod reconcile <pod-dir>`: a pod can now be reconciled against itself.**
+`pod import --reconcile-existing` compares ARRIVING records against stored ones and deliberately
+never compares two stored records with each other, which is the right restriction for an import:
+rewriting records the user did not just hand over must not be an invisible side effect of importing
+an unrelated file. The consequence was that duplicates already IN a pod were permanent. Nothing in
+the tool ever compared them, so no sequence of imports could ever clear them.
+
+This verb is the same reconciler, the same matching and the same conflict machinery, pointed at pod
+content and named honestly as the mutation it is:
+
+- **Dry run is the DEFAULT.** With no flags it reads the pod, runs the full reconciliation, prints
+  what WOULD merge and what WOULD be raised for review, writes nothing, and exits 0. `--apply` is a
+  separate typed decision made after reading that report. `--json` gives the same report machine
+  readable, `--report <file>` writes it to disk.
+- **A record file it cannot read refuses the whole run**, dry run included, at exit 2. Every count
+  this verb prints is a claim about the pod's WHOLE record set, and a file that was never opened
+  could hold a third copy, so a confident report over a partial read is a wrong answer rather than a
+  small one. An unparseable file that is NOT a registered record bucket is warned about and stepped
+  over: a pod legitimately keeps notes and analyses alongside its records.
+- Unresolved conflicts go into the same `settings/pending-conflicts.ttl` queue that `pod conflicts`
+  and `pod resolve` already read. It is covered by the pod read-conformance matrix as a read verb.
+
+**Tier 0: cross-source exact lab duplication merges without raising a conflict, and is journaled.**
+Two organizations reporting one draw is the commonest thing a multi-source pod holds, and queueing a
+question for each one does not produce caution, it produces a queue nobody finishes with the
+genuinely disagreeing pairs buried in it. The class is drawn narrowly and every clause is load
+bearing: same LOINC, the same exact INSTANT (never day level, because a same-day repeat draw is a
+real second measurement), byte-identical content on every non-provenance predicate, and two DIFFERENT
+origins that both name a real organization (`org:` / `ns:`). A `transport:` or absent origin is
+unknown rather than different and is excluded, so a pod written before origins existed reconciles
+exactly as it did before. Measured over 144 candidate groups at a 22% duplicate base rate: zero false
+positives.
+
+Silent means not interrupting, not unrecorded. Every tier-0 merge is counted in the run report as
+`tier0MergesApplied`, itemized in `report.tier0Merges` with the surviving IRI and every IRI it
+absorbed, and appended to `settings/tier0-merge-journal.json` with the FULL content of each discarded
+record, so any merge can be found and undone without the originals. Tier-0 groups are exempt from the
+opt-in cross-provenance guard, which otherwise flagged every benign cross-source duplicate, since two
+organizations reporting one draw differ on provenance class as a matter of course.
+
+### Fixed
+
+**A batch's own internal duplicates imported un-reconciled whenever the pod held any content.**
+On the `--reconcile-existing` fast path, which is the default, the cross-batch pass called
+`assigned.add()` on EVERY new record, matched or not, before the new-against-new pass ran. That pass
+had no unassigned record left to seed from, so it and its same-source guard site were structurally
+dead code, and two duplicates arriving in one import were never compared with each other. The
+single-batch path merged the same pair: 3 records against 1 on identical inputs.
+
+The two passes are now ONE pass whose candidate list is the union of both pools, which makes the fast
+path run the same algorithm the single-batch path runs, restricted so that only new records seed a
+group. Deferring assignment, or running the within-batch pass first, were both considered and
+rejected: each fixes one pair and leaves a different pair un-merged (three copies of one result, one
+in the pod and two in the batch, reach 2 records under either and 1 only under a single pass). The
+restriction that two records already in the pod are never compared with each other is KEPT
+deliberately, and is what `pod reconcile` now exists to do on purpose.
+
+**`--json` output is guaranteed RFC 8259 valid; `pod query --all --edges --json` could emit a
+document jq refused to parse.** Measured on a real pod: 3.7 MB to stdout, exit 0, empty stderr, and
+jq rejected all of it. Turtle admits `\uXXXX` escapes, so a pod literal can hold an UNPAIRED
+surrogate; nothing on the read path rejects it, and `JSON.stringify` (well-formed since ES2019)
+faithfully re-emits it as `\ud800`, which `JSON.parse` accepts, Python's `json` accepts, and jq
+rejects. Two of three parsers accepting is how a corrupt payload looks healthy.
+
+Every JSON-emitting surface now goes through one encoder (`src/lib/json-output.ts`), which replaces
+unpaired surrogates with U+FFFD in string values AND in object keys. Well-formed surrogate pairs,
+C0 escapes and every already-valid document are byte-unchanged. Routed: `pod query`, `pod conflicts`,
+`validate`, `advisory`, the `--report` files written by `pod import` and `reconcile`, the `pod
+extract` sidecars, and the shared error/warning envelopes.
+
+---
+
 ## [0.16.0] - 2026-08-14
 
 ### Added

@@ -117,6 +117,13 @@ const EVENT_IDENTITY_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
     why: 'The user-resolution record URI: one per decision a person made, stamped with resolvedAt.',
   },
   {
+    file: 'commands/pod/reconcile.ts',
+    why:
+      'The pending-conflict record URI, for the same reason as commands/pod/import.ts: the ' +
+      'conflict is deduped on the DETERMINISTIC generateConflictId(recordType, matchedOn), and ' +
+      'the urn identifies one detection event. Reconciling twice detects the same conflict twice.',
+  },
+  {
     file: 'lib/advisory/applier.ts',
     why:
       'PROV activity IRIs for one advisory application. A prov:Activity is an occurrence by ' +

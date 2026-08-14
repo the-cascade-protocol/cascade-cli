@@ -338,6 +338,23 @@ const VERBS: Record<string, VerbSpec> = {
     // state of your pod" about files it never opened.
     strayOutcome: 'fatal',
   },
+  reconcile: {
+    category: 'read',
+    // The DEFAULT is a dry run, which reads every record bucket and writes
+    // nothing, so the read matrix is exactly the right battery for it. The
+    // --apply half has its own suite (pod-reconcile.test.ts).
+    argv: (pod) => ['--json', 'pod', 'reconcile', pod],
+    successExit: 0,
+    // The pod's real record count, in this verb's own vocabulary. A keyless or
+    // partial read cannot reach this number, so it cannot pass hollow.
+    successMustContain: '"recordsBefore": 4',
+    strayTarget: 'clinical/medications.ttl',
+    // Fatal, for the doctor reasoning: every count this verb prints is a claim
+    // about the WHOLE record set ("these are the duplicates", "nothing would
+    // merge"), and a file that was never opened could hold a third copy. A
+    // confident report over a partial read is a wrong answer, not a small one.
+    strayOutcome: 'fatal',
+  },
   export: {
     category: 'read',
     // D-CLI-2: an encrypted pod is refused before any read, in EVERY scenario,
