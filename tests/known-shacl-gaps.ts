@@ -60,21 +60,39 @@ export interface SeverityIssue {
 /**
  * Local names of the properties the C-CDA converter is currently known to
  * violate.
+ *
+ * EMPTY as of clinical v1.15, and that is the point of the file rather than the
+ * end of it. The one entry was `procedureName`: `procedures.ts` wrote the name to
+ * `health:procedureName` while `clinical:ProcedureShape` required
+ * `clinical:procedureName`, so every converted procedure failed for missing a
+ * name it was carrying, on a predicate no shape targeted. The converter now
+ * writes the canonical spelling and the violation is gone, so the entry is gone
+ * with it: `expectKnownViolationsStillPresent` is designed to fail once a listed
+ * gap stops being produced, which is exactly what forced this file open.
+ *
+ * With the set empty, `assertOnlyKnownViolations` degenerates to "there are no
+ * violations", which is the correct assertion while there is no known gap. The
+ * machinery stays so the next gap is recorded here rather than absorbed into a
+ * test's expectations.
  */
-export const KNOWN_VIOLATION_PROPERTIES = new Set(['procedureName']);
+export const KNOWN_VIOLATION_PROPERTIES = new Set<string>();
 
 /**
- * The substring that identifies the finding specifically.
+ * Message substrings that identify each known gap specifically.
  *
- * Deliberately a phrase from the SHAPES, not one invented here: if `spec`
- * reworded or dropped the message, the match stops and this file is forced open
- * rather than silently widening to cover some other `procedureName` failure.
+ * Deliberately phrases from the SHAPES, not ones invented here: if `spec`
+ * reworded or dropped a message, the match stops and this file is forced open
+ * rather than silently widening to cover some other failure on the same
+ * property. Empty while KNOWN_VIOLATION_PROPERTIES is empty.
  */
-const PROCEDURE_NAME_MESSAGE = 'Procedure must have a name';
+const KNOWN_VIOLATION_MESSAGES: Record<string, string> = {};
 
 function isKnownViolation(v: SeverityIssue): boolean {
+  const marker = KNOWN_VIOLATION_MESSAGES[v.property];
   return (
-    KNOWN_VIOLATION_PROPERTIES.has(v.property) && v.message.includes(PROCEDURE_NAME_MESSAGE)
+    marker !== undefined &&
+    KNOWN_VIOLATION_PROPERTIES.has(v.property) &&
+    v.message.includes(marker)
   );
 }
 

@@ -21,8 +21,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-08-08"^^xsd:date ;
-    owl:versionInfo "1.14" ;
+    dct:modified "2026-08-14"^^xsd:date ;
+    owl:versionInfo "1.15" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -727,13 +727,27 @@ clinical:referenceRange a owl:DatatypeProperty ;
 
 clinical:interpretation a owl:DatatypeProperty ;
     rdfs:label "Interpretation"@en ;
-    rdfs:comment """Categorical reading of an observation against its reference range.
+    rdfs:comment """Categorical reading of an observation against its reference range, as a code from the HL7 v3 ObservationInterpretation code system, the code system FHIR R4 binds Observation.interpretation to. Any of the 15 data-absent-reason codes is also accepted, for a source whose interpretation element was absent or null-flavoured. The ten English words of the pre-v1.14 enum are retained so older data keeps validating and are not recommended for new writes.
 
-clinical:LabResultShape constrains this property with sh:in to normal | high | low | abnormal | critical (and capitalized forms). clinical:VitalSignShape deliberately does NOT, and as of v1.13 the inconsistency is intentional rather than an oversight: emitted vital-sign data uses "elevated", which is outside the lab set, so applying the lab constraint to vital signs would be a BREAKING change for existing pods rather than a clarification.
+ONE VALUE SET ACROSS BOTH OBSERVATION SHAPES, as of v1.15. Through v1.14, clinical:LabResultShape bound this property with sh:in and clinical:VitalSignShape did not, so the same predicate on the same kind of value was checked on labs and unchecked on vitals. That gap was recorded as intentional because emitted vital data used "elevated", which is in neither ratified set, and constraining vitals would have failed those records. v1.15 closes it the way core v3.5 wrote down for exactly this situation: the value set is applied to clinical:VitalSignShape at sh:Warning, not sh:Violation, so the records that carry a non-ratified word are reported rather than rejected, and it is raised to sh:Violation in a later clinical version only after a release in which the warning is observably absent from conforming output. "elevated" migrates to the ratified code plus a verbatim clinical:interpretationSourceCode.
 
-Note also that neither set is the FHIR set. FHIR R4 Observation.interpretation binds to v3-ObservationInterpretation, whose codes are symbolic (N, H, L, A, HH, LL, AA), not English words. Both Cascade sets are local vocabulary. Reconciling the two spellings and then aligning them onto the FHIR codes is the ordered fix; doing either half on its own breaks readers."""@en ;
+A source code in NEITHER value set is carried verbatim on clinical:interpretationSourceCode rather than being forced into this property or dropped."""@en ;
+    rdfs:seeAlso <http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation> ;
+    rdfs:seeAlso <http://terminology.hl7.org/CodeSystem/data-absent-reason> ;
     rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-observation-interpretation.html> ;
     rdfs:range xsd:string .
+
+clinical:interpretationSourceCode a owl:DatatypeProperty ;
+    rdfs:label "Interpretation Source Code"@en ;
+    rdfs:comment """The interpretation code the SOURCE wrote, copied verbatim, for the case where that code is a member of neither value set clinical:interpretation is bound to (HL7 v3 ObservationInterpretation, and data-absent-reason). Kept semantically identical to health:interpretationSourceCode, for the reason recorded on the interpretation shapes: these are two spellings of one record, and letting them drift is how one spelling silently becomes the lenient one.
+
+WRITE IT ONLY THEN. A code that IS in one of the bound value sets belongs on clinical:interpretation and must not be duplicated here.
+
+It is deliberately unconstrained: no value set, no pattern, no case folding. A producer that recognises the source code's intent should ALSO write its nearest ratified equivalent on clinical:interpretation, so a consumer reading only the bound property still gets a usable reading."""@en ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso clinical:interpretation ;
+    rdfs:seeAlso health:interpretationSourceCode ;
+    owl:versionInfo "Added in clinical v1.15" .
 
 clinical:specimenType a owl:DatatypeProperty ;
     rdfs:label "Specimen Type"@en ;
@@ -841,9 +855,16 @@ clinical:expirationDate a owl:DatatypeProperty ;
 
 clinical:procedureName a owl:DatatypeProperty ;
     rdfs:label "Procedure Name"@en ;
-    rdfs:comment "Name of the procedure performed"@en ;
+    rdfs:comment """Name of the procedure performed. This is the CANONICAL and only defined spelling: it is the property whose rdfs:domain is clinical:Procedure, the one clinical:ProcedureShape names, and the one the JSON-LD context maps.
+
+THE health: SPELLING IS NOT A SECOND SPELLING (v1.15). A C-CDA import path has been writing the procedure name to a `health:procedureName` predicate that the health vocabulary does not define, on records it types clinical:Procedure. The result was a record that CARRIES a name, fails clinical:ProcedureShape's name requirement as though it had none, and carries that name on a predicate no shape targets, so the name itself is validated by nothing.
+
+This is resolved in favour of clinical:procedureName rather than by blessing the health: spelling, for three reasons. There is no health-namespace procedure vocabulary at all: no health:ProcedureRecord, no health:procedureName, so ratifying the emission would mint an undefined-term family of exactly the kind health v2.5 spent a release eliminating. The record is typed clinical:Procedure, so a health: name predicate on it is a namespace mismatch inside a single record rather than a coherent alternative serialization. And the repository's one dual-spelling precedent, health:DailyVitalReadingShape's sh:or over cascade:date and health:date, exists because BOTH serializations are live and defined; here only one spelling is defined, so that precedent does not reach this case.
+
+MIGRATION, and what a reader must re-query. clinical:ProcedureShape satisfies its name requirement through sh:or over both spellings from v1.15, so a Pod already holding health:procedureName triples stops failing immediately and no data has to be rewritten to become valid. A separate warning-severity shape fires wherever the health: spelling is present. Producers write clinical:procedureName only. Both the sh:or alternative and the warning shape are removed in a later clinical version, once the warning is observably absent from conforming output; each step is its own vocabulary version. A consumer querying health:procedureName must add clinical:procedureName to its query now and can drop the health: term at that later version."""@en ;
     rdfs:domain clinical:Procedure ;
-    rdfs:range xsd:string .
+    rdfs:range xsd:string ;
+    owl:versionInfo "Canonical spelling restated, and the health: emission given a migration window, in clinical v1.15" .
 
 clinical:procedureDate a owl:DatatypeProperty ;
     rdfs:label "Procedure Date"@en ;
@@ -1330,6 +1351,40 @@ clinical:isActive a owl:DatatypeProperty ;
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.15 (2026-08-14)
+# - ONE new property, clinical:interpretationSourceCode: the source's verbatim
+#   interpretation code, written only when that code is a member of neither
+#   value set clinical:interpretation is bound to. Kept semantically identical
+#   to health:interpretationSourceCode (health v2.7). The alternative
+#   considered and rejected was accepting the loss with a warning: a closed
+#   value set plus a lossy importer means a laboratory's local flag is either
+#   dropped or written into a field that then fails, and either way the Pod can
+#   no longer answer what the source actually said.
+# - clinical:VitalSignShape's interpretation is bound to the same value set the
+#   lab shapes use, at sh:Warning. Through v1.14 the lab shapes carried the
+#   sh:in and the vital shape carried none, so the identical predicate was
+#   checked on one record type and unchecked on the other. sh:Warning first,
+#   sh:Violation in a later version once the warning is observably absent from
+#   conforming output, is the ratchet core v3.5 wrote down for precisely this
+#   case: a value that existing data carries is reported, not rejected.
+# - clinical:interpretation's value set (both shapes) gains the fourteen
+#   data-absent-reason codes it did not already carry. v1.14 accepted "unknown"
+#   alone, which made every reason for an absent interpretation identical; a
+#   C-CDA nullFlavor of NASK, ASKU and NAV are three different clinical facts.
+#   Byte-identical to the health:interpretation list, as before.
+# - clinical:ProcedureShape's name requirement moves from a bare sh:minCount on
+#   clinical:procedureName to an sh:or over clinical:procedureName and the
+#   undefined health:procedureName that a C-CDA import path emits, plus a
+#   warning-severity shape that fires on the health: spelling. This is a
+#   MIGRATION WINDOW, not a ratified dual spelling; the rationale, the ratchet
+#   out of it, and what a consumer must re-query are stated on
+#   clinical:procedureName above. Every previously-valid graph stays valid and
+#   a class of graph that was failing for carrying a name now passes.
+# - COMPATIBILITY. Additive and strictly widening. Every graph that validated
+#   under v1.14 validates under v1.15 at the same severity, with one deliberate
+#   exception at sh:Warning only: a vital sign carrying an interpretation
+#   outside the ratified set is now reported. No Violation is added anywhere.
 #
 # Version 1.14 (2026-08-08)
 # - SHACL only; no class or property added, removed, renamed or deprecated.

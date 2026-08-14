@@ -15,7 +15,14 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { contentHashedUri, mintSubjectUri, medicationUri } from '../src/lib/fhir-converter/types.js';
+import {
+  contentHashedUri,
+  mintSubjectUri,
+  medicationUri,
+  codeableConceptKey,
+  codeableConceptSetKey,
+  canonicalSetKey,
+} from '../src/lib/fhir-converter/types.js';
 
 describe('deterministicUuid cross-SDK contract', () => {
   it('SHA-1("hello") produces the canonical UUID', () => {
@@ -83,5 +90,132 @@ describe('deterministicUuid cross-SDK contract', () => {
     const base = { rxNormCode: '29046', startDate: '2020-04-01', patient: 'urn:uuid:p1' };
     expect(medicationUri({ ...base, medicationName: 'Lisinopril 10 mg' }))
       .toBe(medicationUri({ ...base, medicationName: 'Lisinopril 20 mg' }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canonical form of a SET-valued identity input (core v3.6)
+//
+// The rule is stated normatively on cascade:cascadeUri in spec: discard empty
+// members, deduplicate, sort by code point, join with a fixed separator, and a
+// one-element sequence canonicalizes to the bare scalar.
+//
+// THE GOLDEN PINS BELOW ARE THE POINT OF THIS BLOCK. The three invariants are
+// worth testing, but the claim that actually had to be proved before shipping is
+// the NEGATIVE one: that adding dedupe to these key builders moved no identity
+// that had already been written. So the single-code and scalar cases are pinned
+// to literal URIs, not to each other. A test that only compares two computed
+// values passes just as happily when both have moved.
+// ---------------------------------------------------------------------------
+
+describe('canonical form of a set-valued identity input (core v3.6)', () => {
+  // The URI a single-coding CodeableConcept minted BEFORE dedupe was added.
+  //
+  // HOW THIS VALUE WAS OBTAINED, because a golden pin copied out of the run it is
+  // meant to constrain proves nothing. Three independent derivations agree:
+  //   1. An independent SHA-1 implementation applied to the identity string
+  //      "Observation::code=http://loinc.org|2339-0" by hand.
+  //   2. This module's code at origin/main, i.e. BEFORE canonicalSetKey existed.
+  //   3. This module's code now.
+  // The only output that differs between (2) and (3) anywhere is the duplicate
+  // case: codeableConceptSetKey(['medication','food','food']) was
+  // "food;food;medication" and is now "food;medication". That single collapse is
+  // the whole behavioural change, and it is the defect being corrected.
+  const SINGLE_CODING_URI = 'urn:uuid:69d60ee0-84eb-5ecf-be93-c243962b1ae5';
+
+  it('GOLDEN PIN: one coding hashes exactly as it did before dedupe existed', () => {
+    // identity string: Observation::code=http://loinc.org|2339-0
+    const uri = contentHashedUri('Observation', {
+      code: codeableConceptKey({ coding: [{ system: 'http://loinc.org', code: '2339-0' }] }),
+    });
+    expect(uri).toBe(SINGLE_CODING_URI);
+  });
+
+  it('GOLDEN PIN: a scalar field spelled directly hashes to the same URI', () => {
+    // SCALAR AGREEMENT. The key builder is not involved at all here: this is the
+    // bare string a pre-0..* caller would have passed. It must land on the same
+    // value the coding array does, or the two spellings of one record split.
+    const uri = contentHashedUri('Observation', { code: 'http://loinc.org|2339-0' });
+    expect(uri).toBe(SINGLE_CODING_URI);
+  });
+
+  it('GOLDEN PIN: repeating that one coding does not move it', () => {
+    // DUPLICATE INDEPENDENCE, pinned to the literal rather than to a comparison,
+    // so it also proves the dedupe collapses TO the pre-existing value and not
+    // to some new one.
+    const uri = contentHashedUri('Observation', {
+      code: codeableConceptKey({
+        coding: [
+          { system: 'http://loinc.org', code: '2339-0' },
+          { system: 'http://loinc.org', code: '2339-0' },
+        ],
+      }),
+    });
+    expect(uri).toBe(SINGLE_CODING_URI);
+  });
+
+  it('ORDER INDEPENDENCE: two exports listing the same codings differently agree', () => {
+    const a = codeableConceptKey({
+      coding: [
+        { system: 'http://snomed.info/sct', code: '73211009' },
+        { system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'E11.9' },
+      ],
+    });
+    const b = codeableConceptKey({
+      coding: [
+        { system: 'http://hl7.org/fhir/sid/icd-10-cm', code: 'E11.9' },
+        { system: 'http://snomed.info/sct', code: '73211009' },
+      ],
+    });
+    expect(a).toBe(b);
+    expect(contentHashedUri('Condition', { code: a })).toBe(contentHashedUri('Condition', { code: b }));
+  });
+
+  it('a differing SET still differs: canonicalization removes splits, never merges', () => {
+    // The guard on the whole change. Sorting and deduping may only collapse
+    // spellings of ONE set; if it ever collapsed two different sets, every
+    // assertion above would still pass while the converter silently merged
+    // distinct records.
+    const two = codeableConceptKey({
+      coding: [
+        { system: 'http://snomed.info/sct', code: '73211009' },
+        { system: 'http://snomed.info/sct', code: '44054006' },
+      ],
+    });
+    const one = codeableConceptKey({ coding: [{ system: 'http://snomed.info/sct', code: '73211009' }] });
+    expect(two).not.toBe(one);
+    expect(contentHashedUri('Condition', { code: two })).not.toBe(contentHashedUri('Condition', { code: one }));
+  });
+
+  it('sorts by code point, not by locale', () => {
+    // A locale-aware comparator orders these a01, B02, Z01 and would make a
+    // record's identity depend on the machine that imported it.
+    expect(canonicalSetKey(['Z01', 'a01', 'B02'], ',')).toBe('B02,Z01,a01');
+  });
+
+  it('empty and whitespace-only members are discarded, not hashed', () => {
+    expect(canonicalSetKey(['2339-0', '', '   '], ',')).toBe('2339-0');
+    expect(canonicalSetKey(['', '  '], ',')).toBeUndefined();
+    // An all-empty set is ABSENT, and contentHashedUri drops absent fields, so
+    // it must hash identically to the field never being supplied.
+    expect(contentHashedUri('Observation', { date: '2024-01-10', code: canonicalSetKey([''], ',') }))
+      .toBe(contentHashedUri('Observation', { date: '2024-01-10' }));
+  });
+
+  it('keeps the separator each existing site already shipped', () => {
+    // core v3.6 recommends U+002C and REQUIRES it of new implementations, but
+    // lets an existing site keep what it ships, because changing a separator
+    // re-mints every identity that site ever produced. codeableConceptSetKey has
+    // always joined with ';'. This test is what stops a well-meaning
+    // "consistency" edit from silently re-minting every multi-concept record.
+    expect(codeableConceptSetKey(['food', 'medication'])).toBe('food;medication');
+    expect(canonicalSetKey(['food', 'medication'], ',')).toBe('food,medication');
+  });
+
+  it('codeableConceptSetKey deduplicates and orders its members', () => {
+    expect(codeableConceptSetKey(['medication', 'food', 'food'])).toBe('food;medication');
+    expect(codeableConceptSetKey(['food', 'medication'])).toBe(
+      codeableConceptSetKey(['medication', 'food']),
+    );
   });
 });

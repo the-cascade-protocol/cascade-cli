@@ -7,12 +7,13 @@
 # ============================================================================
 # Cascade Protocol -- Core Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.5 (2026-08-09)
+# Version: 1.6 (2026-08-14)
 # Validates: cascade:PatientProfile, cascade:Address, cascade:EmergencyContact,
 #            cascade:PharmacyInfo, cascade:AdvanceDirectives, cascade:ProxyAgent,
 #            cascade:ExportManifest, cascade:RecordSummary,
-#            cascade:InteractionScenario, and the value of cascade:sourceIdentity
-#            wherever it appears
+#            cascade:InteractionScenario, and the values of
+#            cascade:sourceIdentity and cascade:dataAbsentReason wherever
+#            they appear
 #
 # Severity levels:
 #   sh:Violation -- Must fix (blocks operations)
@@ -657,8 +658,58 @@ cascade:SourceIdentityShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Shape: Data Absent Reason (core v3.6)
+# ============================================================================
+# Open-world, exactly like SourceIdentityShape above: sh:targetSubjectsOf, so it
+# constrains the VALUE wherever cascade:dataAbsentReason appears and never
+# requires the property's presence. Every pod written before core v3.6 validates
+# unchanged, because none of them carries the predicate.
+#
+# The sh:in list is the 15 codes of
+# http://terminology.hl7.org/CodeSystem/data-absent-reason, verbatim, as
+# gathered by the value set http://hl7.org/fhir/ValueSet/data-absent-reason. No
+# code is added and none is dropped. In particular the raw HL7 v3 NullFlavor
+# codes (UNK, NAV, NASK, ASKU, ...) are deliberately NOT accepted here: an
+# importer maps them on the way in, per the mapping table stated on the property
+# in core.ttl, and accepting both spellings would give every absence two
+# encodings and make "is this the same absence?" a string-comparison question.
+#
+# sh:Violation rather than sh:Warning, and that is not a ratchet skipped. The
+# ratchet in core v3.5 was about REQUIRING a property no producer had written
+# yet. Here nothing is required; the constraint only says that a producer which
+# chooses to write this brand-new property must write a code from the value set
+# it was defined against. There is no existing data to be lenient toward.
+
+cascade:DataAbsentReasonShape a sh:NodeShape ;
+    sh:targetSubjectsOf cascade:dataAbsentReason ;
+    rdfs:label "Data Absent Reason Shape"@en ;
+    rdfs:comment "Constrains the value of cascade:dataAbsentReason on any record that carries it. Open-world: absence is not a finding."@en ;
+
+    sh:property [
+        sh:path cascade:dataAbsentReason ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ("unknown" "asked-unknown" "temp-unknown" "not-asked"
+               "asked-declined" "masked" "not-applicable" "unsupported"
+               "as-text" "error" "not-a-number" "negative-infinity"
+               "positive-infinity" "not-performed" "not-permitted") ;
+        sh:name "Data Absent Reason"@en ;
+        sh:message "cascade:dataAbsentReason must be a single code from http://terminology.hl7.org/CodeSystem/data-absent-reason. A raw HL7 v3 NullFlavor code (UNK, NAV, NASK, ASKU, ...) is not accepted: map it on import using the table on the property in core.ttl."@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.6 (2026-08-14)
+# - Added DataAbsentReasonShape for core v3.6's cascade:dataAbsentReason.
+#   sh:targetSubjectsOf, so it constrains the value wherever the property
+#   appears and never requires its presence; pods written before v3.6 validate
+#   unchanged. VIOLATION for a non-string, a repeated value, or a code outside
+#   the 15-member data-absent-reason value set, which includes a raw HL7 v3
+#   NullFlavor code written through unmapped.
 #
 # Version 1.5 (2026-08-09)
 # - Added SourceIdentityShape for core v3.5's cascade:sourceIdentity.

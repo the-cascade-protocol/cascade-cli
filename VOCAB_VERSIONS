@@ -95,9 +95,31 @@
 #   genomics.shapes.ttl diffs the sync script also produces are the same
 #   pre-existing drift the 2026-08-08 entry names, unrelated to this change, and
 #   left for their own sync.
-core=3.5
-health=2.6
-clinical=1.14
+# 2026-08-14 — core 3.5→3.6, health 2.6→2.7, clinical 1.14→1.15
+#   Four vocabulary rulings. Shapes re-synced with scripts/sync-shapes-from-spec.sh.
+#   - clinical:VitalSignShape's interpretation is bound to the same 74-value set
+#     the lab shapes use, at sh:Warning (Violation in a later version). Through
+#     v1.14 the identical predicate was checked on labs and unchecked on vitals.
+#   - Both interpretation value sets gain the 14 data-absent-reason codes they
+#     lacked (60 -> 74). ACCEPTED_INTERPRETATION_CODES in
+#     src/lib/fhir-converter/interpretation.ts is the mirror and is asserted
+#     against the shapes by tests/fhir-interpretation-passthrough.ts.
+#   - core v3.6 adds cascade:dataAbsentReason. The C-CDA lab handler now maps
+#     <value nullFlavor="..."/> through it, so UNK / NAV / NASK / ASKU stop
+#     collapsing into one blank. Mapping table: src/lib/ccda-converter/null-flavor.ts.
+#   - clinical v1.15 rules clinical:procedureName canonical; the C-CDA procedures
+#     handler writes it instead of the undefined health:procedureName. The shape
+#     accepts either spelling through an sh:or for now, so pods holding the old
+#     triples do not have to be rewritten.
+#   - core v3.6 states the canonical form of a multi-valued identity input;
+#     canonicalSetKey in src/lib/fhir-converter/types.ts implements it.
+#   Note: src/shapes/evidence.ttl and src/shapes/genomics.shapes.ttl still differ
+#   from spec. That drift predates this change and belongs to its own sync; the
+#   sync script was run and those two files were deliberately reverted.
+#
+core=3.6
+health=2.7
+clinical=1.15
 coverage=1.4
 checkup=3.3
 pots=1.4

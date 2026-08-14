@@ -590,7 +590,47 @@ export function codeableConceptKey(cc: any): string | undefined {
     }
   }
   if (typeof cc.text === 'string' && cc.text.trim().length > 0) parts.push(cc.text.trim());
-  return parts.length > 0 ? parts.sort().join(',') : undefined;
+  return canonicalSetKey(parts, ',');
+}
+
+/**
+ * The canonical form of a SET-valued identity input, stated normatively in core
+ * v3.6 on `cascade:cascadeUri`: discard empty members, deduplicate, sort by code
+ * point, join with a fixed separator.
+ *
+ * WHAT THE DEDUPE CHANGES, PRECISELY. Sorting was already here. Deduplication is
+ * the new half, and it moves an identity for exactly one kind of record: one
+ * whose source listed the SAME coding more than once, which real bundles produce
+ * when a resource is assembled from several sources. Those are the records the
+ * rule exists to stop splitting. A record with one member, or with distinct
+ * members, hashes byte-for-byte as it did before — a one-element array joins to
+ * the bare element with any separator — which is what keeps every identity
+ * already written exactly where it is. `tests/uri-generation.test.ts` pins that
+ * as a golden value rather than leaving it as a claim.
+ *
+ * THE SEPARATOR IS A PARAMETER, AND THAT IS DELIBERATE. core v3.6 recommends
+ * U+002C and requires it of NEW implementations, but explicitly lets an
+ * implementation that already ships a different fixed separator keep it, because
+ * changing a separator re-mints every identifier that site ever produced — the
+ * precise harm the rule exists to prevent. This repository ships ',' at two
+ * sites and ';' at one, so each caller passes the separator it already shipped
+ * and none of them moves. The cross-implementation contract is the three
+ * invariants (order independence, scalar agreement, duplicate independence), not
+ * the byte string.
+ *
+ * DO NOT REACH FOR THIS FOR ORDERED INPUTS. It is for elements that are SETS:
+ * `CodeableConcept.coding`, a repeating CodeableConcept, a category list. FHIR
+ * `name[0]` is the primary name and a component or note list is a sequence;
+ * sorting those merges records the source deliberately kept apart. `stableStringify`
+ * preserves array order for that reason and is not built on this.
+ */
+export function canonicalSetKey(parts: string[], separator: string): string | undefined {
+  const seen = new Set<string>();
+  for (const p of parts) {
+    const t = p.trim();
+    if (t.length > 0) seen.add(t);
+  }
+  return seen.size > 0 ? [...seen].sort().join(separator) : undefined;
 }
 
 /**
@@ -609,7 +649,11 @@ export function codeableConceptSetKey(value: unknown): string | undefined {
     const key = codeableConceptKey(item);
     if (key) parts.push(key);
   }
-  return parts.length > 0 ? parts.sort().join(';') : undefined;
+  // ';' and not ',' — this site has always joined with ';' and changing it would
+  // re-mint every identity it has ever produced. core v3.6 permits exactly this:
+  // an existing site keeps its separator, and conformance is the three
+  // invariants rather than the byte string. See canonicalSetKey.
+  return canonicalSetKey(parts, ';');
 }
 
 /**

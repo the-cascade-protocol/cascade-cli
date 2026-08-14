@@ -6,8 +6,9 @@
  * ObservationInterpretation code system
  * (http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation), and as of
  * health v2.6 `health:interpretation` is bound to the same 49 selectable codes,
- * plus the data-absent-reason code `unknown` and the ten English words the
- * previous five-member enum used.
+ * plus the data-absent-reason codes and the ten English words the previous
+ * five-member enum used. health v2.7 widened the data-absent-reason half from
+ * `unknown` alone to all fifteen codes.
  *
  * So the importer's job is now to CARRY the code, not to translate it. It used to
  * translate: H and L both became "abnormal", HH and LL both became "critical",
@@ -17,7 +18,10 @@
  * indistinguishable from "the source reported no interpretation", and no
  * downstream reader could tell which had happened.
  *
- * `unknown` now means one thing: the source Observation carried no interpretation.
+ * `unknown` now means one thing: the source Observation carried no interpretation
+ * and gave no reason. When the source DID give a reason, the specific
+ * data-absent-reason code carries it instead — see mapNullFlavorToDataAbsentReason
+ * in the C-CDA converter for the nullFlavor half of the same idea.
  *
  * THE LIST BELOW IS A COPY, AND A COPY DRIFTS
  * -------------------------------------------
@@ -30,8 +34,14 @@
 
 /**
  * Every value `health:interpretation` accepts: the 49 selectable HL7 v3
- * ObservationInterpretation codes, the data-absent-reason code `unknown`, and the
- * ten retained health v2.5 words.
+ * ObservationInterpretation codes, ALL FIFTEEN data-absent-reason codes, and the
+ * ten retained health v2.5 words. 74 values.
+ *
+ * health v2.7 widened the data-absent-reason half from the single `unknown` to
+ * the whole code system, so a source that says WHY an interpretation is missing
+ * keeps saying it. Under v2.6 a C-CDA `<interpretationCode nullFlavor="NASK"/>`
+ * ("nobody asked") and one carrying `ASKU` ("we asked, they did not know") both
+ * had to be flattened to `unknown`, and two different clinical facts became one.
  */
 export const ACCEPTED_INTERPRETATION_CODES: ReadonlySet<string> = new Set([
   'EX', 'HM', 'OBX', 'CAR', 'Carrier', 'B', 'D', 'U', 'W',
@@ -40,7 +50,10 @@ export const ACCEPTED_INTERPRETATION_CODES: ReadonlySet<string> = new Set([
   'AA', 'H', 'L', 'HH', 'LL', 'HX', 'LX', 'H>', 'HU', 'E', 'L<', 'LU',
   'ND', 'IND', 'NEG', 'POS', 'EXP', 'UNE', 'DET',
   'SYN-R', 'NR', 'RR', 'WR', 'SDD', 'SYN-S',
-  'unknown',
+  'unknown', 'asked-unknown', 'temp-unknown', 'not-asked',
+  'asked-declined', 'masked', 'not-applicable', 'unsupported',
+  'as-text', 'error', 'not-a-number', 'negative-infinity',
+  'positive-infinity', 'not-performed', 'not-permitted',
   'normal', 'high', 'low', 'abnormal', 'critical',
   'Normal', 'High', 'Low', 'Abnormal', 'Critical',
 ]);
