@@ -33,6 +33,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { printResult, printError, printVerbose, type OutputOptions } from '../lib/output.js';
 import { runReconciliation } from '../lib/reconciler.js';
+import { toJsonText } from '../lib/json-output.js';
 
 // ---------------------------------------------------------------------------
 // Command registration
@@ -107,7 +108,7 @@ export function registerReconcileCommand(program: Command): void {
       };
 
       if (options.report) {
-        writeFileSync(options.report, JSON.stringify(reportData, null, 2));
+        writeFileSync(options.report, toJsonText(reportData));
         console.error(`Report written to: ${options.report}`);
       }
 

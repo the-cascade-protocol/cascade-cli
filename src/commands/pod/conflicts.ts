@@ -20,6 +20,7 @@ import { Command } from 'commander';
 import { loadPendingConflicts, ConflictStoreError } from '../../lib/user-resolutions.js';
 import { resolvePodDir, resolvePodDekIfEncrypted } from './helpers.js';
 import { printError, type OutputOptions } from '../../lib/output.js';
+import { toJsonText } from '../../lib/json-output.js';
 
 export function registerConflictsCommand(podProgram: Command, program: Command): void {
   podProgram
@@ -46,7 +47,7 @@ export function registerConflictsCommand(podProgram: Command, program: Command):
       }
 
       if (options.format === 'json') {
-        console.log(JSON.stringify(conflicts, null, 2));
+        console.log(toJsonText(conflicts));
       } else {
         if (conflicts.length === 0) {
           console.log(`No unresolved conflicts in pod at ${podDir}`);

@@ -30,6 +30,7 @@ import crypto from 'crypto';
 import { getProperties, CASCADE_NAMESPACES } from '../../lib/turtle-parser.js';
 import { resolvePodDir, fileExists } from './helpers.js';
 import { openPod, PodUnreadableError, type PodReader } from '../../lib/pod-read.js';
+import { toJsonText } from '../../lib/json-output.js';
 
 // ── LOINC section code → CDA section string (used by /extract API) ───────────
 
@@ -651,7 +652,7 @@ export function registerExtractSubcommand(pod: Command): void {
         if (toAdd.length > 0) {
           await fs.writeFile(
             queuePath,
-            JSON.stringify([...existing, ...toAdd], null, 2),
+            toJsonText([...existing, ...toAdd]),
             'utf-8',
           );
         }
@@ -676,7 +677,7 @@ export function registerExtractSubcommand(pod: Command): void {
         const existingSet = new Set(existing);
         const newIds = succeededBlockIds.filter((id) => !existingSet.has(id));
         if (newIds.length > 0) {
-          await fs.writeFile(donePath, JSON.stringify([...existing, ...newIds], null, 2), 'utf-8');
+          await fs.writeFile(donePath, toJsonText([...existing, ...newIds]), 'utf-8');
         }
       }
 
@@ -693,7 +694,7 @@ export function registerExtractSubcommand(pod: Command): void {
         const existingKeys = new Set(existing.map((e) => `${e.blockUri}:${e.section}`));
         const newErrors = extractionErrors.filter((e) => !existingKeys.has(`${e.blockUri}:${e.section}`));
         if (newErrors.length > 0) {
-          await fs.writeFile(errorsPath, JSON.stringify([...existing, ...newErrors], null, 2), 'utf-8');
+          await fs.writeFile(errorsPath, toJsonText([...existing, ...newErrors]), 'utf-8');
         }
       }
 
