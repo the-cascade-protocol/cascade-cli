@@ -9,6 +9,7 @@
  *   export <pod-dir>    Export pod data
  *   info <pod-dir>      Show pod metadata and statistics
  *   doctor <pod-dir>    Diagnose a damaged pod, and repair it with --write
+ *   reconcile <pod-dir> Report (and with --apply, merge) duplicates the pod already holds
  *
  * This module delegates to focused subcommand modules:
  *   - init.ts    Pod initialization with templates
@@ -34,6 +35,7 @@ import { registerAddRecordSubcommand } from './add-record.js';
 import { registerRetractSubcommand } from './retract.js';
 import { registerEraseSubcommand } from './erase.js';
 import { registerDoctorSubcommand } from './doctor.js';
+import { registerReconcileSubcommand } from './reconcile.js';
 
 export function registerPodCommand(program: Command): void {
   const pod = program.command('pod').description('Manage Cascade Pod structures');
@@ -54,4 +56,5 @@ export function registerPodCommand(program: Command): void {
   registerRetractSubcommand(pod, program);
   registerEraseSubcommand(pod, program);
   registerDoctorSubcommand(pod, program);
+  registerReconcileSubcommand(pod, program);
 }
