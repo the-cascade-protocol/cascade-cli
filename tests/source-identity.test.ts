@@ -401,26 +401,25 @@ describe('the same-source guard reads the ORIGIN, not the transport', () => {
     expect(await survivingRecords(first, second, 'Household export', 'Household export')).toBe(2);
   });
 
-  it('records that the fast path never compares two NEW records with each other, whatever the guard says', async () => {
-    // MEASURED, twice, and pinned so the day either half changes is visible.
+  it('reaches the same answer on the fast path as on the single-batch path', async () => {
+    // THE TWO PATHS MUST AGREE, and this is the two-sided measurement of it.
     //
-    // `runReconciliation` has two matching paths and picks the
-    // `--reconcile-existing` fast path when an input is marked
-    // `existingPod: true` (the flag the cross-batch sweep introduced; the old
-    // `systemName` convention was overwritten by every pod record's own triple
-    // and never selected it). On that path, the cross-batch pass assigns EVERY
-    // new record — matched or not — before the new-against-new pass runs, so
-    // that pass's guard site is unreachable and two duplicates arriving in ONE
-    // import are never compared with each other, whatever the same-source guard
-    // would have said about them. That is a property of the pass ordering, not
-    // of the origin axis, and it is pinned here rather than fixed here.
+    // What this test used to pin was the DISAGREEMENT. `runReconciliation` picks
+    // the `--reconcile-existing` fast path when an input is marked
+    // `existingPod: true`, and that path ran a cross-batch pass that assigned
+    // EVERY new record, matched or not, before the new-against-new pass could
+    // seed from any of them. So the second pass and its same-source guard site
+    // were unreachable, and two duplicates arriving in ONE import were never
+    // compared with each other whenever the pod held anything — while the SAME
+    // pair through the single-batch path merged. Measured: 3 records against 1
+    // on identical inputs.
     //
-    // The second half is the contrast that shows what is at stake: the SAME two
-    // records through the single-batch path DO merge, because the guard reads
-    // their two different known origins under the shared batch label and admits
-    // the comparison (the P07-SHARED-LABEL semantics). The fast path and the
-    // single-batch path disagreeing about a batch's internal duplicates is a
-    // real gap, and it is tracked; this test is the measurement.
+    // The two passes are now one pass whose candidate list is the union of both
+    // pools, so the fast path runs the single-batch algorithm restricted to
+    // new-record seeds. Both halves below are kept, and they are what makes this
+    // pin two-sided: the fast path merging the pair is the fix, and the
+    // single-batch path still merging it is the guarantee that the fix did not
+    // arrive by loosening the guard.
     const pod = `${RECON_PREFIXES}
 <urn:uuid:lab-already-in-pod> a health:LabResultRecord ;
   health:testCode <http://loinc.org/rdf#2160-0> ;
@@ -431,13 +430,14 @@ describe('the same-source guard reads the ORIGIN, not the transport', () => {
     const alpha = labTtl('urn:uuid:lab-alpha-x', { batch: 'Household export', origin: 'org:stonebridge' });
     const beta = labTtl('urn:uuid:lab-beta-x', { batch: 'Household export', origin: 'org:larkfield' });
 
-    // Fast path: pod content present. The duplicate pair survives un-compared.
+    // Fast path: pod content present. The batch's internal duplicate merges, and
+    // the unrelated pod record (a different LOINC) passes through untouched.
     const fast = await runReconciliation([
       { content: pod, systemName: 'existing-pod', existingPod: true },
       { content: alpha, systemName: 'Household export' },
       { content: beta, systemName: 'Household export' },
     ]);
-    expect(recordSubjects(parse(fast.turtle)).length).toBe(3);
+    expect(recordSubjects(parse(fast.turtle)).length).toBe(2);
 
     // Single-batch path: same pair, no pod content. The guard admits, they merge.
     const single = await runReconciliation([
@@ -445,6 +445,91 @@ describe('the same-source guard reads the ORIGIN, not the transport', () => {
       { content: beta, systemName: 'Household export' },
     ]);
     expect(recordSubjects(parse(single.turtle)).length).toBe(1);
+  });
+
+  it('merges a batch duplicate and a pod duplicate into ONE record, not two', async () => {
+    // The case that rules out both of the smaller repairs the ordering comment
+    // names. Three copies of one result: one already in the pod, two arriving in
+    // one batch under three different known origins.
+    //
+    //   deferring assignment  -> alpha absorbs the pod copy, beta is left over: 2
+    //   within-batch first    -> alpha absorbs beta, neither meets the pod copy: 2
+    //
+    // One pass over the union of both pools is the only arrangement that reaches
+    // 1, which is why the fix is an ordering decision rather than a guard patch.
+    const podCopy = labTtl('urn:uuid:lab-in-pod-y', { batch: 'Earlier import', origin: 'org:brightwater' });
+    const alpha = labTtl('urn:uuid:lab-alpha-y', { batch: 'Household export', origin: 'org:stonebridge' });
+    const beta = labTtl('urn:uuid:lab-beta-y', { batch: 'Household export', origin: 'org:larkfield' });
+
+    const result = await runReconciliation([
+      { content: podCopy, systemName: 'existing-pod', existingPod: true },
+      { content: alpha, systemName: 'Household export' },
+      { content: beta, systemName: 'Household export' },
+    ]);
+    expect(recordSubjects(parse(result.turtle)).length).toBe(1);
+  });
+
+  it('never matches a record against itself now that the seed is its own candidate', async () => {
+    // The cost of merging the two passes into one. The seed record is now IN the
+    // candidate list it walks, and `doRecordsMatch(a, a)` is a perfect match, so
+    // nothing about the record's CONTENT stops it grouping with itself.
+    //
+    // What this pins is the OUTCOME, not one line: no phantom merge, whichever
+    // clause is doing the work. That distinction is load bearing here, because
+    // two clauses currently do it. `b === a` states the condition directly, and
+    // `sameSourceStatement(a, a)` is unconditionally true and would reject the
+    // self-pair on its own, so neither is individually mutation-visible. The
+    // property is worth a test regardless: the record COUNT is unchanged either
+    // way, so a regression here would show up not as a lost record but as a
+    // survivor carrying `mergedFrom` pointing at itself and a report counting a
+    // duplicate that does not exist.
+    const pod = `${RECON_PREFIXES}
+<urn:uuid:lab-already-in-pod> a health:LabResultRecord ;
+  health:testCode <http://loinc.org/rdf#2160-0> ;
+  health:testName "Creatinine" ;
+  health:performedDate "2031-05-20" ;
+  health:resultValue "1.1" .
+`;
+    const lone = labTtl('urn:uuid:lab-lone', { batch: 'Household export', origin: 'org:stonebridge' });
+    const result = await runReconciliation([
+      { content: pod, systemName: 'existing-pod', existingPod: true },
+      { content: lone, systemName: 'Household export' },
+    ]);
+
+    expect(recordSubjects(parse(result.turtle)).length).toBe(2);
+    // Nothing merged, so nothing may CLAIM to have merged.
+    expect(result.report.summary.exactDuplicatesRemoved).toBe(0);
+    expect(result.report.summary.nearDuplicatesMerged).toBe(0);
+    expect(result.report.transformations).toEqual([]);
+    const triples = parse(result.turtle);
+    expect(values(triples, 'https://ns.cascadeprotocol.org/core/v1#mergedFrom')).toEqual([]);
+    expect(values(triples, 'https://ns.cascadeprotocol.org/core/v1#reconciliationStatus')).toEqual([
+      'canonical',
+    ]);
+  });
+
+  it('still never compares two records that were both already in the pod', async () => {
+    // The restriction the single pass deliberately KEEPS. Only new records seed
+    // a group, so an import cannot silently reconcile pod content against itself
+    // as a side effect of importing an unrelated file. `pod reconcile` is where
+    // that mutation is asked for, reported first, and applied on purpose.
+    const podA = labTtl('urn:uuid:lab-pod-a', { batch: 'Earlier import', origin: 'org:stonebridge' });
+    const podB = labTtl('urn:uuid:lab-pod-b', { batch: 'Earlier import', origin: 'org:larkfield' });
+    const unrelated = `${RECON_PREFIXES}
+<urn:uuid:lab-unrelated> a health:LabResultRecord ;
+  cascade:sourceSystem "New import" ;
+  health:testCode <http://loinc.org/rdf#2160-0> ;
+  health:testName "Creatinine" ;
+  health:performedDate "2031-05-20" ;
+  health:resultValue "1.1" .
+`;
+    const result = await runReconciliation([
+      { content: podA, systemName: 'existing-pod', existingPod: true },
+      { content: podB, systemName: 'existing-pod', existingPod: true },
+      { content: unrelated, systemName: 'New import' },
+    ]);
+    // Two pod duplicates + the unrelated new record. The pod pair is untouched.
+    expect(recordSubjects(parse(result.turtle)).length).toBe(3);
   });
 
   it('does not treat an origin difference on one IRI as an identity collision', async () => {
