@@ -67,6 +67,44 @@ split into two arguments and the paste failed. All of them now route through one
 
 ---
 
+## [0.18.0] - 2026-08-15
+
+### Added
+
+**`cascade pod reconcile --undo`: tier-0 merges can now be replayed back out of the journal.**
+Every tier-0 merge already appended the discarded records' full content to
+`settings/tier0-merge-journal.json`; this verb restores them. Dry run is the default, matching
+`pod reconcile` itself. Restoring puts each discarded record back in its bucket, withdraws the
+kept record's merge lineage, and appends an undo entry to the journal rather than rewriting
+history. A journal entry whose bucket is gone, or whose record now collides with a live record,
+refuses loudly per entry instead of silently per run. Running undo twice is safe. Undo covers
+tier-0 merges only: trust-resolved near-duplicate merges are not journaled with discarded
+content and cannot be replayed.
+
+**Pending-conflict disposition is now computed and reported.** Applying a reconciliation
+previously rewrote `settings/pending-conflicts.ttl` from scratch, so conflicts could leave the
+review queue without a word. The queue is now written from an explicit disposition: a conflict
+whose candidate records both survive is KEPT, one whose candidates merged is CLEARED BY MERGE,
+and one whose candidates are simply gone is ORPHANED. The run report and `--json` output carry
+the three counts, because items leaving a review queue is a fact the user is told, not one they
+discover in a later census.
+
+### Fixed
+
+**One health system now yields one source label and one origin slug regardless of transport.**
+A system whose C/CDA documents state an organization name while its FHIR bundles carry only an
+endpoint host used to split into two unrelated sources. The origin slug is now the canonical
+identity, folded through a curated organization crosswalk (host aliases converge onto the
+organization's slug), and the display label is derived from that origin instead of being taken
+verbatim from whichever spelling the transport happened to carry. No record identity moves:
+golden pins verify the IRIs minted before and after are byte-identical.
+
+**Every user-facing command suggestion now shell-quotes the paths it prints.** The reconcile
+dry-run footer printed the pod path unquoted, so pasting the suggested `--apply` command failed
+on any path containing a space, including the default location every macOS pod lives in. The fix
+is a shared helper applied across the verbs that print suggestions, with a class gate in the
+suite that fails on any new unquoted hint.
+
 ## [0.17.0] - 2026-08-14
 
 ### Added
