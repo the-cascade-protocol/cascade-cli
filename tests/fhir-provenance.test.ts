@@ -59,7 +59,12 @@ describe('source EHR fallback (D1: never the import-batch label)', () => {
     const res = await convert(
       JSON.stringify(report), 'fhir', 'cascade', 'turtle', 'Apple Health export',
     );
-    expect(res.output).toContain('clinical:sourceEHR "swedish.org"');
+    // The host still carries the derivation; what it no longer does is BE the
+    // label. The domain reduces to an organization identity and the label is
+    // that organization's name, so this record groups with a C-CDA of the same
+    // system instead of occupying a second row spelled as a domain.
+    expect(res.output).toContain('clinical:sourceEHR "Swedish"');
+    expect(res.output).not.toContain('clinical:sourceEHR "swedish.org"');
     expect(res.output).not.toContain(`clinical:sourceEHR "${SOURCE_EHR_UNKNOWN}"`);
   });
 });
@@ -82,7 +87,12 @@ describe('authoritative sourceEHR override (Apple Health export.xml sourceName)'
       'Providence Health & Services',
     );
     expect(res.success).toBe(true);
+    // The container's account name is the ORIGIN's input; the label is the
+    // canonical display name for the organization it resolves to, which for this
+    // system is the same string. A container that spelled it differently would
+    // still produce this label, which is the property being relied on.
     expect(res.output).toContain('clinical:sourceEHR "Providence Health & Services"');
+    expect(res.output).toContain('cascade:sourceIdentity "org:providence"');
     expect(res.output).not.toContain(`clinical:sourceEHR "${SOURCE_EHR_UNKNOWN}"`);
     expect(res.output).not.toContain('clinical:sourceEHR "Apple Health export"');
     // The import batch stays on the separate ingestion axis.

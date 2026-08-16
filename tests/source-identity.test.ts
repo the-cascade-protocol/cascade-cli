@@ -41,8 +41,18 @@
 
 import { describe, it, expect } from 'vitest';
 import { Parser } from 'n3';
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { orgSlug, sourceIdentity, isKnownOrigin, SOURCE_IDENTITY_PREDICATE } from '../src/lib/source-identity.js';
+import {
+  orgSlug,
+  sourceIdentity,
+  sourceLabel,
+  isKnownOrigin,
+  CANONICAL_ORGANIZATIONS,
+  SOURCE_IDENTITY_PREDICATE,
+} from '../src/lib/source-identity.js';
 import { convert } from '../src/lib/fhir-converter/index.js';
 import { convertCcda } from '../src/lib/ccda-converter/index.js';
 import { runReconciliation } from '../src/lib/reconciler.js';
@@ -115,9 +125,14 @@ describe('orgSlug: one organization, one slug, whichever way the document names 
   });
 
   it('never strips a short registrable name to nothing', () => {
-    // "care" is a generic word and "kp" is only two characters; stripping to
-    // fewer than three would produce an identity that collides with everything.
-    expect(orgSlug('kp.org')).toBe('kp');
+    // "care" is a generic word; stripping a two-character registrable name to
+    // fewer than three characters would produce an identity that collides with
+    // everything.
+    //
+    // The example used to be "kp.org", which now folds through the crosswalk and
+    // so no longer measures the strip floor at all. A two-letter host that names
+    // nobody in the table measures it and only it.
+    expect(orgSlug('rw.example')).toBe('rw');
     expect(orgSlug('healthcare.example')).toBeTruthy();
   });
 
@@ -125,6 +140,131 @@ describe('orgSlug: one organization, one slug, whichever way the document names 
     // "Regional Medical Center" names no one in particular, but a stable
     // low-information identity beats filing it under "origin unknown".
     expect(orgSlug('Regional Medical Center')).toBe('regionalmedicalcenter');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The crosswalk, and the slugs it must NOT move
+// ---------------------------------------------------------------------------
+
+describe('the crosswalk folds the pairs no string transform could', () => {
+  it('resolves a host that shares no token with the organization name', () => {
+    // The case that motivates a table at all. "kp.org" reduces to "kp" and
+    // every document that names the system reduces to "kaiser": nothing about
+    // the two strings relates them, so the normalization cannot and must not
+    // guess. Measured on one real pod as an even split of one system.
+    expect(orgSlug('kp.org')).toBe('kaiser');
+    expect(orgSlug('Kaiser Permanente')).toBe('kaiser');
+    expect(orgSlug('Kaiser Foundation Health Plan of Washington')).toBe('kaiser');
+    expect(orgSlug('fhir.kp.org')).toBe('kaiser');
+  });
+
+  it('gives a crosswalked organization ONE display name from either spelling', () => {
+    expect(sourceLabel(sourceIdentity({ endpointHost: 'kp.org' }))).toBe('Kaiser Permanente');
+    expect(sourceLabel(sourceIdentity({ organizationName: 'Kaiser Permanente' }))).toBe(
+      'Kaiser Permanente',
+    );
+  });
+
+  /**
+   * THE GOLDEN PINS. Inputs whose slugs must not move, ever.
+   *
+   * `cascade:sourceIdentity` is identity-adjacent: the tier-0 merge predicate
+   * requires all origins known AND distinct, and the same-source guard keys on
+   * the value. Moving the slug an input produces re-keys both for every record
+   * already on a pod, so a change that looks like a normalization tidy-up is a
+   * change to which records are eligible to merge with which.
+   *
+   * The crosswalk is the ONE sanctioned way to move one, and moving one that way
+   * is a decision that shows up as an edit to this table. A slug that moves
+   * without such an edit is a defect whichever direction it moved in, which is
+   * what makes this pin two-sided alongside the convergence assertions above.
+   */
+  it.each([
+    ['Meridian Health System', 'meridian'],
+    ['meridianhealth.example', 'meridian'],
+    ['fhir.meridianhealth.example', 'meridian'],
+    ['Stonebridge Hospital', 'stonebridge'],
+    ['fhir.stonebridgehospital.example', 'stonebridge'],
+    ['Larkfield Clinic', 'larkfield'],
+    ['fhir.larkfieldclinic.example', 'larkfield'],
+    ['Providence Health and Services Washington and Montana', 'providence'],
+    ['providence.org', 'providence'],
+    ['Northgate Regional Laboratory', 'northgate'],
+    ['haiku.swedish.org', 'swedish'],
+    ['swedish.org', 'swedish'],
+    ['Swedish', 'swedish'],
+    ['Brightwater Medical Group', 'brightwater'],
+    ['Regional Medical Center', 'regionalmedicalcenter'],
+    ['rw.example', 'rw'],
+  ])('golden: %s stays on %s', (input, slug) => {
+    expect(orgSlug(input)).toBe(slug);
+  });
+
+  it('every alias in the crosswalk actually resolves to its canonical slug', () => {
+    // A table row that names an alias the normalization never produces is dead
+    // weight that reads as coverage. Each alias must be a slug some spelling
+    // really reduces to, and it must not be a canonical slug itself.
+    const canonical = new Set(CANONICAL_ORGANIZATIONS.map((o) => o.slug));
+    for (const org of CANONICAL_ORGANIZATIONS) {
+      for (const alias of org.aliases) {
+        expect(canonical.has(alias), `alias "${alias}" is itself a canonical slug`).toBe(false);
+        expect(orgSlug(`${alias}.example`), `alias "${alias}" does not fold`).toBe(org.slug);
+      }
+      expect(orgSlug(org.slug), `canonical slug "${org.slug}" does not survive itself`).toBe(org.slug);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The label
+// ---------------------------------------------------------------------------
+
+describe('sourceLabel: the display name is computed from the origin, not restated', () => {
+  it('ignores the stated wording entirely when an organization was derivable', () => {
+    // THE LOAD-BEARING ASSERTION. Two documents of one system word its name
+    // differently and a third states only a domain; all three must render the
+    // same, which they can only do if the stated wording is not consulted.
+    const stated = [
+      'Providence Health and Services Washington and Montana',
+      'Providence Health & Services',
+      'providence.org',
+    ];
+    const labels = stated.map((s) =>
+      sourceLabel(sourceIdentity({ organizationName: s }), s),
+    );
+    expect(new Set(labels).size).toBe(1);
+    expect(labels[0]).toBe('Providence Health & Services');
+  });
+
+  it('renders an uncurated organization plainly rather than splitting it', () => {
+    // No crosswalk row, so the label is the plain form of the slug. It is
+    // coarser than "Meridian Health System", and it is the SAME coarse thing on
+    // both transports, which is the trade the module documents.
+    expect(sourceLabel(sourceIdentity({ organizationName: 'Meridian Health System' }))).toBe(
+      'Meridian',
+    );
+    expect(sourceLabel(sourceIdentity({ endpointHost: 'fhir.meridianhealth.example' }))).toBe(
+      'Meridian',
+    );
+  });
+
+  it('passes the stated value through when no organization was derivable', () => {
+    // ns: and transport: name no organization, so there is no canonical display
+    // to compute and the honest answer is what the document said — which for a
+    // custodian that named nobody is the ratified data-absent token.
+    expect(
+      sourceLabel(sourceIdentity({ idNamespace: '2.16.840.1.113883.19.5.1' }), 'unknown'),
+    ).toBe('unknown');
+    expect(sourceLabel(sourceIdentity({ transportLabel: 'Household export' }), 'unknown')).toBe(
+      'unknown',
+    );
+  });
+
+  it('says nothing rather than something empty', () => {
+    expect(sourceLabel(undefined)).toBeUndefined();
+    expect(sourceLabel(sourceIdentity({ transportLabel: 'Household export' }))).toBeUndefined();
+    expect(sourceLabel(sourceIdentity({ transportLabel: 'Household export' }), '   ')).toBeUndefined();
   });
 });
 
@@ -268,15 +408,52 @@ describe('converter emission: both transports mint the identity at one chokepoin
   });
 
   it('gives one health system ONE display label across both transports', async () => {
-    // The LABEL axis keeps its semantics — it is still what the source called the
-    // organization — but the FHIR path now prefers a stated organization NAME over
-    // the endpoint domain, which is the rule the C-CDA path already used. Without
-    // that, one system reads as "meridianhealth.example" and "Meridian Health
-    // System" on one pod.
+    // The LABEL axis no longer restates what the source called the organization.
+    // It is computed from the canonical ORIGIN, so the two transports cannot
+    // disagree about it whatever their documents happen to say.
+    //
+    // The value moved here, deliberately: "Meridian Health System" was the
+    // C-CDA custodian's wording, and this bundle agreed with it only because one
+    // of its resources carried a matching `recorder.display`. The bundle two
+    // tests below carries no such display, which is the ordinary shape, and
+    // under the old rule it labelled itself from its domain instead.
     const fhir = parse((await convert(MERIDIAN_FHIR, 'fhir', 'cascade', 'turtle', 'meridian-fhir-export')).output);
     const ccda = parse((await convertCcda(MERIDIAN_CCDA, { sourceSystem: 'meridian-ccda-summary' })).output);
-    expect(values(fhir, SOURCE_EHR)).toEqual(['Meridian Health System']);
-    expect(values(ccda, SOURCE_EHR)).toEqual(['Meridian Health System']);
+    expect(values(fhir, SOURCE_EHR)).toEqual(['Meridian']);
+    expect(values(ccda, SOURCE_EHR)).toEqual(['Meridian']);
+  });
+
+  it('agrees with the C-CDA even when the bundle names no organization at all', async () => {
+    // THE CASE THE EARLIER FIX COULD NOT REACH, and the one measured on real
+    // data: a patient-facing export with no `Organization` resource and no
+    // institution-looking display anywhere. There is no name in the document to
+    // prefer, so a name-beats-host rule falls straight through to the host and
+    // the system renders under its domain beside the C-CDA's stated name.
+    //
+    // Both halves are asserted. The FHIR half alone would pass on a converter
+    // that simply stopped emitting a label.
+    const stripped = JSON.parse(MERIDIAN_FHIR);
+    for (const e of stripped.entry) delete e.resource.recorder;
+    const hostOnly = JSON.stringify(stripped);
+
+    const fhir = parse((await convert(hostOnly, 'fhir', 'cascade', 'turtle', 'meridian-fhir-export')).output);
+    const ccda = parse((await convertCcda(MERIDIAN_CCDA, { sourceSystem: 'meridian-ccda-summary' })).output);
+    expect(values(fhir, SOURCE_IDENTITY_PREDICATE)).toEqual(['org:meridian']);
+    expect(values(fhir, SOURCE_EHR)).toEqual(['Meridian']);
+    expect(values(ccda, SOURCE_EHR)).toEqual(['Meridian']);
+    expect(new Set([...values(fhir, SOURCE_EHR), ...values(ccda, SOURCE_EHR)]).size).toBe(1);
+  });
+
+  it('gives the container-supplied account name the same label as the document', async () => {
+    // The third spelling of one organization: an Apple-style container names the
+    // account, and its wording is a third variant again. It sets the ORIGIN, and
+    // the label follows from the origin like every other spelling does.
+    const withOverride = await convert(
+      MERIDIAN_FHIR, 'fhir', 'cascade', 'turtle', 'meridian-fhir-export', false,
+      'Meridian Health System of the Northwest',
+    );
+    const ccda = parse((await convertCcda(MERIDIAN_CCDA, { sourceSystem: 'meridian-ccda-summary' })).output);
+    expect(values(parse(withOverride.output), SOURCE_EHR)).toEqual(values(ccda, SOURCE_EHR));
   });
 
   it('falls to the ns tier when a C-CDA custodian names nobody', async () => {
@@ -322,6 +499,75 @@ describe('converter emission: both transports mint the identity at one chokepoin
     });
     const triples = parse((await convert(anonymous, 'fhir', 'cascade', 'turtle', 'Household export')).output);
     expect(values(triples, SOURCE_IDENTITY_PREDICATE)).toEqual(['transport:Household export']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Record identity
+// ---------------------------------------------------------------------------
+
+/**
+ * THE NEGATIVE CLAIM, and the one that actually had to be proved before this
+ * change could ship: moving the source axes moved NO record identity.
+ *
+ * `clinical:sourceEHR` is written as a triple and never reaches a key builder on
+ * either transport, so in principle nothing here can move. "In principle" is
+ * what a golden pin is for. A record IRI that moves is a duplicate on every pod
+ * that already holds the record, invisible until someone counts, and no test
+ * that compares two computed values would catch it: that test passes just as
+ * happily when both have moved.
+ *
+ * HOW THESE VALUES WERE OBTAINED, because a golden pin copied out of the run it
+ * constrains proves nothing: they are the IRIs the converters at origin/main
+ * mint from these fixtures, read out of a checkout of origin/main, BEFORE any of
+ * this change existed.
+ */
+describe('golden pins: no record IRI moves when the source axes do', () => {
+  const FIXTURES = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
+    'test-fixtures',
+    'pathology',
+  );
+
+  /** `TypeLocalName IRI` for every record subject, sorted. */
+  function typedSubjects(ttl: string): string[] {
+    const byUri = new Map<string, string>();
+    for (const t of parse(ttl)) {
+      if (t.p === RDF_TYPE) byUri.set(t.s, t.o.split('#').pop() as string);
+    }
+    return [...byUri].map(([uri, type]) => `${type} ${uri}`).sort();
+  }
+
+  it('mints the pre-change IRIs for the FHIR half of the dual-transport pair', async () => {
+    const input = readFileSync(path.join(FIXTURES, 'p01-dual-label-fhir.json'), 'utf-8');
+    const result = await convert(input, 'fhir', 'cascade', 'turtle', 'p01-fhir');
+    expect(typedSubjects(result.output)).toEqual([
+      'ConditionRecord urn:uuid:efdbc4e8-ae76-5951-b501-116b86cd6774',
+      'ImmunizationRecord urn:uuid:994b9672-c37f-5422-940d-2b23e12284a0',
+      'LabResultRecord urn:uuid:b60bf2fc-5a3c-52ec-9c65-3af3bbfa56f0',
+      'PatientProfile urn:uuid:5269032f-c3ed-5601-984e-9968f24a2dc2',
+    ]);
+  });
+
+  it('mints the pre-change IRIs for the C-CDA half, section documents included', async () => {
+    // The section ClinicalDocument nodes are the ones worth naming: their key is
+    // built from the section code, the document id and the INGESTION label, and
+    // the label axis is passed into the same function for a different purpose.
+    // If it ever reached the key, these two are what would move.
+    const input = readFileSync(path.join(FIXTURES, 'p01-dual-label-ccda.xml'), 'utf-8');
+    const result = await convertCcda(input, {
+      sourceSystem: 'p01-ccda',
+      importedAt: '2026-01-01T00:00:00Z',
+    });
+    expect(typedSubjects(result.output)).toEqual([
+      'ClinicalDocument urn:uuid:068d7478-b123-50f8-b0fe-e14cbc21d092',
+      'ClinicalDocument urn:uuid:ac0b69f8-dc7a-5843-8093-03b09c5b7cb8',
+      'ConditionRecord urn:uuid:bfac17d9-5034-5902-ac10-de00ba6d0fdf',
+      'LabResultRecord urn:uuid:aa7622d6-9e51-51ca-9026-a6c6c7991cab',
+      'LaboratoryReport urn:uuid:d3e74e76-7a77-5cf4-8482-4a8eb2dd5dcc',
+      'PatientProfile urn:uuid:109dd41d-23e8-5151-b7d2-678555b7b35e',
+    ]);
   });
 });
 

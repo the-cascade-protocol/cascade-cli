@@ -23,6 +23,7 @@ import {
   MANIFEST_RELATIVE_PATH,
 } from '../../lib/pod-encryption.js';
 import { obtainNewPassphrase } from '../../lib/passphrase.js';
+import { shellCommand } from '../../lib/shell-quote.js';
 
 // ─── Pod Init Templates ──────────────────────────────────────────────────────
 
@@ -380,7 +381,7 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
           console.log('  1. Edit profile/card.ttl to set patient name and demographics');
           console.log('  2. Add data files to clinical/ and wellness/ directories');
           console.log('  3. Register data types in settings/publicTypeIndex.ttl');
-          console.log(`  4. Run: cascade pod info ${directory}`);
+          console.log(`  4. Run: ${shellCommand('cascade', 'pod', 'info', directory)}`);
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

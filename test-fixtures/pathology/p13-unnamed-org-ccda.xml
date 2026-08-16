@@ -1,15 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  P01b - DUAL-LABEL SPLIT (C-CDA half).
+  P13b - UNNAMED-ORGANIZATION SPLIT (C-CDA half).
 
-  The SAME synthetic health system as p01-dual-label-fhir.json, exporting a
-  Continuity of Care Document instead of FHIR resources. This document states
-  the custodian ORGANIZATION NAME ("Meridian Health System"); the FHIR half
-  states an endpoint domain ("meridianhealth.example").
+  The SAME synthetic health system as p13-unnamed-org-fhir.json, exporting a
+  Continuity of Care Document. The custodian states the name of a REGIONAL LEGAL
+  ENTITY of the system, which is what a real custodian element states: not the
+  brand a patient would recognise, and not anything a domain could be turned
+  into.
 
-  The pathology: one health system occupied two rows on the pod's source axis,
-  purely because of which transport the patient happened to download. Nothing
-  in either document is wrong; the two derivation rules simply did not meet.
+  The pathology this pair reproduces is the one P01 does not reach. P01's FHIR
+  half carries a recorder.display naming the organization, so preferring a
+  stated name over the endpoint domain is enough to make its two halves agree.
+  Here there is no stated name on the FHIR side at all, so the two halves can
+  only agree if the display label is derived from the canonical ORIGIN both
+  transports resolve to, rather than from whatever each document happens to say.
 
   Authored for this repository. Invented person, organization, identifiers,
   dates and values. No content is derived from a real record.
@@ -19,27 +23,27 @@
   <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>
   <templateId root="2.16.840.1.113883.10.20.22.1.1"/>
   <templateId root="2.16.840.1.113883.10.20.22.1.2"/>
-  <id root="2.16.840.1.113883.19.5.99991.1" extension="P01-CCDA-001"/>
+  <id root="2.16.840.1.113883.19.5.99993.1" extension="P13-CCDA-001"/>
   <code code="34133-9" displayName="Summarization of Episode Note" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
-  <title>Meridian Health System Continuity of Care Document</title>
-  <effectiveTime value="20250214081500-0800"/>
+  <title>Continuity of Care Document</title>
+  <effectiveTime value="20250409081500-0500"/>
   <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>
   <languageCode code="en-US"/>
   <recordTarget>
     <patientRole>
-      <id root="2.16.840.1.113883.19.5.99991.2" extension="MRN-4417"/>
+      <id root="2.16.840.1.113883.19.5.99993.2" extension="MRN-6620"/>
       <patient>
-        <name use="L"><given>Marisol</given><family>Quintaine</family></name>
-        <administrativeGenderCode code="F" codeSystem="2.16.840.1.113883.5.1"/>
-        <birthTime value="19710418"/>
+        <name use="L"><given>Teodoro</given><family>Alderfen</family></name>
+        <administrativeGenderCode code="M" codeSystem="2.16.840.1.113883.5.1"/>
+        <birthTime value="19580922"/>
       </patient>
     </patientRole>
   </recordTarget>
   <custodian>
     <assignedCustodian>
       <representedCustodianOrganization>
-        <id root="2.16.840.1.113883.19.5.99991.1"/>
-        <name>Meridian Health System</name>
+        <id root="2.16.840.1.113883.19.5.99993.1"/>
+        <name>Brightwater Health Partners of the Cascades</name>
       </representedCustodianOrganization>
     </assignedCustodian>
   </custodian>
@@ -52,21 +56,21 @@
           <templateId root="2.16.840.1.113883.10.20.22.2.5.1"/>
           <code code="11450-4" displayName="Problem List" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
           <title>Problems</title>
-          <text>Type 2 diabetes mellitus, onset 2019-06-02</text>
+          <text>Hypertensive disorder, onset 2021-03-17</text>
           <entry typeCode="DRIV">
             <act classCode="ACT" moodCode="EVN">
               <templateId root="2.16.840.1.113883.10.20.22.4.3"/>
-              <id root="2.16.840.1.113883.19.5.99991.3" extension="P01-PROB-ACT"/>
+              <id root="2.16.840.1.113883.19.5.99993.3" extension="P13-PROB-ACT"/>
               <code code="CONC" codeSystem="2.16.840.1.113883.5.6"/>
               <statusCode code="active"/>
               <entryRelationship typeCode="SUBJ">
                 <observation classCode="OBS" moodCode="EVN">
                   <templateId root="2.16.840.1.113883.10.20.22.4.4"/>
-                  <id root="2.16.840.1.113883.19.5.99991.3" extension="P01-PROB-OBS"/>
+                  <id root="2.16.840.1.113883.19.5.99993.3" extension="P13-PROB-OBS"/>
                   <code code="55607006" displayName="Problem" codeSystem="2.16.840.1.113883.6.96"/>
                   <statusCode code="completed"/>
-                  <effectiveTime><low value="20190602"/></effectiveTime>
-                  <value xsi:type="CD" code="44054006" displayName="Type 2 diabetes mellitus" codeSystem="2.16.840.1.113883.6.96"/>
+                  <effectiveTime><low value="20210317"/></effectiveTime>
+                  <value xsi:type="CD" code="38341003" displayName="Hypertensive disorder" codeSystem="2.16.840.1.113883.6.96"/>
                 </observation>
               </entryRelationship>
             </act>
@@ -74,28 +78,28 @@
         </section>
       </component>
 
-      <!-- Results: the SAME A1c the FHIR half carries, same day, same value. -->
+      <!-- Results: the SAME creatinine the FHIR half carries, same instant, same value. -->
       <component>
         <section>
           <templateId root="2.16.840.1.113883.10.20.22.2.3.1"/>
           <code code="30954-2" displayName="Relevant Diagnostic Tests and/or Laboratory Data" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
           <title>Results</title>
-          <text>Hemoglobin A1c 7.4 %</text>
+          <text>Creatinine 1.1 mg/dL</text>
           <entry typeCode="DRIV">
             <organizer classCode="BATTERY" moodCode="EVN">
               <templateId root="2.16.840.1.113883.10.20.22.4.1"/>
-              <id root="2.16.840.1.113883.19.5.99991.4" extension="P01-ORG-A1C"/>
-              <code code="4548-4" displayName="Hemoglobin A1c panel" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+              <id root="2.16.840.1.113883.19.5.99993.4" extension="P13-ORG-BMP"/>
+              <code code="51990-0" displayName="Basic metabolic panel" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
               <statusCode code="completed"/>
-              <effectiveTime value="20250211091500-0800"/>
+              <effectiveTime value="20250406094500-0500"/>
               <component>
                 <observation classCode="OBS" moodCode="EVN">
                   <templateId root="2.16.840.1.113883.10.20.22.4.2"/>
-                  <id root="2.16.840.1.113883.19.5.99991.4" extension="P01-OBS-A1C"/>
-                  <code code="4548-4" displayName="Hemoglobin A1c/Hemoglobin.total in Blood" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+                  <id root="2.16.840.1.113883.19.5.99993.4" extension="P13-OBS-CREAT"/>
+                  <code code="2160-0" displayName="Creatinine [Mass/volume] in Serum or Plasma" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
                   <statusCode code="completed"/>
-                  <effectiveTime value="20250211091500-0800"/>
-                  <value xsi:type="PQ" value="7.4" unit="%"/>
+                  <effectiveTime value="20250406094500-0500"/>
+                  <value xsi:type="PQ" value="1.1" unit="mg/dL"/>
                 </observation>
               </component>
             </organizer>

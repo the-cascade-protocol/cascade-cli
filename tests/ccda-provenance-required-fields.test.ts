@@ -141,7 +141,7 @@ describe('C-CDA ClinicalDocument required fields', () => {
     expect(output).toContain('"2026-06-28T12:00:00Z"');
     expect(output).toContain('clinical:fhirResourceType "DocumentReference"');
     expect(output).toMatch(/clinical:fhirResourceId "[^"]+"/);
-    expect(output).toContain('clinical:sourceEHR "Providence Health and Services Washington and Montana"');
+    expect(output).toContain('clinical:sourceEHR "Providence Health & Services"');
   });
 });
 
@@ -161,11 +161,20 @@ describe('C-CDA patient demographics', () => {
 });
 
 describe('C-CDA sourceEHR derivation from custodian', () => {
-  it('uses the custodian org name, not the import-batch label', async () => {
+  it('uses the custodian organization, not the import-batch label', async () => {
+    // The custodian names a REGIONAL LEGAL ENTITY of the health system, and the
+    // label is now the health system's canonical display name rather than that
+    // wording. It has to be: a FHIR export of the same system states no
+    // organization name at all, so a label that restated the custodian's wording
+    // could only ever agree with itself. See `src/lib/source-identity.ts`.
     const { output } = await convert();
-    expect(output).toContain('clinical:sourceEHR "Providence Health and Services Washington and Montana"');
-    // The import-batch label must NOT leak into sourceEHR.
+    expect(output).toContain('clinical:sourceEHR "Providence Health & Services"');
+    // What has not changed, and is the assertion this test was written for: the
+    // import-batch label must NOT leak into sourceEHR.
     expect(output).not.toContain('clinical:sourceEHR "ImportBatchLabel"');
+    // Nor may the origin axis carry the label. Both spellings of this system
+    // reduce here, which is what lets the label be computed at all.
+    expect(output).toContain('cascade:sourceIdentity "org:providence"');
   });
 
   it('falls back to "unknown" when no custodian or author org is present', async () => {

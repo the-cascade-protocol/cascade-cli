@@ -30,7 +30,7 @@
 import type { Quad } from 'n3';
 
 import { NS, tripleStr } from './types.js';
-import { sourceIdentity, type SourceIdentity } from '../source-identity.js';
+import { sourceIdentity, sourceLabel, type SourceIdentity } from '../source-identity.js';
 
 /**
  * The ratified "value is expected but not known" token, from the FHIR/HL7
@@ -227,15 +227,21 @@ export function extractBundleIdNamespace(resources: readonly any[]): string | un
  * values for one export. A source axis cannot be built out of a value that
  * varies by which field a resource happened to populate.
  *
- * The label prefers the organization NAME over the endpoint host, which is what
- * makes it agree with the C-CDA path: that path already derives its label from
- * the custodian organization name, and a system exporting both transports was
- * rendering as "meridianhealth.example" and "Meridian Health System". The host
- * remains the fallback, and remains what most Apple Health-shaped exports land
- * on, because they name no organization anywhere.
+ * The label is DERIVED FROM THE IDENTITY rather than from whichever of the two
+ * inputs happened to be present, and that is the half of the fix a
+ * name-beats-host preference could not deliver. Preferring the name only helps a
+ * bundle that states one; the common patient-facing export states no
+ * `Organization` at all and has nothing but its endpoint domain, so against a
+ * C-CDA of the same system it still rendered as "providence.org" beside
+ * "Providence Health and Services Washington and Montana". Both now reduce to one
+ * origin and take that origin's canonical name. See `../source-identity.ts`.
  *
  * `override` is the container adapter's authoritative account name (Apple
- * Health's `export.xml` `<ClinicalRecord sourceName>`), which beats both.
+ * Health's `export.xml` `<ClinicalRecord sourceName>`). It still beats both
+ * derived inputs as the ORIGIN's input, so an account the container names is
+ * attributed to that organization; what it no longer does is set the label
+ * directly, because a container name and a custodian name are two more spellings
+ * of one organization and the whole point is that spellings stop mattering.
  */
 export function deriveBundleOrigin(
   resources: readonly any[],
@@ -249,7 +255,7 @@ export function deriveBundleOrigin(
     idNamespace: extractBundleIdNamespace(resources),
     transportLabel: opts.transportLabel,
   });
-  return { label: organizationName ?? endpointHost, identity };
+  return { label: sourceLabel(identity, organizationName ?? endpointHost), identity };
 }
 
 /**

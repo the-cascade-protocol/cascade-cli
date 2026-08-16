@@ -1,0 +1,66 @@
+{
+  "_comment": "P13a - UNNAMED-ORGANIZATION SPLIT (FHIR half). One synthetic health system exporting FHIR, in the shape a patient-facing export actually has: there is NO Organization resource anywhere, and no provider display names an institution. Every reference is an absolute URL on the system's own FHIR endpoint, so the endpoint domain is the ONLY thing in the whole document that identifies where these records came from. This is what distinguishes P13 from P01, whose FHIR half happens to carry a recorder.display naming the organization: a rule that prefers a stated organization name over the endpoint domain fixes P01 and cannot touch this, because there is no stated name to prefer. The C-CDA half (p13-unnamed-org-ccda.xml) is the same system exporting a document whose custodian states a regional legal entity name. 100% synthetic: invented person, invented organization, invented endpoint, invented values.",
+  "resourceType": "Bundle",
+  "id": "p13-brightwater-fhir",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "https://fhir.brightwaterhealth.example/api/FHIR/R4/Patient/pt-6620",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "pt-6620",
+        "name": [{ "use": "official", "family": "Alderfen", "given": ["Teodoro"] }],
+        "gender": "male",
+        "birthDate": "1958-09-22"
+      }
+    },
+    {
+      "fullUrl": "https://fhir.brightwaterhealth.example/api/FHIR/R4/Condition/cond-5502",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "cond-5502",
+        "clinicalStatus": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/condition-clinical", "code": "active" }] },
+        "code": {
+          "coding": [{ "system": "http://snomed.info/sct", "code": "38341003", "display": "Hypertensive disorder" }],
+          "text": "Hypertensive disorder"
+        },
+        "subject": { "reference": "https://fhir.brightwaterhealth.example/api/FHIR/R4/Patient/pt-6620" },
+        "onsetDateTime": "2021-03-17"
+      }
+    },
+    {
+      "fullUrl": "https://fhir.brightwaterhealth.example/api/FHIR/R4/Observation/obs-9931",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "obs-9931",
+        "status": "final",
+        "category": [
+          {
+            "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "laboratory", "display": "Laboratory" }]
+          }
+        ],
+        "code": {
+          "coding": [{ "system": "http://loinc.org", "code": "2160-0", "display": "Creatinine [Mass/volume] in Serum or Plasma" }],
+          "text": "Creatinine"
+        },
+        "subject": { "reference": "https://fhir.brightwaterhealth.example/api/FHIR/R4/Patient/pt-6620" },
+        "effectiveDateTime": "2025-04-06T09:45:00-05:00",
+        "valueQuantity": { "value": 1.1, "unit": "mg/dL", "system": "http://unitsofmeasure.org", "code": "mg/dL" }
+      }
+    },
+    {
+      "fullUrl": "https://fhir.brightwaterhealth.example/api/FHIR/R4/Immunization/imm-4471",
+      "resource": {
+        "resourceType": "Immunization",
+        "id": "imm-4471",
+        "status": "completed",
+        "vaccineCode": {
+          "coding": [{ "system": "http://hl7.org/fhir/sid/cvx", "code": "115", "display": "Tdap" }],
+          "text": "Tdap"
+        },
+        "patient": { "reference": "https://fhir.brightwaterhealth.example/api/FHIR/R4/Patient/pt-6620" },
+        "occurrenceDateTime": "2023-11-08"
+      }
+    }
+  ]
+}

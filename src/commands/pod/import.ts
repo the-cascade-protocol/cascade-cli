@@ -63,6 +63,7 @@ import { classifyImportInput, isPathInsidePod } from '../../lib/import-input.js'
 import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket-write.js';
 import { toJsonText } from '../../lib/json-output.js';
 import { appendTier0Journal, TIER0_JOURNAL_RELATIVE_PATH } from '../../lib/tier0-journal.js';
+import { shellCommand } from '../../lib/shell-quote.js';
 
 // ---------------------------------------------------------------------------
 // Import report type
@@ -1305,7 +1306,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
               if (narrativeCount > 0) {
                 console.log('');
                 console.log(`  ℹ  Found ${narrativeCount} section(s) with narrative text for AI extraction.`);
-                console.log(`     Run: cascade pod extract ${podDirArg}`);
+                console.log(`     Run: ${shellCommand('cascade', 'pod', 'extract', podDirArg)}`);
               }
             }
           } catch { /* non-fatal */ }
