@@ -31,7 +31,7 @@ scorecard baseline lives in `tests/pathology-reconciliation-baseline.json`.
 
 | ID | Fixture(s) | Pathology |
 |----|-----------|-----------|
-| P01 | `p01-dual-label-fhir.json`, `p01-dual-label-ccda.xml` | **Dual-label split.** One health system exports FHIR (whose `clinical:sourceEHR` is derived from the registrable domain of its endpoint) and a C-CDA (whose label is derived from the custodian organization name). One system, two rows on the pod's source axis. |
+| P01 | `p01-dual-label-fhir.json`, `p01-dual-label-ccda.xml` | **Dual-label split.** One health system exports FHIR (which states its endpoint domain, and on one resource an organization name) and a C-CDA (which states the custodian organization name). One system, two rows on the pod's source axis. |
 | P02 | `p02-duplicate-source-id-ccda.xml` | **Duplicate source-id collision.** A single root-only `<id>` reused across three distinct lab observations, the shape the public HL7 CCD sample distributes. HL7 II says a root alone may be the whole identifier, so all three mint one IRI. |
 | P03 | `p03-narrative-names-ccda.xml` | **Narrative-only test names, one dangling.** Names live in the section narrative and are referenced from the entry. Three references resolve, one points at an element the narrative does not contain, and one observation is named nowhere at all. |
 | P04 | `p04-date-precision-ccda.xml` | **Date-precision variety.** Day precision, second precision with a zone offset, and a month-precision value that has no honest `xsd:date` or `xsd:dateTime` and must not be emitted. Carries the corpus's one procedure. |
@@ -43,6 +43,8 @@ scorecard baseline lives in `tests/pathology-reconciliation-baseline.json`.
 | P09 | `p09a-med-chains-alpha.json`, `p09b-med-chains-beta.json` | **Medication chains.** Dose supersession (10 mg stopped / 20 mg active), stale-active (one active against two stopped from another prescriber), and the same dose disagreement asked twice: once through `MedicationStatement.dosage` and once through `MedicationRequest.dosageInstruction`. |
 | P10 | `p10-allergy-sentinels-fhir.json` | **Allergy sentinels.** A real allergen, a "No Known Allergies" negation, an "Unknown Allergen" data-absent marker, and a real allergen with sparse detail. Three different meanings, one record shape. |
 | P11 | `p11-panel-name-variants-fhir.json` | **Panel display-name variants over shared results.** One lipid draw reported three times as "Lipid Panel", "Lipid Profile" and "LIPID PROFILE - Final result", every report pointing at the same four Observations. |
+| P12 | `p12-vendor-defects-a-ccda.xml`, `p12-vendor-defects-b-ccda.xml` | **Vendor-shipped defects.** An unsubstituted template placeholder as the document id, a malformed nine-digit date, an empty `nullFlavor` section, and `nullFlavor` variety on values. |
+| P13 | `p13-unnamed-org-fhir.json`, `p13-unnamed-org-ccda.xml` | **Unnamed-organization split.** The same system as P01's shape, except the FHIR half names no organization anywhere: no `Organization` resource, no institution-looking provider display, only the endpoint domain. P01 is fixed by preferring a stated organization name over the domain; this one cannot be, because there is no stated name, so the two transports agree only if the display label is derived from the canonical origin. |
 
 ## What the harness asserts
 

@@ -26,6 +26,7 @@ import * as path from 'path';
 import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
 import { resolvePodDir, isDirectory, copyDirectory, createZipArchive } from './helpers.js';
 import { isPodEncrypted, MANIFEST_RELATIVE_PATH } from '../../lib/pod-encryption.js';
+import { shellCommand } from '../../lib/shell-quote.js';
 
 /** File name of the note stamped into an encrypted export. */
 export const ENCRYPTED_EXPORT_NOTICE_FILE = 'ENCRYPTED-EXPORT-README.md';
@@ -107,7 +108,8 @@ export function registerExportSubcommand(pod: Command, program: Command): void {
         if (encrypted && !options.allowEncrypted) {
           printError(
             `This pod is encrypted, so an export of it would contain ciphertext that nobody ` +
-              `can read without its passphrase. Decrypt it first (cascade pod decrypt ${podDir}), ` +
+              `can read without its passphrase. Decrypt it first ` +
+              `(${shellCommand('cascade', 'pod', 'decrypt', podDir)}), ` +
               `or pass --allow-encrypted to export the sealed bytes on purpose.`,
             globalOpts,
           );

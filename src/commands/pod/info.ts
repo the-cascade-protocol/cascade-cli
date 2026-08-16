@@ -36,6 +36,7 @@ import {
   type OutputOptions,
 } from '../../lib/output.js';
 import { getSubjectsByType, getProperties, shortenIRI } from '../../lib/turtle-parser.js';
+import { shellCommand } from '../../lib/shell-quote.js';
 import { DATA_TYPES, CASCADE_NAMESPACES, normalizeProvenanceLabel } from './helpers.js';
 import {
   openPod,
@@ -398,9 +399,9 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
               console.log(`  Pending review:     ${extractionStatus.pendingReview} item(s) in analysis/review-queue.json`);
             }
             if (extractionStatus.narrativeBlocks > 0 && extractionStatus.aiExtracted === 0) {
-              console.log('\n  Next step: cascade pod extract ' + podDir);
+              console.log(`\n  Next step: ${shellCommand('cascade', 'pod', 'extract', podDir)}`);
             } else if (extractionStatus.pendingReview > 0) {
-              console.log('\n  Next step: cascade agent review --pod ' + podDir);
+              console.log(`\n  Next step: ${shellCommand('cascade', 'agent', 'review', '--pod', podDir)}`);
             }
           }
 

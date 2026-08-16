@@ -31,20 +31,30 @@
  * a pod. And the report is useful on its own: "how much cross-source duplication
  * do I actually have" is a question worth answering without changing anything.
  *
+ * AND THE WAY BACK
+ * ----------------
+ * `--undo` replays `settings/tier0-merge-journal.json` and puts the silently
+ * merged records back. It is the same shape as the forward verb — report first,
+ * `--apply` to write — because it is the same kind of decision, and reversibility
+ * that only exists as a JSON file a person could read by hand is reversibility in
+ * principle. See {@link runUndo}.
+ *
  * Exit codes:
  *   0 — the run completed (a dry run, or an --apply that wrote successfully)
- *   1 — the reconciliation ran but at least one bucket could not be WRITTEN
- *   2 — the pod could not be opened, or a record file in it could not be READ.
- *       The second one is exit 2 in the DRY RUN too: this command's whole output
- *       is a claim about the pod's whole record set, and it must not make that
- *       claim about files it never opened.
+ *   1 — the reconciliation ran but at least one bucket could not be WRITTEN, or
+ *       an --undo run refused at least one journal entry
+ *   2 — the pod could not be opened, or a record file in it could not be READ,
+ *       or the review queue / the journal exists and could not be read.
+ *       These are exit 2 in the DRY RUN too: this command's whole output is a
+ *       claim about the pod's whole record set, and it must not make that claim
+ *       about files it never opened.
  */
 
 import type { Command } from 'commander';
 import * as fs from 'node:fs/promises';
 import * as fsSync from 'node:fs';
 import * as path from 'node:path';
-import { Parser } from 'n3';
+import { Parser, DataFactory } from 'n3';
 import type { Quad } from 'n3';
 import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
 import { toJsonText } from '../../lib/json-output.js';
@@ -54,13 +64,26 @@ import { openPod, PodReadLedger, tidyReason, type PodReader } from '../../lib/po
 import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket-write.js';
 import {
   writePendingConflicts,
+  loadPendingConflicts,
   generateConflictId,
   type PendingConflict,
 } from '../../lib/user-resolutions.js';
 import { randomUUID } from 'node:crypto';
-import { appendTier0Journal, TIER0_JOURNAL_RELATIVE_PATH } from '../../lib/tier0-journal.js';
+import {
+  appendTier0Journal,
+  appendTier0Undo,
+  isMergeEntry,
+  readTier0Journal,
+  restoredUris,
+  TIER0_JOURNAL_RELATIVE_PATH,
+  type Tier0Journal,
+} from '../../lib/tier0-journal.js';
+import { shellCommand } from '../../lib/shell-quote.js';
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+const MERGED_FROM = 'https://ns.cascadeprotocol.org/core/v1#mergedFrom';
+
+const { namedNode, literal, quad: makeQuad } = DataFactory;
 
 /** Pod directories holding reconcilable records. Matches `pod import`. */
 const DATA_DIRS = ['clinical', 'wellness'] as const;
@@ -85,6 +108,58 @@ export interface ReconcileGroupReport {
   /** True for the narrow, silently-mergeable cross-source exact lab class. */
   tier0: boolean;
   sources: string[];
+}
+
+/**
+ * What this run does to the queue of conflicts a person still has to answer.
+ *
+ * WHY THIS IS A REPORTED FIELD AND NOT AN IMPLEMENTATION DETAIL
+ * -------------------------------------------------------------
+ * `settings/pending-conflicts.ttl` is a user-decision queue: each row is a
+ * question the tool declined to answer on its own. Applying a reconcile used to
+ * write that file from the run's OWN conflicts alone, so every question already
+ * in it was discarded whether or not anything about it had changed. Measured on
+ * a real pod: eight conflict subjects before, zero after, and a run report that
+ * did not mention conflicts at all.
+ *
+ * Most of those eight were probably moot — their candidates had merged, so there
+ * was nothing left to choose between. But "probably" is doing all the work in
+ * that sentence, and the case it does not cover is a question about records that
+ * are still there, still different, and now silently un-asked.
+ *
+ * So the queue is now rewritten from a decision about each row, and the decision
+ * is counted here. "N items left your review queue" is a fact the user is told,
+ * not one they discover by diffing a settings file.
+ */
+export interface PendingConflictDisposition {
+  /** Rows in the queue before this run. */
+  before: number;
+  /** Rows this run's own reconciliation raises. */
+  raised: number;
+  /**
+   * Pre-existing rows carried forward: two or more of their candidate records
+   * are still in the pod as distinct records, so the question still stands.
+   */
+  kept: number;
+  /**
+   * Pre-existing rows retired because their candidates merged. The choice they
+   * asked for has been made by the merge, so the row is answered, not dropped.
+   */
+  clearedByMerge: number;
+  /**
+   * Pre-existing rows whose candidate records are no longer in the pod at all,
+   * and not because of a merge this run performed. Nothing can act on them, so
+   * they do not survive — but they are counted and named, because "your queue
+   * shrank and no merge explains it" is exactly the sentence a silent rewrite
+   * would have swallowed.
+   */
+  orphaned: number;
+  /** Rows the queue holds afterwards. `raised` plus `kept`, minus re-raises. */
+  after: number;
+  /** The conflict ids behind `clearedByMerge`, sorted. */
+  clearedIds: string[];
+  /** The conflict ids behind `orphaned`, sorted. */
+  orphanedIds: string[];
 }
 
 export interface ReconcileReport {
@@ -119,6 +194,81 @@ export interface ReconcileReport {
   groups: ReconcileGroupReport[];
   /** The tier-0 subset, with the discarded records retained for undo. */
   tier0Merges: Tier0Merge[];
+  /** What this run does to the pending-conflict queue. */
+  pendingConflicts: PendingConflictDisposition;
+  filesWritten: string[];
+}
+
+/** A disposition for a pod where nothing was read and nothing can change. */
+function emptyDisposition(before = 0): PendingConflictDisposition {
+  return {
+    before,
+    raised: 0,
+    kept: before,
+    clearedByMerge: 0,
+    orphaned: 0,
+    after: before,
+    clearedIds: [],
+    orphanedIds: [],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The undo report
+// ---------------------------------------------------------------------------
+
+/** What `--undo` would do, or did, to one journalled merge. */
+export interface UndoMergeReport {
+  /** When the run that applied this merge completed. */
+  appliedAt: string;
+  /** The record that survived the merge and goes on existing. */
+  canonicalUri: string;
+  recordType: string;
+  matchedOn: string;
+  /** The discarded record IRIs this entry would put back. */
+  restores: string[];
+  /**
+   * `restorable`      every discarded record can go back where it came from.
+   * `already-undone`  the journal already records these as restored.
+   * `blocked`         something about the pod stops it, named in `reason`.
+   */
+  status: 'restorable' | 'already-undone' | 'blocked';
+  /** Why a blocked entry is blocked. Absent otherwise. */
+  reason?: string;
+  /** Pod-relative bucket the records go back into, when one was resolvable. */
+  bucket?: string;
+  /**
+   * Whether the record the merge KEPT is still in the pod.
+   *
+   * False does not block the restore, and that is a deliberate asymmetry. The
+   * journal exists so a discarded record can always be recovered; refusing to
+   * give it back because the record it was merged into has since been deleted
+   * would make the recovery surface fail exactly when it is most needed. It is
+   * reported because it means the pod is no longer in the state the journal
+   * describes, and there is then no lineage edge to withdraw.
+   */
+  canonicalPresent: boolean;
+}
+
+export interface ReconcileUndoReport {
+  podDir: string;
+  ranAt: string;
+  /** False for a dry run. The single most important field in this object. */
+  applied: boolean;
+  /** Pod-relative location of the journal that was replayed. */
+  journal: string;
+  /** Every merge the journal holds, with what would happen to it. */
+  merges: UndoMergeReport[];
+  /** Records put back (or that would be). */
+  recordsRestored: number;
+  /** Merges reversed (or that would be). */
+  mergesUndone: number;
+  /** Merges already reversed by an earlier undo run. */
+  alreadyUndone: number;
+  /** Merges that could NOT be reversed. Non-zero means exit 1. */
+  blocked: number;
+  /** `cascade:mergedFrom` edges withdrawn from the surviving records. */
+  lineageEdgesRemoved: number;
   filesWritten: string[];
 }
 
@@ -275,7 +425,224 @@ function countRecordsIn(inputs: ReconcilerInput[]): number {
   return subjects.size;
 }
 
+/**
+ * Decide what happens to every row of the pending-conflict queue, and build the
+ * queue this run would leave behind.
+ *
+ * THE TWO POPULATIONS THE RECONCILED TEXT DISTINGUISHES
+ * ----------------------------------------------------
+ * A record IRI that was in the pod and is not in the reconciled output either
+ * MERGED into another record — in which case the survivor carries
+ * `cascade:mergedFrom` pointing at it, which is the lineage the reconciler
+ * writes — or it is simply gone. Those two are opposite facts about a conflict:
+ * the first ANSWERS it, the second means nothing here can act on it. Reading
+ * only "is it still a subject" would collapse them and let a vanished record
+ * look like a resolved one.
+ *
+ * A row survives when two or more of its candidates are still distinct records,
+ * because that is the condition under which there is still something to choose
+ * between. One candidate left is not a choice.
+ *
+ * Re-raised rows are deduplicated on `conflictId`, and the PRE-EXISTING row wins:
+ * it carries the `detectedAt` the user first saw and the subject IRI anything
+ * else in the pod may reference. A conflict does not become newer by being
+ * noticed again.
+ */
+function disposePendingConflicts(
+  existing: readonly PendingConflict[],
+  raised: readonly PendingConflict[],
+  reconciledTurtle: string,
+): { disposition: PendingConflictDisposition; queue: PendingConflict[] } {
+  const surviving = new Set<string>();
+  const absorbed = new Set<string>();
+  for (const q of new Parser({ format: 'Turtle', baseIRI: relBaseFor(reconciledTurtle) }).parse(
+    reconciledTurtle,
+  )) {
+    if (q.predicate.value === RDF_TYPE) surviving.add(q.subject.value);
+    else if (q.predicate.value === MERGED_FROM) absorbed.add(q.object.value);
+  }
+
+  const kept: PendingConflict[] = [];
+  const clearedIds: string[] = [];
+  const orphanedIds: string[] = [];
+
+  for (const c of existing) {
+    const alive = c.candidateRecordUris.filter((u) => surviving.has(u));
+    const merged = c.candidateRecordUris.filter((u) => absorbed.has(u));
+    if (alive.length >= 2) {
+      kept.push(c);
+    } else if (merged.length > 0) {
+      clearedIds.push(c.conflictId);
+    } else {
+      orphanedIds.push(c.conflictId);
+    }
+  }
+
+  const keptIds = new Set(kept.map((c) => c.conflictId));
+  const newRows = raised.filter((c) => !keptIds.has(c.conflictId));
+
+  return {
+    disposition: {
+      before: existing.length,
+      raised: raised.length,
+      kept: kept.length,
+      clearedByMerge: clearedIds.length,
+      orphaned: orphanedIds.length,
+      after: kept.length + newRows.length,
+      clearedIds: clearedIds.sort(),
+      orphanedIds: orphanedIds.sort(),
+    },
+    queue: [...kept, ...newRows],
+  };
+}
+
 // ---------------------------------------------------------------------------
+// Undo
+// ---------------------------------------------------------------------------
+
+/** Rebuild a journalled record's quads from the properties the journal kept. */
+function quadsFromJournal(
+  uri: string,
+  properties: Record<string, Array<{ value: string; datatype?: string; isIri?: boolean }>>,
+): Quad[] {
+  const subject = namedNode(uri);
+  const out: Quad[] = [];
+  for (const [predicate, values] of Object.entries(properties)) {
+    for (const v of values) {
+      const object = v.isIri
+        ? namedNode(v.value)
+        : v.datatype
+          ? literal(v.value, namedNode(v.datatype))
+          : literal(v.value);
+      out.push(makeQuad(subject, namedNode(predicate), object));
+    }
+  }
+  return out;
+}
+
+/** The rdf:type IRI a journalled record carried, if it carried one. */
+function journalledTypeIri(
+  properties: Record<string, Array<{ value: string; datatype?: string; isIri?: boolean }>>,
+): string | undefined {
+  return properties[RDF_TYPE]?.[0]?.value;
+}
+
+/** The registered bucket a type IRI belongs in, pod-relative. */
+function bucketForType(typeIri: string): string | undefined {
+  for (const info of Object.values(DATA_TYPES)) {
+    if (info.isFhirPassthroughBucket) continue;
+    if (info.rdfTypes.includes(typeIri)) return `${info.directory}/${info.filename}`;
+  }
+  return undefined;
+}
+
+function renderUndoReport(report: ReconcileUndoReport): string {
+  const lines: string[] = [''];
+  lines.push(
+    report.applied
+      ? `Undid tier-0 merges in the pod at ${report.podDir}`
+      : `Dry run over the tier-0 merge journal of ${report.podDir}`,
+  );
+  lines.push(`  Journal: ${report.journal}`);
+  lines.push('');
+
+  if (report.merges.length === 0) {
+    lines.push('  The journal records no tier-0 merges. There is nothing to undo.');
+    lines.push('');
+    return lines.join('\n');
+  }
+
+  const pending = report.merges.filter((m) => m.status === 'restorable');
+  const blocked = report.merges.filter((m) => m.status === 'blocked');
+
+  if (pending.length > 0) {
+    lines.push(
+      report.applied
+        ? `  Restored ${report.recordsRestored} record(s) from ${report.mergesUndone} merge(s):`
+        : `  Would restore ${report.recordsRestored} record(s) from ${report.mergesUndone} merge(s):`,
+    );
+    for (const m of pending) {
+      lines.push(`    ${m.matchedOn}  (merged ${m.appliedAt})`);
+      lines.push(
+        `      keep     ${m.canonicalUri}${m.canonicalPresent ? '' : '  [no longer in the pod]'}`,
+      );
+      for (const uri of m.restores) lines.push(`      restore  ${uri}  -> ${m.bucket}`);
+    }
+    lines.push('');
+  }
+
+  if (report.alreadyUndone > 0) {
+    lines.push(
+      `  ${report.alreadyUndone} merge(s) were already undone by an earlier run and were left alone.`,
+    );
+    lines.push('');
+  }
+
+  if (blocked.length > 0) {
+    lines.push(`  ${blocked.length} merge(s) could NOT be undone:`);
+    for (const m of blocked) {
+      lines.push(`    ${m.matchedOn}  (merged ${m.appliedAt})`);
+      lines.push(`      ${m.reason}`);
+    }
+    lines.push(
+      '    Each is refused on its own. The rest of the journal was replayed normally.',
+    );
+    lines.push('');
+  }
+
+  if (report.applied) {
+    lines.push(
+      `  Wrote ${report.filesWritten.length} file(s), withdrew ${report.lineageEdgesRemoved} ` +
+        `cascade:mergedFrom edge(s), and appended the undo to the journal.`,
+    );
+  } else if (pending.length > 0) {
+    lines.push('  DRY RUN. Nothing was written.');
+    lines.push(
+      '  Re-run with --apply to restore: ' +
+        shellCommand('cascade', 'pod', 'reconcile', report.podDir, '--undo', '--apply'),
+    );
+  } else {
+    lines.push('  Nothing to restore.');
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The review-queue paragraph. Printed whenever the queue held anything or this
+ * run puts anything in it, INCLUDING on the "nothing to reconcile" path: a run
+ * that merges nothing still rewrites the queue, and that is precisely the case
+ * where a silent change would be least expected.
+ */
+function renderConflictQueue(report: ReconcileReport): string[] {
+  const p = report.pendingConflicts;
+  if (p.before === 0 && p.raised === 0) return [];
+
+  const lines: string[] = [];
+  const verb = report.applied ? '' : ' would';
+  lines.push(`  Review queue (settings/pending-conflicts.ttl): ${p.before} item(s) before,`);
+  lines.push(`  ${p.after} after.`);
+  if (p.kept > 0) lines.push(`    ${p.kept} kept: their records are still distinct and still need a decision.`);
+  if (p.raised > 0) lines.push(`    ${p.raised} raised by this run.`);
+  if (p.clearedByMerge > 0) {
+    lines.push(
+      `    ${p.clearedByMerge} cleared by merge: their candidate records became one, so the`,
+    );
+    lines.push('    question is answered rather than dropped.');
+    for (const id of p.clearedIds) lines.push(`      ${id}`);
+  }
+  if (p.orphaned > 0) {
+    lines.push(
+      `    ${p.orphaned} orphaned: their candidate records are no longer in the pod, and no`,
+    );
+    lines.push(`    merge in this run explains it. These${verb} leave the queue unanswered.`);
+    for (const id of p.orphanedIds) lines.push(`      ${id}`);
+  }
+  lines.push('');
+  return lines;
+}
 
 function renderTextReport(report: ReconcileReport): string {
   const lines: string[] = [];
@@ -290,6 +657,7 @@ function renderTextReport(report: ReconcileReport): string {
   if (merges === 0 && s.conflictsUnresolved === 0 && s.conflictsResolved === 0) {
     lines.push('  No duplicates and no conflicts found. Nothing to reconcile.');
     lines.push('');
+    lines.push(...renderConflictQueue(report));
     return lines.join('\n');
   }
 
@@ -331,6 +699,8 @@ function renderTextReport(report: ReconcileReport): string {
     lines.push('');
   }
 
+  lines.push(...renderConflictQueue(report));
+
   if (report.filesUnreadable.length > 0) {
     lines.push(`  ${report.filesUnreadable.length} file(s) could NOT be read and were excluded:`);
     for (const f of report.filesUnreadable) lines.push(`    ${f}`);
@@ -339,7 +709,10 @@ function renderTextReport(report: ReconcileReport): string {
 
   if (!report.applied) {
     lines.push('  DRY RUN. Nothing was written.');
-    lines.push(`  Re-run with --apply to merge: cascade pod reconcile ${report.podDir} --apply`);
+    lines.push(
+      `  Re-run with --apply to merge: ` +
+        shellCommand('cascade', 'pod', 'reconcile', report.podDir, '--apply'),
+    );
     lines.push('');
   } else {
     lines.push(`  Wrote ${report.filesWritten.length} file(s).`);
@@ -347,6 +720,236 @@ function renderTextReport(report: ReconcileReport): string {
   }
 
   return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * `--undo`: replay the tier-0 journal and put the silently merged records back.
+ *
+ * WHY THE JOURNAL IS ENOUGH, AND WHY IT IS THE ONLY INPUT
+ * ------------------------------------------------------
+ * The tier-0 ruling lets one narrow class of duplicate merge without asking
+ * anyone. That is only defensible because every such merge is written to
+ * `settings/tier0-merge-journal.json` with the FULL content of every record it
+ * discarded. Until now that made the merges reversible in principle and by hand.
+ * This is the verb that makes them reversible in practice, and it reads nothing
+ * but the journal and the pod: not the original import files, not the pod's
+ * history, and not the tier-0 rule, which may well have been what the person
+ * running this disagrees with.
+ *
+ * SAFE TO RUN TWICE, BY CONSTRUCTION
+ * ----------------------------------
+ * The undo is itself journalled, appended rather than substituted for the merge
+ * entry it reverses. So the set of records already put back is derivable from
+ * the journal, a second run finds nothing outstanding, and it writes nothing —
+ * rather than restoring a second copy of every record, which is what a
+ * re-runnable restore with no memory would do.
+ *
+ * REFUSALS ARE PER ENTRY
+ * ----------------------
+ * Two things about the pod can make one journalled merge unrestorable: the
+ * bucket its records belong in is gone, or a live record already holds the IRI
+ * being restored. Both mean the pod has moved on from what the journal
+ * describes, and both are decisions for a person. They are refused ONE AT A
+ * TIME, loudly, with the rest of the journal replayed normally — because
+ * abandoning the whole run over one entry would make an unrelated recoverable
+ * record unrecoverable, and the exit code says clearly enough that something
+ * needs looking at.
+ */
+async function runUndo(
+  podDir: string,
+  reader: PodReader,
+  apply: boolean,
+  reportFile: string | undefined,
+  globalOpts: OutputOptions,
+): Promise<void> {
+  const dek = reader.dek;
+
+  let journal: Tier0Journal;
+  try {
+    journal = readTier0Journal(podDir, dek);
+  } catch (err: unknown) {
+    printError(
+      `Could not read ${TIER0_JOURNAL_RELATIVE_PATH}: ` +
+        `${err instanceof Error ? err.message : String(err)}. "there were no silent merges" and ` +
+        `"I cannot tell you what was merged away" are opposite answers, and this is the second ` +
+        `one. The pod is unchanged.`,
+      globalOpts,
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  // The pod is read for the same reason the reconcile path reads it: every
+  // judgement below is about whether a record can go back, and a bucket that was
+  // never opened could hold the live record that stops it.
+  const { inputs, filesRead, ledger } = await readPodBuckets(reader);
+  if (ledger.hasFatal) {
+    for (const f of ledger.fatal) printError(`Could not read ${f.file}: ${f.reason}`, globalOpts);
+    printError(
+      `Refusing to undo in ${podDir}: ${ledger.fatal.length} of ${ledger.attempted} record ` +
+        `file(s) could not be read, and a record restored beside a live copy this run never saw ` +
+        `would be a duplicate. The pod is unchanged.`,
+      globalOpts,
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  const live = new Set<string>();
+  for (const input of inputs) {
+    for (const q of new Parser({ format: 'Turtle', baseIRI: relBaseFor(input.content) }).parse(
+      input.content,
+    )) {
+      if (q.predicate.value === RDF_TYPE) live.add(q.subject.value);
+    }
+  }
+
+  const alreadyRestored = restoredUris(journal);
+  const merges: UndoMergeReport[] = [];
+  /** Restorable quads, keyed by the pod-relative bucket they belong in. */
+  const toWrite = new Map<string, Quad[]>();
+  const restoredSet = new Set<string>();
+  const undone: Array<{ canonicalUri: string; restoredUris: string[] }> = [];
+
+  for (const entry of journal.entries) {
+    if (!isMergeEntry(entry)) continue;
+    for (const merge of entry.merges) {
+      const restores = merge.discarded.map((d) => d.uri);
+      const base = {
+        appliedAt: entry.appliedAt,
+        canonicalUri: merge.canonicalUri,
+        recordType: merge.recordType,
+        matchedOn: merge.matchedOn,
+        restores,
+        canonicalPresent: live.has(merge.canonicalUri),
+      };
+
+      if (restores.every((u) => alreadyRestored.has(u))) {
+        merges.push({ ...base, status: 'already-undone' });
+        continue;
+      }
+
+      let reason: string | undefined;
+      let bucket: string | undefined;
+      const quads: Quad[] = [];
+      for (const d of merge.discarded) {
+        if (live.has(d.uri)) {
+          reason =
+            `a live record already holds ${d.uri}, so restoring the journalled copy would ` +
+            `create a second record under one IRI. Nothing was restored for this merge.`;
+          break;
+        }
+        const typeIri = journalledTypeIri(d.properties);
+        if (!typeIri) {
+          reason = `the journalled record ${d.uri} states no rdf:type, so nothing can route it to a bucket.`;
+          break;
+        }
+        const rel = bucketForType(typeIri);
+        if (!rel) {
+          reason = `no registered bucket holds <${typeIri}>, which is the type of ${d.uri}.`;
+          break;
+        }
+        if (!fsSync.existsSync(path.join(podDir, ...rel.split('/')))) {
+          reason =
+            `the bucket ${rel} that ${d.uri} belongs in no longer exists in this pod. ` +
+            `Restoring into a file the pod has since dropped would put the record somewhere ` +
+            `nothing reads.`;
+          break;
+        }
+        bucket = rel;
+        quads.push(...quadsFromJournal(d.uri, d.properties));
+      }
+
+      if (reason) {
+        merges.push({ ...base, status: 'blocked', reason, bucket });
+        continue;
+      }
+
+      merges.push({ ...base, status: 'restorable', bucket });
+      const target = toWrite.get(bucket as string) ?? [];
+      target.push(...quads);
+      toWrite.set(bucket as string, target);
+      for (const u of restores) restoredSet.add(u);
+      undone.push({ canonicalUri: merge.canonicalUri, restoredUris: restores });
+    }
+  }
+
+  const report: ReconcileUndoReport = {
+    podDir,
+    ranAt: new Date().toISOString(),
+    applied: false,
+    journal: TIER0_JOURNAL_RELATIVE_PATH,
+    merges,
+    recordsRestored: restoredSet.size,
+    mergesUndone: merges.filter((m) => m.status === 'restorable').length,
+    alreadyUndone: merges.filter((m) => m.status === 'already-undone').length,
+    blocked: merges.filter((m) => m.status === 'blocked').length,
+    lineageEdgesRemoved: 0,
+    filesWritten: [],
+  };
+
+  if (apply && restoredSet.size > 0) {
+    // Buckets that receive a restored record, PLUS any bucket holding a
+    // `cascade:mergedFrom` edge that points at one. The second set is usually the
+    // same as the first and does not have to be: the edge lives on the surviving
+    // record, and nothing guarantees the survivor and the record it absorbed are
+    // filed under one type forever.
+    const targets = new Map<string, Quad[]>(toWrite);
+    for (const rel of filesRead) {
+      if (targets.has(rel)) continue;
+      const abs = path.join(podDir, ...rel.split('/'));
+      const text = reader.readText(abs);
+      if (!text.ok) continue;
+      const hasEdge = new Parser({ format: 'Turtle', baseIRI: relBaseFor(text.value) })
+        .parse(text.value)
+        .some((q) => q.predicate.value === MERGED_FROM && restoredSet.has(q.object.value));
+      if (hasEdge) targets.set(rel, []);
+    }
+
+    const failed: string[] = [];
+    for (const rel of [...targets.keys()].sort()) {
+      const incoming = targets.get(rel) as Quad[];
+      const abs = path.join(podDir, ...rel.split('/'));
+      try {
+        await mergeIntoBucket(abs, incoming, dek, {
+          combine: (existing, added) => {
+            // The lineage the merge wrote is withdrawn along with the merge. A
+            // survivor that still claimed `mergedFrom` a record now sitting
+            // beside it would state a merge the pod no longer contains, and the
+            // restored record would read as both live and absorbed.
+            const kept = existing.filter(
+              (q) => !(q.predicate.value === MERGED_FROM && restoredSet.has(q.object.value)),
+            );
+            report.lineageEdgesRemoved += existing.length - kept.length;
+            return [...kept, ...added];
+          },
+        });
+        report.filesWritten.push(rel);
+      } catch (e: unknown) {
+        printError(
+          `Refusing to write ${rel}: ${e instanceof Error ? e.message : String(e)}`,
+          globalOpts,
+        );
+        failed.push(rel);
+      }
+    }
+
+    if (failed.length === 0) {
+      appendTier0Undo(podDir, undone, 'pod reconcile --undo --apply', dek);
+      report.applied = true;
+    } else {
+      // The journal is NOT appended when a bucket failed: an undo entry claims
+      // those records are back, and a later run would believe it and skip them.
+      process.exitCode = 1;
+    }
+  }
+
+  if (report.blocked > 0) process.exitCode = 1;
+
+  if (reportFile) await fs.writeFile(reportFile, toJsonText(report), 'utf-8');
+  printResult(globalOpts.json ? report : renderUndoReport(report), globalOpts);
 }
 
 // ---------------------------------------------------------------------------
@@ -363,12 +966,18 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
       'Actually merge and write. Without this the command only reports what it would do.',
       false,
     )
+    .option(
+      '--undo',
+      'Replay settings/tier0-merge-journal.json and put the silently merged records back. ' +
+        'Reports by default; combine with --apply to write.',
+      false,
+    )
     .option('--trust <scores>', 'Trust scores, e.g. hospital=0.95,clinic=0.85')
     .option('--report <file>', 'Write the full report as JSON to this file')
     .action(
       async (
         podDirArg: string,
-        options: { apply?: boolean; trust?: string; report?: string },
+        options: { apply?: boolean; undo?: boolean; trust?: string; report?: string },
       ) => {
         const globalOpts = program.opts() as OutputOptions;
         const podDir = resolvePodDir(podDirArg);
@@ -397,10 +1006,36 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
         }
         const dek = reader.dek;
 
+        if (options.undo === true) {
+          await runUndo(podDir, reader, apply, options.report, globalOpts);
+          return;
+        }
+
         const trustScores: Record<string, number> = {};
         for (const pair of (options.trust ?? '').split(',')) {
           const [k, v] = pair.split('=');
           if (k && v && !Number.isNaN(Number(v))) trustScores[k.trim()] = Number(v);
+        }
+
+        // The review queue is read BEFORE anything is decided, and a queue that
+        // exists and cannot be read ends the run. Under --apply this file is
+        // rewritten, so a run that could not read it would be overwriting a set
+        // of unanswered questions it never saw; in the dry run the report would
+        // be claiming a disposition it never computed. Both are worse than
+        // stopping.
+        let existingConflicts: PendingConflict[];
+        try {
+          existingConflicts = await loadPendingConflicts(podDir, dek);
+        } catch (err: unknown) {
+          printError(
+            `Could not read settings/pending-conflicts.ttl: ` +
+              `${err instanceof Error ? err.message : String(err)}. Refusing to reconcile ` +
+              `${podDir}: applying would rewrite a review queue this run cannot read. ` +
+              `The pod is unchanged.`,
+            globalOpts,
+          );
+          process.exitCode = 2;
+          return;
         }
 
         const { inputs, filesRead, unreadable, ledger } = await readPodBuckets(reader);
@@ -456,6 +1091,11 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
                   },
                   groups: [],
                   tier0Merges: [],
+                  // Nothing was read, so nothing can have merged and no row of
+                  // the queue can have changed meaning. It is still reported,
+                  // because "your queue has 8 items" is true and useful on a pod
+                  // that holds no reconcilable records at all.
+                  pendingConflicts: emptyDisposition(existingConflicts.length),
                   filesWritten: [],
                 }
               : `\nNo reconcilable records found in ${podDir}.\n`,
@@ -468,6 +1108,35 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
         printVerbose(`Reconciling ${recordsBefore} record(s) from ${inputs.length} file(s)...`, globalOpts);
 
         const result = await runReconciliation(inputs, { trustScores, labTolerance: 0.05 });
+
+        // Conflicts this run raises go through the SAME queue every other conflict
+        // does, so `pod conflicts` and `pod resolve` see them. Building them here
+        // rather than inside the --apply branch is what lets the DRY RUN say what
+        // the queue would look like, which is the whole reason the verb reports
+        // before it writes.
+        const raisedConflicts: PendingConflict[] = (
+          result.report.unresolvedConflicts as Array<{
+            recordType: string;
+            matchedOn: string;
+            sources?: string[];
+            candidateUris?: string[];
+            label?: string;
+          }>
+        ).map((c) => ({
+          uri: `urn:uuid:conflict-${randomUUID()}`,
+          conflictId: generateConflictId(c.recordType, c.matchedOn),
+          recordType: c.recordType,
+          detectedAt: new Date(),
+          candidateRecordUris: c.candidateUris ?? [],
+          label: c.label,
+          sourceA: c.sources?.[0],
+          sourceB: c.sources?.[1],
+        }));
+        const { disposition, queue: finalConflicts } = disposePendingConflicts(
+          existingConflicts,
+          raisedConflicts,
+          result.turtle,
+        );
 
         const groups: ReconcileGroupReport[] = (
           result.report.transformations as Array<{
@@ -509,6 +1178,7 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
           },
           groups,
           tier0Merges: result.report.tier0Merges,
+          pendingConflicts: disposition,
           filesWritten: [],
         };
 
@@ -571,29 +1241,14 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
             }
           }
 
-          // Conflicts this run raised go through the SAME queue every other
-          // conflict does, so `pod conflicts` and `pod resolve` see them.
-          const pendingConflicts: PendingConflict[] = (
-            result.report.unresolvedConflicts as Array<{
-              recordType: string;
-              matchedOn: string;
-              sources?: string[];
-              candidateUris?: string[];
-              label?: string;
-            }>
-          ).map((c) => ({
-            uri: `urn:uuid:conflict-${randomUUID()}`,
-            conflictId: generateConflictId(c.recordType, c.matchedOn),
-            recordType: c.recordType,
-            detectedAt: new Date(),
-            candidateRecordUris: c.candidateUris ?? [],
-            label: c.label,
-            sourceA: c.sources?.[0],
-            sourceB: c.sources?.[1],
-          }));
+          // The queue is written as the DISPOSITION decided it: rows this run
+          // raised, plus every pre-existing row whose question still stands.
+          // Writing only the run's own conflicts is what silently emptied a
+          // user-decision queue, so the set written here is the one the report
+          // above already told the user about.
           const conflictsFile = path.join(podDir, 'settings', 'pending-conflicts.ttl');
-          if (pendingConflicts.length > 0 || fsSync.existsSync(conflictsFile)) {
-            await writePendingConflicts(podDir, pendingConflicts, dek);
+          if (finalConflicts.length > 0 || fsSync.existsSync(conflictsFile)) {
+            await writePendingConflicts(podDir, finalConflicts, dek);
           }
 
           if (result.report.tier0Merges.length > 0) {

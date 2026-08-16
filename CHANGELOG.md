@@ -7,6 +7,66 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+**`cascade pod reconcile <pod-dir> --undo`: the tier-0 journal is now replayable.**
+Tier 0 merges one narrow class of duplicate without asking anyone, and the argument for that is not
+that the rule is always right but that the merge stays a fact the pod holds: every one is written to
+`settings/tier0-merge-journal.json` with the FULL content of every record it discarded. Until now
+that made the merges reversible in principle and by hand. `--undo` replays the journal and puts the
+records back:
+
+- **Report first, exactly like the forward verb.** `--undo` alone prints what would be restored and
+  writes nothing; `--undo --apply` writes.
+- **Restoring withdraws the lineage it reverses.** The surviving record's `cascade:mergedFrom` edge
+  is removed along with the merge, so no record reads as both live and absorbed.
+- **Running it twice is safe.** The undo is journaled by APPENDING, never by removing the merge
+  entry it reverses, so "merged on the 3rd and put back on the 9th" stays a different fact from
+  "never merged" and a second run has nothing outstanding to do.
+- **A pod that has moved on is refused per entry, not per run.** A live record already holding the
+  IRI being restored, or a bucket that no longer exists, blocks that one entry with a named reason
+  and exits 1, while the rest of the journal is replayed.
+
+**`pod reconcile` reports what it does to the pending-conflict queue.**
+The run report and `--json` now carry a `pendingConflicts` disposition: rows before, rows raised,
+rows kept, rows cleared by merge, rows orphaned, rows after, with the conflict ids behind the last
+two. A decision queue changing size is a fact the user is told rather than one they discover by
+diffing a settings file.
+
+### Fixed
+
+**One health system now resolves to ONE display label whichever transport carried it.**
+`cascade:sourceIdentity` already converged. `clinical:sourceEHR` did not: the C-CDA path labelled
+records with the custodian's stated organization name and the FHIR path fell back to the endpoint's
+registrable domain, which is what a patient-facing export leaves it with because such exports
+routinely carry no `Organization` resource at all. Measured on a real pod, one system occupied two
+rows with 1,175 records under one label and 938 under the other, and every source-scoped consumer
+inherited the split. Preferring a stated name over the domain cannot fix it, because in that shape
+there is no stated name to prefer.
+
+The label is now computed FROM the canonical origin, so two records with one origin cannot carry two
+labels. A curated crosswalk in `src/lib/source-identity.ts` supplies canonical display names, and
+folds the host/name pairs that share no token and that no string transform could relate. Corpus
+scenario P13 reproduces the case a per-transport rule cannot reach.
+
+**`pod reconcile --apply` no longer discards pending conflicts it did not raise.**
+The queue was rewritten from the run's own conflicts alone, so every unanswered question already in
+it was dropped whether or not anything about it had changed. Measured on a real pod: eight conflict
+subjects before an `--apply`, zero after. Rows whose candidate records merged are now cleared, rows
+whose candidates are still distinct are kept with their original id and detection time, and rows
+whose records are gone entirely are counted and named. A queue file that exists and cannot be read
+refuses the run at exit 2 rather than being overwritten unseen.
+
+**Suggested command lines are shell-quoted.**
+Every verb that prints a command to copy (`pod reconcile`, `pod doctor`, `pod conflicts`,
+`pod resolve`, `pod import`, `pod info`, `pod init`, `pod export`) interpolated the pod path raw, so
+on the primary desktop platform, where the default pod location contains a space, the printed line
+split into two arguments and the paste failed. All of them now route through one quoter.
+
+---
+
 ## [0.17.0] - 2026-08-14
 
 ### Added

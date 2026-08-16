@@ -74,11 +74,30 @@ cascade pod reconcile ./my-pod --apply
 
 Two organizations reporting the same lab result, at the same instant, with identical values, are
 merged without raising a conflict. Every such merge is appended to `settings/tier0-merge-journal.json`
-with the full content of the record it discarded, so it can be reviewed or undone afterwards.
-Anything less certain than that is reported for review and reaches `cascade pod conflicts`.
+with the full content of the record it discarded. Anything less certain than that is reported for
+review and reaches `cascade pod conflicts`.
+
+Those merges are reversible, with the same report-first gate:
+
+```bash
+# What WOULD be restored from the journal. Changes nothing.
+cascade pod reconcile ./my-pod --undo
+
+# Put the records back, having read the report above.
+cascade pod reconcile ./my-pod --undo --apply
+```
+
+The undo is itself journaled, by appending rather than by removing the merge it reverses, so running
+it twice restores nothing the second time. A journal entry the pod has moved on from (a live record
+already holding the IRI, or a bucket that no longer exists) is refused on its own, by name, while the
+rest of the journal is replayed.
+
+Every run also reports what it does to the review queue: how many pending conflicts were kept,
+cleared because their records merged, and orphaned because their records are gone.
 
 If a record file cannot be read, the command refuses to run at all (exit 2) rather than report counts
-about a pod it only partly opened.
+about a pod it only partly opened. The same holds for the review queue and the journal: a file that
+exists and cannot be read stops the run rather than being overwritten unseen.
 
 ## Pod graph queries
 

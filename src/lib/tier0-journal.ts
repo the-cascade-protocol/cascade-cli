@@ -51,8 +51,46 @@ export interface Tier0JournalEntry {
   merges: Tier0Merge[];
 }
 
+/**
+ * One appended entry recording that merges were UNDONE.
+ *
+ * APPENDED, NEVER SUBTRACTED, and that is the whole design. The obvious way to
+ * record an undo is to remove the merge entry it reverses, and that would make
+ * the journal a statement of current state rather than of what happened. A
+ * person auditing a pod needs to see that a merge was made AND that it was
+ * reversed, in that order, with both timestamps: "this record was merged away on
+ * the 3rd and put back on the 9th" is a different fact from "this record was
+ * never merged", and only the second one survives a rewrite.
+ *
+ * It also makes the undo verb re-runnable without a separate lock or marker: the
+ * set of already-restored records is derivable from the journal itself, so a
+ * second run has nothing left to do and says so.
+ */
+export interface Tier0UndoEntry {
+  /** When the undo run completed. */
+  appliedAt: string;
+  /** Which verb performed it. */
+  appliedBy: string;
+  /** The discriminator. Distinguishes an undo entry from a merge entry. */
+  rule: 'tier-0-merge-undo';
+  /** What was put back, grouped by the merge it reverses. */
+  undone: Array<{
+    /** The record that had survived the merge, and keeps existing. */
+    canonicalUri: string;
+    /** The discarded record IRIs restored to the pod. */
+    restoredUris: string[];
+  }>;
+}
+
 export interface Tier0Journal {
-  entries: Tier0JournalEntry[];
+  entries: Array<Tier0JournalEntry | Tier0UndoEntry>;
+}
+
+/** True for an entry that records merges rather than an undo of them. */
+export function isMergeEntry(
+  entry: Tier0JournalEntry | Tier0UndoEntry,
+): entry is Tier0JournalEntry {
+  return entry.rule === 'tier-0-cross-source-exact-lab-duplicate';
 }
 
 function journalPath(podDir: string): string {
@@ -102,11 +140,61 @@ export function appendTier0Journal(
 }
 
 /**
+ * Append one undo run. A no-op when it restored nothing, so a re-run of the undo
+ * verb never grows the journal with an entry that says nothing happened.
+ *
+ * Returns the number of records recorded as restored.
+ */
+export function appendTier0Undo(
+  podDir: string,
+  undone: Tier0UndoEntry['undone'],
+  appliedBy: string,
+  dek?: Buffer,
+): number {
+  const restored = undone.reduce((n, u) => n + u.restoredUris.length, 0);
+  if (restored === 0) return 0;
+  const existing = readTier0Journal(podDir, dek);
+  const entry: Tier0UndoEntry = {
+    appliedAt: new Date().toISOString(),
+    appliedBy,
+    rule: 'tier-0-merge-undo',
+    undone,
+  };
+  const p = journalPath(podDir);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  writeResource(p, toJsonText({ entries: [...existing.entries, entry] }), dek);
+  return restored;
+}
+
+/**
+ * The discarded record IRIs the journal says have already been put back.
+ *
+ * This is what makes running the undo twice safe without any state outside the
+ * journal: a record named by an undo entry is in the pod again, so the merge
+ * that discarded it has nothing left to reverse.
+ */
+export function restoredUris(journal: Tier0Journal): Set<string> {
+  const out = new Set<string>();
+  for (const entry of journal.entries) {
+    if (isMergeEntry(entry)) continue;
+    for (const u of entry.undone) {
+      for (const uri of u.restoredUris) out.add(uri);
+    }
+  }
+  return out;
+}
+
+/**
  * Every record any tier-0 merge ever discarded, newest run last.
  *
  * This is the reversibility surface: a caller that wants to undo reads these and
  * has the complete pre-merge records without needing the pod's history, the
  * original import files, or the tier-0 rule to have been right.
+ *
+ * Records already put back are still listed. The function reports what the
+ * journal says was DISCARDED, which is a fact about the past that an undo does
+ * not change; a caller that wants only the outstanding ones subtracts
+ * {@link restoredUris}.
  */
 export function tier0DiscardedRecords(journal: Tier0Journal): Array<{
   runAppliedAt: string;
@@ -121,6 +209,7 @@ export function tier0DiscardedRecords(journal: Tier0Journal): Array<{
     properties: Record<string, Array<{ value: string; datatype?: string; isIri?: boolean }>>;
   }> = [];
   for (const entry of journal.entries) {
+    if (!isMergeEntry(entry)) continue;
     for (const merge of entry.merges) {
       for (const d of merge.discarded) {
         out.push({

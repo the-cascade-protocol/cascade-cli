@@ -591,6 +591,49 @@
           }
         ]
       }
+    },
+    {
+      "id": "P13",
+      "pathology": "one health system whose FHIR export names no organization still resolves to ONE source",
+      "batches": [
+        {
+          "file": "p13-unnamed-org-fhir.json",
+          "from": "fhir"
+        },
+        {
+          "file": "p13-unnamed-org-ccda.xml",
+          "from": "c-cda"
+        }
+      ],
+      "expect": {
+        "convertedRecords": [
+          4,
+          6
+        ],
+        "reportedResourceCount": [
+          4,
+          6
+        ],
+        "_comment_distinctValuesByPredicate": "The invariant, and the reason this scenario exists alongside P01. P01's FHIR half carries a recorder.display naming the organization, so its two transports agree as soon as a stated organization name is preferred over the endpoint domain. This bundle states no organization anywhere: no Organization resource, no institution-looking provider display. The only thing in it that locates the source is the endpoint domain, and the only thing in the C-CDA that names the source is a regional legal entity the domain cannot be turned into. They can therefore agree on ONE display LABEL only if the label is derived from the canonical ORIGIN both reduce to (org:brightwater), which is what the sourceEHR count below pins. The merge count is the other half: the two transports must remain comparable.",
+        "distinctValuesByPredicate": {
+          "https://ns.cascadeprotocol.org/core/v1#sourceIdentity": 1,
+          "https://ns.cascadeprotocol.org/clinical/v1#sourceEHR": 1
+        },
+        "podRecords": 7,
+        "podRecordsByType": {
+          "ClinicalDocument": 2,
+          "ConditionRecord": 1,
+          "ImmunizationRecord": 1,
+          "LaboratoryReport": 1,
+          "LabResultRecord": 1,
+          "PatientProfile": 1
+        },
+        "merges": 3,
+        "conflicts": 0,
+        "edgesInPod": 1,
+        "violations": 0,
+        "importWarnings": 0
+      }
     }
   ]
 }

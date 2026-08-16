@@ -36,6 +36,7 @@ import {
   type OutputOptions,
 } from '../../lib/output.js';
 import { resolvePodDir, fileExists } from './helpers.js';
+import { shellCommand } from '../../lib/shell-quote.js';
 import { openPod, PodUnreadableError, type PodReader } from '../../lib/pod-read.js';
 import {
   runPodDoctor,
@@ -164,7 +165,9 @@ function printReport(report: DoctorReport, podDirArg: string): void {
     );
   }
   if (report.repairable > 0) {
-    console.log(`Re-run with --write to apply: cascade pod doctor ${podDirArg} --write`);
+    console.log(
+      `Re-run with --write to apply: ${shellCommand('cascade', 'pod', 'doctor', podDirArg, '--write')}`,
+    );
   }
   if (report.refused + report.unreadable > 0) {
     console.log(

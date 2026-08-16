@@ -21,6 +21,7 @@ import { loadPendingConflicts, ConflictStoreError } from '../../lib/user-resolut
 import { resolvePodDir, resolvePodDekIfEncrypted } from './helpers.js';
 import { printError, type OutputOptions } from '../../lib/output.js';
 import { toJsonText } from '../../lib/json-output.js';
+import { shellCommand } from '../../lib/shell-quote.js';
 
 export function registerConflictsCommand(podProgram: Command, program: Command): void {
   podProgram
@@ -63,7 +64,9 @@ export function registerConflictsCommand(podProgram: Command, program: Command):
           if (c.sourceB) console.log(`   Source B: ${c.sourceB}`);
           console.log(`   Conflict ID: ${c.conflictId}`);
           console.log(`   Detected: ${c.detectedAt.toISOString()}`);
-          console.log(`   Resolve: cascade pod resolve ${podDirArg} --conflict "${c.conflictId}" --keep source-a`);
+          console.log(
+            `   Resolve: ${shellCommand('cascade', 'pod', 'resolve', podDirArg, '--conflict', c.conflictId, '--keep', 'source-a')}`,
+          );
           console.log();
         }
 

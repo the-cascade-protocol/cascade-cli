@@ -48,7 +48,7 @@ import {
 } from './provenance.js';
 import { identityKey } from '../identity.js';
 import { beginCcdaIdScope, endCcdaIdScope } from './record-identity.js';
-import { sourceIdentity } from '../source-identity.js';
+import { sourceIdentity, sourceLabel } from '../source-identity.js';
 
 // Map templateId → extractor function and LOINC code.
 //
@@ -312,18 +312,24 @@ function convertNormalizedCcda(
   const documentType = detectDocumentType(normalizedDoc);
   // The EHR of origin is the document's custodian organization (ratified CDA
   // signal), independent of the import-batch label that drives `sourceSystem`.
-  const sourceEhr = deriveSourceEhr(ccdaDoc);
+  const statedOrganization = deriveSourceEhr(ccdaDoc);
   // The ORIGIN axis, derived once per document through the shared door. The
-  // custodian organization NAME is the input, not the label: the label is what
-  // this document called the organization, and the identity is the canonical
-  // form the FHIR path independently arrives at from the endpoint host. If the
+  // custodian organization NAME is the input: the identity is the canonical form
+  // the FHIR path independently arrives at from the endpoint host. If the
   // custodian named nobody, the document's own id namespace is the next-best
   // fact, and the import-batch label is the last resort and says so.
   const documentOrigin = sourceIdentity({
-    organizationName: sourceEhr,
+    organizationName: statedOrganization,
     idNamespace: deriveCcdaIdNamespace(ccdaDoc),
     transportLabel: sourceSystem,
   });
+  // The LABEL axis, derived FROM that origin rather than from the custodian's
+  // wording. What a document calls an organization varies with which regional
+  // legal entity issued it; what the organization IS does not, and a source row
+  // has to be the second thing or one system occupies two rows. When no
+  // organization was derivable this falls through to what the document stated,
+  // which is the ratified data-absent token.
+  const sourceEhr = sourceLabel(documentOrigin, statedOrganization) ?? statedOrganization;
 
   // Document ID for narrative linking
   const docIdEl = firstOf<any>(ccdaDoc?.id);

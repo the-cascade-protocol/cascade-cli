@@ -22,6 +22,7 @@ import {
 import { resolvePodDir, resolvePodDekIfEncrypted } from './helpers.js';
 import { printResult, printError, type OutputOptions } from '../../lib/output.js';
 import { randomUUID } from 'node:crypto';
+import { shellCommand } from '../../lib/shell-quote.js';
 
 export function registerResolveCommand(podProgram: Command, program: Command): void {
   podProgram
@@ -79,7 +80,8 @@ export function registerResolveCommand(podProgram: Command, program: Command): v
 
       if (!conflict) {
         printError(
-          `Conflict not found: ${options.conflict}. Run 'cascade pod conflicts ${podDirArg}' to see available conflicts.`,
+          `Conflict not found: ${options.conflict}. Run ` +
+            `${shellCommand('cascade', 'pod', 'conflicts', podDirArg)} to see available conflicts.`,
           globalOpts,
         );
         process.exit(1);

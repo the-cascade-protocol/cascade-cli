@@ -11,9 +11,9 @@
  *                                         carried it. The only one of the three
  *                                         that may be a reconciliation key.
  *   LABEL       `clinical:sourceEHR`      what to CALL that organization on
- *                                         screen. Source-worded, so two
- *                                         spellings of one organization are two
- *                                         labels.
+ *                                         screen. DERIVED FROM THE ORIGIN, for
+ *                                         the reason set out under THE LABEL IS
+ *                                         A FUNCTION OF THE ORIGIN below.
  *   INGESTION   `cascade:sourceSystem`    the import batch: how and when data
  *                                         entered the pod. Never an origin.
  *
@@ -26,9 +26,11 @@
  *   health systems' exports under one batch tag, 12 records where 7 is right.
  *
  *   Reading the display LABEL as an origin fails the other way. The FHIR path
- *   derives it from the registrable domain of the endpoint and the C-CDA path
- *   from the custodian organization name, so ONE system renders as TWO sources
- *   the moment a patient downloads both transports. Corpus scenario P01.
+ *   derived it from the registrable domain of the endpoint and the C-CDA path
+ *   from the custodian organization name, so ONE system rendered as TWO sources
+ *   the moment a patient downloaded both transports. Corpus scenarios P01 and
+ *   P13; the second is the half a per-transport rule cannot reach, and the one
+ *   the label derivation below exists for.
  *
  * So the origin has to be a THIRD, declared thing, derived by a rule both
  * transports implement identically. That rule is `sourceIdentity()` below, and
@@ -54,6 +56,42 @@
  * unprefixed value is exactly what a producer writes when it has stamped a
  * display label or a batch tag into the origin axis — the confusion the axis
  * exists to end.
+ *
+ * THE LABEL IS A FUNCTION OF THE ORIGIN
+ * -------------------------------------
+ * The origin axis converged; the label axis did not, and the split it left was
+ * MEASURED on a real pod. One health system arrived by both transports and
+ * occupied two rows: 1,175 records under the C-CDA custodian's stated
+ * organization name and 938 under the FHIR endpoint's registrable domain. A
+ * second system split 92 against 92. Every source-scoped consumer inherits the
+ * split, because every one of them groups on the label.
+ *
+ * The reason it could not be fixed by making one transport's rule better is
+ * arithmetic, not effort: a bundle that carries no `Organization` states no
+ * organization NAME anywhere. Its domain is all it has. No string transform
+ * turns "providence.org" into a legal entity name, so no rule computed from each
+ * transport's own input can make the two agree on a name.
+ *
+ * What both transports DO agree on is the canonical origin — that is what
+ * {@link orgSlug} is for. So the label is derived from it:
+ *
+ *     LABEL := displayNameOf(ORIGIN)
+ *
+ * and the invariant stops being a coincidence that holds while both documents
+ * happen to say the same thing. Two records with one origin CANNOT carry two
+ * labels, because the label is not independently derived at all.
+ *
+ * The cost is stated plainly: a label is now as coarse as the origin. A system
+ * whose documents call it "Providence Health and Services Washington and
+ * Montana" renders under the canonical name for `org:providence`, and two
+ * organizations that collapse to one slug also collapse to one label. That is
+ * the same trade {@link orgSlug} already takes, in the same direction, and for
+ * the same reason: a collapsed row is visible and recoverable, a split source
+ * axis is neither.
+ *
+ * {@link CANONICAL_ORGANIZATIONS} is where a coarse default is bought back. It
+ * is a curated table, and it is the only mechanism here that is EXPECTED to
+ * grow.
  *
  * @see core v3.5 `cascade:sourceIdentity` in `src/shapes/core.ttl` for the
  *      normative statement of the value form and the normalization.
@@ -114,6 +152,82 @@ const MULTI_LABEL_SUFFIXES: ReadonlySet<string> = new Set([
   'com.au', 'net.au', 'org.au', 'gov.au',
   'co.nz', 'co.za', 'co.jp', 'or.jp', 'com.br', 'com.mx',
 ]);
+
+/**
+ * ONE canonical organization: the slug that IS its identity, the name to show
+ * for it, and the raw tokens that must fold into it.
+ */
+export interface CanonicalOrganization {
+  /** The canonical `org:` slug. Every alias resolves here; this never moves. */
+  slug: string;
+  /** The one display name every record of this origin renders under. */
+  display: string;
+  /**
+   * Raw tokens {@link orgSlug}'s generic normalization produces for OTHER
+   * spellings of this organization, which must fold into `slug`.
+   *
+   * These are slug-space values, not hosts or names: the normalization runs
+   * first and its output is looked up here. So the entry for a host is the token
+   * that host reduces to (`kp.org` -> `kp`), which keeps the table independent of
+   * subdomains, of `www.`, and of every future spelling that reduces the same way.
+   */
+  aliases: readonly string[];
+}
+
+/**
+ * THE CROSSWALK. Curated, deliberately short, and the ONLY part of this module
+ * that is meant to grow.
+ *
+ * TWO JOBS, AND THEY ARE DIFFERENT
+ * --------------------------------
+ *   `aliases` moves an ORIGIN. It is identity-adjacent: adding one re-keys the
+ *   reconciler's same-source guard for every record whose origin folds, and two
+ *   groups that were never compared become comparable. Add one only for an
+ *   organization whose public host and whose stated name genuinely share no
+ *   token, which is the case the generic normalization provably cannot reach.
+ *
+ *   `display` moves only a LABEL. It buys back the readability the coarse
+ *   default gives up, and it costs nothing but a row on screen. Adding one is
+ *   safe.
+ *
+ * Absence from this table is not an error. An organization not listed gets its
+ * slug from the normalization and its label from {@link titleCaseSlug}, which is
+ * convergent, just plainer.
+ *
+ * WHY A TABLE AND NOT A RULE
+ * --------------------------
+ * Because the fact it encodes is not derivable. "kp.org" and "Kaiser Permanente"
+ * are one organization because of a naming decision that organization made, and
+ * there is no transform over the two strings that discovers it. A rule that
+ * appeared to bridge them would be bridging them by accident, and the same
+ * accident would bridge organizations that are not one. Stating the few known
+ * facts and computing everything else is the honest split.
+ */
+export const CANONICAL_ORGANIZATIONS: readonly CanonicalOrganization[] = [
+  // Public host shares no token with the stated name, so the normalization gives
+  // `kp` from the endpoint and `kaiser` from every document that names it. Both
+  // spellings of one system were measured on one real pod, splitting it evenly.
+  { slug: 'kaiser', display: 'Kaiser Permanente', aliases: ['kp'] },
+  // Host and name already converge. The entry exists only for the display name:
+  // the stated organization name is a regional legal entity, and the origin is
+  // the system, so neither the full legal name nor the bare token is the right
+  // thing to put on a source row.
+  { slug: 'providence', display: 'Providence Health & Services', aliases: [] },
+];
+
+/** Raw normalization output -> canonical slug. Built once from the table. */
+const ALIAS_TO_CANONICAL: ReadonlyMap<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const org of CANONICAL_ORGANIZATIONS) {
+    for (const alias of org.aliases) m.set(alias, org.slug);
+  }
+  return m;
+})();
+
+/** Canonical slug -> display name. */
+const CANONICAL_DISPLAY: ReadonlyMap<string, string> = new Map(
+  CANONICAL_ORGANIZATIONS.map((o) => [o.slug, o.display]),
+);
 
 /** True when a string looks like a bare hostname rather than an organization name. */
 function looksLikeHost(raw: string): boolean {
@@ -235,13 +349,61 @@ export function orgSlug(raw: string | undefined | null): string | undefined {
   }
 
   const distinctive = tokens.filter((t) => !GENERIC_ORG_WORDS.has(t) && !/^\d+$/.test(t));
-  if (distinctive.length > 0) return distinctive[0];
+  if (distinctive.length > 0) return canonicalize(distinctive[0]);
 
   // Every token was generic ("Regional Medical Center"). Falling through to
   // undefined would file the organization under "origin unknown", which is worse
   // than a low-information but STABLE identity, so use the whole normalized form.
   const joined = tokens.join('');
-  return joined || undefined;
+  return joined ? canonicalize(joined) : undefined;
+}
+
+/**
+ * The last step of {@link orgSlug}: fold a raw normalization result onto its
+ * canonical slug, when the crosswalk names one.
+ *
+ * A pass-through for everything not in the table, which is almost everything.
+ * Applied at BOTH exits of `orgSlug` on purpose: an organization whose every
+ * token is generic can still have an alias, and a fold that only covered the
+ * common exit would be a rule with a hole in it that nothing would ever surface.
+ */
+function canonicalize(rawSlug: string): string {
+  return ALIAS_TO_CANONICAL.get(rawSlug) ?? rawSlug;
+}
+
+/**
+ * A slug rendered for a person to read, when the crosswalk names no display.
+ *
+ * Capitalizing the first letter and nothing else is deliberate. A slug is one
+ * token by construction, so there is no word boundary to title-case, and the
+ * degenerate all-generic case ("regionalmedicalcenter") has no boundary a
+ * transform could find either. Guessing at one would produce a different wrong
+ * answer for each input; capitalizing produces the same plain one every time,
+ * and the crosswalk is where a better name is supplied.
+ */
+function titleCaseSlug(slug: string): string {
+  return slug.charAt(0).toUpperCase() + slug.slice(1);
+}
+
+/**
+ * The display name for a canonical `org:` slug: curated, else the plain form.
+ *
+ * Exported because the label is a fact about the ORIGIN, so anything that has an
+ * origin and wants to show it derives the name here rather than keeping its own
+ * copy of the rule.
+ */
+export function orgDisplayName(slug: string): string {
+  return CANONICAL_DISPLAY.get(slug) ?? titleCaseSlug(slug);
+}
+
+/**
+ * The `org:` slug inside a stored identity value, or `undefined` for the `ns:`
+ * and `transport:` tiers, which name no organization to look up.
+ */
+export function organizationSlugOf(identityValue: string | undefined): string | undefined {
+  if (typeof identityValue !== 'string' || !identityValue.startsWith('org:')) return undefined;
+  const slug = identityValue.slice('org:'.length);
+  return slug || undefined;
 }
 
 /**
@@ -286,6 +448,38 @@ export function sourceIdentity(opts: {
   if (label) return { value: `transport:${label}`, tier: 'transport' };
 
   return undefined;
+}
+
+/**
+ * THE OTHER DOOR: the display LABEL (`clinical:sourceEHR`) for a record set whose
+ * origin has already been resolved.
+ *
+ * Every converter calls this instead of writing whatever its own transport
+ * happened to state, which is the whole of the label fix. The two arguments are
+ * NOT alternatives to choose between:
+ *
+ *   ORGANIZATION TIER — the identity names an organization, so the label is that
+ *   organization's canonical display name and `statedName` is ignored outright.
+ *   Ignoring it is the point: it is exactly the value that differed by transport,
+ *   and consulting it at all would put the split back.
+ *
+ *   ns: / transport: TIER — no organization was derivable, so there is no
+ *   canonical name to render and `statedName` is all there is. In practice it is
+ *   the ratified data-absent token the C-CDA path writes when the custodian named
+ *   nobody, and passing it through keeps "we do not know" legible rather than
+ *   inventing a name out of an OID or a batch tag.
+ *
+ * Returns `undefined` when there is nothing honest to say, leaving the caller to
+ * write no triple or to apply its own data-absent rule.
+ */
+export function sourceLabel(
+  identity: SourceIdentity | undefined,
+  statedName?: string,
+): string | undefined {
+  const slug = identity?.tier === 'organization' ? organizationSlugOf(identity.value) : undefined;
+  if (slug) return orgDisplayName(slug);
+  const stated = typeof statedName === 'string' ? statedName.trim() : '';
+  return stated || undefined;
 }
 
 /**
