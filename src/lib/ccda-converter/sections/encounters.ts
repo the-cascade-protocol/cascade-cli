@@ -7,9 +7,18 @@
  * (sections/labs.ts), which links each lab panel to the visit it was collected
  * in via clinical:hasEncounter. Both paths therefore produce identical,
  * dedupe-safe encounter records (encounter completeness).
+ *
+ * The `<effectiveTime>` was read here for IDENTITY long before it was read for
+ * CONTENT: the record's key had the visit's day in it while the record itself
+ * carried no start, no end and no encounter date, so every encounter this
+ * converter produced was undated to the shapes and to every consumer. It now
+ * states its time, through the same typed-date helper the other section
+ * handlers use, and its identity is computed from the same field in the same
+ * order as before so that no existing encounter re-mints.
  */
 
 import { NS } from '../../fhir-converter/types.js';
+import { ccdaDateQuad } from '../dates.js';
 import { listOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { DataFactory } from 'n3';
@@ -61,6 +70,33 @@ function formatCcdaDate(dateVal: string): string {
 }
 
 /**
+ * The raw `@value` of one HL7 TS element, under either attribute spelling the
+ * C-CDA parser can hand back.
+ */
+function tsValue(el: any): unknown {
+  if (el === null || el === undefined) return undefined;
+  return el?.['@_value'] ?? el?.value;
+}
+
+/**
+ * The three ways an `<encounter>` states WHEN, split apart.
+ *
+ * A C-CDA Encounters section writes an interval (`<low>`/`<high>`) for a visit
+ * with a start and an end, and a single `@value` for one stated as a day. Both
+ * are ordinary and both were being read for identity only, so every encounter
+ * this converter produced was undated as far as the shapes and every consumer
+ * were concerned.
+ */
+function encounterTimes(enc: any): { low: unknown; high: unknown; single: unknown } {
+  const effTime = enc?.effectiveTime ?? {};
+  return {
+    low: tsValue(effTime?.low),
+    high: tsValue(effTime?.high),
+    single: tsValue(effTime),
+  };
+}
+
+/**
  * Build one clinical:Encounter record from a C-CDA <encounter> element, or null
  * when the element carries no usable identity (no id, type, or date — a bare
  * reference rather than a real definition).
@@ -79,10 +115,14 @@ export function buildEncounterRecord(
   const codeEl = enc?.code ?? {};
   const displayName = encounterDisplayName(codeEl);
 
-  const effTime = enc?.effectiveTime ?? {};
-  const dateVal =
-    effTime?.['@_value'] ?? effTime?.value ?? effTime?.low?.['@_value'] ?? effTime?.low?.value ?? '';
-  const dateStr = formatCcdaDate(dateVal);
+  const { low, high, single } = encounterTimes(enc);
+  // IDENTITY INPUT, UNCHANGED. Same field, same order, same day-precision
+  // formatting as before the encounter learned to state its time: an encounter
+  // IRI that moves is a duplicate visit on every pod that already holds the
+  // record, plus a dangling clinical:hasEncounter edge from everything that
+  // pointed at it.
+  const dateVal = single ?? low ?? '';
+  const dateStr = formatCcdaDate(dateVal as string);
 
   const sourceId = ccdaSourceId(enc?.id);
 
@@ -107,7 +147,32 @@ export function buildEncounterRecord(
   quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Encounter')));
   quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(sourceSystem)));
   if (displayName) quads.push(makeQuad(subj, namedNode(NS.cascade + 'encounterType'), literal(displayName)));
+  // Kept, unchanged and untyped, because the reconciler reads
+  // health:effectiveDate. Moving a record's date out from under a matcher in the
+  // same change that gives it a second one is two changes wearing one commit.
   if (dateStr) quads.push(makeQuad(subj, namedNode(NS.health + 'effectiveDate'), literal(dateStr)));
+
+  // WHEN THE VISIT WAS, said so the shapes and every consumer can see it.
+  //
+  // clinical:EncounterTemporalShape asks for encounterStart, encounterEnd or
+  // encounterDate; this handler wrote none of the three, so every encounter the
+  // C-CDA path produced fired its Warning — including the ones whose section
+  // states the times outright. `<high>` was not read at any site.
+  //
+  // Each triple states exactly what the document stated and nothing else: an
+  // interval becomes a start and an end, a single value becomes a date, and a
+  // source that gave neither gets neither. The literals go through ccdaDateQuad,
+  // the same typed-date chokepoint the labs, problems, immunizations and vitals
+  // handlers use, so an encounter's precision rule is not a fifth opinion.
+  for (const [predicate, raw] of [
+    [NS.clinical + 'encounterStart', low],
+    [NS.clinical + 'encounterEnd', high],
+    [NS.clinical + 'encounterDate', single],
+  ] as const) {
+    const q = ccdaDateQuad(uri, predicate, raw, warnings);
+    if (q) quads.push(q);
+  }
+
   if (sourceId) quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceRecordId'), literal(sourceId)));
 
   return { subject: uri, quads };

@@ -11,6 +11,28 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+**`pod query --include-bookkeeping`, and the default that made it necessary.**
+`--all` swept every `.ttl` a pod holds except a short list of plumbing files, and
+`settings/pending-conflicts.ttl` and `settings/user-resolutions.ttl` were not on that list. So the
+pod's own paperwork about its records was returned AS records: every unresolved conflict and every
+decision the user had already recorded arrived in the `other` bucket beside the medications, undated
+and with no origin, and the pod grew one more of them each time a conflict was detected or resolved.
+A consumer that renders query output as health records rendered the paperwork as mystery records.
+
+Bookkeeping subjects are now excluded from the record output by default and returned by
+`--include-bookkeeping`, which exists because the queue is real data a conflict UI has to be able to
+ask for. The rule is stated over `rdf:type` rather than over filenames, because what makes a
+`cascade:PendingConflict` not a record is what it IS, and a path list only excludes the files someone
+remembered to add to it. The enumeration is `BOOKKEEPING_TYPE_IRIS` in `src/lib/pod-read.ts`:
+`cascade:PendingConflict`, `cascade:UserResolution`, `solid:TypeIndex`, `solid:TypeRegistration`,
+`pim:ConfigurationFile`.
+
+A file that held nothing but bookkeeping produces no bucket at all rather than a bucket reporting
+zero, so a pod with conflicts looks like a pod without them instead of growing an empty "Other"
+section. For a pod that holds no bookkeeping the output is byte-identical with the flag and without
+it. `pod conflicts`, `pod resolve`, `pod reconcile` and `validate` read the settings files directly
+and are unaffected.
+
 **`cascade pod reconcile <pod-dir> --undo`: the tier-0 journal is now replayable.**
 Tier 0 merges one narrow class of duplicate without asking anyone, and the argument for that is not
 that the rule is always right but that the merge stays a fact the pod holds: every one is written to
@@ -89,6 +111,45 @@ for, and import now goes through that same computation: pre-existing rows are ke
 merge, or orphaned and named, and the counts reach `--report`. A queue file that exists and cannot
 be read refuses the import at exit 2 rather than being overwritten unseen. The `legacyConflictIds`
 docstring, which asserted the wholesale rewrite as intended design, is corrected.
+**A C-CDA encounter now imports with the time the document stated.**
+`sections/encounters.ts` read `<effectiveTime>` only to build the record's IDENTITY. The one date
+triple it wrote was `health:effectiveDate` as an untyped literal, on a predicate the Encounter shapes
+do not look at, and `<high>` was never read at any site. `clinical:EncounterTemporalShape` asks for
+`clinical:encounterStart`, `clinical:encounterEnd` or `clinical:encounterDate` and the converter
+wrote none of the three, so EVERY encounter the C-CDA path produced fired the "should carry a start,
+an end or an encounter date" warning, including the ones whose Encounters section states the visit
+times outright. Measured on a real export: 123 of 123 encounters.
+
+Each of the three shapes an Encounters section uses now gets the triple that says what it says, and
+the literals go through `ccdaDateQuad`, the same typed-date chokepoint the labs, problems,
+immunizations and vitals handlers use, so an encounter's precision rule is not a fifth opinion. An
+interval becomes a start and an end, a single value becomes an encounter date, and an encounter the
+document never dated stays undated: FHIR R4 `Encounter.period` is 0..1, and inventing a day to
+silence a warning is the fabrication the date module exists to refuse. Across the committed fixture
+corpus the warning family falls from 7 to 1, and the remaining one is the undated case.
+
+The identity input is deliberately unchanged: the same field, in the same order, formatted the same
+way, because an encounter IRI that moves is a duplicate visit on every pod that already holds the
+record plus a dangling `clinical:hasEncounter` edge from everything that pointed at it. Golden pins
+in `tests/ccda-encounter-dates.test.ts` hold that, measured against the converter before the change.
+Both call sites are covered: the Encounters section and the `<entryRelationship>` form the Results
+walk uses.
+
+**A prescription that states only `authoredOn` no longer imports undated.**
+`convertMedicationStatement` already treated `authoredOn` as the record's date where it counted most,
+as the FIRST input to the subject IRI, and never wrote it as a triple: `health:startDate` came only
+from `effectivePeriod.start` or `effectiveDateTime`. A `MedicationRequest` carrying `authoredOn` and
+no effective date is the ordinary shape of a prescription order, so the ordinary prescription reached
+the pod with NO date predicate at all, undated in every consumer and keyed on a date the record did
+not state. Across the committed FHIR fixtures, medications carrying a date rise from 7 of 32 to 31 of
+32; the remaining one states no date of any kind.
+
+The fallback order is deliberately not the identity order. Identity takes `authoredOn` first because
+the date an order was written survives a re-export unchanged, and reordering it would re-mint every
+medication in every existing pod. The triple takes it last because a stated effective period is when
+the patient took the drug while `authoredOn` is when a clinician typed it. Golden pins over 353 typed
+subjects across 21 FHIR fixtures, regenerated from a separate checkout of the previous release, hold
+that no record IRI moved.
 
 **One health system now resolves to ONE display label whichever transport carried it.**
 `cascade:sourceIdentity` already converged. `clinical:sourceEHR` did not: the C-CDA path labelled

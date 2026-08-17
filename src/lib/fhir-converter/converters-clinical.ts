@@ -168,11 +168,29 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
     }
   }
 
-  // Effective period
+  // Effective period, and the order date when there is no effective period.
+  //
+  // `authoredOn` was already treated as this record's date where it counted most
+  // — it is the FIRST input to the subject IRI, ten lines up — and was never
+  // written as a triple. A MedicationRequest carrying `authoredOn` and no
+  // effective date is the ordinary shape of a prescription order, so the
+  // ordinary prescription imported with NO date predicate: undated in every
+  // consumer, invisible to anything that places records in time, and keyed on a
+  // date the record did not state.
+  //
+  // The fallback ORDER here is deliberately not the identity order. Identity
+  // takes `authoredOn` first because the date an order was written is the value
+  // that survives a re-export unchanged, and reordering it would re-mint every
+  // medication in every existing pod. The triple takes it LAST because an
+  // effective period is when the patient took the drug, while `authoredOn` is
+  // when a clinician typed it — preferring the typing date over a stated period
+  // would be a downgrade. Two orders, two different questions.
   if (resource.effectivePeriod?.start) {
     quads.push(tripleDateTime(subjectUri, NS.health + 'startDate', resource.effectivePeriod.start));
   } else if (resource.effectiveDateTime) {
     quads.push(tripleDateTime(subjectUri, NS.health + 'startDate', resource.effectiveDateTime));
+  } else if (resource.authoredOn) {
+    quads.push(tripleDateTime(subjectUri, NS.health + 'startDate', resource.authoredOn));
   }
   if (resource.effectivePeriod?.end) {
     quads.push(tripleDateTime(subjectUri, NS.health + 'endDate', resource.effectivePeriod.end));

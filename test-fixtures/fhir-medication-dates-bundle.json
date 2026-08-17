@@ -1,0 +1,128 @@
+{
+  "resourceType": "Bundle",
+  "id": "medication-dates-bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "mr-authored-only-with-id",
+        "status": "active",
+        "intent": "order",
+        "authoredOn": "2025-04-09",
+        "subject": { "reference": "Patient/pt-dates-1" },
+        "medicationCodeableConcept": {
+          "text": "Levothyroxine 50 mcg",
+          "coding": [
+            {
+              "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+              "code": "966224",
+              "display": "Levothyroxine Sodium 0.05 MG Oral Tablet"
+            }
+          ]
+        },
+        "dosageInstruction": [{ "text": "1 tablet by mouth once daily" }]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "status": "active",
+        "intent": "order",
+        "authoredOn": "2025-05-21T08:15:00-05:00",
+        "subject": { "reference": "Patient/pt-dates-1" },
+        "medicationCodeableConcept": {
+          "text": "Omeprazole 20 mg",
+          "coding": [
+            {
+              "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+              "code": "7646",
+              "display": "Omeprazole 20 MG Delayed Release Oral Capsule"
+            }
+          ]
+        },
+        "dosageInstruction": [{ "text": "1 capsule by mouth once daily before breakfast" }]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "mr-authored-and-effective",
+        "status": "active",
+        "intent": "order",
+        "authoredOn": "2025-06-02",
+        "effectivePeriod": { "start": "2025-06-04", "end": "2025-09-04" },
+        "subject": { "reference": "Patient/pt-dates-1" },
+        "medicationCodeableConcept": {
+          "text": "Sertraline 50 mg",
+          "coding": [
+            {
+              "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+              "code": "312940",
+              "display": "Sertraline 50 MG Oral Tablet"
+            }
+          ]
+        },
+        "dosageInstruction": [{ "text": "1 tablet by mouth once daily" }]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationStatement",
+        "id": "ms-effective-datetime",
+        "status": "active",
+        "effectiveDateTime": "2025-02-14",
+        "subject": { "reference": "Patient/pt-dates-1" },
+        "medicationCodeableConcept": {
+          "text": "Metformin 500 mg",
+          "coding": [
+            {
+              "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+              "code": "861007",
+              "display": "Metformin hydrochloride 500 MG Oral Tablet"
+            }
+          ]
+        },
+        "dosage": [{ "text": "1 tablet by mouth twice daily with meals" }]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationStatement",
+        "status": "active",
+        "effectivePeriod": { "start": "2025-01-07" },
+        "subject": { "reference": "Patient/pt-dates-1" },
+        "medicationCodeableConcept": {
+          "text": "Atorvastatin 10 mg",
+          "coding": [
+            {
+              "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+              "code": "617312",
+              "display": "Atorvastatin 10 MG Oral Tablet"
+            }
+          ]
+        },
+        "dosage": [{ "text": "1 tablet by mouth at bedtime" }]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "MedicationStatement",
+        "id": "ms-no-date-at-all",
+        "status": "active",
+        "subject": { "reference": "Patient/pt-dates-1" },
+        "medicationCodeableConcept": {
+          "text": "Cetirizine 10 mg",
+          "coding": [
+            {
+              "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+              "code": "1014676",
+              "display": "Cetirizine hydrochloride 10 MG Oral Tablet"
+            }
+          ]
+        },
+        "dosage": [{ "text": "1 tablet by mouth as needed" }]
+      }
+    }
+  ]
+}
