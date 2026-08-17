@@ -65,10 +65,10 @@ import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket
 import {
   writePendingConflicts,
   loadPendingConflicts,
-  generateConflictId,
+  pendingConflictFromRaised,
   type PendingConflict,
+  type RaisedConflict,
 } from '../../lib/user-resolutions.js';
-import { randomUUID } from 'node:crypto';
 import {
   appendTier0Journal,
   appendTier0Undo,
@@ -107,7 +107,19 @@ export interface ReconcileGroupReport {
   resolved: boolean;
   /** True for the narrow, silently-mergeable cross-source exact lab class. */
   tier0: boolean;
+  /** INGESTION axis: the import batch each record of the group arrived in. */
   sources: string[];
+  /**
+   * ORIGIN axis: which organization each record came from, one per record, in
+   * the same order as `sources`.
+   *
+   * Reported separately rather than replacing `sources` because the two are
+   * different facts and both are worth having. A pod-internal run reads every
+   * record through one door, so `sources` is legitimately one repeated string
+   * there — which is fine as an answer to "how did this get here" and useless as
+   * an answer to "who says what".
+   */
+  origins: string[];
 }
 
 /**
@@ -200,7 +212,7 @@ export interface ReconcileReport {
 }
 
 /** A disposition for a pod where nothing was read and nothing can change. */
-function emptyDisposition(before = 0): PendingConflictDisposition {
+export function emptyDisposition(before = 0): PendingConflictDisposition {
   return {
     before,
     raised: 0,
@@ -448,7 +460,7 @@ function countRecordsIn(inputs: ReconcilerInput[]): number {
  * else in the pod may reference. A conflict does not become newer by being
  * noticed again.
  */
-function disposePendingConflicts(
+export function disposePendingConflicts(
   existing: readonly PendingConflict[],
   raised: readonly PendingConflict[],
   reconciledTurtle: string,
@@ -1115,23 +1127,8 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
         // the queue would look like, which is the whole reason the verb reports
         // before it writes.
         const raisedConflicts: PendingConflict[] = (
-          result.report.unresolvedConflicts as Array<{
-            recordType: string;
-            matchedOn: string;
-            sources?: string[];
-            candidateUris?: string[];
-            label?: string;
-          }>
-        ).map((c) => ({
-          uri: `urn:uuid:conflict-${randomUUID()}`,
-          conflictId: generateConflictId(c.recordType, c.matchedOn),
-          recordType: c.recordType,
-          detectedAt: new Date(),
-          candidateRecordUris: c.candidateUris ?? [],
-          label: c.label,
-          sourceA: c.sources?.[0],
-          sourceB: c.sources?.[1],
-        }));
+          result.report.unresolvedConflicts as RaisedConflict[]
+        ).map((c) => pendingConflictFromRaised(c));
         const { disposition, queue: finalConflicts } = disposePendingConflicts(
           existingConflicts,
           raisedConflicts,
@@ -1148,6 +1145,7 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
             resolved: boolean;
             tier0?: boolean;
             sources?: string[];
+            origins?: string[];
           }>
         ).map((t) => ({
           type: t.type,
@@ -1158,6 +1156,7 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
           resolved: t.resolved,
           tier0: t.tier0 === true,
           sources: t.sources ?? [],
+          origins: t.origins ?? [],
         }));
 
         const report: ReconcileReport = {

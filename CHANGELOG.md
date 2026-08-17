@@ -35,7 +35,60 @@ rows kept, rows cleared by merge, rows orphaned, rows after, with the conflict i
 two. A decision queue changing size is a fact the user is told rather than one they discover by
 diffing a settings file.
 
+**`pod resolve --by <actorIri>` records who answered a conflict, and `pod conflicts --resolved` reads
+the decisions back.**
+`settings/user-resolutions.ttl` carried WHEN a conflict was answered (`cascade:resolvedAt`) and never
+by whom, and no verb listed the file at all, so a decision was write-only. `--by` mirrors
+`pod annotate --by`: it writes `prov:wasAttributedTo` on the `cascade:UserResolution`, refuses an IRI
+that could not be written back before the pod is opened, and is optional, so omitting it leaves the
+row exactly as it was written before. `pod conflicts --resolved` emits the decision log (conflict id,
+timestamp, choice, kept and discarded record IRIs, note, actor when present) as text or with
+`--format json`. It exits 0 whenever the read succeeded: exit 1 is a CI signal about UNANSWERED
+questions, and a decision log carries no such signal.
+
+**`pod import --report` carries the pending-conflict disposition.**
+The same block `pod reconcile --json` reports, on the verb that runs a reconciliation pass of its
+own. Stated on a dry run too, where it is a preview of what the queue would look like.
+
 ### Fixed
+
+**A raised conflict now names the two ORIGINS its sides came from, and keeps both of their values.**
+Conflict rows were labelled with `cascade:sourceSystem`, the INGESTION axis. A pod-internal
+`pod reconcile` reads every record back through one door, so both sides of a row arrived under one
+string and the row said it twice; and for a record stating no `cascade:sourceSystem` of its own,
+that string was the bucket path, so a dose disagreement between two organizations printed
+`Source A: clinical/medications.ttl` / `Source B: clinical/medications.ttl`.
+
+The second half lost data rather than merely failing to show it: the reconciler's map of the two
+sides' values was keyed on that same string, so the two entries collapsed into one and only the
+value assigned second survived. A levothyroxine disagreement between "50 mcg" and "75 mcg" reached
+the pod as the single clause `clinical/medications.ttl: "75 mcg"`, with the surviving record's own
+value gone.
+
+Sides are now keyed and labelled by ORIGIN (`cascade:sourceIdentity` through the shared
+`sourceLabel` derivation, falling back to the stated EHR name and then to the record IRI), and
+carried as an ORDERED list that cannot collapse whatever the labels are. The reconciliation report
+now states both axes: `sources` is unchanged and still the ingestion batch, `origins` is the new
+fact. Matching, the same-source guard, merge ranking and identity minting are untouched, and the
+pathology corpus scorecard is unmoved.
+
+**A conflict row stays reviewable after its candidates merge.**
+The row kept both candidate record IRIs, and a value or status conflict that resolves absorbs the
+losing record, so a consumer following the two IRIs to show "this side says X, that side says Y"
+found one of them gone. The disagreement is now written onto the row at raise time: the field in
+dispute (`cascade:conflictField`), each side's value (`cascade:valueA` / `cascade:valueB`) beside
+each side's origin, and which candidate survived (`cascade:survivingRecord`). These are additive app
+bookkeeping in the namespace the file already uses, not protocol vocabulary; rows written before
+them still parse with the new fields absent, and `pod conflicts --format json` emits them.
+
+**`pod import` no longer discards pending conflicts it did not raise.**
+`writePendingConflicts` replaces the file wholesale and import called it with the run's own
+conflicts alone, so any import at all, including one that touched none of a pending row's records,
+erased every question already in the queue. It is the defect `pod reconcile` was given a disposition
+for, and import now goes through that same computation: pre-existing rows are kept, cleared by
+merge, or orphaned and named, and the counts reach `--report`. A queue file that exists and cannot
+be read refuses the import at exit 2 rather than being overwritten unseen. The `legacyConflictIds`
+docstring, which asserted the wholesale rewrite as intended design, is corrected.
 
 **One health system now resolves to ONE display label whichever transport carried it.**
 `cascade:sourceIdentity` already converged. `clinical:sourceEHR` did not: the C-CDA path labelled

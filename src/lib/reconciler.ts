@@ -19,7 +19,12 @@ import { normalizeMedName, normalizeDose, normalizeFrequency, type DrugNameNorma
 import { medicationCodeKeys, sharedMedicationCodeKey, extractCodeValue } from './code-keys.js';
 import { cascadeTerminologyResolver } from './terminology.js';
 import { relBase, relBaseFor, derelativizeQuads } from './bucket-write.js';
-import { SOURCE_IDENTITY_PREDICATE, isKnownOrigin } from './source-identity.js';
+import {
+  SOURCE_IDENTITY_PREDICATE,
+  isKnownOrigin,
+  sourceLabel,
+  type SourceIdentityTier,
+} from './source-identity.js';
 
 // Re-export so existing consumers of the reconciler's normalizeMedName keep
 // working. The canonical definition now lives in ./medication-normalize.ts
@@ -703,6 +708,15 @@ export interface IdentityCollision {
   /** Source systems involved, deduplicated, in the order first seen. */
   sourceSystems: string[];
   /**
+   * ORIGIN labels involved, deduplicated, in the order first seen.
+   *
+   * The same axis {@link conflictOriginLabel} renders for every other conflict
+   * row. An identity collision raised through the same queue would otherwise be
+   * the one row whose two sides are named by the ingestion batch, which is the
+   * axis the colliding records most often agree on.
+   */
+  origins: string[];
+  /**
    * Predicates the colliding records DISAGREE on, sorted.
    *
    * The answer to the only question a person resolving this conflict has ("what
@@ -823,6 +837,7 @@ export function splitIdentityCollisions(
         recordType: bucket[0].type,
         resultingUris: [uri, ...distinct.slice(1).map((fp) => target.get(fp)!)],
         sourceSystems: [...new Set(bucket.map((r) => r.sourceSystem))],
+        origins: [...new Set(bucket.map(conflictOriginLabel))],
         differingPredicates: differingPredicates(bucket, resolveRef),
       });
     }
@@ -1222,11 +1237,96 @@ function doRecordsMatch(a: ParsedRecord, b: ParsedRecord, tol: number, resolver?
 
 type MatchType = 'exact_duplicate' | 'near_duplicate' | 'status_conflict' | 'value_conflict' | 'pass_through';
 
+/**
+ * ONE side of a disagreement: whose it is, what it says, and which record said
+ * it.
+ *
+ * WHY THIS IS A LIST AND NOT A MAP
+ * -------------------------------
+ * It used to be `Record<sourceSystem, value>`, and a map keyed on a string the
+ * two sides can SHARE loses one of them. `sourceSystem` is the INGESTION axis —
+ * the import-batch label — and a pod-internal reconcile reads every record back
+ * through one door, so on that path the two sides routinely arrive under one
+ * label (or, for a record stating none, under the bucket path the reader
+ * defaulted to). Two entries collapse to one, and the value that survives is
+ * whichever was assigned second. Measured: a dose disagreement between "50 mcg"
+ * and "75 mcg" reached the pod as the single clause `batch: "75 mcg"`, with the
+ * canonical record's own value gone.
+ *
+ * An ordered list cannot collapse, whatever the labels turn out to be. The label
+ * is then free to be the thing that actually distinguishes the sides — the
+ * ORIGIN — without the correctness of "both values survive" depending on the two
+ * origins being distinct.
+ */
+export interface ConflictSide {
+  /** The ORIGIN label for this side. See {@link conflictOriginLabel}. */
+  origin: string;
+  /** This side's value of the conflicting field. */
+  value: string;
+  /** The record IRI the value was read from. */
+  recordUri: string;
+}
+
+/**
+ * How a conflict row NAMES one of its sides.
+ *
+ * The axis is the ORIGIN (`cascade:sourceIdentity`), rendered through the shared
+ * {@link sourceLabel} derivation, and it is chosen for the same reason the
+ * same-source guard reads it: it is the only one of the three source-shaped
+ * facts that says WHICH ORGANIZATION a record came from. The guard has already
+ * used it to decide these two records are comparable at all, so a row that then
+ * labels both sides with the ingestion batch is describing the pair by the one
+ * axis on which they agreed.
+ *
+ * The cascade mirrors `sourceLabel`'s own, and each step is a weaker claim:
+ *
+ *   1. A stated origin. `org:` renders as the canonical organization display
+ *      name, which is what makes one system's two transports render as one row
+ *      rather than two. `ns:` and `transport:` name no organization, so the
+ *      label falls to what the record itself states.
+ *   2. `clinical:sourceEHR`, for a record written before origins existed. Not an
+ *      origin claim, and it can be split by transport — but it is what that pod
+ *      has, and it is legible.
+ *   3. THE RECORD IRI. Reached when nothing named a source at all. Deliberately
+ *      not a constant like "unknown": two sides labelled "unknown" are the
+ *      collapse this whole change is about, one level down, and an IRI is unique
+ *      by construction. It is ugly on screen and it is honest, which is the
+ *      right trade for a case that means "this pod never recorded where this
+ *      came from".
+ *
+ * REPORT SURFACE ONLY. Nothing here feeds matching, the same-source guard, merge
+ * ranking or identity minting; it decides what a row SAYS, never what happens to
+ * the records.
+ */
+function conflictOriginLabel(r: ParsedRecord): string {
+  const value = r.sourceIdentity;
+  const stated = getProp(r, NS.clinical + 'sourceEHR');
+  if (typeof value === 'string' && value.length > 0) {
+    const tier: SourceIdentityTier = value.startsWith('org:')
+      ? 'organization'
+      : value.startsWith('ns:')
+        ? 'namespace'
+        : 'transport';
+    const label = sourceLabel({ value, tier }, stated);
+    if (label) return label;
+  }
+  const bare = typeof stated === 'string' ? stated.trim() : '';
+  return bare || r.uri;
+}
+
+/** The two sides of a two-record disagreement, in record order. */
+function conflictSides(a: ParsedRecord, b: ParsedRecord, valueA: string, valueB: string): ConflictSide[] {
+  return [
+    { origin: conflictOriginLabel(a), value: valueA, recordUri: a.uri },
+    { origin: conflictOriginLabel(b), value: valueB, recordUri: b.uri },
+  ];
+}
+
 function classifyGroup(
   records: ParsedRecord[],
   tol: number,
   resolver?: DrugNameNormalizer,
-): { matchType: MatchType; conflictField?: string; conflictValues?: Record<string, string> } {
+): { matchType: MatchType; conflictField?: string; conflictSides?: ConflictSide[] } {
   if (records.length < 2) return { matchType: 'pass_through' };
   const [a, b] = records;
 
@@ -1234,20 +1334,20 @@ function classifyGroup(
     const sA = getProp(a, NS.health + 'status');
     const sB = getProp(b, NS.health + 'status');
     if (sA && sB && sA !== sB)
-      return { matchType: 'status_conflict', conflictField: 'health:status', conflictValues: { [a.sourceSystem]: sA, [b.sourceSystem]: sB } };
+      return { matchType: 'status_conflict', conflictField: 'health:status', conflictSides: conflictSides(a, b, sA, sB) };
   }
   if (a.type === 'health:AllergyRecord') {
     const sA = getProp(a, NS.health + 'allergySeverity');
     const sB = getProp(b, NS.health + 'allergySeverity');
     if (sA && sB && sA !== sB)
-      return { matchType: 'value_conflict', conflictField: 'health:allergySeverity', conflictValues: { [a.sourceSystem]: sA, [b.sourceSystem]: sB } };
+      return { matchType: 'value_conflict', conflictField: 'health:allergySeverity', conflictSides: conflictSides(a, b, sA, sB) };
   }
   if (a.type === 'health:LabResultRecord') {
     const vA = parseFloat(getProp(a, NS.health + 'resultValue') ?? 'NaN');
     const vB = parseFloat(getProp(b, NS.health + 'resultValue') ?? 'NaN');
     if (!isNaN(vA) && !isNaN(vB)) {
       const diff = Math.abs(vA - vB) / Math.max(Math.abs(vA), 0.001);
-      if (diff > tol) return { matchType: 'value_conflict', conflictField: 'health:resultValue', conflictValues: { [a.sourceSystem]: String(vA), [b.sourceSystem]: String(vB) } };
+      if (diff > tol) return { matchType: 'value_conflict', conflictField: 'health:resultValue', conflictSides: conflictSides(a, b, String(vA), String(vB)) };
       if (diff > 0)   return { matchType: 'near_duplicate' };
     }
   }
@@ -1262,10 +1362,12 @@ function classifyGroup(
       return {
         matchType: 'status_conflict',
         conflictField: 'clinical:status',
-        conflictValues: {
-          [a.sourceSystem]: getProp(a, NS.clinical + 'status') ?? '(none)',
-          [b.sourceSystem]: getProp(b, NS.clinical + 'status') ?? '(none)',
-        },
+        conflictSides: conflictSides(
+          a,
+          b,
+          getProp(a, NS.clinical + 'status') ?? '(none)',
+          getProp(b, NS.clinical + 'status') ?? '(none)',
+        ),
       };
     }
 
@@ -1278,7 +1380,7 @@ function classifyGroup(
       return {
         matchType: 'value_conflict',
         conflictField: 'clinical:dosage',
-        conflictValues: { [a.sourceSystem]: doseA as string, [b.sourceSystem]: doseB as string },
+        conflictSides: conflictSides(a, b, doseA as string, doseB as string),
       };
     }
     const freqA = getProp(a, NS.clinical + 'frequency') ?? getProp(a, NS.health + 'frequency');
@@ -1287,7 +1389,7 @@ function classifyGroup(
       return {
         matchType: 'value_conflict',
         conflictField: 'clinical:frequency',
-        conflictValues: { [a.sourceSystem]: freqA as string, [b.sourceSystem]: freqB as string },
+        conflictSides: conflictSides(a, b, freqA as string, freqB as string),
       };
     }
 
@@ -1484,7 +1586,7 @@ interface Group {
   records: ParsedRecord[];
   matchedOn: string;
   conflictField?: string;
-  conflictValues?: Record<string, string>;
+  conflictSides?: ConflictSide[];
   /** True when every member satisfies the tier-0 predicate. See {@link isTier0Group}. */
   tier0?: boolean;
 }
@@ -1807,8 +1909,12 @@ async function serializeGroups(
         emit(makeQuad(subj, namedNode(NS.cascade + 'mergedSources'), literal(res.mergedSystems.join(', '))));
         emit(makeQuad(subj, namedNode(NS.cascade + 'conflictResolution'), literal(res.strategy)));
         if (g.conflictField) emit(makeQuad(subj, namedNode(NS.cascade + 'conflictField'), literal(g.conflictField)));
-        if (g.conflictValues) {
-          const valDesc = Object.entries(g.conflictValues).map(([s, v]) => `${s}: "${v}"`).join(' vs ');
+        if (g.conflictSides && g.conflictSides.length > 0) {
+          // Rendered from the ORDERED sides, so the clause count always equals
+          // the side count. Building this string from a map keyed on the sides'
+          // labels is what dropped one side's value whenever the two labels
+          // matched, which on a pod-internal run was every time.
+          const valDesc = g.conflictSides.map((s) => `${s.origin}: "${s.value}"`).join(' vs ');
           emit(makeQuad(subj, namedNode(NS.cascade + 'conflictValues'), literal(valDesc)));
         }
       }
@@ -2096,8 +2202,8 @@ export async function runReconciliation(
       if (matched.length === 1) {
         groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
       } else {
-        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol, resolver);
-        groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
+        const { matchType, conflictField, conflictSides } = classifyGroup(matched, labTol, resolver);
+        groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictSides });
       }
     }
 
@@ -2150,8 +2256,8 @@ export async function runReconciliation(
       if (matched.length === 1) {
         groups.push({ matchType: 'pass_through', confidence: 1.0, records: matched, matchedOn: '' });
       } else {
-        const { matchType, conflictField, conflictValues } = classifyGroup(matched, labTol, resolver);
-        groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictValues });
+        const { matchType, conflictField, conflictSides } = classifyGroup(matched, labTol, resolver);
+        groups.push({ matchType, confidence: bestConf, records: matched, matchedOn, conflictField, conflictSides });
       }
     }
   }
@@ -2231,11 +2337,25 @@ export async function runReconciliation(
       type: g.matchType,
       recordType: g.records[0].type,
       canonicalUri: res.canonical.uri,
+      // TWO source axes, reported side by side because they answer different
+      // questions and one of them used to be asked to answer both. `sources` is
+      // INGESTION: which import batch each record arrived in, unchanged and
+      // still the right answer to "how did this get here". `origins` is which
+      // ORGANIZATION each record came from, which is what a conflict row has to
+      // name for its two sides to be told apart.
       sources: g.records.map(r => r.sourceSystem),
+      origins: g.records.map(conflictOriginLabel),
       matchedOn: g.matchedOn,
       strategy: res.strategy,
       conflictField: g.conflictField,
-      conflictValues: g.conflictValues,
+      conflictSides: g.conflictSides,
+      // The map form, kept so a consumer written against it goes on working. It
+      // is DERIVED from the sides rather than being the primary record, and it
+      // still cannot represent two sides that share an origin label — which is
+      // exactly why the sides above are the thing anything new should read.
+      conflictValues: g.conflictSides
+        ? Object.fromEntries(g.conflictSides.map((s) => [s.origin, s.value]))
+        : undefined,
       resolved: res.resolved,
       documentType: getProp(g.records[0], NS.cascade + 'documentType'),
       // Only stated when true, so every existing consumer of this object and
@@ -2275,6 +2395,7 @@ export async function runReconciliation(
       recordType: c.recordType,
       canonicalUri: c.mintedUri,
       sources: c.sourceSystems,
+      origins: c.origins,
       matchedOn: `identity-collision:${c.mintedUri}`,
       strategy: 'split_unresolved',
       resolved: false,

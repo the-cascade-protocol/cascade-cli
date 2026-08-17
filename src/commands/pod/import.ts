@@ -47,10 +47,19 @@ import {
 } from './helpers.js';
 import {
   writePendingConflicts,
-  generateConflictId,
+  loadPendingConflicts,
+  pendingConflictFromRaised,
   type PendingConflict,
+  type RaisedConflict,
 } from '../../lib/user-resolutions.js';
-import { randomUUID } from 'node:crypto';
+// The disposition is imported from the reconcile verb rather than reimplemented
+// here on purpose. Two copies of "what happens to a row of the review queue" is
+// how import came to have none: the rule lived in one verb, the other kept its
+// wholesale rewrite, and the two drifted without anything failing.
+import {
+  disposePendingConflicts,
+  type PendingConflictDisposition,
+} from './reconcile.js';
 import {
   isPodEncrypted,
   resolveDek,
@@ -79,6 +88,18 @@ interface ImportReport {
     existingRecordsLoaded?: number;
     summary?: object;
   };
+  /**
+   * What this import did to the queue of conflicts a person still has to answer.
+   *
+   * The same block `pod reconcile --json` reports, and it is here for the same
+   * reason: this file is a user-decision queue, and an import rewrites it. "N
+   * items left your review queue" is a fact the user is told, not one they
+   * discover by diffing a settings file.
+   *
+   * Absent when no reconciliation pass ran, which is the one case where the
+   * queue provably cannot change and the file is not written at all.
+   */
+  pendingConflicts?: PendingConflictDisposition;
   filesWritten: Array<{
     path: string;
     recordsAdded: number;
@@ -717,6 +738,11 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // Count of record-to-record edge objects the reconciler redirected from a
       // merged-away subject to its survivor.
       let reconciledEdgeRewrites = 0;
+      // What this import does to the queue of questions a person has not
+      // answered. Undefined when no reconciliation ran, which is the one case
+      // where the queue provably cannot change: nothing merged, so no row's
+      // meaning moved, and the file is not touched.
+      let pendingDisposition: PendingConflictDisposition | undefined;
 
       // Load existing pod data as an implicit source 0 when --reconcile-existing is set
       let existingInputs: ReconcilerInput[] = [];
@@ -765,24 +791,53 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           );
         }
 
-        // Persist unresolved conflicts to settings/pending-conflicts.ttl
+        // The review queue is read BEFORE anything about it is decided, and a
+        // queue that exists and cannot be read ends the run. Under a real import
+        // the file is rewritten, so a run that could not read it would be
+        // overwriting a set of unanswered questions it never saw; in a dry run
+        // the report would be claiming a disposition it never computed. Nothing
+        // has been written to the pod at this point, so stopping here leaves it
+        // exactly as it was.
+        let existingConflicts: PendingConflict[];
+        try {
+          existingConflicts = await loadPendingConflicts(podDir, dek);
+        } catch (err: unknown) {
+          printError(
+            `Could not read settings/pending-conflicts.ttl: ` +
+              `${err instanceof Error ? err.message : String(err)}. Refusing to import into ` +
+              `${podDir}: this import would rewrite a review queue it cannot read. ` +
+              `The pod is unchanged.`,
+            globalOpts,
+          );
+          process.exitCode = 2;
+          return;
+        }
+
+        // A conflict this run raises goes through the same mapping every other
+        // verb uses, so the row carries the disagreement itself and not only a
+        // pair of record IRIs, one of which the merge below may absorb.
+        const raisedConflicts: PendingConflict[] = (
+          reconcileResult.report.unresolvedConflicts as RaisedConflict[]
+        ).map((c) => pendingConflictFromRaised(c));
+
+        // THE FIX. `writePendingConflicts` replaces the file wholesale, and this
+        // call site handed it the run's OWN conflicts and nothing else — so an
+        // import that touched none of a pending row's records erased that row
+        // anyway. It is the same defect `pod reconcile` was given a disposition
+        // for, and it goes through the same one: every pre-existing row is KEPT
+        // (its candidates are still distinct records), CLEARED BY MERGE (its
+        // candidates became one, so the merge answered it), or ORPHANED (its
+        // candidates are not in the pod, so nothing can act on it) — and the
+        // counts are reported rather than left to be discovered by diffing a
+        // settings file.
+        const { disposition, queue: finalConflicts } = disposePendingConflicts(
+          existingConflicts,
+          raisedConflicts,
+          mergedTurtle,
+        );
+        pendingDisposition = disposition;
+
         if (!dryRun) {
-          const pendingConflicts: PendingConflict[] = (reconcileResult.report.unresolvedConflicts as Array<{
-            recordType: string;
-            matchedOn: string;
-            sources?: string[];
-            candidateUris?: string[];
-            label?: string;
-          }>).map((c) => ({
-            uri: `urn:uuid:conflict-${randomUUID()}`,
-            conflictId: generateConflictId(c.recordType, c.matchedOn),
-            recordType: c.recordType,
-            detectedAt: new Date(),
-            candidateRecordUris: c.candidateUris ?? [],
-            label: c.label,
-            sourceA: c.sources?.[0],
-            sourceB: c.sources?.[1],
-          }));
           // With the DEK: on a sealed pod this file holds record types, source
           // EHR names and candidate record IRIs, and it used to be written back
           // in the clear on every import.
@@ -793,11 +848,19 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           // rewritten when the list is empty, because "no conflicts remain" has
           // to be able to CLEAR stale entries from an earlier import.
           const conflictsFile = path.join(podDir, 'settings', 'pending-conflicts.ttl');
-          if (pendingConflicts.length > 0 || (await fileExists(conflictsFile))) {
-            await writePendingConflicts(podDir, pendingConflicts, dek);
+          if (finalConflicts.length > 0 || (await fileExists(conflictsFile))) {
+            await writePendingConflicts(podDir, finalConflicts, dek);
           }
-          if (pendingConflicts.length > 0) {
-            printVerbose(`  ${pendingConflicts.length} unresolved conflict(s) written to settings/pending-conflicts.ttl`, globalOpts);
+          if (raisedConflicts.length > 0) {
+            printVerbose(`  ${raisedConflicts.length} unresolved conflict(s) written to settings/pending-conflicts.ttl`, globalOpts);
+          }
+          if (disposition.orphaned > 0) {
+            printWarning(
+              `${disposition.orphaned} pending conflict(s) left your review queue because their ` +
+                `candidate records are no longer in the pod and no merge in this import explains ` +
+                `it: ${disposition.orphanedIds.join(', ')}.`,
+              globalOpts,
+            );
           }
 
           // Tier-0 merges applied WITHOUT asking. Journaled with the discarded
@@ -1177,6 +1240,11 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
               summary: reconciliationSummary,
             }
           : { enabled: false },
+        // Stated on a dry run too, and it is honest there: the disposition is
+        // computed from the reconciled text, which the dry run produces, so the
+        // preview says what the queue WOULD look like rather than going quiet
+        // about a file it is about to rewrite.
+        ...(pendingDisposition ? { pendingConflicts: pendingDisposition } : {}),
         filesWritten,
         typeCounts,
         bucketsRefused,
