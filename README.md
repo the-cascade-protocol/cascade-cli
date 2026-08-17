@@ -119,6 +119,20 @@ Both are additive and deterministic: `--all` without `--edges` is unchanged, and
 the same invocation always produces byte-identical output. The JSON contract is
 documented in [docs/2026-07-16-graph-query-json-shapes.md](docs/2026-07-16-graph-query-json-shapes.md).
 
+`pod query` answers with the pod's RECORDS. The pod's own bookkeeping about those
+records — `cascade:PendingConflict`, `cascade:UserResolution`, `solid:TypeIndex`,
+`solid:TypeRegistration`, `pim:ConfigurationFile` — is excluded from the record
+output, because a note about two records is not a third record. Tooling that wants
+the conflict queue asks for it:
+
+```bash
+cascade --json pod query ./my-pod --all --include-bookkeeping
+```
+
+A pod holding no bookkeeping produces byte-identical output with the flag and
+without it. `pod conflicts`, `pod resolve`, `pod reconcile` and `validate` read the
+settings files directly and are unaffected either way.
+
 ## Exit codes
 
 Every command answers with one of three codes: `0` success, `1` user or input
