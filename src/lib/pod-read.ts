@@ -417,6 +417,80 @@ export function isRegisteredRecordFile(podRelPath: string): boolean {
   return REGISTERED_RECORD_FILES.has(podRelPath.split(/[\\/]/).join('/'));
 }
 
+// ─── Bookkeeping subjects ─────────────────────────────────────────────────────
+
+/**
+ * The rdf:types that are the pod's PAPERWORK ABOUT records rather than records.
+ *
+ * WHY AN ENUMERATION AND NOT A PATH RULE
+ * --------------------------------------
+ * `pod query --all` excluded the two type-index files from its sweep BY PATH, so
+ * `settings/pending-conflicts.ttl` and `settings/user-resolutions.ttl` — added
+ * later, under the same directory — were swept in and returned as records. Every
+ * unresolved conflict and every decision the user had already recorded came back
+ * beside the medications, undated and with no origin, and the pod grew one more
+ * of them per decision. A path list only excludes the files someone remembered
+ * to add to it; a `cascade:PendingConflict` is not a record because of what it
+ * IS, and that stays true wherever it is written.
+ *
+ * WHAT IS ON THE LIST, AND WHY EACH ONE
+ * -------------------------------------
+ *   cascade:PendingConflict  a conflict the reconciler could not settle, waiting
+ *                            for the user. A note ABOUT two records.
+ *   cascade:UserResolution   the decision the user made about one. A note about
+ *                            a note about two records.
+ *   solid:TypeIndex          the pod's map of what lives where.
+ *   solid:TypeRegistration   one entry in that map.
+ *   pim:ConfigurationFile    `settings/preferences`, the root of private config.
+ *
+ * The last three are already excluded from `pod query --all` by filename and
+ * from {@link extractRecords} as structural types. They are restated here so the
+ * rule is about the subject and not about which of two mechanisms happened to
+ * catch it first — the exact gap the conflict store fell through.
+ *
+ * WHAT IS DELIBERATELY NOT ON IT
+ * ------------------------------
+ * `cascade:PatientProfile` and `clinical:ClinicalDocument` are records: one is
+ * the pod owner, the other is a document the pod holds. Neither is paperwork
+ * about other records, and both are things a person querying their pod expects
+ * to see. Provenance nodes (`prov:`) are not here either: they are not subjects
+ * with types of their own in the record files, and {@link extractRecords}
+ * already drops them.
+ *
+ * `settings/tier0-merge-journal.json` needs no entry: it is JSON, so no `.ttl`
+ * sweep reaches it.
+ */
+export const BOOKKEEPING_TYPE_IRIS: readonly string[] = [
+  CASCADE_NAMESPACES.cascade + 'PendingConflict',
+  CASCADE_NAMESPACES.cascade + 'UserResolution',
+  'http://www.w3.org/ns/solid/terms#TypeIndex',
+  'http://www.w3.org/ns/solid/terms#TypeRegistration',
+  'http://www.w3.org/ns/pim/space#ConfigurationFile',
+];
+
+/**
+ * The same list as {@link PodRecord.type} carries it.
+ *
+ * A record's `type` has already been through `shortenIRI`, so the comparison is
+ * made on the shortened form of both sides rather than by re-deriving the
+ * prefix here. Both sides go through the SAME function, so an unprefixed IRI
+ * still matches itself.
+ */
+const BOOKKEEPING_RECORD_TYPES: ReadonlySet<string> = new Set(
+  BOOKKEEPING_TYPE_IRIS.map((iri) => shortenIRI(iri)),
+);
+
+/**
+ * Is this record's type one the pod keeps about its own records?
+ *
+ * Takes the `type` of a {@link PodRecord} (a CURIE such as
+ * `core:PendingConflict`), so a caller filters the records it already has
+ * without reaching back into the store.
+ */
+export function isBookkeepingRecordType(recordType: string): boolean {
+  return BOOKKEEPING_RECORD_TYPES.has(recordType);
+}
+
 /**
  * Collects a sweep's read failures and sorts them by the rule above, so no
  * caller restates it and no caller quietly softens it.

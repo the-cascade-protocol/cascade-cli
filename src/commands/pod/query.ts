@@ -20,6 +20,17 @@
  *
  * The decrypt-vs-parse weighting lives in the read layer's `PodReadLedger`, so
  * this command states the rule by using it rather than by restating it.
+ *
+ * WHAT COUNTS AS A RECORD
+ * -----------------------
+ * Not everything a pod stores as Turtle is a record. `--all` used to sweep
+ * `settings/pending-conflicts.ttl` and `settings/user-resolutions.ttl` into the
+ * `other` bucket, so the pod's own paperwork about its records was returned AS
+ * records — undated, origin-less, and one more of them every time a conflict was
+ * detected or a decision recorded. Bookkeeping subjects are excluded by default
+ * and available under `--include-bookkeeping`, which exists because the queue is
+ * real data that a conflict UI has to be able to ask for. The enumeration and
+ * its reasoning live in `lib/pod-read.ts` (`BOOKKEEPING_TYPE_IRIS`).
  */
 
 import type { Command } from 'commander';
@@ -44,9 +55,11 @@ import {
   discoverTtlFiles,
   unreadableFilesMessage,
   skippedFilesMessage,
+  isBookkeepingRecordType,
   PodReadLedger,
   type PodReader,
   type PodReadFailure,
+  type PodRecord,
 } from '../../lib/pod-read.js';
 import { expandCurie } from '../../lib/turtle-parser.js';
 import { loadPodGraph, recordEdges, neighborhood } from './graph.js';
@@ -67,6 +80,28 @@ function classifyExtraBucket(relPath: string, baseName: string): string {
     return 'ai-extracted';
   }
   return 'other';
+}
+
+/**
+ * Drop the pod's own bookkeeping subjects, unless the caller asked for them.
+ *
+ * `pod query` answers with the pod's RECORDS. `settings/pending-conflicts.ttl`
+ * and `settings/user-resolutions.ttl` are notes ABOUT records, and `--all` swept
+ * them in: every unresolved conflict and every decision the user had recorded
+ * came back beside the medications, undated, with no origin, one more of them
+ * per decision taken. A consumer that renders query output as health records
+ * rendered paperwork as mystery records.
+ *
+ * Applied at the point the records become output, BEFORE the bucket's `count` is
+ * taken and before the extra-file sweep's empty-bucket check, so an excluded
+ * bucket is absent rather than present-and-zero. A pod holding no bookkeeping
+ * gets byte-identical output either way, which is nearly every pod.
+ *
+ * `lib/pod-read.ts` owns the enumeration and the reasoning for each entry.
+ */
+function withoutBookkeeping(records: PodRecord[], include: boolean): PodRecord[] {
+  if (include) return records;
+  return records.filter((r) => !isBookkeepingRecordType(r.type));
 }
 
 /**
@@ -136,6 +171,13 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
       [] as string[],
     )
     .option('--edges', 'With --all, add a record-to-record edge projection to the output')
+    .option(
+      '--include-bookkeeping',
+      "Also return the pod's own bookkeeping subjects (cascade:PendingConflict, " +
+        'cascade:UserResolution, solid:TypeIndex, solid:TypeRegistration, ' +
+        'pim:ConfigurationFile). These are notes ABOUT records, not records, and ' +
+        'are excluded by default; ask for them when building a conflict queue',
+    )
     .action(
       async (
         podDir: string,
@@ -163,6 +205,7 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           hops?: string;
           edge?: string[];
           edges?: boolean;
+          includeBookkeeping?: boolean;
         },
       ) => {
         const globalOpts = program.opts() as OutputOptions;
@@ -308,7 +351,10 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             // one of these — a key that will not open it, or bytes that are not
             // Turtle — leaves the count unknown, and unknown is not zero.
             const read = reader.readRecords(filePath);
-            const records = read.ok ? read.value.records : [];
+            const records = withoutBookkeeping(
+              read.ok ? read.value.records : [],
+              options.includeBookkeeping === true,
+            );
             const error = read.ok ? undefined : read.failure.reason;
             if (!read.ok) ledger.record(read.failure);
 
@@ -342,7 +388,14 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             // stray file, not a broken pod — a pod holds notes, investigations
             // and reports too — so the ledger reports it and steps over it.
             const read = reader.readRecords(extraFile);
-            const records = read.ok ? read.value.records : [];
+            // Filtered BEFORE the empty-file skip below, so a file that held
+            // nothing but bookkeeping produces no bucket at all rather than an
+            // `other` bucket reporting zero. A pod without conflicts has never
+            // shown one, and a pod with them must not start.
+            const records = withoutBookkeeping(
+              read.ok ? read.value.records : [],
+              options.includeBookkeeping === true,
+            );
             const error = read.ok ? undefined : read.failure.reason;
             if (!read.ok) ledger.record(read.failure);
             if (records.length === 0) continue;
