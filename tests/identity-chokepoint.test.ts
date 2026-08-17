@@ -104,24 +104,17 @@ const EVENT_IDENTITY_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   },
   {
     file: 'lib/user-resolutions.ts',
-    why: 're-exports randomUUID for the resolve/import commands below; contains no call of its own.',
-  },
-  {
-    file: 'commands/pod/import.ts',
     why:
-      'The pending-conflict record URI. The conflict itself is deduped on the DETERMINISTIC ' +
-      'generateConflictId(recordType, matchedOn); the urn is the id of one detection event.',
+      'The pending-conflict record URI, minted in pendingConflictFromRaised(). The conflict ' +
+      'itself is deduped on the DETERMINISTIC generateConflictId(recordType, matchedOn); the ' +
+      'urn identifies one detection event, and detecting the same conflict twice is two events. ' +
+      'Both raising verbs (pod reconcile, the pass inside pod import) go through this one ' +
+      'function, so neither of them mints anything of its own — which is why they are no longer ' +
+      'on this list. It also re-exports randomUUID for commands/pod/resolve.ts.',
   },
   {
     file: 'commands/pod/resolve.ts',
     why: 'The user-resolution record URI: one per decision a person made, stamped with resolvedAt.',
-  },
-  {
-    file: 'commands/pod/reconcile.ts',
-    why:
-      'The pending-conflict record URI, for the same reason as commands/pod/import.ts: the ' +
-      'conflict is deduped on the DETERMINISTIC generateConflictId(recordType, matchedOn), and ' +
-      'the urn identifies one detection event. Reconciling twice detects the same conflict twice.',
   },
   {
     file: 'lib/advisory/applier.ts',

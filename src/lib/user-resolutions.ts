@@ -106,8 +106,42 @@ export interface UserResolution {
   keptRecordUri: string;
   discardedRecordUris: string[];
   userNote?: string;
+  /**
+   * WHO made this decision (`prov:wasAttributedTo`), when they said so.
+   *
+   * Optional, and its absence is not a gap to be filled in later by guessing.
+   * The log recorded WHEN a conflict was answered and never by whom, which on a
+   * pod more than one person touches makes a decision unattributable after the
+   * fact. `pod annotate --by` already writes this predicate for a note; a
+   * decision about which of two clinical facts stands is at least as
+   * attributable, so it takes the same flag and writes the same triple.
+   */
+  actorIri?: string;
 }
 
+/**
+ * One unanswered question in `settings/pending-conflicts.ttl`.
+ *
+ * WHY THE ROW CARRIES THE DISAGREEMENT AND NOT ONLY POINTERS TO IT
+ * ---------------------------------------------------------------
+ * The row used to be a pair of candidate record IRIs and little else, on the
+ * assumption that a consumer wanting to show the two sides would dereference
+ * them. That assumption does not survive the run that raises the row: a value or
+ * status conflict that the reconciler settles ABSORBS the losing record into the
+ * survivor, so one of the two IRIs points at a record that is no longer in the
+ * pod. Measured at full scale: a re-import raised seven medication
+ * disagreements, and every one of them was un-reviewable for exactly this
+ * reason.
+ *
+ * So the substance is written onto the row at raise time — the field in dispute,
+ * each side's value, each side's origin, and which candidate survived. These are
+ * APP BOOKKEEPING in the same namespace and style the file already uses, not
+ * protocol vocabulary: they describe the state of a review queue, not a clinical
+ * fact about the patient, and nothing outside this tool reads them.
+ *
+ * Every one of them is OPTIONAL, and reads tolerate their absence: a pod holding
+ * rows written by an earlier CLI still parses, with the new fields undefined.
+ */
 export interface PendingConflict {
   uri: string;             // urn:uuid:conflict-{conflictId}
   conflictId: string;
@@ -116,8 +150,88 @@ export interface PendingConflict {
   candidateRecordUris: string[];
   // Human-readable summary fields (for display)
   label?: string;          // e.g. "Hypertension"
-  sourceA?: string;        // source system name
+  /**
+   * The two sides' ORIGIN labels: which organization each came from, rendered
+   * through the shared source-identity derivation.
+   *
+   * These used to be the INGESTION label (the import batch), which on a
+   * pod-internal reconcile is one string for every record read out of the pod —
+   * so both sides of the row said the same thing and named nothing a person
+   * could act on.
+   */
+  sourceA?: string;
   sourceB?: string;
+  /** The predicate the two sides disagree on, e.g. `clinical:dosage`. */
+  conflictField?: string;
+  /** What the `sourceA` side says. */
+  valueA?: string;
+  /** What the `sourceB` side says. */
+  valueB?: string;
+  /**
+   * Which candidate record is still in the pod under its own IRI after the run
+   * that raised this row. The other candidate may have been absorbed by a merge,
+   * which is the whole reason the values above are on the row at all.
+   */
+  survivingRecordUri?: string;
+}
+
+/**
+ * A conflict as the RECONCILER describes it, before it becomes a queue row.
+ *
+ * Structural on purpose: it names the fields of the reconciler's own
+ * `unresolvedConflicts` entries without importing its types, so the queue store
+ * does not depend on the reconciler. Every field is optional except the two the
+ * conflict id is computed from, because an identity collision and a value
+ * conflict are both raised through here and they carry different things.
+ */
+export interface RaisedConflict {
+  recordType: string;
+  matchedOn: string;
+  /** The record that survives the run, when one of the candidates does. */
+  canonicalUri?: string;
+  candidateUris?: string[];
+  label?: string;
+  /** ORIGIN labels, one per record, in record order. */
+  origins?: string[];
+  /** INGESTION labels, one per record. The fallback when no origin is stated. */
+  sources?: string[];
+  conflictField?: string;
+  conflictSides?: Array<{ origin: string; value: string; recordUri: string }>;
+}
+
+/**
+ * Turn one raised conflict into the queue row that records it.
+ *
+ * ONE function because there are two callers — `pod reconcile` and the
+ * reconciliation pass inside `pod import` — and they were two copies of the same
+ * mapping. A row that carries the disagreement is only useful if EVERY verb that
+ * raises one writes it the same way, and a second copy is how one of them
+ * silently stops.
+ */
+export function pendingConflictFromRaised(
+  c: RaisedConflict,
+  detectedAt: Date = new Date(),
+): PendingConflict {
+  const sides = c.conflictSides ?? [];
+  return {
+    uri: `urn:uuid:conflict-${randomUUID()}`,
+    conflictId: generateConflictId(c.recordType, c.matchedOn),
+    recordType: c.recordType,
+    detectedAt,
+    candidateRecordUris: c.candidateUris ?? [],
+    label: c.label,
+    // Taken from the SIDES when there are sides, so `sourceA` and `valueA` are
+    // guaranteed to describe the same record rather than two lists that happen
+    // to be ordered alike. Origin next, and the ingestion label only as a last
+    // resort: a run whose records state no origin still names its sides with
+    // something, and a pod written before origins existed reads as it did.
+    sourceA: sides[0]?.origin ?? c.origins?.[0] ?? c.sources?.[0],
+    sourceB: sides[1]?.origin ?? c.origins?.[1] ?? c.sources?.[1],
+    conflictField: c.conflictField,
+    valueA: sides[0]?.value,
+    valueB: sides[1]?.value,
+    survivingRecordUri: c.canonicalUri,
+  };
 }
 
 /**
@@ -149,10 +263,18 @@ export function generateConflictId(recordType: string, matchedOn: string): strin
  *      `settings/user-resolutions.ttl` is keyed by conflict id and cannot hold
  *      two rows under one key.
  *
- * `settings/pending-conflicts.ttl` re-keys itself, because every import rewrites
- * it wholesale from the run's own conflicts; `pod resolve` matches the id the
- * user pasted against that file, so it needs nothing from here. What does NOT
- * re-key itself is the decision log: a row recorded before this change carries
+ * `settings/pending-conflicts.ttl` does NOT need anything from here either, but
+ * for a different reason than this comment used to give. It said the file
+ * re-keys itself "because every import rewrites it wholesale from the run's own
+ * conflicts" — which described the wholesale rewrite as the intended design when
+ * it was the defect: an import that touched none of a row's records dropped that
+ * row anyway. Both `pod reconcile` and `pod import` now put every pre-existing
+ * row through a disposition (kept / cleared by merge / orphaned), so a row can
+ * SURVIVE a run under the id it was written with. It still needs no legacy
+ * lookup, because `pod resolve` matches the id the user pasted against whatever
+ * that file literally holds. What does NOT re-key itself is the decision log:
+ * `settings/user-resolutions.ttl` is keyed by conflict id, and a row recorded
+ * before the id formula changed carries
  * the id from the old formula forever, and a lookup by the new id would miss it.
  * This function is how such a row is still found.
  *
@@ -252,6 +374,7 @@ export async function loadUserResolutions(
             keptRecordUri,
             discardedRecordUris: discardedBySubject.get(uri) ?? [],
             userNote: props.get(NS.cascade + 'userNote'),
+            actorIri: props.get(NS.prov + 'wasAttributedTo'),
           });
         }
         resolve(map);
@@ -319,6 +442,9 @@ async function writeUserResolutions(
       if (res.userNote) {
         writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'userNote'), literal(res.userNote)));
       }
+      if (res.actorIri) {
+        writer.addQuad(makeQuad(subj, namedNode(NS.prov + 'wasAttributedTo'), namedNode(res.actorIri)));
+      }
     }
 
     writer.end((err, result) => {
@@ -366,6 +492,22 @@ export async function writePendingConflicts(
       if (conflict.label) writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'label'), literal(conflict.label)));
       if (conflict.sourceA) writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'sourceA'), literal(conflict.sourceA)));
       if (conflict.sourceB) writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'sourceB'), literal(conflict.sourceB)));
+      // The substance of the disagreement, so the row stays answerable after the
+      // run that raised it absorbed one of its candidate records. Every one is
+      // written only when known, which is what keeps a row from an earlier CLI
+      // and a row from this one the same shape apart from what is actually here.
+      if (conflict.conflictField) {
+        writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'conflictField'), literal(conflict.conflictField)));
+      }
+      if (conflict.valueA !== undefined) {
+        writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'valueA'), literal(conflict.valueA)));
+      }
+      if (conflict.valueB !== undefined) {
+        writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'valueB'), literal(conflict.valueB)));
+      }
+      if (conflict.survivingRecordUri) {
+        writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'survivingRecord'), namedNode(conflict.survivingRecordUri)));
+      }
     }
 
     writer.end((err, result) => {
@@ -431,6 +573,13 @@ export async function loadPendingConflicts(
             label: (props.get(NS.cascade + 'label') ?? [])[0],
             sourceA: (props.get(NS.cascade + 'sourceA') ?? [])[0],
             sourceB: (props.get(NS.cascade + 'sourceB') ?? [])[0],
+            // Absent on every row written before these existed, and `undefined`
+            // is the right answer for those: the disagreement was never
+            // recorded, so the row says so rather than inventing a value.
+            conflictField: (props.get(NS.cascade + 'conflictField') ?? [])[0],
+            valueA: (props.get(NS.cascade + 'valueA') ?? [])[0],
+            valueB: (props.get(NS.cascade + 'valueB') ?? [])[0],
+            survivingRecordUri: (props.get(NS.cascade + 'survivingRecord') ?? [])[0],
           });
         }
         resolve(conflicts);
