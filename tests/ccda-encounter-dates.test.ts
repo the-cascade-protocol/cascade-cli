@@ -90,6 +90,21 @@ function encountersBySourceId(quads: Quad[]): Map<string, string> {
   return bySourceId;
 }
 
+/** The clinical:Encounter subject carrying a given encounterType. */
+function encounterByType(quads: Quad[], type: string): string | undefined {
+  const isEncounter = new Set(
+    quads
+      .filter((q) => q.predicate.value === RDF_TYPE && q.object.value === CLINICAL + 'Encounter')
+      .map((q) => q.subject.value),
+  );
+  return quads.find(
+    (q) =>
+      q.predicate.value === CASCADE + 'encounterType' &&
+      q.object.value === type &&
+      isEncounter.has(q.subject.value),
+  )?.subject.value;
+}
+
 /** One subject's object for a predicate, as {value, datatype}, or undefined. */
 function typedObject(
   quads: Quad[],
@@ -150,6 +165,18 @@ describe('C-CDA Encounters section — the visit imports with its time', () => {
     expect(typedObject(quads, subject!, CLINICAL + 'encounterDate')).toBeUndefined();
   });
 
+  it('states every time an encounter carrying both an @value and an interval gave', async () => {
+    // Vendors emit both. Each triple says one thing the document said; none of
+    // them is derived from another, so there is nothing here to choose between.
+    const quads = await convertFixture('ccda-encounter-dates.xml');
+    const subject = encountersBySourceId(quads).get('ENC-BOTH');
+    expect(subject).toBeTruthy();
+
+    expect(typedObject(quads, subject!, CLINICAL + 'encounterStart')?.value).toBe('2025-11-01');
+    expect(typedObject(quads, subject!, CLINICAL + 'encounterEnd')?.value).toBe('2025-11-02');
+    expect(typedObject(quads, subject!, CLINICAL + 'encounterDate')?.value).toBe('2025-11-04');
+  });
+
   it('leaves an encounter the document never dated undated', async () => {
     const quads = await convertFixture('ccda-encounter-dates.xml');
     const subject = encountersBySourceId(quads).get('ENC-UNDATED');
@@ -205,7 +232,7 @@ describe('C-CDA Encounters section — SHACL', () => {
     const validation = validateTurtle(result.output, store, shapeFiles, 'ccda-encounter-dates.xml');
 
     const temporal = validation.results.filter((r) => String(r.message).includes(TEMPORAL_WARNING));
-    // 4 of 4 before this change; 1 of 4 after, and that one is the encounter the
+    // 5 of 5 before this change; 1 of 5 after, and that one is the encounter the
     // document genuinely left undated.
     expect(
       temporal.length,
@@ -241,6 +268,16 @@ describe('golden pins: no encounter IRI moves when the dates start being stated'
    * dangling. Nothing in the change above should be able to do that — the date
    * reaches `ccdaRecordUri` through the same field, formatted the same way — and
    * "should not be able to" is what a golden pin is for.
+   *
+   * WHAT THESE COULD NOT SEE, AND WHY THE FIXTURE GREW A SIXTH ENCOUNTER.
+   * Reversing `single ?? low` to `low ?? single` — the one line the identity
+   * claim rests on — left the FULL suite green. Two reasons, and both had to be
+   * removed: an encounter carrying an `<id>` is keyed on the id and its date is
+   * never consulted, and an encounter carrying only ONE of `@value` / `low`
+   * reads the same value under either order. Every encounter in every fixture
+   * was one or the other. The id-less "Telehealth Follow Up Visit" below states
+   * both times AND has no id, so the two orders mint different keys and this pin
+   * is what says which of them is correct.
    */
   it('mints the pre-change IRIs for the Encounters-section fixture', async () => {
     const quads = await convertFixture('ccda-encounter-dates.xml');
@@ -249,7 +286,17 @@ describe('golden pins: no encounter IRI moves when the dates start being stated'
       'ENC-SINGLE': 'urn:uuid:dca04918-11ea-556c-a45a-840cbb9639f8',
       'ENC-LOW-ONLY': 'urn:uuid:46501fee-3168-5b55-9a4f-01109cf91529',
       'ENC-UNDATED': 'urn:uuid:30a1e368-177b-55f0-8467-09f82deddee0',
+      'ENC-BOTH': 'urn:uuid:ae7579e5-abeb-5004-bd54-2ead0edf9723',
     });
+  });
+
+  it('keys the id-less encounter on the @value, not on the interval low', async () => {
+    // The order pin. Under `low ?? single` this subject is a different IRI, and
+    // it is the only record in the repository for which that is true.
+    const quads = await convertFixture('ccda-encounter-dates.xml');
+    expect(encounterByType(quads, 'Telehealth Follow Up Visit')).toBe(
+      'urn:uuid:d9906703-7c75-5ad1-86ff-5adadad1d760',
+    );
   });
 
   it('mints the pre-change IRI for the nested-encounter fixture', async () => {

@@ -14,6 +14,15 @@
     ENC-UNDATED  - no effectiveTime. A referenced-only encounter, which must stay
                    undated: FHIR R4 Encounter.period is 0..1 and inventing a day
                    for it would be a fabrication, not a fix.
+    ENC-BOTH     - an @value AND a low/high interval, on three different days.
+                   Vendors do emit both.
+    (id-less)    - the same double-stated time on an encounter with NO <id>, so
+                   its identity falls through to type + date. This is the ONLY
+                   shape in the corpus where the ORDER the identity key reads
+                   @value and low in is observable: with an <id> present the id
+                   decides and the date is never consulted, and with only one of
+                   the two times present both orders read the same value. Without
+                   it, reversing that order moves no IRI and no test notices.
 
   Authored for this repository. No content is derived from a real record.
 -->
@@ -91,6 +100,29 @@
               <templateId root="2.16.840.1.113883.10.20.22.4.49"/>
               <id root="2.16.840.1.113883.3.88.11.32.1" extension="ENC-UNDATED"/>
               <code code="99212" displayName="Office Outpatient Visit 10 Minutes" codeSystem="2.16.840.1.113883.6.12" codeSystemName="CPT"/>
+            </encounter>
+          </entry>
+
+          <entry typeCode="DRIV">
+            <encounter classCode="ENC" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.49"/>
+              <id root="2.16.840.1.113883.3.88.11.32.1" extension="ENC-BOTH"/>
+              <code code="99215" displayName="Office Outpatient Visit 40 Minutes" codeSystem="2.16.840.1.113883.6.12" codeSystemName="CPT"/>
+              <effectiveTime value="20251104">
+                <low value="20251101"/>
+                <high value="20251102"/>
+              </effectiveTime>
+            </encounter>
+          </entry>
+
+          <entry typeCode="DRIV">
+            <encounter classCode="ENC" moodCode="EVN">
+              <templateId root="2.16.840.1.113883.10.20.22.4.49"/>
+              <code code="99204" displayName="Telehealth Follow Up Visit" codeSystem="2.16.840.1.113883.6.12" codeSystemName="CPT"/>
+              <effectiveTime value="20251208">
+                <low value="20251205"/>
+                <high value="20251206"/>
+              </effectiveTime>
             </encounter>
           </entry>
         </section>
