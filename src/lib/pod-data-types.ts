@@ -104,9 +104,25 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
     directory: 'wellness',
     filename: 'sleep.ttl',
   },
+  // Two vocabularies spell a supplement, and both route HERE rather than to two
+  // files. `clinical:Supplement` is the importer's spelling; the checkup
+  // vocabulary's `checkup:SupplementSummary` is the patient-facing one, which
+  // carries the regulatory classification (dietary supplement / OTC drug /
+  // homeopathic / herbal) that separates a supplement from an FDA-approved
+  // medication, and which is what a person adding their own supplement writes.
+  //
+  // It was registered nowhere, so `pod add-record --type
+  // checkup:SupplementSummary` failed outright with "No known bucket for type"
+  // and there was no way to record a supplement by hand at all. Filing it beside
+  // `clinical:Supplement` (rather than in a checkup-only file) is what keeps
+  // "show me the supplements" one read: a reader asking that question must not
+  // have to know which of two vocabularies the writer happened to use.
   supplements: {
     label: 'Supplements',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'Supplement'],
+    rdfTypes: [
+      CASCADE_NAMESPACES.clinical + 'Supplement',
+      CASCADE_NAMESPACES.checkup + 'SupplementSummary',
+    ],
     directory: 'wellness',
     filename: 'supplements.ttl',
   },

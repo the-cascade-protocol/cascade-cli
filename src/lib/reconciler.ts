@@ -15,6 +15,18 @@ import {
   decodeReferencePlaceholder,
   isReferencePlaceholder,
 } from './fhir-converter/reference-resolution.js';
+import {
+  buildDerivedReferenceResolver,
+  decodeParsedIndicationPlaceholder,
+  isParsedIndicationPlaceholder,
+  splitLinkedConditionIds,
+  DERIVED_REFERENCE_PREDICATES,
+  INDICATION_REFERENCE,
+  INDICATION_TEXT_PREDICATES,
+  LINKED_CONDITION,
+  LINKED_CONDITION_IDS,
+  PARSED_INDICATION_REFERENCE,
+} from './literal-lifting.js';
 import { normalizeMedName, normalizeDose, normalizeFrequency, type DrugNameNormalizer } from './medication-normalize.js';
 import { medicationCodeKeys, sharedMedicationCodeKey, extractCodeValue } from './code-keys.js';
 import { cascadeTerminologyResolver } from './terminology.js';
@@ -659,6 +671,133 @@ function normalizeEdgeValue(
   return resolveRef?.(decodeReferencePlaceholder(value)) ?? undefined;
 }
 
+// ---------------------------------------------------------------------------
+// Derived reference predicates
+// ---------------------------------------------------------------------------
+
+/**
+ * The values a record WOULD carry on a derived reference predicate, computed
+ * from the record's own stated content rather than read off it.
+ *
+ * WHY A DERIVED EDGE CANNOT BE COMPARED AS WRITTEN
+ * ------------------------------------------------
+ * `clinical:parsedIndicationReference` and `clinical:linkedCondition` are not
+ * stated by any source. `liftTrappedLiterals` derives them at the END of an
+ * import, from a reason the converter captured or from the UUIDs a Checkup
+ * export packs into `clinical:linkedConditionIds`. Reconciliation runs BEFORE
+ * that pass, so the two copies of one record it is asked to compare were caught
+ * at different stages of the same pipeline:
+ *
+ *   - the copy read back out of the POD is post-lift, and carries the derived
+ *     edge pointing at a real subject (`urn:uuid:...`), or carries no such edge
+ *     at all because the reason matched nothing and the pass dropped it;
+ *   - the copy from the BATCH is pre-lift, and carries either an opaque
+ *     `urn:cascade:parsed-indication:` placeholder holding the reason's codes,
+ *     or nothing yet on `clinical:linkedCondition` because the pass has not run.
+ *
+ * Compared as written, those never agree. Every re-import of a record with a
+ * reason therefore read as two materially different records sharing one IRI:
+ * a false identity collision, a split into a second IRI, and an unresolved
+ * conflict whose label was "differs on clinical:parsedIndicationReference" for
+ * two records byte-identical in everything a source ever said, source record id
+ * included. Measured on the reason-code fixture: three false conflicts and a
+ * pod that grew from 6 records to 9 on the second import of ONE unchanged file,
+ * and one more on `clinical:linkedCondition` for a record carrying
+ * linked-condition ids.
+ *
+ * WHY RE-DERIVING IS THE FIX RATHER THAN IGNORING THE PREDICATE
+ * ------------------------------------------------------------
+ * Dropping these predicates from the fingerprint would make the false conflicts
+ * go away and take the true ones with them: two records whose parsed
+ * indications genuinely point at DIFFERENT conditions would then compare equal,
+ * and one of them would be silently discarded as a duplicate. So both sides are
+ * put through the same derivation instead, and what is compared is the edge set
+ * the lift will actually write. Identical inputs give identical sets; different
+ * indications give different sets and still conflict.
+ *
+ * The derivation is the lift's own (see `buildDerivedReferenceResolver`), not a
+ * second copy of it, because a second copy would drift and drift here is
+ * indistinguishable from the defect.
+ */
+export type DerivedReferenceValues = (record: ParsedRecord, predicate: string) => string[];
+
+/**
+ * Build the re-derivation over the conditions present in `quads` (every input
+ * of the run: the pod's own records and the batch's alike, so a reason resolves
+ * against the same condition set whichever side asks).
+ */
+export function buildDerivedReferenceValues(
+  quads: Quad[],
+  resolveRef?: (raw: string) => string | null,
+): DerivedReferenceValues {
+  const resolver = buildDerivedReferenceResolver(quads);
+
+  const resolvedValues = (record: ParsedRecord, predicate: string): string[] => {
+    const out: string[] = [];
+    for (const v of record.properties.get(predicate) ?? []) {
+      const normalized = normalizeEdgeValue(v.value, resolveRef);
+      if (normalized !== undefined) out.push(normalized);
+    }
+    return out;
+  };
+
+  return (record, predicate): string[] => {
+    const out = new Set<string>();
+
+    if (predicate === PARSED_INDICATION_REFERENCE) {
+      // A reason the record ALSO states outright suppresses its parsed
+      // restatement, exactly as the lift's `existingEdges` seeding does. Without
+      // this, a record carrying both `reasonReference` and `reasonCode` for one
+      // condition derives an edge on one side that the pod's copy correctly does
+      // not hold.
+      const stated = new Set(resolvedValues(record, INDICATION_REFERENCE));
+
+      let sawPlaceholder = false;
+      for (const v of record.properties.get(PARSED_INDICATION_REFERENCE) ?? []) {
+        if (isParsedIndicationPlaceholder(v.value)) {
+          sawPlaceholder = true;
+          const payload = decodeParsedIndicationPlaceholder(v.value);
+          if (!payload) continue;
+          const { target } = resolver.matchParsedIndication(record.uri, payload);
+          if (target) out.add(target);
+          continue;
+        }
+        const normalized = normalizeEdgeValue(v.value, resolveRef);
+        if (normalized !== undefined) out.add(normalized);
+      }
+
+      // The free-text path, which is the only one a Turtle-passthrough record
+      // (Checkup's `reasonForUse`, or an earlier import's `clinical:indication`)
+      // has. The lift skips it for a record whose reason already arrived as a
+      // coded candidate, so this does too.
+      if (!sawPlaceholder) {
+        for (const textPredicate of INDICATION_TEXT_PREDICATES) {
+          for (const v of record.properties.get(textPredicate) ?? []) {
+            const { target } = resolver.matchIndicationText(record.uri, v.value);
+            if (target) out.add(target);
+          }
+        }
+      }
+
+      for (const s of stated) out.delete(s);
+      return [...out].sort();
+    }
+
+    if (predicate === LINKED_CONDITION) {
+      for (const value of resolvedValues(record, LINKED_CONDITION)) out.add(value);
+      for (const v of record.properties.get(LINKED_CONDITION_IDS) ?? []) {
+        for (const id of splitLinkedConditionIds(v.value)) {
+          const target = resolver.matchLinkedConditionId(record.uri, id);
+          if (target) out.add(target);
+        }
+      }
+      return [...out].sort();
+    }
+
+    return [];
+  };
+}
+
 /**
  * A content fingerprint for one parsed record: SHA-256 over its
  * (predicate, value, datatype) triples, sorted, with
@@ -673,10 +812,15 @@ export function recordContentFingerprint(
   r: ParsedRecord,
   resolveRef?: (raw: string) => string | null,
   ignored: ReadonlySet<string> = COLLISION_IGNORED_PREDICATES,
+  derived?: DerivedReferenceValues,
 ): string {
   const parts: string[] = [];
   for (const [pred, vals] of r.properties) {
     if (ignored.has(pred)) continue;
+    // A derived reference is contributed by the block below, re-derived from the
+    // record's own content, so whichever spelling it happens to carry right now
+    // is skipped here.
+    if (derived && DERIVED_REFERENCE_PREDICATES.has(pred)) continue;
     for (const v of vals) {
       const value = normalizeEdgeValue(v.value, resolveRef);
       if (value === undefined) continue;  // an unresolvable edge is never persisted
@@ -684,6 +828,16 @@ export function recordContentFingerprint(
       // makes grep and ripgrep classify it as binary and silently skip the whole
       // file, which is how a defect in this very module went unfound.
       parts.push(`${pred}\u0000${value}\u0000${v.datatype ?? ''}`);
+    }
+  }
+  // Iterated over the PREDICATE SET rather than over the record's own keys, so a
+  // copy that does not carry the derived edge YET still contributes the edges it
+  // implies. That absence is the whole asymmetry: without this the pre-lift copy
+  // has no entry where the post-lift copy has one, and the two never agree.
+  if (derived) {
+    for (const pred of DERIVED_REFERENCE_PREDICATES) {
+      if (ignored.has(pred)) continue;
+      for (const value of derived(r, pred)) parts.push(`${pred}\u0000${value}\u0000`);
     }
   }
   parts.sort();
@@ -747,8 +901,17 @@ function collisionSplitUri(mintedUri: string, fingerprint: string): string {
 function differingPredicates(
   bucket: ParsedRecord[],
   resolveRef?: (raw: string) => string | null,
+  derived?: DerivedReferenceValues,
 ): string[] {
   const normalize = (r: ParsedRecord, pred: string): string | undefined => {
+    // A derived reference is re-derived on BOTH sides, for the same reason the
+    // fingerprint re-derives it. Reporting the raw spellings here would name a
+    // predicate the fingerprint no longer disagrees on, which is worse than the
+    // old behaviour: a conflict row explaining a difference that is not there.
+    if (derived && DERIVED_REFERENCE_PREDICATES.has(pred)) {
+      const values = derived(r, pred);
+      return values.length > 0 ? values.join(', ') : undefined;
+    }
     const vals = r.properties.get(pred);
     if (!vals) return undefined;
     const normalized = vals
@@ -760,6 +923,13 @@ function differingPredicates(
   const preds = new Set<string>();
   for (const r of bucket) for (const p of r.properties.keys()) {
     if (!COLLISION_IGNORED_PREDICATES.has(p)) preds.add(p);
+  }
+  // A derived predicate is considered even when no record in the bucket carries
+  // it yet, since one side may only imply it.
+  if (derived) {
+    for (const p of DERIVED_REFERENCE_PREDICATES) {
+      if (!COLLISION_IGNORED_PREDICATES.has(p)) preds.add(p);
+    }
   }
   const out: string[] = [];
   for (const p of preds) {
@@ -785,6 +955,7 @@ function differingPredicates(
 export function splitIdentityCollisions(
   records: ParsedRecord[],
   resolveRef?: (raw: string) => string | null,
+  derived?: DerivedReferenceValues,
 ): {
   records: ParsedRecord[];
   collisions: IdentityCollision[];
@@ -803,7 +974,9 @@ export function splitIdentityCollisions(
   const collisions: IdentityCollision[] = [];
   const collisionGroupByUri = new Map<string, string>();
   const fingerprints = new Map<ParsedRecord, string>();
-  for (const r of records) fingerprints.set(r, recordContentFingerprint(r, resolveRef));
+  for (const r of records) {
+    fingerprints.set(r, recordContentFingerprint(r, resolveRef, COLLISION_IGNORED_PREDICATES, derived));
+  }
 
   let current = records;
   for (let round = 0; round < 8; round++) {
@@ -838,7 +1011,7 @@ export function splitIdentityCollisions(
         resultingUris: [uri, ...distinct.slice(1).map((fp) => target.get(fp)!)],
         sourceSystems: [...new Set(bucket.map((r) => r.sourceSystem))],
         origins: [...new Set(bucket.map(conflictOriginLabel))],
-        differingPredicates: differingPredicates(bucket, resolveRef),
+        differingPredicates: differingPredicates(bucket, resolveRef, derived),
       });
     }
 
@@ -2000,7 +2173,14 @@ export async function runReconciliation(
   // reason it is passed above: a stated edge arrives resolved from the pod and as
   // a placeholder from the new input, and without normalizing the two spellings
   // every re-import of an edge-bearing record reads as a collision.
-  const split = splitIdentityCollisions(allRecords, referenceResolver);
+  // The same re-derivation both halves of the collision check need: what
+  // `liftTrappedLiterals` WILL write on each record's derived reference
+  // predicates, computed over every input of this run. Built here so the pod's
+  // post-lift copy and the batch's pre-lift copy of one record are compared on
+  // the same footing rather than on the pipeline stage each was caught at.
+  const derivedReferenceValues = buildDerivedReferenceValues(allInputQuads, referenceResolver);
+
+  const split = splitIdentityCollisions(allRecords, referenceResolver, derivedReferenceValues);
   allRecords = split.records;
   const identityCollisions = split.collisions;
 
@@ -2281,7 +2461,9 @@ export async function runReconciliation(
   const fingerprintOf = (r: ParsedRecord): string => {
     let fp = fingerprintCache.get(r);
     if (fp === undefined) {
-      fp = recordContentFingerprint(r, referenceResolver, TIER0_IGNORED_PREDICATES);
+      fp = recordContentFingerprint(
+        r, referenceResolver, TIER0_IGNORED_PREDICATES, derivedReferenceValues,
+      );
       fingerprintCache.set(r, fp);
     }
     return fp;

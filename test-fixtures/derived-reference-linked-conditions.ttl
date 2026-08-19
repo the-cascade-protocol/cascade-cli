@@ -1,0 +1,23 @@
+# Synthetic fixture for the DERIVED reference edge `clinical:linkedCondition`.
+#
+# One condition and one medication that names it through the deprecated
+# `clinical:linkedConditionIds` literal. The edge itself is never stated: the
+# import's literal-lifting pass derives it, which happens AFTER reconciliation,
+# so re-importing this file is the shape that used to raise a false identity
+# collision labelled "differs on clinical:linkedCondition".
+#
+# Both records carry a source record id, so the two arrivals are the SAME
+# record by every axis a source states.
+
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix health: <https://ns.cascadeprotocol.org/health/v1#> .
+
+<urn:uuid:aaaaaaaa-0000-4000-8000-000000000001> a health:ConditionRecord ;
+    health:conditionName "Hyperlipidemia" ;
+    health:sourceRecordId "cond-1" ;
+    health:snomedCode <http://snomed.info/sct/55822004> .
+
+<urn:uuid:bbbbbbbb-0000-4000-8000-000000000001> a clinical:Medication ;
+    clinical:drugName "simvastatin" ;
+    clinical:sourceRecordId "med-1" ;
+    clinical:linkedConditionIds "aaaaaaaa-0000-4000-8000-000000000001" .
