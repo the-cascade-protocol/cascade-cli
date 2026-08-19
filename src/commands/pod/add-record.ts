@@ -14,6 +14,14 @@
  * --json arg, or from the CASCADE_RECORD_JSON environment variable when --json
  * is omitted (useful for large payloads).
  *
+ * Every value is given as a string, and the LITERAL it becomes is decided by
+ * the datatype the bundled shapes declare for that property (see
+ * `lib/shape-datatypes.ts`): `checkup:supplementIsActive "true"` is written as
+ * an `xsd:boolean`, `checkup:supplementStartDate` as an `xsd:date`,
+ * `checkup:patientCost` as an `xsd:decimal`. A property no shape declares stays
+ * a plain string literal, and a value that cannot be its declared datatype is
+ * refused before anything is written.
+ *
  * --json result (global --json flag):
  *   { added: true, recordUri, type }
  */
@@ -26,6 +34,7 @@ import { printResult, printError, printVerbose, type OutputOptions } from '../..
 import { DATA_TYPES, resolvePodDir, fileExists, type DataTypeInfo } from './helpers.js';
 import { resolvePodDek, mintUri } from '../../lib/annotations.js';
 import { mergeIntoBucket, KNOWN_PREFIXES, assertWritableIri } from '../../lib/bucket-write.js';
+import { typedLiteralForPredicate } from '../../lib/shape-datatypes.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -178,7 +187,24 @@ export function registerAddRecordSubcommand(pod: Command, program: Command): voi
           process.exitCode = 1;
           return;
         }
-        newQuads.push(makeQuad(subject, namedNode(predicateIri), literal(String(value))));
+        // The value arrives as a string whatever its type: JSON hands one over
+        // and so does a shell. The literal it becomes is decided by what the
+        // bundled shapes DECLARE the property to be, so a boolean, a date or a
+        // decimal lands typed instead of as a bare string the validator then
+        // objects to. A value that cannot be its declared datatype is refused
+        // here, before anything is written.
+        let object;
+        try {
+          object = typedLiteralForPredicate(predicateIri, String(value));
+        } catch (e: unknown) {
+          printError(
+            `${e instanceof Error ? e.message : String(e)} (property "${curie}")`,
+            globalOpts,
+          );
+          process.exitCode = 1;
+          return;
+        }
+        newQuads.push(makeQuad(subject, namedNode(predicateIri), object));
       }
       // Source axis: who reported it (self) — and a real attribution triple.
       newQuads.push(makeQuad(

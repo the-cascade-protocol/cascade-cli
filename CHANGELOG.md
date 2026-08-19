@@ -7,6 +7,72 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.20.0] - 2026-08-18
+
+### Added
+
+**`pod add-record --type checkup:SupplementSummary` now has somewhere to write.**
+The data-type map registered `clinical:Supplement` and nothing else, so adding a supplement by hand
+failed outright with `No known bucket for type checkup:SupplementSummary` and there was no way to
+record one at all. `checkup:SupplementSummary` is the patient-facing spelling, and the one carrying
+`checkup:regulatoryStatus`, the classification that separates a dietary supplement or an OTC product
+from an FDA-approved medication; its SHACL shape has shipped in this package the whole time and only
+the route was missing. It is registered against the SAME `wellness/supplements.ttl` the importer
+spelling uses, so "show me the supplements" stays one read and a reader does not have to know which
+vocabulary the writer happened to use. `pod query --supplements`, `pod query --all` and `pod info`
+all reach it, and `cascade validate` selects `SupplementSummaryShape` and reports nothing.
+
+### Fixed
+
+**`pod add-record` writes the datatype the vocabulary declares, instead of a bare string.**
+Values arrive as strings, because JSON and a shell both hand one over, and every one of them was
+written as a plain literal. A supplement carrying a boolean, a date and a decimal produced five
+`sh:datatype` violations from `cascade validate` on a file that still reported PASS, because the
+checkup shapes raise datatype at Info. Beyond the report, the pod held dates that sort lexically by
+luck and decimals nothing could sum without re-deriving a schema the pod does not carry, and it
+disagreed with itself: the same properties written by an IMPORT arrived correctly typed.
+
+The literal is now built at one chokepoint (`src/lib/shape-datatypes.ts`) from the `sh:datatype` the
+BUNDLED SHAPES declare for the property, so the writer and the validator cannot disagree and no
+hand-maintained table of datatypes exists here to drift from `spec/` on the next sync. A property no
+shape declares stays a plain string literal. `xsd:string` stays the short form, since RDF 1.1 makes
+a plain literal `xsd:string` already. Lexical values are preserved exactly, so `"12.50"` does not
+become `12.5` and a date is not shifted through a timezone. A value that cannot be its declared
+datatype (a boolean given as `maybe`, a date given as `2026-02-30`) is REFUSED and nothing is
+written, rather than coerced or silently written untyped: the same stance the command already takes
+on an unwritable IRI, because the input is the only place either is still fixable. Two invariants
+are pinned as tripwires for the next vocabulary sync: every datatype the shapes declare has a
+lexical-form check, and no property is declared with two different datatypes.
+
+**A DERIVED reference edge no longer reads as evidence that a re-import is a different record.**
+`clinical:parsedIndicationReference` and `clinical:linkedCondition` are stated by no source. The
+literal-lifting pass derives them at the END of an import, from a reason the converter captured or
+from the UUIDs packed into a `clinical:linkedConditionIds` literal. Reconciliation runs BEFORE that
+pass, so the two copies of one record it compares were caught at different stages of one pipeline:
+the copy read back out of the POD is post-lift and carries the derived edge (or carries nothing,
+because the reason matched no condition and the pass dropped it), while the copy from the BATCH is
+pre-lift and carries an opaque placeholder holding the reason's codes, or nothing at all.
+
+Compared as written, those never agree. So the content fingerprint declared them materially
+different records that the identity layer had put on one IRI: a false identity collision, a split
+onto a second IRI, and an unresolved conflict labelled `differs on
+clinical:parsedIndicationReference` for two records identical in everything a source ever said,
+source record id included. Measured on the reason-code fixture: three false conflicts, and a pod
+that grew from 6 records to 9 on the second import of ONE unchanged file, and again on the third.
+A record carrying linked-condition ids reproduced the same defect on `clinical:linkedCondition`.
+
+Both sides are now put through the SAME derivation, and what is compared is the edge set the lift
+will actually write. This is deliberately not an ignore-list: dropping the predicates from the
+fingerprint would remove the false conflicts and the true ones with them, so two records whose
+parsed indications genuinely point at different conditions would compare equal and one would be
+discarded as a duplicate. Both directions are pinned by tests. The derivation is the lift's own
+(`buildDerivedReferenceResolver`), exported rather than reimplemented, because a second copy would
+drift and drift here is indistinguishable from the defect. `DERIVED_REFERENCE_PREDICATES` is the
+chokepoint the next derived edge family joins, and a test fails if a predicate is added to it
+without a re-derivation to match.
+
+---
+
 ## [0.19.0] - 2026-08-17
 
 ### Added

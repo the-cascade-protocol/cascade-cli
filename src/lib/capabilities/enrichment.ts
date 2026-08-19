@@ -125,6 +125,7 @@ export const COMMAND_ENRICHMENT: EnrichmentTable = {
       'Enforced at run time, not by the parser: the record properties are mandatory. Pass them as the propsJson positional argument — a JSON object of { "<curie>": "<value>" } — or set CASCADE_RECORD_JSON, which is the better route for a large payload. With neither, the command exits 1 with "No properties provided."',
       '--type takes a CURIE whose prefix is one of cascade/core, health, clinical, coverage, checkup, pots, workbench, fhir, and whose class must map to a known bucket file (e.g. health:ConditionRecord, clinical:Medication). An unmapped type is refused rather than guessed.',
       'The record is written as cascade:SelfReported and workbench:Unverified, attributed to --by if given and otherwise to the pod owner\'s WebID.',
+      'Property values are given as strings, and each is written as the datatype the bundled SHACL shapes declare for that property: a checkup:supplementIsActive of "true" becomes an xsd:boolean, a checkup:supplementStartDate an xsd:date, a checkup:patientCost an xsd:decimal. A property no shape declares stays a plain string literal. A value that cannot be its declared datatype (a boolean given as "maybe", a date given as "2026-02-30") is refused and nothing is written.',
     ],
   },
 

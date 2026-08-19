@@ -45,11 +45,29 @@ const { namedNode, quad: makeQuad } = DataFactory;
 // Predicates and types this pass reads and writes
 // ---------------------------------------------------------------------------
 
-const LINKED_CONDITION_IDS = NS.clinical + 'linkedConditionIds';
-const LINKED_CONDITION = NS.clinical + 'linkedCondition';
-const PARSED_INDICATION_REFERENCE = NS.clinical + 'parsedIndicationReference';
-const INDICATION_REFERENCE = NS.clinical + 'indicationReference';
+export const LINKED_CONDITION_IDS = NS.clinical + 'linkedConditionIds';
+export const LINKED_CONDITION = NS.clinical + 'linkedCondition';
+export const PARSED_INDICATION_REFERENCE = NS.clinical + 'parsedIndicationReference';
+export const INDICATION_REFERENCE = NS.clinical + 'indicationReference';
 const RDF_TYPE = NS.rdf + 'type';
+
+/**
+ * Predicates whose object this pass DERIVES rather than reads: the record never
+ * states them, so their presence and their value are both a function of the
+ * record's other content plus the conditions in scope.
+ *
+ * That makes them useless as evidence of what a record IS, and actively
+ * misleading to anything that compares two copies of one record: this pass runs
+ * at the END of an import, so a copy read back out of the pod carries the
+ * derived edge and a freshly converted copy of the same record does not carry
+ * it yet. Any comparison that reads them literally therefore sees two different
+ * records where there is one. `lib/reconciler.ts` re-derives both sides through
+ * {@link buildDerivedReferenceResolver} instead of comparing the spellings.
+ */
+export const DERIVED_REFERENCE_PREDICATES: ReadonlySet<string> = new Set<string>([
+  PARSED_INDICATION_REFERENCE,
+  LINKED_CONDITION,
+]);
 
 /**
  * rdf:type values that mark a record as a condition, across every producer:
@@ -92,7 +110,7 @@ const CONDITION_NAME_PREDICATES = [
  * rather than through the FHIR converter, so they arrive with no coded candidate
  * attached and only the name fallback can resolve them.
  */
-const INDICATION_TEXT_PREDICATES = [
+export const INDICATION_TEXT_PREDICATES = [
   NS.clinical + 'indication',
   NS.clinical + 'reasonForUse',
   'https://ns.cascadeprotocol.org/checkup/v1#reasonForUse',
@@ -300,6 +318,92 @@ function candidateCount(set: Set<string> | undefined, exclude?: string): number 
   return [...set].filter((s) => s !== exclude).length;
 }
 
+/**
+ * The UUIDs a `clinical:linkedConditionIds` literal packs.
+ *
+ * Checkup emits comma-separated lowercased UUIDs; the deprecated property's own
+ * comment says space-separated. Accept both, plus stray semicolons, rather than
+ * trusting either wording. Exported so the reconciler splits the literal
+ * exactly the way this pass does: a second, subtly different split would
+ * re-derive a different edge set and put the false conflicts straight back.
+ */
+export function splitLinkedConditionIds(value: string): string[] {
+  return value
+    .split(/[\s,;]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// The derivation, as a resolver both this pass and the reconciler can call
+// ---------------------------------------------------------------------------
+
+/** The outcome of asking which condition a derived reference names. */
+export interface ConditionMatch {
+  /** The single condition subject that matched, or null when none did. */
+  target: string | null;
+  /** True when more than one candidate matched, so no edge may be written. */
+  ambiguous: boolean;
+}
+
+/**
+ * The derivation rules of this pass, bound to one set of conditions in scope.
+ *
+ * There is exactly ONE definition of "which condition does this reason name",
+ * and both callers go through it. The reconciler needs the answer to compare
+ * two copies of a record without seeing the pipeline stage they were caught at
+ * as a difference in content; this pass needs it to write the edge. A second
+ * implementation on either side would drift, and drift here reads as a
+ * spurious conflict on every re-import.
+ */
+export interface DerivedReferenceResolver {
+  /** The condition a converter-captured coded reason names, if exactly one. */
+  matchParsedIndication(subject: string, payload: ParsedIndicationPayload): ConditionMatch;
+  /** The condition a bare free-text reason literal names, if exactly one. */
+  matchIndicationText(subject: string, text: string): ConditionMatch;
+  /** The condition a `linkedConditionIds` UUID names, if exactly one. */
+  matchLinkedConditionId(subject: string, id: string): string | null;
+}
+
+/** Build the resolver over the condition records present in `quads`. */
+export function buildDerivedReferenceResolver(quads: Quad[]): DerivedReferenceResolver {
+  const index = buildConditionIndex(quads);
+
+  return {
+    matchParsedIndication(subject, payload) {
+      // Code-first: exact coding identity against the condition's own code.
+      // Measured on a real provider export, this is the signal that works;
+      // normalized-name matching alone resolved nothing there.
+      let ambiguous = false;
+      for (const code of payload.codes) {
+        const bucket = index.byCode.get(code);
+        if (candidateCount(bucket, subject) > 1) { ambiguous = true; continue; }
+        const sole = soleCandidate(bucket, subject);
+        if (sole) return { target: sole, ambiguous };
+      }
+      // Fallback: exact normalized-name equality (never substring, which would
+      // trade precision for recall on clinical names).
+      if (payload.text) {
+        const bucket = index.byName.get(normalizeName(payload.text));
+        if (candidateCount(bucket, subject) > 1) ambiguous = true;
+        const sole = soleCandidate(bucket, subject);
+        if (sole) return { target: sole, ambiguous };
+      }
+      return { target: null, ambiguous };
+    },
+
+    matchIndicationText(subject, text) {
+      const bucket = index.byName.get(normalizeName(text));
+      const target = soleCandidate(bucket, subject);
+      return { target, ambiguous: target === null && candidateCount(bucket, subject) > 1 };
+    },
+
+    matchLinkedConditionId(subject, id) {
+      return soleCandidate(index.byUuid.get(id), subject);
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The pass
 // ---------------------------------------------------------------------------
@@ -313,7 +417,7 @@ function candidateCount(set: Set<string> | undefined, exclude?: string): number 
  */
 export function liftTrappedLiterals(quads: Quad[]): { quads: Quad[]; stats: LiteralLiftSummary } {
   const stats = emptyLiftSummary();
-  const index = buildConditionIndex(quads);
+  const resolver = buildDerivedReferenceResolver(quads);
 
   // Edges already present, so a re-import (or a record that already states an
   // indication) never produces a duplicate or a redundant parsed restatement.
@@ -361,30 +465,9 @@ export function liftTrappedLiterals(quads: Quad[]): { quads: Quad[]; stats: Lite
       }
       const subject = q.subject.value;
 
-      // Code-first: exact coding identity against the condition's own code.
-      // Measured on a real provider export, this is the signal that works;
-      // normalized-name matching alone resolved nothing there.
-      let matched: string | null = null;
-      let sawAmbiguous = false;
-      for (const code of payload.codes) {
-        const bucket = index.byCode.get(code);
-        const n = candidateCount(bucket, subject);
-        if (n > 1) { sawAmbiguous = true; continue; }
-        const sole = soleCandidate(bucket, subject);
-        if (sole) { matched = sole; break; }
-      }
-
-      // Fallback: exact normalized-name equality (never substring, which would
-      // trade precision for recall on clinical names).
-      if (!matched && payload.text) {
-        const bucket = index.byName.get(normalizeName(payload.text));
-        const n = candidateCount(bucket, subject);
-        if (n > 1) sawAmbiguous = true;
-        matched = soleCandidate(bucket, subject);
-      }
-
+      const { target: matched, ambiguous } = resolver.matchParsedIndication(subject, payload);
       if (!matched) {
-        if (sawAmbiguous) stats.parsedIndication.ambiguous++;
+        if (ambiguous) stats.parsedIndication.ambiguous++;
         else stats.parsedIndication.unmatched++;
         continue;
       }
@@ -407,15 +490,8 @@ export function liftTrappedLiterals(quads: Quad[]): { quads: Quad[]; stats: Lite
     // alongside it.
     if (q.predicate.value === LINKED_CONDITION_IDS && q.object.termType === 'Literal') {
       const subject = q.subject.value;
-      // Checkup emits comma-separated lowercased UUIDs; the deprecated
-      // property's own comment says space-separated. Accept both, plus stray
-      // semicolons, rather than trusting either wording.
-      const ids = q.object.value
-        .split(/[\s,;]+/)
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
-      for (const id of ids) {
-        const target = soleCandidate(index.byUuid.get(id), subject);
+      for (const id of splitLinkedConditionIds(q.object.value)) {
+        const target = resolver.matchLinkedConditionId(subject, id);
         if (!target) {
           stats.linkedCondition.unresolved++;
           continue;
@@ -439,11 +515,9 @@ export function liftTrappedLiterals(quads: Quad[]): { quads: Quad[]; stats: Lite
       !hasCodedCandidate.has(q.subject.value)
     ) {
       const subject = q.subject.value;
-      const bucket = index.byName.get(normalizeName(q.object.value));
-      const n = candidateCount(bucket, subject);
-      const target = soleCandidate(bucket, subject);
+      const { target, ambiguous } = resolver.matchIndicationText(subject, q.object.value);
       if (!target) {
-        if (n > 1) stats.parsedIndication.ambiguous++;
+        if (ambiguous) stats.parsedIndication.ambiguous++;
         else stats.parsedIndication.unmatched++;
       } else {
         const key = edgeKey(subject, PARSED_INDICATION_REFERENCE, target);
