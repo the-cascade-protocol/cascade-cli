@@ -19,7 +19,7 @@
 #   both StanceValue (per-link) and DirectionValue (aggregate); evidence:None
 #   is both a DirectionValue and a BasisValue; evidence:NeedsLiterature is both
 #   a deprecated VerdictValue and a NeedsEvidenceReasonValue. Local names match
-#   the consuming application's code mirror exactly.
+#   the code mirror (the consuming application's grounding contract) exactly.
 # v1-draft.0.1 (2026-06-16) — Initial draft: Assertion / EvidenceLink /
 #   Citation / GroundingActivity, flat VerdictValue + StanceValue enumerations,
 #   grounding invariant.
@@ -33,6 +33,18 @@
 @prefix dct:  <http://purl.org/dc/terms/> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 
+@prefix vs:       <http://www.w3.org/2003/06/sw-vocab-status/ns#> .
+# ============================================================================
+# Changelog
+# ============================================================================
+# v1.0-draft.0.3 (2026-08-20) — Per-term maturity. Every term now carries
+#   vs:term_status (W3C SemWeb Vocabulary Status, originating in FOAF):
+#   "unstable" for draft terms, "archaic" for terms already marked
+#   owl:deprecated. The convention is per-TERM by design, so a vocabulary
+#   can promote individual terms in place without a namespace change;
+#   Cascade previously stated maturity once per vocabulary, in prose no
+#   machine could read. No term definition changed.
+
 # ============================================================================
 # Ontology Metadata
 # ============================================================================
@@ -42,8 +54,8 @@
     dct:description "Layer 2 cross-cutting vocabulary for grounding assertions in cited evidence with explicit verdicts."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-06-16"^^xsd:date ;
-    dct:modified "2026-07-01"^^xsd:date ;
-    owl:versionInfo "1.0-draft.0.2" ;
+    dct:modified "2026-08-20"^^xsd:date ;
+    owl:versionInfo "1.0-draft.0.3" ;
     rdfs:comment "Generalizes the assertion -> evidence -> verdict pattern needed by Cascade Workbench (checking claims pulled from AI conversations against a patient's records and literature), the Cascade Appeal system (citing clinical evidence against policy criteria, cf. coverage:deniedClinicalContext), and PGx/genomics decision support. Reuses core provenance primitives (cascade:extractionModel, cascade:extractionConfidence, cascade:requiresUserReview, prov:wasDerivedFrom) rather than redefining them. Uses 'Assertion' (not 'Claim') to avoid collision with coverage:ClaimRecord. Draft: not in VOCAB_VERSIONS until v1.0 graduation."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/evidence/v1-draft/> .
 
@@ -55,62 +67,73 @@ evidence:Assertion a owl:Class ;
     rdfs:subClassOf prov:Entity ;
     rdfs:label "Assertion"@en ;
     rdfs:comment "A discrete, checkable statement extracted from a source (e.g. an AI conversation) or entered by the user, evaluated against evidence in the Pod and/or literature. Carries exactly one verdict and zero-or-more evidence links. The extraction of an Assertion from its source SHOULD be recorded with a cascade:AIExtractionActivity; an assertion surfaced by a general-purpose AI assistant SHOULD carry cascade:dataProvenance cascade:AIAsserted."@en ;
-    owl:versionInfo "Added in evidence v1-draft.0.1" .
+    owl:versionInfo "Added in evidence v1-draft.0.1" ;
+    vs:term_status "unstable" .
 
 evidence:EvidenceLink a owl:Class ;
     rdfs:label "Evidence Link"@en ;
     rdfs:comment "A reified link from an Assertion to one piece of evidence (a Pod record or an external Citation), carrying a stance (supports / contradicts / contextual). Modeled as a node so a single Assertion can carry multiple, differently-directed pieces of evidence. Pattern mirrors cascade:ConflictDetail."@en ;
-    owl:versionInfo "Added in evidence v1-draft.0.1" .
+    owl:versionInfo "Added in evidence v1-draft.0.1" ;
+    vs:term_status "unstable" .
 
 evidence:Citation a owl:Class ;
     rdfs:subClassOf prov:Entity ;
     rdfs:label "Citation"@en ;
     rdfs:comment "An external bibliographic source (e.g. a research paper) used as evidence, identified by DOI and/or PMID. When retrieved into the Pod it is a first-class resource (recommended path literature/) so an evidence chip can resolve to it exactly as it resolves to a clinical record."@en ;
-    owl:versionInfo "Added in evidence v1-draft.0.1" .
+    owl:versionInfo "Added in evidence v1-draft.0.1" ;
+    vs:term_status "unstable" .
 
 evidence:GroundingActivity a owl:Class ;
     rdfs:subClassOf prov:Activity ;
     rdfs:label "Grounding Activity"@en ;
     rdfs:comment "A PROV-O Activity representing the model pass that graded an Assertion against evidence and produced its verdict. Distinct from cascade:AIExtractionActivity (which extracts structured records from documents); grounding grades free-text assertions. Reuses cascade:extractionModel to record the model."@en ;
-    owl:versionInfo "Added in evidence v1-draft.0.1" .
+    owl:versionInfo "Added in evidence v1-draft.0.1" ;
+    vs:term_status "unstable" .
 
 evidence:VerdictValue a owl:Class ;
     owl:deprecated true ;
     rdfs:label "Verdict Value (deprecated)"@en ;
     rdfs:comment "DEPRECATED in v1-draft.0.2: the flat verdict enumeration is superseded by the facet model (evidence:direction / evidence:basis / evidence:strength / evidence:settled / evidence:reason). Retained one release so draft-period data carrying evidence:verdict still validates; clients derive the flat value from the facets in code and MUST NOT serialize it going forward. Scheduled for removal at v1.0 graduation."@en ;
-    owl:versionInfo "Added in evidence v1-draft.0.1; deprecated in v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.1; deprecated in v1-draft.0.2" ;
+    vs:term_status "archaic" .
 
 evidence:StanceValue a owl:Class ;
     rdfs:label "Stance Value"@en ;
     rdfs:comment "Closed enumeration of the direction of an EvidenceLink. Instances are the named individuals below."@en ;
-    owl:versionInfo "Added in evidence v1-draft.0.1" .
+    owl:versionInfo "Added in evidence v1-draft.0.1" ;
+    vs:term_status "unstable" .
 
 # ── Facet enumeration classes (verdict taxonomy v2, grounding plan §4.1) ─────
 
 evidence:DirectionValue a owl:Class ;
     rdfs:label "Direction Value"@en ;
     rdfs:comment "Closed enumeration of what the evidence, in aggregate, says about the Assertion: Supports | Contradicts | Mixed | None. The per-link analogue is StanceValue; evidence:Supports and evidence:Contradicts are shared individuals of both."@en ;
-    owl:versionInfo "Added in evidence v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.2" ;
+    vs:term_status "unstable" .
 
 evidence:BasisValue a owl:Class ;
     rdfs:label "Basis Value"@en ;
     rdfs:comment "Closed enumeration of where the evidence is: Record | Literature | RecordAndLiterature | None. New bases (guideline, clinician annotation) slot in here without breaking any flat enum."@en ;
-    owl:versionInfo "Added in evidence v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.2" ;
+    vs:term_status "unstable" .
 
 evidence:StrengthValue a owl:Class ;
     rdfs:label "Strength Value"@en ;
     rdfs:comment "Closed enumeration of the quantity/quality of the evidence: Strong | Moderate | Weak. On basis Record, strength is a pure deterministic function of the match (guardrail G-2), never model-emitted."@en ;
-    owl:versionInfo "Added in evidence v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.2" ;
+    vs:term_status "unstable" .
 
 evidence:SettledValue a owl:Class ;
     rdfs:label "Settled Value"@en ;
     rdfs:comment "Closed enumeration of whether the Assertion is resolved: Settled | NeedsEvidence."@en ;
-    owl:versionInfo "Added in evidence v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.2" ;
+    vs:term_status "unstable" .
 
 evidence:NeedsEvidenceReasonValue a owl:Class ;
     rdfs:label "Needs-Evidence Reason Value"@en ;
     rdfs:comment "Closed enumeration of why an Assertion still needs evidence, when it does: NoRecord | NeedsLiterature | NotCheckableByNature."@en ;
-    owl:versionInfo "Added in evidence v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.2" ;
+    vs:term_status "unstable" .
 
 # ============================================================================
 # Named Individuals (enumerations)
@@ -119,54 +142,73 @@ evidence:NeedsEvidenceReasonValue a owl:Class ;
 # Deprecated flat verdicts (v1-draft.0.2): retained one release for draft-period
 # data; derive from the facets in code, do not serialize. Removal at v1.0.
 evidence:Supported       a owl:NamedIndividual, evidence:VerdictValue ; owl:deprecated true ; rdfs:label "Supported (deprecated)"@en ;
-    rdfs:comment "DEPRECATED: use evidence:settled evidence:Settled + evidence:direction evidence:Supports. The patient's records and/or literature substantiate the assertion."@en .
+    rdfs:comment "DEPRECATED: use evidence:settled evidence:Settled + evidence:direction evidence:Supports. The patient's records and/or literature substantiate the assertion."@en ;
+    vs:term_status "archaic" .
 evidence:Contradicted    a owl:NamedIndividual, evidence:VerdictValue ; owl:deprecated true ; rdfs:label "Contradicted (deprecated)"@en ;
-    rdfs:comment "DEPRECATED: use evidence:settled evidence:Settled + evidence:direction evidence:Contradicts. The patient's records and/or literature directly conflict with the assertion."@en .
+    rdfs:comment "DEPRECATED: use evidence:settled evidence:Settled + evidence:direction evidence:Contradicts. The patient's records and/or literature directly conflict with the assertion."@en ;
+    vs:term_status "archaic" .
 evidence:Unverifiable    a owl:NamedIndividual, evidence:VerdictValue ; owl:deprecated true ; rdfs:label "Unverifiable (deprecated)"@en ;
-    rdfs:comment "DEPRECATED: use evidence:settled evidence:NeedsEvidence + evidence:reason evidence:NoRecord. No evidence available in the current Pod to support or refute. NOT a judgment that the assertion is false."@en .
+    rdfs:comment "DEPRECATED: use evidence:settled evidence:NeedsEvidence + evidence:reason evidence:NoRecord. No evidence available in the current Pod to support or refute. NOT a judgment that the assertion is false."@en ;
+    vs:term_status "archaic" .
 
 evidence:Supports    a owl:NamedIndividual, evidence:StanceValue, evidence:DirectionValue ; rdfs:label "Supports"@en ;
-    rdfs:comment "As a StanceValue: this one link supports. As a DirectionValue (v1-draft.0.2): the evidence in aggregate supports."@en .
+    rdfs:comment "As a StanceValue: this one link supports. As a DirectionValue (v1-draft.0.2): the evidence in aggregate supports."@en ;
+    vs:term_status "unstable" .
 evidence:Contradicts a owl:NamedIndividual, evidence:StanceValue, evidence:DirectionValue ; rdfs:label "Contradicts"@en ;
-    rdfs:comment "As a StanceValue: this one link contradicts. As a DirectionValue (v1-draft.0.2): the evidence in aggregate contradicts."@en .
+    rdfs:comment "As a StanceValue: this one link contradicts. As a DirectionValue (v1-draft.0.2): the evidence in aggregate contradicts."@en ;
+    vs:term_status "unstable" .
 evidence:Contextual  a owl:NamedIndividual, evidence:StanceValue ; rdfs:label "Contextual"@en ;
-    rdfs:comment "Relevant background that neither supports nor refutes."@en .
+    rdfs:comment "Relevant background that neither supports nor refutes."@en ;
+    vs:term_status "unstable" .
 
 # ── Facet individuals (v1-draft.0.2) ─────────────────────────────────────────
 
 evidence:Mixed a owl:NamedIndividual, evidence:DirectionValue ; rdfs:label "Mixed"@en ;
-    rdfs:comment "The evidence points in both directions; see the individual links."@en .
+    rdfs:comment "The evidence points in both directions; see the individual links."@en ;
+    vs:term_status "unstable" .
 evidence:None a owl:NamedIndividual, evidence:DirectionValue, evidence:BasisValue ; rdfs:label "None"@en ;
-    rdfs:comment "As a DirectionValue: the evidence says nothing. As a BasisValue: there is no evidence base. Shared individual; the property it appears on disambiguates."@en .
+    rdfs:comment "As a DirectionValue: the evidence says nothing. As a BasisValue: there is no evidence base. Shared individual; the property it appears on disambiguates."@en ;
+    vs:term_status "unstable" .
 
 evidence:Record a owl:NamedIndividual, evidence:BasisValue ; rdfs:label "Record"@en ;
-    rdfs:comment "The evidence is the patient's own Pod records (deterministic path, G-2)."@en .
+    rdfs:comment "The evidence is the patient's own Pod records (deterministic path, G-2)."@en ;
+    vs:term_status "unstable" .
 evidence:Literature a owl:NamedIndividual, evidence:BasisValue ; rdfs:label "Literature"@en ;
-    rdfs:comment "The evidence is published research; it has not been checked against the patient's records."@en .
+    rdfs:comment "The evidence is published research; it has not been checked against the patient's records."@en ;
+    vs:term_status "unstable" .
 evidence:RecordAndLiterature a owl:NamedIndividual, evidence:BasisValue ; rdfs:label "Record and Literature"@en ;
-    rdfs:comment "Both the patient's records and published research contribute evidence."@en .
+    rdfs:comment "Both the patient's records and published research contribute evidence."@en ;
+    vs:term_status "unstable" .
 
 evidence:Strong   a owl:NamedIndividual, evidence:StrengthValue ; rdfs:label "Strong"@en ;
-    rdfs:comment "On the record path: exact code + value/negation match."@en .
+    rdfs:comment "On the record path: exact code + value/negation match."@en ;
+    vs:term_status "unstable" .
 evidence:Moderate a owl:NamedIndividual, evidence:StrengthValue ; rdfs:label "Moderate"@en ;
-    rdfs:comment "On the record path: code match with value absent or approximate."@en .
+    rdfs:comment "On the record path: code match with value absent or approximate."@en ;
+    vs:term_status "unstable" .
 evidence:Weak     a owl:NamedIndividual, evidence:StrengthValue ; rdfs:label "Weak"@en ;
-    rdfs:comment "On the record path: lexical / recall-fallback match only."@en .
+    rdfs:comment "On the record path: lexical / recall-fallback match only."@en ;
+    vs:term_status "unstable" .
 
 evidence:Settled       a owl:NamedIndividual, evidence:SettledValue ; rdfs:label "Settled"@en ;
-    rdfs:comment "The claim is resolved by the cited evidence."@en .
+    rdfs:comment "The claim is resolved by the cited evidence."@en ;
+    vs:term_status "unstable" .
 evidence:NeedsEvidence a owl:NamedIndividual, evidence:SettledValue ; rdfs:label "Needs Evidence"@en ;
-    rdfs:comment "The claim is not resolved; evidence:reason says why. A NeedsEvidence assertion carries direction None (a grounded direction here is facet-inconsistent and fails validation)."@en .
+    rdfs:comment "The claim is not resolved; evidence:reason says why. A NeedsEvidence assertion carries direction None (a grounded direction here is facet-inconsistent and fails validation)."@en ;
+    vs:term_status "unstable" .
 
 evidence:NoRecord a owl:NamedIndividual, evidence:NeedsEvidenceReasonValue ; rdfs:label "No Record"@en ;
-    rdfs:comment "Nothing in the patient's records speaks to this. That does not make it wrong."@en .
+    rdfs:comment "Nothing in the patient's records speaks to this. That does not make it wrong."@en ;
+    vs:term_status "unstable" .
 evidence:NotCheckableByNature a owl:NamedIndividual, evidence:NeedsEvidenceReasonValue ; rdfs:label "Not Checkable By Nature"@en ;
-    rdfs:comment "Subjective, personal, or otherwise unverifiable by its nature (instruction, opinion, tautology, meta)."@en .
+    rdfs:comment "Subjective, personal, or otherwise unverifiable by its nature (instruction, opinion, tautology, meta)."@en ;
+    vs:term_status "unstable" .
 # evidence:NeedsLiterature doubles as a NeedsEvidenceReasonValue (below) and the
 # deprecated VerdictValue of the same local name; the code mirror uses the same
 # string for both, so one shared individual is exact.
 evidence:NeedsLiterature a owl:NamedIndividual, evidence:VerdictValue, evidence:NeedsEvidenceReasonValue ; rdfs:label "Needs Literature"@en ;
-    rdfs:comment "As a NeedsEvidenceReasonValue (v1-draft.0.2): the patient's records cannot settle this; it needs published evidence. As a VerdictValue it is DEPRECATED (use evidence:settled evidence:NeedsEvidence + evidence:reason evidence:NeedsLiterature)."@en .
+    rdfs:comment "As a NeedsEvidenceReasonValue (v1-draft.0.2): the patient's records cannot settle this; it needs published evidence. As a VerdictValue it is DEPRECATED (use evidence:settled evidence:NeedsEvidence + evidence:reason evidence:NeedsLiterature)."@en ;
+    vs:term_status "unstable" .
 
 # ============================================================================
 # Properties — Assertion
@@ -175,13 +217,15 @@ evidence:NeedsLiterature a owl:NamedIndividual, evidence:VerdictValue, evidence:
 evidence:assertionText a owl:DatatypeProperty ;
     rdfs:label "assertion text"@en ;
     rdfs:comment "The normalized, atomic statement being evaluated."@en ;
-    rdfs:domain evidence:Assertion ; rdfs:range xsd:string .
+    rdfs:domain evidence:Assertion ; rdfs:range xsd:string ;
+    vs:term_status "unstable" .
 
 evidence:verdict a owl:ObjectProperty ;
     owl:deprecated true ;
     rdfs:label "verdict (deprecated)"@en ;
     rdfs:comment "DEPRECATED in v1-draft.0.2: superseded by the facet properties (direction / basis / strength / settled / reason / confidence), which are the canonical serialized form. Retained one release so draft-period data validates; derive the flat value from the facets in code, do not serialize it. Removal at v1.0 graduation."@en ;
-    rdfs:domain evidence:Assertion ; rdfs:range evidence:VerdictValue .
+    rdfs:domain evidence:Assertion ; rdfs:range evidence:VerdictValue ;
+    vs:term_status "archaic" .
 
 # ── Facet properties (verdict taxonomy v2, v1-draft.0.2) ─────────────────────
 # The canonical grounding outcome. Grounding invariant (SHACL Core, see
@@ -193,61 +237,72 @@ evidence:direction a owl:ObjectProperty ;
     rdfs:label "direction"@en ;
     rdfs:comment "What the evidence, in aggregate, says about the assertion."@en ;
     rdfs:domain evidence:Assertion ; rdfs:range evidence:DirectionValue ;
-    owl:versionInfo "Added in evidence v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.2" ;
+    vs:term_status "unstable" .
 
 evidence:basis a owl:ObjectProperty ;
     rdfs:label "basis"@en ;
     rdfs:comment "Where the evidence is. Tells the UI which regime produced the result: Record is the deterministic path (G-2), Literature is model+search."@en ;
     rdfs:domain evidence:Assertion ; rdfs:range evidence:BasisValue ;
-    owl:versionInfo "Added in evidence v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.2" ;
+    vs:term_status "unstable" .
 
 evidence:strength a owl:ObjectProperty ;
     rdfs:label "strength"@en ;
     rdfs:comment "Quantity/quality of the evidence. On basis Record this is a pure deterministic function of the match (G-2), never model-emitted."@en ;
     rdfs:domain evidence:Assertion ; rdfs:range evidence:StrengthValue ;
-    owl:versionInfo "Added in evidence v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.2" ;
+    vs:term_status "unstable" .
 
 evidence:settled a owl:ObjectProperty ;
     rdfs:label "settled"@en ;
     rdfs:comment "Whether the assertion is resolved by the cited evidence."@en ;
     rdfs:domain evidence:Assertion ; rdfs:range evidence:SettledValue ;
-    owl:versionInfo "Added in evidence v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.2" ;
+    vs:term_status "unstable" .
 
 evidence:reason a owl:ObjectProperty ;
     rdfs:label "reason"@en ;
     rdfs:comment "Why the assertion still needs evidence, when settled is NeedsEvidence."@en ;
     rdfs:domain evidence:Assertion ; rdfs:range evidence:NeedsEvidenceReasonValue ;
-    owl:versionInfo "Added in evidence v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.2" ;
+    vs:term_status "unstable" .
 
 evidence:confidence a owl:DatatypeProperty ;
     rdfs:label "confidence"@en ;
     rdfs:comment "Confidence in the grounding result, [0.0, 1.0]. On basis Record this is a fixed function of match quality, never a model probability (G-2); on the literature path it may reflect model certainty. Distinct from evidence:groundingConfidence, which is the GroundingActivity's raw model confidence."@en ;
     rdfs:domain evidence:Assertion ; rdfs:range xsd:decimal ;
-    owl:versionInfo "Added in evidence v1-draft.0.2" .
+    owl:versionInfo "Added in evidence v1-draft.0.2" ;
+    vs:term_status "unstable" .
 
 evidence:rationale a owl:DatatypeProperty ;
     rdfs:label "rationale"@en ;
     rdfs:comment "One-line plain-language explanation of the verdict."@en ;
-    rdfs:domain evidence:Assertion ; rdfs:range xsd:string .
+    rdfs:domain evidence:Assertion ; rdfs:range xsd:string ;
+    vs:term_status "unstable" .
 
 evidence:disconfirming a owl:DatatypeProperty ;
     rdfs:label "disconfirming consideration"@en ;
     rdfs:comment "A 'what would argue against this' consideration. Multiple permitted. Required by product design for any material assertion (anti-confirmation-bias)."@en ;
-    rdfs:domain evidence:Assertion ; rdfs:range xsd:string .
+    rdfs:domain evidence:Assertion ; rdfs:range xsd:string ;
+    vs:term_status "unstable" .
 
 evidence:hasEvidenceLink a owl:ObjectProperty ;
     rdfs:label "has evidence link"@en ;
-    rdfs:domain evidence:Assertion ; rdfs:range evidence:EvidenceLink .
+    rdfs:domain evidence:Assertion ; rdfs:range evidence:EvidenceLink ;
+    vs:term_status "unstable" .
 
 evidence:groundedBy a owl:ObjectProperty ;
     rdfs:subPropertyOf prov:wasGeneratedBy ;
     rdfs:label "grounded by"@en ;
     rdfs:comment "Links an Assertion to the GroundingActivity that produced its verdict."@en ;
-    rdfs:domain evidence:Assertion ; rdfs:range evidence:GroundingActivity .
+    rdfs:domain evidence:Assertion ; rdfs:range evidence:GroundingActivity ;
+    vs:term_status "unstable" .
 
 evidence:assertedAt a owl:DatatypeProperty ;
     rdfs:label "asserted at"@en ;
-    rdfs:domain evidence:Assertion ; rdfs:range xsd:dateTime .
+    rdfs:domain evidence:Assertion ; rdfs:range xsd:dateTime ;
+    vs:term_status "unstable" .
 
 # Reuse (NOT redefined here): cascade:extractionModel, cascade:extractionConfidence,
 # and cascade:requiresUserReview carry the extraction provenance of an Assertion.
@@ -258,41 +313,51 @@ evidence:assertedAt a owl:DatatypeProperty ;
 
 evidence:evidenceStance a owl:ObjectProperty ;
     rdfs:label "evidence stance"@en ;
-    rdfs:domain evidence:EvidenceLink ; rdfs:range evidence:StanceValue .
+    rdfs:domain evidence:EvidenceLink ; rdfs:range evidence:StanceValue ;
+    vs:term_status "unstable" .
 
 evidence:citesRecord a owl:ObjectProperty ;
     rdfs:subPropertyOf prov:wasDerivedFrom ;
     rdfs:label "cites record"@en ;
     rdfs:comment "Points to a Pod record (clinical:, health:, pots:, genomics: ...) used as evidence. Range intentionally open (rdfs:Resource) for cross-namespace linking, mirroring coverage:deniedClinicalContext."@en ;
-    rdfs:domain evidence:EvidenceLink ; rdfs:range rdfs:Resource .
+    rdfs:domain evidence:EvidenceLink ; rdfs:range rdfs:Resource ;
+    vs:term_status "unstable" .
 
 evidence:citesSource a owl:ObjectProperty ;
     rdfs:label "cites source"@en ;
     rdfs:comment "Points to an external Citation (research paper) used as evidence."@en ;
-    rdfs:domain evidence:EvidenceLink ; rdfs:range evidence:Citation .
+    rdfs:domain evidence:EvidenceLink ; rdfs:range evidence:Citation ;
+    vs:term_status "unstable" .
 
 evidence:evidenceWeight a owl:DatatypeProperty ;
     rdfs:label "evidence weight"@en ;
     rdfs:comment "Optional 0.0-1.0 strength of this evidence link toward the verdict."@en ;
-    rdfs:domain evidence:EvidenceLink ; rdfs:range xsd:decimal .
+    rdfs:domain evidence:EvidenceLink ; rdfs:range xsd:decimal ;
+    vs:term_status "unstable" .
 
 # ============================================================================
 # Properties — Citation
 # ============================================================================
 
 evidence:doi a owl:DatatypeProperty ; rdfs:label "DOI"@en ;
-    rdfs:domain evidence:Citation ; rdfs:range xsd:string .
+    rdfs:domain evidence:Citation ; rdfs:range xsd:string ;
+    vs:term_status "unstable" .
 evidence:pmid a owl:DatatypeProperty ; rdfs:label "PMID"@en ;
-    rdfs:domain evidence:Citation ; rdfs:range xsd:string .
+    rdfs:domain evidence:Citation ; rdfs:range xsd:string ;
+    vs:term_status "unstable" .
 evidence:citationTitle a owl:DatatypeProperty ; rdfs:label "title"@en ;
-    rdfs:domain evidence:Citation ; rdfs:range xsd:string .
+    rdfs:domain evidence:Citation ; rdfs:range xsd:string ;
+    vs:term_status "unstable" .
 evidence:citationYear a owl:DatatypeProperty ; rdfs:label "year"@en ;
-    rdfs:domain evidence:Citation ; rdfs:range xsd:gYear .
+    rdfs:domain evidence:Citation ; rdfs:range xsd:gYear ;
+    vs:term_status "unstable" .
 evidence:citationSourceName a owl:DatatypeProperty ; rdfs:label "source name"@en ;
     rdfs:comment "Retrieval source, e.g. 'PubMed', 'Europe PMC'."@en ;
-    rdfs:domain evidence:Citation ; rdfs:range xsd:string .
+    rdfs:domain evidence:Citation ; rdfs:range xsd:string ;
+    vs:term_status "unstable" .
 evidence:retrievedAt a owl:DatatypeProperty ; rdfs:label "retrieved at"@en ;
-    rdfs:domain evidence:Citation ; rdfs:range xsd:dateTime .
+    rdfs:domain evidence:Citation ; rdfs:range xsd:dateTime ;
+    vs:term_status "unstable" .
 
 # ============================================================================
 # Properties — GroundingActivity
@@ -301,5 +366,6 @@ evidence:retrievedAt a owl:DatatypeProperty ; rdfs:label "retrieved at"@en ;
 evidence:groundingConfidence a owl:DatatypeProperty ;
     rdfs:label "grounding confidence"@en ;
     rdfs:comment "Model confidence in the produced verdict, [0.0, 1.0]."@en ;
-    rdfs:domain evidence:GroundingActivity ; rdfs:range xsd:decimal .
+    rdfs:domain evidence:GroundingActivity ; rdfs:range xsd:decimal ;
+    vs:term_status "unstable" .
 # Reuses cascade:extractionModel to record which model performed the grounding.

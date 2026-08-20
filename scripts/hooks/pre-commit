@@ -1,19 +1,44 @@
 #!/usr/bin/env bash
 # cascade-cli pre-commit hook
-# Checks that VOCAB_VERSIONS is updated when vocabulary files change.
+# Checks that VOCAB_VERSIONS is updated when a RATIFIED vocabulary file changes.
+#
+# Draft vocabularies are deliberately excluded. Per the draft policy, a
+# pre-stable vocabulary is NOT registered in VOCAB_VERSIONS until it graduates
+# at v1.0, so a draft-only sync has no VOCAB_VERSIONS line to update and the
+# only ways past this hook were to invent one (contradicting the policy) or to
+# pass --no-verify (disarming the check for the ratified files in the same
+# commit). Both are worse than knowing which vocabularies the rule applies to.
 
 set -euo pipefail
 
-SHAPES_CHANGED=$(git diff --cached --name-only | grep -E '^src/shapes/' || true)
+# The vocabularies VOCAB_VERSIONS actually tracks, read from the file rather
+# than hardcoded, so a newly graduated vocabulary is covered the day it lands.
+RATIFIED=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' VOCAB_VERSIONS 2>/dev/null \
+           | grep -E '^[a-z][a-z0-9-]*=[0-9]+\.[0-9]+$' | cut -d= -f1)
 
-if [[ -z "$SHAPES_CHANGED" ]]; then
-  exit 0
+if [[ -z "$RATIFIED" ]]; then
+  echo "ERROR: VOCAB_VERSIONS lists no vocabularies; refusing to pass a check" >&2
+  echo "       that would then be vacuous." >&2
+  exit 1
 fi
+
+STAGED=$(git diff --cached --name-only | grep -E '^src/shapes/' || true)
+[[ -n "$STAGED" ]] || exit 0
+
+RATIFIED_CHANGED=""
+for vocab in $RATIFIED; do
+  if echo "$STAGED" | grep -qE "^src/shapes/${vocab}(\.shapes)?\.ttl$"; then
+    RATIFIED_CHANGED="$RATIFIED_CHANGED $vocab"
+  fi
+done
+
+[[ -n "$RATIFIED_CHANGED" ]] || exit 0
 
 if ! git diff --cached --name-only | grep -q "VOCAB_VERSIONS"; then
   echo ""
-  echo "ERROR: src/shapes/ changed but VOCAB_VERSIONS was not updated."
-  echo "Update VOCAB_VERSIONS to reflect the vocabulary versions in the new shapes files,"
+  echo "ERROR: ratified vocabulary shapes changed ($RATIFIED_CHANGED) but"
+  echo "       VOCAB_VERSIONS was not updated."
+  echo "Update VOCAB_VERSIONS to reflect the versions in the new shapes files,"
   echo "then stage it: git add VOCAB_VERSIONS"
   echo ""
   exit 1
