@@ -473,12 +473,22 @@ genomics:HaplotypeShape a sh:NodeShape ;
     ] ;
 
     # WARNING: hasComponent recommended for full provenance.
+    #
+    # The acceptable component classes are ENUMERATED rather than left to
+    # subclass inference. sh:class is resolved over SHACL-instances in the DATA
+    # graph, so `sh:class genomics:Variant` alone accepts only nodes explicitly
+    # typed genomics:Variant. A component typed genomics:CopyNumberVariant
+    # would be rejected by a validator that performs no entailment and accepted
+    # by one that does. See validation/index.md, rule S3.
     sh:property [
         sh:path genomics:hasComponent ;
-        sh:class genomics:Variant ;
+        sh:or (
+            [ sh:class genomics:Variant ]
+            [ sh:class genomics:CopyNumberVariant ]
+        ) ;
         sh:severity sh:Warning ;
         sh:name "Component Variants"@en ;
-        sh:message "genomics:hasComponent is recommended; absence prevents downstream tools from auditing which constituent variants define this star allele"@en
+        sh:message "genomics:hasComponent is recommended; absence prevents downstream tools from auditing which constituent variants define this star allele. When present, each component must be a genomics:Variant or genomics:CopyNumberVariant."@en
     ] .
 
 # ============================================================================
@@ -526,14 +536,26 @@ genomics:DiplotypeShape a sh:NodeShape ;
 # ============================================================================
 # Shape 5: Copy Number Variant
 # ============================================================================
-# Note: CopyNumberVariant rdfs:subClassOf genomics:Variant in the ontology,
-# so VariantShape constraints apply transitively (geneSymbol, dataQualityTier,
-# at-least-one-stable-ID). This shape adds CNV-specific requirements.
+# CopyNumberVariant is rdfs:subClassOf genomics:Variant in the ontology, but a
+# subclass axiom does NOT carry VariantShape's constraints across. SHACL
+# resolves sh:targetClass over SHACL-instances in the DATA graph, and pod
+# records carry rdf:type triples, not schema axioms, so an axiom that lives
+# only in genomics.ttl reaches nothing at validation time. Until v1-draft.0.5
+# this shape asserted the inheritance in its comment and did not implement it,
+# with the result that CNVs were never checked for genomics:dataQualityTier
+# (a Violation-severity constraint the D-QUALITY-TIER safety rule on
+# VariantInterpretation depends on) or for carrying a stable identifier.
+# The inheritance is now stated explicitly with sh:node, which every conforming
+# validator applies whether or not it entails. See validation/index.md, rule S2.
 
 genomics:CopyNumberVariantShape a sh:NodeShape ;
     sh:targetClass genomics:CopyNumberVariant ;
     rdfs:label "Copy Number Variant Shape"@en ;
-    rdfs:comment "Validation constraints specific to genomics:CopyNumberVariant. Inherits VariantShape constraints (geneSymbol, dataQualityTier, at least one stable ID) via rdfs:subClassOf and adds the CNV-specific requirements: integer copy number, interval coordinates with reference."@en ;
+    rdfs:comment "Validation constraints specific to genomics:CopyNumberVariant. Applies VariantShape's constraints (geneSymbol, dataQualityTier, at least one stable ID) explicitly via sh:node, and adds the CNV-specific requirements: integer copy number, interval coordinates with reference."@en ;
+
+    # Applies every VariantShape constraint to this focus node. Explicit, so the
+    # constraint set does not depend on the validator performing entailment.
+    sh:node genomics:VariantShape ;
 
     # VIOLATION: copyNumber required, integer.
     sh:property [

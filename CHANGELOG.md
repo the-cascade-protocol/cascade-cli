@@ -7,6 +7,36 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.20.1] - 2026-08-20
+
+### Changed
+
+**Draft vocabularies re-synced from spec; every draft term now carries `vs:term_status`.**
+The five draft vocabularies in `spec` adopted per-term maturity annotations using
+[W3C SemWeb Vocabulary Status](http://www.w3.org/2003/06/sw-vocab-status/ns#) (`vs:term_status`,
+originating in FOAF): draft terms are `unstable`, terms already marked `owl:deprecated` are
+`archaic`. The vendored copies in `src/shapes/` are updated to match. A consumer reading these
+ontologies can now ask which individual terms are settled, instead of being told once per file that
+the whole vocabulary is provisional. Ontology versions: advisory 1.0-draft.0.2,
+evidence 1.0-draft.0.3, genomics 1.0-draft.0.5, workbench 1.0-draft.0.7. None of these vocabularies
+is registered in `VOCAB_VERSIONS`, so that file is unchanged.
+
+### Fixed
+
+**`genomics:HaplotypeShape` and `genomics:DiplotypeShape` rejected a valid component variant.**
+Not a change authored here: this shape was corrected in `spec` and the vendored copy in this package
+was never re-synced, so the fix had not reached anyone installing the CLI. `sh:class
+genomics:Variant` on `genomics:hasComponent` is resolved over instances in the DATA graph, so a
+component typed `genomics:CopyNumberVariant` was rejected by a validator that performs no entailment
+and accepted by one that does — the same star allele valid or invalid depending on the validator.
+The acceptable classes are now enumerated with `sh:or` rather than left to subclass inference, per
+`validation/index.md` rule S3.
+
+The drift is the more interesting half: nothing checks that this package's vendored shapes match the
+spec they were copied from, so a correction can sit unshipped indefinitely. Filed as a follow-up.
+
+---
+
 ## [0.20.0] - 2026-08-18
 
 ### Added
