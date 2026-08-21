@@ -35,7 +35,11 @@ function scan(dir: string): string[] {
 }
 
 describe('public repo carries no internal tracker references', () => {
-  for (const dir of ['src', 'tests', 'docs']) {
+  // `scripts/` is scanned for the same reason as the three above even though it
+  // is not in package.json `files`: it is public the moment it is pushed, and it
+  // was carrying two references when this line was added. Scanning only what
+  // ships confuses "not published to npm" with "not published".
+  for (const dir of ['src', 'tests', 'docs', 'scripts', '.github']) {
     it(`${dir}/ is free of them`, () => {
       expect(scan(dir)).toEqual([]);
     });

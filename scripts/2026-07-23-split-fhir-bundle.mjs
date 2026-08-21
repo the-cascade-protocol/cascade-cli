@@ -5,10 +5,10 @@
  * be exercised through the multi-file import path.
  *
  * `cascade pod import` resolves cross-record reference edges ONCE per import
- * invocation (root backlog 2.11, slice R5). A single Bundle resolves everything
- * in-batch; an Apple Health export is one resource per file, so the same edges
- * must resolve across files. This splitter turns a Bundle into that layout, which
- * lets a test assert the two layouts are equivalent (root backlog 3.22).
+ * invocation. A single Bundle resolves everything in-batch; an Apple Health
+ * export is one resource per file, so the same edges must resolve across files.
+ * This splitter turns a Bundle into that layout, which lets a test assert the
+ * two layouts are equivalent.
  *
  * The split is byte-deterministic: entries are emitted in bundle order, each file
  * is named `<ResourceType>-<id>.json`, and each holds the bare resource

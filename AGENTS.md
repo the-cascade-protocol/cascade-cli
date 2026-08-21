@@ -19,6 +19,7 @@ Do **not** load `llms-full.txt` from that site. It is roughly 1.3 MB, larger tha
 ## Ground rules
 
 - **Never hand-edit `src/shapes/`.** Those files are copies from `spec`. Run `sh scripts/sync-shapes-from-spec.sh` and update `VOCAB_VERSIONS`. Vocabulary is authored in `spec` and nowhere else.
+- **`npm run check:shapes-drift` decides whether the copy is current.** It walks `spec/ontologies/` itself rather than asking the sync script what it copied, and CI runs it against `spec` `main` on every PR. Exit 1 is drift, exit 2 is "could not check" and is equally fatal.
 - **To add a `--from <format>` importer, append to `src/lib/import-registry.ts`.** Do not edit `src/commands/convert.ts`; help text, validation and auto-detection derive from the registry.
 - **`deterministicUuid()` is a locked-in spec.** Changing it changes record identity in every SDK port at once. Coordinate before touching it.
 - **Build before you test.** Some suites spawn the built `dist/` output, so an unbuilt change is not under test and the suite can report green against code it never ran.

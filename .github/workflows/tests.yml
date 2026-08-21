@@ -108,3 +108,53 @@ jobs:
             echo "::error::Only ${skipped} tests skipped, expected ${EXPECTED_SKIPPED_TESTS}. Good news: lower EXPECTED_SKIPPED_TESTS here in the same change that closed the gap."
             exit 1
           fi
+
+  # Drift between this repository's vendored `src/shapes/` and the `spec` those
+  # files were copied from was, until 2026-08-20, checked by nothing at all. A
+  # correction to `genomics.shapes.ttl` sat unshipped here for roughly three
+  # weeks, and the copy in the published package told two conformant SHACL
+  # validators different things about the same star allele.
+  #
+  # This job is deliberately its own job rather than a step of `test`: it needs a
+  # second repository checked out, and a red here means "spec moved and this
+  # repository has not caught up", which is a different fact from a failing test
+  # and should read as one.
+  #
+  # `spec` is checked out at the default branch on purpose. Pinning a commit here
+  # would make the job deterministic and useless: it would go green against a
+  # `spec` that had moved on, which is precisely the failure being fixed. If this
+  # job is red on a PR that did not touch shapes, the correct response is to run
+  # the sync, not to relax the gate.
+  vendored-shapes:
+    name: Vendored shapes match spec
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout cascade-cli
+        uses: actions/checkout@v4
+        with:
+          path: cascade-cli
+
+      - name: Checkout spec
+        uses: actions/checkout@v4
+        with:
+          repository: the-cascade-protocol/spec
+          path: spec
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: cascade-cli/package-lock.json
+
+      # The checker parses both copies of every file, so it needs n3. Nothing
+      # else is built or run here.
+      - name: Install dependencies
+        working-directory: cascade-cli
+        run: npm ci
+
+      # Exit 2 (cannot check) is as fatal as exit 1 (drift). A checker that
+      # cannot see spec must not report "no drift".
+      - name: Check vendored shapes against spec
+        working-directory: cascade-cli
+        run: node scripts/check-shapes-drift.mjs --spec ../spec
