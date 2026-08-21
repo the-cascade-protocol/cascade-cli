@@ -4,19 +4,12 @@
 
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { parseHeaderLines, classifySource } from '../src/lib/vcf-converter/header.js';
 import { inflateGzip } from '../src/lib/vcf-converter/detect.js';
+import { conformancePath } from './helpers/conformance.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const VCF_GZ_FIXTURE = path.resolve(
-  __dirname,
-  '../../conformance/fixtures/genomics/vcf/sample-clinvar.input.vcf.gz',
-);
+const VCF_GZ_FIXTURE = conformancePath('fixtures/genomics/vcf/sample-clinvar.input.vcf.gz');
 
 describe('parseHeaderLines', () => {
   it('parses a minimal v4.1 header with reference + source', () => {

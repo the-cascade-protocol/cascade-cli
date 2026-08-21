@@ -7,6 +7,35 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.20.2] - 2026-08-20
+
+### Fixed
+
+**A fresh clone reported hundreds of test failures that had nothing to do with the code.**
+`npm ci && npm test` on a clean checkout produced 313 failing tests across 65 files, because the
+suite has prerequisites that CI satisfies as separate workflow steps and a developer does not:
+a built `dist/`, which 25 of those files spawn instead of the sources, and a sibling `conformance`
+checkout, which the other 40 read fixtures from. Nothing in the output named either one, so the
+repository read as broken.
+
+`npm test` now runs the build first via a `pretest` hook, which removes the `dist/` class of
+failure outright. The remaining prerequisites are checked once, before the first test, and report
+everything that is missing in a single message naming the exact command to clone or install
+it (`tests/setup/preflight.ts`). Missing prerequisites fail rather than skip, so this cannot turn
+into the false green the CI skip ratchet already guards against from the other direction.
+
+**Fixture paths did not resolve from a git worktree.** All 42 fixture-backed suites hardcoded
+`path.resolve(__dirname, '../../conformance/...')`, which from a worktree points inside the
+worktrees directory rather than at the sibling checkout, so working in a worktree meant symlinking
+the fixtures into place by hand. Resolution now goes through one helper
+(`tests/helpers/conformance.ts`) that falls back to the main checkout's sibling when it is run from
+a worktree. `CASCADE_CONFORMANCE_DIR` was previously honored by 5 of the 42 suites; it now
+overrides all of them.
+
+No shipped CLI behavior changes; `dist/` output is byte-identical.
+
+---
+
 ## [0.20.1] - 2026-08-20
 
 ### Changed

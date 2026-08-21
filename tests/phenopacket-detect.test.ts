@@ -14,11 +14,12 @@ import {
 } from '../src/lib/phenopacket-converter/detect.js';
 import { phenopacketImporter } from '../src/lib/phenopacket-converter/registry-entry.js';
 import { getImporter, listFormats, autoDetect } from '../src/lib/import-registry.js';
+import { conformancePath } from './helpers/conformance.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const FIXTURES_DIR = path.resolve(__dirname, '../../conformance/fixtures/genomics/phenopackets');
+const FIXTURES_DIR = conformancePath('fixtures/genomics/phenopackets');
 const NON_GENOMICS_FHIR = path.resolve(__dirname, '../test-fixtures/fhir-bundle-example.json');
 
 /**
