@@ -27,12 +27,13 @@ import { fileURLToPath } from 'node:url';
 import { Parser } from 'n3';
 import { convertCcda } from '../src/lib/ccda-converter/index.js';
 import { loadShapes, validateTurtle } from '../src/lib/shacl-validator.js';
+import { conformancePath } from './helpers/conformance.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Fixtures live in the conformance repo, two levels up from cascade-cli/tests/
-const FIXTURES_DIR = path.resolve(__dirname, '../../conformance/fixtures/ccda');
+const FIXTURES_DIR = conformancePath('fixtures/ccda');
 
 // This repo's own synthetic fixtures (co-located, committed here).
 const LOCAL_FIXTURES_DIR = path.resolve(__dirname, '../test-fixtures');

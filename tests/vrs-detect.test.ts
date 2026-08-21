@@ -5,20 +5,13 @@
 
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { detectVrs } from '../src/lib/vrs-converter/detect.js';
 import { vrsImporter } from '../src/lib/vrs-converter/registry-entry.js';
 import { getImporter, listFormats, autoDetect } from '../src/lib/import-registry.js';
+import { conformancePath } from './helpers/conformance.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const VRS_FIXTURE = path.resolve(
-  __dirname,
-  '../../conformance/fixtures/genomics/vrs/example-allele-BRCA2-deletion.input.json',
-);
+const VRS_FIXTURE = conformancePath('fixtures/genomics/vrs/example-allele-BRCA2-deletion.input.json');
 
 describe('detectVrs', () => {
   it('returns true for the corpus BRCA2 Allele fixture', () => {

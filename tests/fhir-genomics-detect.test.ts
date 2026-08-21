@@ -11,11 +11,12 @@ import { fileURLToPath } from 'node:url';
 import { detectFhirGenomics } from '../src/lib/fhir-genomics-converter/detect.js';
 import { fhirGenomicsImporter } from '../src/lib/fhir-genomics-converter/registry-entry.js';
 import { getImporter, listFormats, autoDetect } from '../src/lib/import-registry.js';
+import { conformancePath } from './helpers/conformance.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const FIXTURES_DIR = path.resolve(__dirname, '../../conformance/fixtures/genomics/fhir-genomics-ig');
+const FIXTURES_DIR = conformancePath('fixtures/genomics/fhir-genomics-ig');
 const NON_GENOMICS_FHIR = path.resolve(__dirname, '../test-fixtures/fhir-bundle-example.json');
 
 const ALL_BUNDLES = [

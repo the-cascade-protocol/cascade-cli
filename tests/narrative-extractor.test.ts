@@ -9,7 +9,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 
 import { extractNarrativeText, collectNarrativeBlocks } from '../src/lib/ccda-converter/narrative-extractor.js';
@@ -19,11 +18,9 @@ import {
   EPIC_STATUS_CODES,
 } from '../src/lib/ccda-converter/vendor-normalizer.js';
 import { convertCcda } from '../src/lib/ccda-converter/index.js';
+import { conformancePath } from './helpers/conformance.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const FIXTURES_DIR = path.resolve(__dirname, '../../conformance/fixtures/ccda');
+const FIXTURES_DIR = conformancePath('fixtures/ccda');
 
 function readFixture(name: string): string {
   return fs.readFileSync(path.join(FIXTURES_DIR, name), 'utf-8');

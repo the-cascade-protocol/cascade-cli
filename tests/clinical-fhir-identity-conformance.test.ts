@@ -57,12 +57,13 @@ import { Parser } from 'n3';
 
 import { fhirImporter } from '../src/lib/fhir-converter/registry-entry.js';
 import type { ImportContext } from '../src/lib/import-types.js';
+import { conformancePath } from './helpers/conformance.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const FIXTURES_DIR = process.env.CASCADE_CONFORMANCE_DIR
   ? path.resolve(process.env.CASCADE_CONFORMANCE_DIR, 'fixtures/clinical-fhir')
-  : path.resolve(__dirname, '../../conformance/fixtures/clinical-fhir');
+  : conformancePath('fixtures/clinical-fhir');
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 

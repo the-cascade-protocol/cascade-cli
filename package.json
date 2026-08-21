@@ -1,6 +1,6 @@
 {
   "name": "@the-cascade-protocol/cli",
-  "version": "0.20.1",
+  "version": "0.20.2",
   "description": "Cascade Protocol CLI - Validate, convert, and manage health data",
   "bin": {
     "cascade": "dist/index.js"
@@ -13,6 +13,7 @@
     "build": "tsc && npm run copy-shapes && npm run copy-data",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
+    "pretest": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src/",

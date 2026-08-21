@@ -12,16 +12,13 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import type { ImportContext } from '../src/lib/import-types.js';
 import { phenopacketImporter } from '../src/lib/phenopacket-converter/registry-entry.js';
 import { autoDetect } from '../src/lib/import-registry.js';
+import { conformancePath } from './helpers/conformance.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const FIXTURES_DIR = path.resolve(__dirname, '../../conformance/fixtures/genomics/phenopackets');
+const FIXTURES_DIR = conformancePath('fixtures/genomics/phenopackets');
 
 const ctx: ImportContext = {
   inputPath: '<test>',

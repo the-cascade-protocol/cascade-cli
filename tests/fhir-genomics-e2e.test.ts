@@ -15,7 +15,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { fhirGenomicsImporter } from '../src/lib/fhir-genomics-converter/registry-entry.js';
 import {
@@ -24,10 +23,9 @@ import {
   autoDetect,
 } from '../src/lib/import-registry.js';
 import type { ImportContext } from '../src/lib/import-types.js';
+import { conformancePath } from './helpers/conformance.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const FIXTURES_DIR = path.resolve(__dirname, '../../conformance/fixtures/genomics/fhir-genomics-ig');
+const FIXTURES_DIR = conformancePath('fixtures/genomics/fhir-genomics-ig');
 
 const baseCtx: ImportContext = {
   inputPath: '<test>',

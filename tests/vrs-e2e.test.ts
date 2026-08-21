@@ -8,22 +8,15 @@
 
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Parser as N3Parser } from 'n3';
 
 import { vrsImporter } from '../src/lib/vrs-converter/registry-entry.js';
 import { computeSimpleVrsDigest } from '../src/lib/vrs-converter/allele.js';
 import { GENOMICS_NS } from '../src/lib/fhir-genomics-converter/types.js';
 import type { ImportContext } from '../src/lib/import-types.js';
+import { conformancePath } from './helpers/conformance.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const VRS_FIXTURE = path.resolve(
-  __dirname,
-  '../../conformance/fixtures/genomics/vrs/example-allele-BRCA2-deletion.input.json',
-);
+const VRS_FIXTURE = conformancePath('fixtures/genomics/vrs/example-allele-BRCA2-deletion.input.json');
 
 const STRICT_CTX: ImportContext = {
   inputPath: VRS_FIXTURE,

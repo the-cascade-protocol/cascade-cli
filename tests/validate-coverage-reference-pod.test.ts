@@ -47,9 +47,10 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { loadShapes, validateFile, findTurtleFiles } from '../src/lib/shacl-validator.js';
+import { conformancePath } from './helpers/conformance.js';
 
 const CLI_PATH = resolve(__dirname, '../dist/index.js');
-const REFERENCE_POD = resolve(__dirname, '../../conformance/reference-patient-pod');
+const REFERENCE_POD = conformancePath('reference-patient-pod');
 const skipIfNoPod = !existsSync(REFERENCE_POD);
 
 const CASCADE_NS = 'https://ns.cascadeprotocol.org/';

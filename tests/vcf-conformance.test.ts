@@ -33,27 +33,18 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { vcfImporter } from '../src/lib/vcf-converter/registry-entry.js';
 import type {
   ImportContext,
   VocabularyGap,
 } from '../src/lib/import-types.js';
+import { conformancePath } from './helpers/conformance.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const DEFAULT_FIXTURES_DIR = path.resolve(
-  __dirname,
-  '../../conformance/fixtures/genomics/vcf',
-);
 // No realpath canonicalization needed: derived IRIs no longer depend on the
 // path the fixture is read through, so any path that reaches the same bytes
 // produces the same graph.
-const FIXTURES_DIR = process.env.CASCADE_CONFORMANCE_DIR
-  ? path.resolve(process.env.CASCADE_CONFORMANCE_DIR, 'fixtures/genomics/vcf')
-  : DEFAULT_FIXTURES_DIR;
+const FIXTURES_DIR = conformancePath('fixtures/genomics/vcf');
 
 const FIXTURES = [
   {

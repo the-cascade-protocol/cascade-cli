@@ -5,21 +5,14 @@
 
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import path from 'node:path';
 import zlib from 'node:zlib';
-import { fileURLToPath } from 'node:url';
 
 import { detectVcf, isGzipped, inflateGzip } from '../src/lib/vcf-converter/detect.js';
 import { vcfImporter } from '../src/lib/vcf-converter/registry-entry.js';
 import { getImporter, listFormats, autoDetect } from '../src/lib/import-registry.js';
+import { conformancePath } from './helpers/conformance.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const VCF_GZ_FIXTURE = path.resolve(
-  __dirname,
-  '../../conformance/fixtures/genomics/vcf/sample-clinvar.input.vcf.gz',
-);
+const VCF_GZ_FIXTURE = conformancePath('fixtures/genomics/vcf/sample-clinvar.input.vcf.gz');
 
 describe('detectVcf', () => {
   it('returns true for a plain VCFv4.1 header', () => {

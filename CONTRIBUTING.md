@@ -11,7 +11,7 @@ Open an issue before starting anything larger than a bug fix, so the approach ca
 
 ## Development setup
 
-**`conformance` must be cloned as a sibling directory**, not inside this one. Several suites resolve fixtures at `../../conformance/fixtures/`, and CI reproduces that layout exactly.
+**`conformance` must be cloned as a sibling directory**, not inside this one. Several suites read fixtures from it, and CI reproduces that layout exactly.
 
 ```
 <parent>/
@@ -25,8 +25,19 @@ git clone https://github.com/the-cascade-protocol/conformance.git
 cd cascade-cli
 
 npm ci          # not npm install, and never a symlinked node_modules
-npm run build
 ```
+
+`npm test` builds first, so `npm run build` is no longer a separate step you have to
+remember. If a prerequisite is missing the suite stops before the first test and names
+what to clone or install, rather than failing several hundred times.
+
+Fixtures are resolved in `tests/helpers/conformance.ts`, in this order:
+
+1. `CASCADE_CONFORMANCE_DIR`, if set, for a checkout parked anywhere else.
+2. A sibling of your checkout.
+3. A sibling of the **main** checkout, when you are working in a git worktree. A
+   worktree has no sibling `conformance` of its own, so this is what lets a worktree
+   find fixtures you cloned as documented, without symlinking them into place.
 
 Two further requirements:
 
@@ -39,14 +50,13 @@ Install the hooks once: `sh scripts/install-hooks.sh`. The pre-commit hook block
 
 ```bash
 npm ci
-npm run build
 npm test
 ```
 
 `npm test` runs the full vitest suite. Two things to know about reading its output:
 
 - **Green is not the same as complete.** A subset of suites is guarded by `describe.skipIf` and vanishes rather than fails when its inputs are absent, so a passing run can hide a suite that stopped executing. CI ratchets the skip count and fails in **both** directions: growth means something stopped running, and a decrease means a gap closed and the baseline must be lowered in the same change.
-- **Build before you test.** Some tests spawn the built `dist/` output rather than the sources, so a change that is not built is not under test, and the suite can report green against code you did not run.
+- **`dist/` is what several suites actually run.** Some tests spawn the built output rather than the sources, so a change that is not built is not under test. `npm test` builds first for you; `npx vitest run` does not, and the preflight check will stop you if `dist/` is missing.
 
 ## Commit messages
 

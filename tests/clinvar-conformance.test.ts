@@ -27,27 +27,15 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { clinvarImporter } from '../src/lib/clinvar-converter/registry-entry.js';
 import type {
   ImportContext,
   VocabularyGap,
 } from '../src/lib/import-types.js';
+import { conformancePath } from './helpers/conformance.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const DEFAULT_FIXTURES_DIR = path.resolve(
-  __dirname,
-  '../../conformance/fixtures/genomics/clinvar',
-);
-const FIXTURES_DIR = process.env.CASCADE_CONFORMANCE_DIR
-  ? path.resolve(
-      process.env.CASCADE_CONFORMANCE_DIR,
-      'fixtures/genomics/clinvar',
-    )
-  : DEFAULT_FIXTURES_DIR;
+const FIXTURES_DIR = conformancePath('fixtures/genomics/clinvar');
 
 const VCVS = [
   'VCV000007105-CFTR-deltaF508',
