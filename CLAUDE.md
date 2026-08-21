@@ -60,12 +60,32 @@ sh scripts/sync-shapes-from-spec.sh
 - [ ] Update CHANGELOG.md
 - [ ] Bump version in `package.json` (patch for shapes-only; minor for new CLI behavior)
 - [ ] Install hooks if you haven't: `sh scripts/install-hooks.sh`
+- [ ] Confirm the copy is now current: `npm run check:shapes-drift`
 
 The pre-commit hook will block commits that change `src/shapes/` without updating `VOCAB_VERSIONS`.
 
+### Checking the vendored copy is current
+
+```sh
+npm run check:shapes-drift                        # spec resolved at ../spec
+CASCADE_SPEC_DIR=/path/to/spec npm run check:shapes-drift
+```
+
+`scripts/check-shapes-drift.mjs` compares every file in `src/shapes/` against a `spec` checkout it
+walks itself. It deliberately shares no vocabulary list and no code path with
+`sync-shapes-from-spec.sh`: a checker that asks the generator what the generator copied can only
+confirm the generator is self-consistent, which is how the sync script's two lists fell out of step
+and `src/shapes/health.ttl` went un-synced entirely.
+
+Exit 1 is drift. Exit 2 is "could not check" — no `spec` checkout, or a walk that turned up
+implausibly little — and is a failure in the same way, never a pass. CI runs it against `spec`
+`main` on every pull request (`vendored-shapes` job).
+
 ### Current vocabulary versions
 
-Check `VOCAB_VERSIONS` at the repo root. Compare against `spec/VOCAB_VERSIONS` to see what's behind.
+Check `VOCAB_VERSIONS` at the repo root. `npm run check:shapes-drift` compares it against
+`spec/VOCAB_VERSIONS` row by row, and against the `owl:versionInfo` each bundled ontology actually
+declares.
 
 ## Commit Conventions
 

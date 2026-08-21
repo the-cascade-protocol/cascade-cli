@@ -94,6 +94,17 @@ git diff src/shapes/          # review what moved
 
 Then update `VOCAB_VERSIONS` to the versions now embedded, and verify `cascade validate` passes against the current conformance fixtures.
 
+To check whether the vendored copy is already current:
+
+```bash
+npm run check:shapes-drift                       # spec resolved at ../spec
+CASCADE_SPEC_DIR=/path/to/spec npm run check:shapes-drift
+```
+
+It compares `src/shapes/` against a `spec` checkout it walks itself, and CI runs it against `spec` `main` on every pull request, so drift fails the build instead of shipping. Exit 1 means drift; exit 2 means it could not check (no `spec` checkout, or a walk that turned up implausibly little) and is treated as a failure too, because a checker that cannot see `spec` must not report that nothing has moved.
+
+A `spec` clone is optional for the rest of the suite and required for this check. If you do not have one, say so in the PR body and let CI run it.
+
 If your change needs a new class or property that does not exist yet, it starts in `spec`. Read [`spec/CONTRIBUTING.md`](https://github.com/the-cascade-protocol/spec/blob/main/CONTRIBUTING.md) for the full seven-step propagation sequence; this repository is step 4 of it.
 
 `deterministicUuid()` in `src/lib/fhir-converter/types.ts` is the canonical Cascade URI derivation algorithm. It is deliberately not RFC 4122 v5. **Do not change it without coordinating every SDK port**, because the same input must derive the same URI in all of them. Contract tests live in `tests/uri-generation.test.ts`.

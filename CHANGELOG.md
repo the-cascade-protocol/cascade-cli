@@ -7,6 +7,37 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.20.3] - 2026-08-20
+
+### Added
+
+**A gate that fails when the vendored `src/shapes/` no longer matches the `spec` it was copied
+from.** `src/shapes/` is a vendored copy of every ontology and shapes file authored in
+[`spec`](https://github.com/the-cascade-protocol/spec), and until now nothing checked that the copy
+was current. The existing `tests/shapes-sync.test.ts` checks the bundle is internally consistent,
+which is a different question and stays green while the whole bundle is uniformly stale. That gap
+is what let the `genomics:hasComponent` correction released in 0.20.1 sit unshipped for roughly
+three weeks: the published package told a validator performing no entailment and one performing
+RDFS entailment different things about the same star allele.
+
+`scripts/check-shapes-drift.mjs` (`npm run check:shapes-drift`) compares each vendored file against
+a `spec` checkout **it walks itself**. It shares no vocabulary list and no code path with
+`scripts/sync-shapes-from-spec.sh`, deliberately: a checker that asks the generator what the
+generator produced can only confirm the generator is self-consistent. It asserts that every `.ttl`
+published under `spec/ontologies/` is bundled here, that every bundled file has an upstream, that
+each pair is byte-identical, that both copies parse, and that `VOCAB_VERSIONS` agrees with
+`spec/VOCAB_VERSIONS` and with the `owl:versionInfo` each bundled ontology declares. It fails rather
+than passes when it cannot check, and refuses to report success from a walk that found implausibly
+little.
+
+CI runs it against `spec` `main` on every pull request as the `vendored-shapes` job, so drift fails
+the build instead of being found by accident.
+
+No vocabulary changed in this release: all 20 vendored files are byte-identical to `spec` at
+core 3.6 / health 2.7 / clinical 1.15 / coverage 1.4 / checkup 3.3 / pots 1.4.
+
+---
+
 ## [0.20.2] - 2026-08-20
 
 ### Fixed
