@@ -7,6 +7,56 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.20.4] - 2026-08-21
+
+### Security
+
+**`adm-zip` is bumped past CVE-2026-39244, which was reachable from `cascade convert`.**
+`package.json` declared `^0.5.16`, and the advisory (GHSA-xpcp-8h2w-3j85, CVSS 7.5) covers every
+version below 0.6.0: `zipEntry.js` allocated `Buffer.alloc(_centralHeader.size)` from the ZIP
+central directory's *declared* uncompressed size, with no bounds check and no comparison against
+the actual compressed size, before validating the CRC. A ~120-byte archive could declare ~4GB and
+get it.
+
+This was not merely present in the dependency tree. `cascade convert` accepts a `.zip`
+(`src/commands/convert.ts`), reads it into a Buffer, and the C/CDA converter calls `new AdmZip(...)`
+then `entry.getData()` on each `.xml` entry (`src/lib/ccda-converter/index.ts`), and `getData()` is
+one of the methods the advisory names. The IHE XDM adapter exists precisely so a user can hand the
+tool a ZIP a hospital portal gave them, so untrusted input reaches that allocation by design.
+
+Note that `^0.5.16` could never have resolved to the fix on its own: a caret range on a `0.x`
+version pins the minor, so no lockfile refresh would have produced it.
+
+`tests/adm-zip-declared-size.test.ts` pins the behaviour. It asserts on **allocation**, not on
+whether the archive is rejected, because the obvious assertion is worthless here: a crafted archive
+throws `CRC32 checksum failed` on the vulnerable version too. The difference is that 0.5.16 requested
+67,108,864 bytes from a 121-byte file on the way to that outcome, exactly as the advisory describes
+(the allocation happens *before* CRC validation, so the payload cannot be rejected early). Both
+allocation tests were observed RED on 0.5.16 and GREEN on 0.6.0 before being trusted.
+
+Two things were found while writing that test and are worth recording, since both would have
+produced a tripwire that passed while the defect was live. The crafted entry must be named `*.xml`,
+or the converter never calls `getData()` on it and the convert-path test is vacuous. And the
+measurement must spy on `Buffer.alloc` rather than sample `process.memoryUsage()`, because when the
+allocation is followed by a throw the orphaned buffer can be collected before the "after" sample,
+which made the convert-path case measure ~0 on a version that demonstrably allocated 64 MB.
+
+### Removed
+
+**`pdfjs-dist` is dropped from `dependencies`.** It was referenced by no source file and appeared
+nowhere in the built `dist/`, while carrying a HIGH advisory ("PDF.js: Arbitrary JavaScript execution
+upon opening a malicious PDF") into every install of the package. There is no PDF path in the CLI
+today; when one is built, the dependency comes back with the code that uses it.
+
+**`@types/adm-zip` is dropped from `devDependencies`.** `adm-zip` 0.6.0 bundles its own
+`types.d.ts`, where 0.5.16 shipped none, so the separate stub package is now redundant. Verified by
+typechecking with it removed.
+
+Together these take `npm audit --omit=dev` from 15 advisories to 13, and remove both of the two
+DIRECT high-severity ones. The remainder are transitive and tracked separately.
+
+---
+
 ## [0.20.3] - 2026-08-20
 
 ### Added
