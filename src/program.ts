@@ -15,6 +15,7 @@ import { registerValidateCommand } from './commands/validate.js';
 import { registerConvertCommand } from './commands/convert.js';
 import { registerReconcileCommand } from './commands/reconcile.js';
 import { registerPodCommand } from './commands/pod/index.js';
+import { registerSourcesCommand } from './commands/sources.js';
 import { registerConformanceCommand } from './commands/conformance.js';
 import { registerServeCommand } from './commands/serve.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';
@@ -37,6 +38,7 @@ export function buildProgram(): Command {
   registerConvertCommand(program);
   registerReconcileCommand(program);
   registerPodCommand(program);
+  registerSourcesCommand(program);
   registerConformanceCommand(program);
   registerServeCommand(program);
   registerCapabilitiesCommand(program);
@@ -57,6 +59,7 @@ Examples:
   cascade pod extract ./my-pod
   cascade pod doctor ./my-pod
   cascade pod doctor ./my-pod --write
+  cascade sources coverage ./my-pod
   cascade agent
   cascade agent serve
   cascade capabilities
