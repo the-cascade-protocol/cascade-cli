@@ -320,6 +320,28 @@ export function convertImmunization(resource: any): ConversionResult & { _quads:
 // Coverage converter
 // ---------------------------------------------------------------------------
 
+/**
+ * ACKNOWLEDGED DROP: `Coverage.status` (active | cancelled | draft |
+ * entered-in-error).
+ *
+ * Whether a plan is still in force is worth storing — a cancelled policy
+ * displayed like a current one is a wrong answer to the only question anyone
+ * asks an insurance record. It is not emitted because there is no predicate
+ * that can carry it truthfully:
+ *
+ *   - The coverage: namespace defines no status property for
+ *     `coverage:InsurancePlan`. `coverage:claimStatus` is domain-restricted to
+ *     `coverage:ClaimRecord` and `coverage:adjudicationStatus` to
+ *     `coverage:BenefitStatement`; both would be false here.
+ *   - `clinical:status` declares no domain, but clinical: is the EHR clinical
+ *     record namespace and an insurance plan is not one of its records. The
+ *     health:/clinical: split is documented as historical rather than semantic;
+ *     coverage: carries no such note, so borrowing across it would be a
+ *     judgement made in a converter about vocabulary scope.
+ *
+ * The fix is a `coverage:status` term, authored through the vocabulary
+ * checklist. Until then this is a stated omission rather than a silent one.
+ */
 export function convertCoverage(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const subjectUri = mintSubjectUri(resource, warnings);

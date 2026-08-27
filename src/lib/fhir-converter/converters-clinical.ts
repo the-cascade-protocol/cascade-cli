@@ -52,6 +52,39 @@ import {
 import { interpretationValue } from './interpretation.js';
 
 // ---------------------------------------------------------------------------
+// Record lifecycle status
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY `clinical:status` CARRIES FHIR's `.status` ON EVERY TYPE THAT HAS ONE
+ * ------------------------------------------------------------------------
+ * An `amended` result and a `final` one are different claims about the same
+ * measurement, and until this was emitted they were byte-identical in the pod:
+ * measured on one real account, 1 amended Observation and 9 amended
+ * DocumentReferences were indistinguishable from final ones. Nothing about that
+ * needed new vocabulary; the field was simply never read.
+ *
+ * `clinical:status` is the predicate used, because:
+ *
+ *   - It is already how this repo spells FHIR `.status` — `convertMedicationStatement`
+ *     writes it, and `restoreMedicationRecord` reads it back.
+ *   - It declares NO `rdfs:domain`, so it makes no claim about the class of the
+ *     subject it sits on. Its definition says in as many words that permitted
+ *     values depend on the record class and are constrained per-shape, which is
+ *     also exactly how FHIR treats `.status`.
+ *   - It gives a reader ONE predicate to ask for. `clinical:observationStatus`
+ *     exists and names this value set precisely, but it carries
+ *     `rdfs:domain clinical:LabResult`, which is false for a vital sign — and
+ *     `convertObservationVital` re-routes non-canonical vitals into
+ *     `convertObservationLab`, so a per-branch predicate would mean the same
+ *     source element landing under two different names depending on a routing
+ *     table.
+ *
+ * Deliberately NOT covered here: `Coverage.status`. See `convertCoverage`.
+ */
+const STATUS_PREDICATE = NS.clinical + 'status';
+
+// ---------------------------------------------------------------------------
 // Medication converter
 // ---------------------------------------------------------------------------
 
@@ -362,6 +395,21 @@ export function convertCondition(resource: any): ConversionResult & { _quads: Qu
   const clinicalStatus = resource.clinicalStatus?.coding?.[0]?.code ?? 'active';
   quads.push(tripleStr(subjectUri, NS.health + 'status', clinicalStatus));
 
+  // Condition.verificationStatus — `confirmed` and `refuted` are OPPOSITE claims
+  // about whether the patient has the problem at all, and the pod stated neither.
+  // `clinical:verificationStatus` is the only predicate in the vocabulary for it,
+  // it is bound by clinical:ConditionShape to exactly this FHIR R4 value set, and
+  // its rdfs:domain (clinical:Condition) is the deprecated spelling of the class
+  // this converter emits — health.ttl's namespace-boundary note states the two
+  // are one record under two names, so nothing is asserted here that is not true.
+  //
+  // This field is ALREADY in `conditionSubjectUri`, deliberately and with a
+  // comment anticipating this exact change, so no IRI moves.
+  const verificationStatus = resource.verificationStatus?.coding?.[0]?.code;
+  if (verificationStatus) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'verificationStatus', verificationStatus));
+  }
+
   if (resource.onsetDateTime) {
     quads.push(tripleDateTime(subjectUri, NS.health + 'onsetDate', resource.onsetDateTime));
   } else if (resource.onsetPeriod?.start) {
@@ -473,6 +521,23 @@ export function convertAllergyIntolerance(resource: any): ConversionResult & { _
 
   const allergen = codeableConceptText(resource.code) ?? 'Unknown Allergen';
   quads.push(tripleStr(subjectUri, NS.health + 'allergen', allergen));
+
+  // AllergyIntolerance.clinicalStatus — active | inactive | resolved. A resolved
+  // penicillin allergy displayed as an active one changes what a clinician
+  // prescribes, so this is a correctness field, not colour.
+  //
+  // `health:status` is NOT used: its rdfs:domain is a deliberately enumerated
+  // union of ConditionRecord and ImmunizationRecord, and health.ttl says in the
+  // same release note that a domain the data falsifies is the defect it was
+  // correcting. `clinical:clinicalStatus` is domain-restricted to Condition,
+  // which an allergy is not. `clinical:status` declares no domain — see
+  // STATUS_PREDICATE.
+  //
+  // Already inside `allergySubjectUri`, so no IRI moves.
+  const allergyClinicalStatus = resource.clinicalStatus?.coding?.[0]?.code;
+  if (allergyClinicalStatus) {
+    quads.push(tripleStr(subjectUri, STATUS_PREDICATE, allergyClinicalStatus));
+  }
 
   if (Array.isArray(resource.category) && resource.category.length > 0) {
     quads.push(tripleStr(subjectUri, NS.health + 'allergyCategory', resource.category[0]));
@@ -673,6 +738,14 @@ function labSubjectUri(resource: any, warnings: string[]): string {
     value: labMeasuredValueKey(resource),
     specimen: resource?.specimen?.reference,
     category: labCategoryKey(resource),
+    // Serialized as clinical:status, so it is inside the key: see the
+    // completeness rule on `conditionSubjectUri`. A `final` result and an
+    // `amended` one are two different assertions about the same draw, and an
+    // id-less pair differing only here would otherwise share an IRI and let
+    // read order decide which the pod ends up stating. Raw, like the
+    // immunization key: no `?? 'final'`, so an absent status stays absent
+    // rather than arriving as a constant.
+    status: resource?.status,
   }, warnings);
 }
 
@@ -686,6 +759,13 @@ export function convertObservationLab(resource: any): ConversionResult & { _quad
 
   const testName = codeableConceptText(resource.code) ?? 'Unknown Lab Test';
   quads.push(tripleStr(subjectUri, NS.health + 'testName', testName));
+
+  // Observation.status — see STATUS_PREDICATE. Emitted raw and only when the
+  // source stated it; a defaulted status would assert `final` about a record
+  // whose server never said so.
+  if (resource.status) {
+    quads.push(tripleStr(subjectUri, STATUS_PREDICATE, resource.status));
+  }
 
   if (resource.valueQuantity) {
     quads.push(tripleStr(subjectUri, NS.health + 'resultValue', String(resource.valueQuantity.value)));
@@ -865,6 +945,12 @@ export function convertObservationVital(resource: any): ConversionResult & { _qu
   quads.push(tripleStr(subjectUri, NS.clinical + 'vitalTypeName', vitalInfo!.name));
   quads.push(tripleRef(subjectUri, NS.clinical + 'snomedCode', NS.sct + vitalInfo!.snomedCode));
 
+  // Observation.status — the same element the lab branch writes, under the same
+  // predicate, so a reader does not have to know which branch handled it.
+  if (resource.status) {
+    quads.push(tripleStr(subjectUri, STATUS_PREDICATE, resource.status));
+  }
+
   if (resource.valueQuantity) {
     quads.push(tripleDouble(subjectUri, NS.clinical + 'value', resource.valueQuantity.value));
     quads.push(tripleStr(subjectUri, NS.clinical + 'unit', resource.valueQuantity.unit ?? vitalInfo?.unit ?? ''));
@@ -1028,6 +1114,19 @@ export function convertClinicalDocument(resource: any): ConversionResult & { _qu
   const docType = codeableConceptText(resource.type) ?? 'Unknown Document';
   quads.push(tripleStr(subjectUri, NS.clinical + 'documentType', docType));
 
+  // DocumentReference.docStatus — preliminary | final | amended | entered-in-error.
+  // This is the status of the DOCUMENT, which is what clinical:ClinicalDocument
+  // models, so it is the one that belongs on clinical:status.
+  //
+  // ACKNOWLEDGED DROP: `DocumentReference.status` (current | superseded |
+  // entered-in-error) is a statement about the REFERENCE rather than about the
+  // document, and putting it on the same predicate would leave a reader seeing
+  // `entered-in-error` unable to tell which of the two elements said so. It
+  // needs its own predicate, which does not exist.
+  if (resource.docStatus) {
+    quads.push(tripleStr(subjectUri, STATUS_PREDICATE, resource.docStatus));
+  }
+
   // Date
   const docDate = resource.date ?? resource.indexed;
   if (docDate) {
@@ -1085,6 +1184,122 @@ export function convertClinicalDocument(resource: any): ConversionResult & { _qu
 // Encounter converter (B2)
 // ---------------------------------------------------------------------------
 
+/**
+ * How much a participation role recommends its holder as THE provider for a
+ * visit, lowest first. Codes are from the HL7 v3 ParticipationType code system,
+ * which FHIR R4 binds `Encounter.participant.type` to.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * The converter used to take `participant[0].individual.display` with no role
+ * check at all. Measured on one real Epic account, 54 encounters: the first
+ * participant slot held an explicitly NON-TREATING role on 18 of the 52
+ * encounters that have participants — `losAuthorizingPhysician` 16 times and
+ * `referrer` twice. So the pod named the doctor who referred the patient, or who
+ * authorised a length of stay, and dropped the clinician who actually delivered
+ * the care — with nothing on the record to say which one a reader was looking
+ * at.
+ *
+ * Roles NOT in this table (referrer, authorising physician, the generic
+ * `Participation`, anything an EHR spells locally) are not ranked and therefore
+ * never outrank a real performer. They can still be selected, but only when the
+ * encounter names nobody better; that is the pre-existing behaviour and losing
+ * a name entirely would be a worse answer than an unranked one.
+ *
+ * @see https://terminology.hl7.org/CodeSystem-v3-ParticipationType.html
+ * @see https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.participant.type
+ */
+const ENCOUNTER_PARTICIPANT_ROLE_RANK: Record<string, number> = {
+  ATND: 0, // attender — the clinician responsible for the patient during the visit
+  PPRF: 1, // primary performer
+  SPRF: 2, // secondary performer
+  CON: 3, // consultant
+  ADM: 4, // admitter
+  DIS: 5, // discharger
+};
+
+/** Rank of the best role a single `Encounter.participant` declares, or undefined. */
+function participantRoleRank(participant: any): number | undefined {
+  const types = Array.isArray(participant?.type) ? participant.type : [];
+  let best: number | undefined;
+  const consider = (rank: number | undefined): void => {
+    if (rank === undefined) return;
+    if (best === undefined || rank < best) best = rank;
+  };
+  for (const type of types) {
+    for (const coding of Array.isArray(type?.coding) ? type.coding : []) {
+      const code = typeof coding?.code === 'string' ? coding.code.trim().toUpperCase() : undefined;
+      if (code) consider(ENCOUNTER_PARTICIPANT_ROLE_RANK[code]);
+    }
+    // Sources that populate only `type.text`. Epic writes `attender` here rather
+    // than the v3 code, and it is the single role most worth recognising, so the
+    // text tier looks for it specifically instead of guessing at the rest.
+    if (typeof type?.text === 'string' && /attend/i.test(type.text)) {
+      consider(ENCOUNTER_PARTICIPANT_ROLE_RANK.ATND);
+    }
+  }
+  return best;
+}
+
+/**
+ * The single name to store as `clinical:providerName` for an encounter.
+ *
+ * Preference order, highest first: attender, primary performer, any other
+ * ranked clinical performer role (see the table above), then — only if no
+ * participant declares a ranked role — the first participant that carries a
+ * name at all. Ties are broken by source order, so a stable input gives a
+ * stable answer.
+ *
+ * Emitting EVERY participant with its role is the right long-run answer and
+ * needs vocabulary that does not exist yet; this keeps the record's single
+ * provider slot and only corrects WHICH name lands in it.
+ */
+function selectEncounterProviderName(resource: any): string | undefined {
+  const participants = Array.isArray(resource?.participant) ? resource.participant : [];
+  let chosen: string | undefined;
+  let chosenRank: number | undefined;
+  let firstNamed: string | undefined;
+
+  for (const participant of participants) {
+    const name = participant?.individual?.display;
+    if (typeof name !== 'string' || name.trim().length === 0) continue;
+    if (firstNamed === undefined) firstNamed = name;
+    const rank = participantRoleRank(participant);
+    if (rank === undefined) continue;
+    if (chosenRank === undefined || rank < chosenRank) {
+      chosenRank = rank;
+      chosen = name;
+    }
+  }
+
+  return chosen ?? firstNamed;
+}
+
+/**
+ * The facility an encounter happened at.
+ *
+ * `serviceProvider` first, because it is the organisation FHIR designates as
+ * responsible for the encounter. It is also, on real vendor output, frequently
+ * absent: measured empty on all 54 encounters of one Epic account, while
+ * `location[].location.display` was populated on all 54 (24 distinct clinics).
+ * `clinical:facilityName` consequently appeared ZERO times in that entire pod
+ * despite existing in the vocabulary and being the most orienting single fact
+ * on an encounter card.
+ *
+ * @see https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.serviceProvider
+ * @see https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.location.location
+ */
+function selectEncounterFacilityName(resource: any): string | undefined {
+  const serviceProvider = resource?.serviceProvider?.display;
+  if (typeof serviceProvider === 'string' && serviceProvider.trim().length > 0) return serviceProvider;
+
+  for (const entry of Array.isArray(resource?.location) ? resource.location : []) {
+    const display = entry?.location?.display;
+    if (typeof display === 'string' && display.trim().length > 0) return display;
+  }
+  return undefined;
+}
+
 export function convertEncounter(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const subjectUri = mintSubjectUri(resource, warnings);
@@ -1094,6 +1309,15 @@ export function convertEncounter(resource: any): ConversionResult & { _quads: Qu
   quads.push(...commonTriples(subjectUri));
 
   // Encounter class (ambulatory, emergency, inpatient, etc.)
+  //
+  // ACKNOWLEDGED DROP: `class.display`. On vendor output the code is often a
+  // local identifier — one Epic account returns `"5"` — while the display beside
+  // it is the readable name (`Appointment`, `HOV`, `Surgery Log`, `Support OP
+  // Encounter`). Both are worth keeping, but there is no predicate for the
+  // display: `clinical:encounterClass` is the code, and `clinical:encounterType`
+  // already carries `type[0]`, which is a different FHIR element. Overwriting
+  // the code with the display is not an option either — the code is what the
+  // reverse converter needs to rebuild `Encounter.class`. Needs vocabulary.
   const encounterClass = resource.class?.code ?? resource.class?.coding?.[0]?.code;
   if (encounterClass) {
     quads.push(tripleStr(subjectUri, NS.clinical + 'encounterClass', encounterClass));
@@ -1128,17 +1352,17 @@ export function convertEncounter(resource: any): ConversionResult & { _quads: Qu
     quads.push(tripleDateTime(subjectUri, NS.clinical + 'encounterEnd', resource.period.end));
   }
 
-  // Provider from first participant
-  if (Array.isArray(resource.participant) && resource.participant.length > 0) {
-    const providerName = resource.participant[0]?.individual?.display;
-    if (providerName) {
-      quads.push(tripleStr(subjectUri, NS.clinical + 'providerName', providerName));
-    }
+  // Provider: the participant whose declared ROLE says they treated the patient,
+  // not merely the one the server listed first. See selectEncounterProviderName.
+  const providerName = selectEncounterProviderName(resource);
+  if (providerName) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'providerName', providerName));
   }
 
-  // Facility from serviceProvider
-  if (resource.serviceProvider?.display) {
-    quads.push(tripleStr(subjectUri, NS.clinical + 'facilityName', resource.serviceProvider.display));
+  // Facility: serviceProvider, falling back to the first named location.
+  const facilityName = selectEncounterFacilityName(resource);
+  if (facilityName) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'facilityName', facilityName));
   }
 
   if (resource.id) {
@@ -1172,6 +1396,14 @@ export function convertLaboratoryReport(resource: any): ConversionResult & { _qu
   // Panel name from code.text or first coding display
   const panelName = codeableConceptText(resource.code) ?? 'Unknown Panel';
   quads.push(tripleStr(subjectUri, NS.clinical + 'panelName', panelName));
+
+  // DiagnosticReport.status — registered | partial | preliminary | final |
+  // amended | corrected | appended | cancelled | entered-in-error. Unlike
+  // DocumentReference, DiagnosticReport has exactly one status element, so there
+  // is nothing to disambiguate. See STATUS_PREDICATE.
+  if (resource.status) {
+    quads.push(tripleStr(subjectUri, STATUS_PREDICATE, resource.status));
+  }
 
   // LOINC code
   const codings = extractCodings(resource.code);

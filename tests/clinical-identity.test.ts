@@ -490,6 +490,11 @@ describe('two records that serialize differently never share an identity', () =>
         ['code', { code: { coding: [{ system: 'http://snomed.info/sct', code: '195967001' }], text: 'Asthma' } }],
         ['category', { category: [{ coding: [{ code: 'encounter-diagnosis' }] }] }],
         ['clinicalStatus', { clinicalStatus: { coding: [{ code: 'resolved' }] } }],
+        // Serialized as clinical:verificationStatus since the status sweep. It
+        // was always in the key (with a comment saying the serializer would
+        // catch up); this row is what makes the audit able to see it, and the
+        // `compared` guard below fails if the serializer ever stops writing it.
+        ['verificationStatus', { verificationStatus: { coding: [{ code: 'refuted' }] } }],
         ['onsetDateTime', { onsetDateTime: '2022-09-09' }],
         ['onsetPeriod', { onsetDateTime: undefined, onsetPeriod: { start: '2019-01-01' } }],
         ['abatementDateTime', { abatementDateTime: '2024-01-01' }],
@@ -506,6 +511,8 @@ describe('two records that serialize differently never share an identity', () =>
         ['code', { code: { coding: [{ system: 'http://snomed.info/sct', code: '387406002' }], text: 'Sulfonamide' } }],
         ['category', { category: ['food'] }],
         ['criticality', { criticality: 'low' }],
+        // Serialized as clinical:status since the status sweep; already in the key.
+        ['clinicalStatus', { clinicalStatus: { coding: [{ code: 'resolved' }] } }],
         ['reaction', { reaction: [{ manifestation: [{ text: 'Anaphylaxis' }], severity: 'severe' }] }],
         ['onsetDateTime', { onsetDateTime: '2019-01-01' }],
         ['note', { note: [{ text: 'Reported by patient' }] }],

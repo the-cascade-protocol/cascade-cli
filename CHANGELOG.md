@@ -7,6 +7,86 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+**Record `status` now reaches the pod, so an amended result is no longer identical to a final one.**
+No FHIR converter emitted the resource's status, on any type that has one. An `amended` Observation
+and a `final` one therefore produced byte-identical records, as did an `amended` DocumentReference
+and a `final` one. Measured against one real vendor account: 1 amended Observation and 9 amended
+DocumentReferences existed in the source and were indistinguishable after import. This is a
+correctness distinction rather than an enrichment, and no new vocabulary was needed to carry it.
+
+Emitted now, all on predicates that already existed:
+
+| Source element | Predicate |
+|---|---|
+| `Observation.status` (lab and vital branches alike) | `clinical:status` |
+| `DocumentReference.docStatus` | `clinical:status` |
+| `DiagnosticReport.status` | `clinical:status` |
+| `AllergyIntolerance.clinicalStatus` | `clinical:status` |
+| `Condition.verificationStatus` | `clinical:verificationStatus` |
+
+`clinical:status` carries four of the five because it declares no `rdfs:domain`, states in its own
+definition that permitted values are constrained per-shape rather than on the property, and is
+already how this repository spells FHIR `.status` on medications. It also gives a reader ONE
+predicate to ask for: `convertObservationVital` re-routes non-canonical vitals into
+`convertObservationLab`, so a per-branch predicate would mean the same source element landing under
+two different names depending on a routing table.
+
+A status is reported and never invented — no converter defaults one — because asserting `final`
+about a record whose server never said so is the same defect in the opposite direction.
+
+Two statuses are **acknowledged drops** rather than silent ones, each with a written reason in the
+converter. `Coverage.status` has no predicate that can hold it truthfully: the coverage namespace
+defines no status property for `coverage:InsurancePlan`, and `coverage:claimStatus` /
+`coverage:adjudicationStatus` are domain-restricted to other classes. `DocumentReference.status`
+(current | superseded) is a statement about the reference rather than about the document, and
+sharing one predicate with `docStatus` would leave a reader seeing `entered-in-error` unable to
+tell which element said it. Both need vocabulary. The Coverage case carries a tripwire that fails
+the day a `coverage:status` term is authored.
+
+**`Encounter` provider is now selected by declared role, not by array position.**
+`convertEncounter` took `participant[0].individual.display` with no role check. On one real account
+the first slot held an explicitly non-treating role on 18 of the 52 encounters that have
+participants — an authorising physician 16 times, a referrer twice — so the pod named the wrong
+clinician with nothing on the record to say so. Selection is now by HL7 v3 ParticipationType
+preference (attender, primary performer, secondary performer, consultant, admitter, discharger),
+reading both `type[].coding[].code` and `type[].text`, with ties broken by source order and an
+unranked participant used only when the encounter names nobody better. The record still carries a
+single `clinical:providerName`; emitting every participant with its role needs vocabulary.
+
+**`Encounter` facility falls back to the location when the vendor omits `serviceProvider`.**
+`clinical:facilityName` appeared zero times in an entire real pod: the converter sourced it only
+from `serviceProvider`, which that vendor never populated, while `location[].location.display` was
+present on all 54 encounters (24 distinct clinics). `serviceProvider` is still preferred; the first
+non-empty location display is used when it is absent.
+
+`Encounter.class.display` remains an acknowledged drop, documented in the converter. The class
+*code* is what the reverse converter needs to rebuild `Encounter.class`, so overwriting it with the
+display is not available, and no predicate exists for the display alongside it.
+
+### Identity
+
+`Observation.status` joins the lab Observation content key, per the completeness rule documented on
+`conditionSubjectUri`: a serialized field outside the key is a field two records sharing an IRI can
+disagree on. This moves IRIs only for id-less lab Observations that differ in status; a record
+carrying an `id` is unaffected, and the two fields newly serialized on Condition and
+AllergyIntolerance were already in their keys, so no IRI moves there at all. The mechanical audit in
+`clinical-identity.test.ts` gained a row for each.
+
+### Tests
+
+`tests/fhir-field-coverage-wave1.test.ts` (27 cases). 16 were observed RED against the parent commit
+with `dist/` rebuilt from it; the 11 that pass either way are labelled in place as stability pins or
+acknowledged drops and are not counted as evidence. Two further cases in
+`tests/clinical-identity.test.ts` were likewise observed RED. The role table was additionally
+probed by deletion: removing a single rank entry, and removing the unranked fallback, each turns the
+suite red.
+
+---
+
 ## [0.20.4] - 2026-08-21
 
 ### Security
