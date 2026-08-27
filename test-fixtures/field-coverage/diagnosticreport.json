@@ -1,0 +1,89 @@
+{
+  "resourceType": "DiagnosticReport",
+  "id": "fc-diagnosticreport-cbc-1",
+  "meta": {
+    "versionId": "2",
+    "lastUpdated": "2025-03-12T18:05:03Z"
+  },
+  "identifier": [
+    {
+      "use": "official",
+      "system": "urn:oid:1.2.840.114350.1.13.999.2.7.2.798268",
+      "value": "50100000004"
+    }
+  ],
+  "status": "final",
+  "category": [
+    {
+      "coding": [
+        {
+          "system": "http://terminology.hl7.org/CodeSystem/v2-0074",
+          "code": "HM",
+          "display": "Hematology"
+        }
+      ],
+      "text": "Hematology"
+    }
+  ],
+  "code": {
+    "coding": [
+      {
+        "system": "http://loinc.org",
+        "code": "58410-2",
+        "display": "CBC panel - Blood by Automated count"
+      }
+    ],
+    "text": "CBC with Differential"
+  },
+  "subject": {
+    "reference": "Patient/fc-patient-1"
+  },
+  "encounter": {
+    "reference": "Encounter/fc-encounter-derm-1"
+  },
+  "effectiveDateTime": "2025-03-12T15:22:00Z",
+  "issued": "2025-03-12T17:41:00Z",
+  "performer": [
+    {
+      "reference": "Organization/fc-organization-lab",
+      "display": "Northgate Reference Laboratory"
+    }
+  ],
+  "resultsInterpreter": [
+    {
+      "reference": "Practitioner/fc-practitioner-pathologist",
+      "display": "Ines Vargas, MD"
+    }
+  ],
+  "specimen": [
+    {
+      "reference": "Specimen/fc-specimen-blood-1"
+    }
+  ],
+  "result": [
+    {
+      "reference": "Observation/fc-observation-hgb-1"
+    }
+  ],
+  "conclusion": "Mild normocytic anemia. Recommend repeat CBC in 8 weeks.",
+  "conclusionCode": [
+    {
+      "coding": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "271737000",
+          "display": "Anemia"
+        }
+      ],
+      "text": "Anemia"
+    }
+  ],
+  "presentedForm": [
+    {
+      "contentType": "application/pdf",
+      "url": "Binary/fc-binary-cbc-report-1",
+      "title": "CBC with Differential - final report",
+      "creation": "2025-03-12T17:41:00Z"
+    }
+  ]
+}

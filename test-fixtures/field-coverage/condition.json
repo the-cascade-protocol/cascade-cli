@@ -1,0 +1,82 @@
+{
+  "resourceType": "Condition",
+  "id": "fc-condition-asthma-1",
+  "meta": {
+    "versionId": "3",
+    "lastUpdated": "2025-04-01T16:41:55Z"
+  },
+  "identifier": [
+    {
+      "use": "usual",
+      "system": "urn:oid:1.2.840.114350.1.13.999.2.7.3.688884.101",
+      "value": "80100000003"
+    }
+  ],
+  "clinicalStatus": {
+    "coding": [
+      {
+        "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+        "code": "active",
+        "display": "Active"
+      }
+    ],
+    "text": "Active"
+  },
+  "verificationStatus": {
+    "coding": [
+      {
+        "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+        "code": "confirmed",
+        "display": "Confirmed"
+      }
+    ],
+    "text": "Confirmed"
+  },
+  "category": [
+    {
+      "coding": [
+        {
+          "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+          "code": "problem-list-item",
+          "display": "Problem List Item"
+        }
+      ],
+      "text": "Problem List Item"
+    }
+  ],
+  "severity": {
+    "text": "Moderate"
+  },
+  "code": {
+    "coding": [
+      {
+        "system": "http://snomed.info/sct",
+        "code": "195967001",
+        "display": "Asthma"
+      },
+      {
+        "system": "http://hl7.org/fhir/sid/icd-10-cm",
+        "code": "J45.909",
+        "display": "Unspecified asthma, uncomplicated"
+      }
+    ],
+    "text": "Asthma, mild intermittent"
+  },
+  "subject": {
+    "reference": "Patient/fc-patient-1"
+  },
+  "encounter": {
+    "reference": "Encounter/fc-encounter-derm-1"
+  },
+  "onsetDateTime": "2011-09-03T00:00:00Z",
+  "recordedDate": "2019-02-18T21:08:00Z",
+  "recorder": {
+    "reference": "Practitioner/fc-practitioner-pcp",
+    "display": "Tobias Lund, MD"
+  },
+  "note": [
+    {
+      "text": "Well controlled on as-needed inhaler; no exacerbation since 2022."
+    }
+  ]
+}

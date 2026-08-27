@@ -21,7 +21,11 @@ import type {
 } from '../import-types.js';
 import { convert as legacyConvert, detectFormat } from './index.js';
 import type { BatchConversionResult, InputFormat } from './types.js';
-import { buildImportManifest } from './import-manifest.js';
+import {
+  buildFieldCoverageDisclosure,
+  buildImportManifest,
+  type FieldCoverageDisclosure,
+} from './import-manifest.js';
 import { EXCLUDED_TYPES } from './converters-passthrough.js';
 
 function adapt(r: BatchConversionResult): ImportResult {
@@ -79,8 +83,14 @@ export const fhirImporter: FormatImporter = {
     const manifestOpt = ctx.options['manifest'];
     if (manifestOpt === undefined || !result.success) return;
 
-    // Count excluded resource types from the original FHIR Bundle.
+    // Count excluded resource types from the original FHIR Bundle, and measure
+    // what the converters did NOT emit from the resources they did convert.
+    //
+    // Both need the SOURCE, which is why they are here rather than in the
+    // manifest builder: the manifest builder sees only what came out, and "what
+    // came out" is precisely the side of the comparison that cannot show a loss.
     const excludedCounts: Record<string, number> = {};
+    let fieldCoverage: FieldCoverageDisclosure | undefined;
     try {
       const inputStr = Buffer.isBuffer(input) ? input.toString('utf-8') : input;
       const parsed = JSON.parse(inputStr);
@@ -93,8 +103,11 @@ export const fhirImporter: FormatImporter = {
           excludedCounts[res.resourceType] = (excludedCounts[res.resourceType] ?? 0) + 1;
         }
       }
+      fieldCoverage = buildFieldCoverageDisclosure(resources);
     } catch {
-      // JSON already validated upstream by the converter; ignore.
+      // JSON already validated upstream by the converter; ignore. `fieldCoverage`
+      // stays undefined, which the manifest reports as "not measured" rather
+      // than as "nothing lost".
     }
 
     // buildImportManifest expects the legacy BatchConversionResult shape;
@@ -121,6 +134,7 @@ export const fhirImporter: FormatImporter = {
       ctx.inputPath,
       ctx.sourceSystem ?? '',
       excludedCounts,
+      fieldCoverage,
     );
 
     let manifestPath: string;

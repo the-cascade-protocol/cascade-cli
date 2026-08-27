@@ -1,0 +1,91 @@
+{
+  "resourceType": "DocumentReference",
+  "id": "fc-documentreference-progress-1",
+  "meta": {
+    "versionId": "4",
+    "lastUpdated": "2025-04-03T02:10:52Z"
+  },
+  "identifier": [
+    {
+      "use": "official",
+      "system": "urn:oid:1.2.840.114350.1.13.999.2.7.8.688883.5",
+      "value": "40100000012"
+    }
+  ],
+  "status": "current",
+  "docStatus": "amended",
+  "type": {
+    "coding": [
+      {
+        "system": "http://loinc.org",
+        "code": "11506-3",
+        "display": "Progress note"
+      }
+    ],
+    "text": "Progress Notes"
+  },
+  "category": [
+    {
+      "coding": [
+        {
+          "system": "http://loinc.org",
+          "code": "47039-3",
+          "display": "Hospital Admission history and physical note"
+        }
+      ],
+      "text": "Clinical Notes"
+    }
+  ],
+  "subject": {
+    "reference": "Patient/fc-patient-1"
+  },
+  "date": "2025-04-01T18:22:00Z",
+  "author": [
+    {
+      "reference": "Practitioner/fc-practitioner-attender",
+      "display": "Amara Okoye, MD"
+    },
+    {
+      "reference": "Practitioner/fc-practitioner-resident",
+      "display": "Noor Habib, MD"
+    }
+  ],
+  "authenticator": {
+    "reference": "Practitioner/fc-practitioner-attender",
+    "display": "Amara Okoye, MD"
+  },
+  "custodian": {
+    "reference": "Organization/fc-organization-1",
+    "display": "Northgate Health Network"
+  },
+  "description": "Dermatology progress note, amended 2025-04-02 to correct laterality.",
+  "content": [
+    {
+      "attachment": {
+        "contentType": "text/html",
+        "url": "Binary/fc-binary-progress-1",
+        "title": "Progress Notes",
+        "creation": "2025-04-01T18:22:00Z"
+      },
+      "format": {
+        "system": "http://ihe.net/fhir/ValueSet/IHE.FormatCode.codesystem",
+        "code": "urn:ihe:iti:xds:2017:mimeTypeSufficient",
+        "display": "mimeType Sufficient"
+      }
+    }
+  ],
+  "context": {
+    "encounter": [
+      {
+        "reference": "Encounter/fc-encounter-derm-1"
+      }
+    ],
+    "period": {
+      "start": "2025-04-01T16:00:00Z",
+      "end": "2025-04-01T16:40:00Z"
+    },
+    "facilityType": {
+      "text": "Outpatient clinic"
+    }
+  }
+}
