@@ -449,6 +449,23 @@ describe('re-converting one source record is not a collision with its own older 
     expect(result.report.summary.identityCollisionsSplit).toBe(1);
   });
 
+  it('needs an ARRIVING copy: two pod files claiming one IRI are not a re-conversion', async () => {
+    // `pod import --reconcile-existing` loads the pod's files as several inputs,
+    // so a subject written into two of them arrives as a bucket with no incoming
+    // conversion in it. Nothing there is authoritative — neither copy just came
+    // out of a converter — so there is no "replace with the incoming one" to do,
+    // and the pair goes to the collision door as before. Reaching for
+    // `incoming[0]` on such a bucket is a crash, not a merge, which is why the
+    // clause is a guard rather than a preference.
+    const result = await runReconciliation([
+      { content: POD_OLD, systemName: 'existing-pod', existingPod: true },
+      { content: FRESH_NEW, systemName: 'existing-pod', existingPod: true },
+    ]);
+
+    expect(result.report.summary.identityCollisionsSplit).toBe(1);
+    expect(encounterSubjects(result.turtle)).toHaveLength(2);
+  });
+
   it('still splits when the two copies name different ORIGINS', async () => {
     // One id string claimed by two organizations is the cross-source collision
     // the origin axis exists to catch. Agreeing on an id is not enough.
