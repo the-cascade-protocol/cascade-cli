@@ -237,6 +237,248 @@ describe('a re-import is still a re-import', () => {
   });
 });
 
+describe('re-converting one source record is not a collision with its own older copy', () => {
+  /**
+   * THE THIRD REASON two records can share an IRI, and the one the two above do
+   * not cover.
+   *
+   * Converters get better. When they do, a re-import of a pod's own retained
+   * source produces the SAME subject IRI (identity is keyed on the source's id,
+   * which has not changed) carrying DIFFERENT content: more facts than before,
+   * and sometimes a corrected value where the old converter chose wrongly. The
+   * fingerprint sees two materially different records on one IRI and calls it a
+   * collision, which is the one thing it is not: there is one source record
+   * here, converted twice.
+   *
+   * Measured on a real pod re-imported through the enriched converters: 723
+   * identity-collision conflicts, and every one of the 54 encounters split into
+   * an old thin twin and a new rich one. The thin twins carried no visit
+   * identifier — the very field the new converter had just started emitting — so
+   * the encounter matcher could not put them back together either, and the pod
+   * ended at 112 encounter subjects instead of 58.
+   *
+   * WHAT MAKES IT NOT A COLLISION, AND IT IS THE SOURCE'S OWN ANSWER
+   * ---------------------------------------------------------------
+   * The two records agree on the source record's IDENTITY: they state the same
+   * id on the same source-id predicate, contradict on no source-id predicate
+   * they both state, and come from the same origin. That is the source saying
+   * "these are one record", exactly as it does for the encounter matcher one
+   * layer up.
+   *
+   * WHAT HAPPENS THEN. The incoming conversion is authoritative for every
+   * predicate it states — that is what makes a corrected value arrive as a
+   * correction rather than as a question — and predicates it does NOT state are
+   * kept from the pod's copy, which is what carries the reconciler's lineage and
+   * any fact a sibling source contributed through an earlier merge.
+   *
+   * Two DIFFERENT source records that collide on one IRI keep the split-and-
+   * conflict path unchanged. So does a pair with no source id to agree on.
+   */
+  const IRI = 'urn:uuid:enc-reconverted';
+  const PRE = `@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+`;
+
+  /** The pod's copy, written by the OLD converter: thin, and wrong about who. */
+  const POD_OLD = `${PRE}<${IRI}> a clinical:Encounter ;
+  cascade:sourceSystem "epic-fhir" ;
+  cascade:sourceIdentity "org:providence" ;
+  clinical:sourceRecordId "enc-1" ;
+  clinical:encounterType "Office Visit" ;
+  clinical:providerName "Lucas Camden Smith, MD" ;
+  cascade:reconciliationStatus "canonical" .
+`;
+
+  /** The same source record through the NEW converter: richer, and corrected. */
+  const FRESH_NEW = `${PRE}<${IRI}> a clinical:Encounter ;
+  cascade:sourceSystem "epic-fhir" ;
+  cascade:sourceIdentity "org:providence" ;
+  clinical:sourceRecordId "enc-1" ;
+  cascade:sourceRecordId "1.2.999:20100000001" ;
+  clinical:encounterType "Office Visit" ;
+  clinical:providerName "Khiem Tran, MD" ;
+  clinical:encounterStatus "finished" ;
+  clinical:facilityName "NORTHGATE DERMATOLOGY" .
+`;
+
+  const encounterSubjects = (ttl: string): string[] =>
+    new Parser({ format: 'Turtle' })
+      .parse(ttl)
+      .filter(
+        (q) =>
+          q.predicate.value === RDF_TYPE &&
+          q.object.value === 'https://ns.cascadeprotocol.org/clinical/v1#Encounter',
+      )
+      .map((q) => q.subject.value)
+      .sort();
+
+  const objectsOf = (ttl: string, predicate: string): string[] =>
+    new Parser({ format: 'Turtle' })
+      .parse(ttl)
+      .filter((q) => q.predicate.value === predicate)
+      .map((q) => q.object.value)
+      .sort();
+
+  it('collapses the enriched re-conversion onto one subject, with no conflict', async () => {
+    const result = await runReconciliation([
+      { content: POD_OLD, systemName: 'existing-pod', existingPod: true },
+      { content: FRESH_NEW, systemName: 'epic-fhir' },
+    ]);
+
+    expect(result.report.summary.identityCollisionsSplit).toBe(0);
+    expect(result.report.summary.conflictsUnresolved).toBe(0);
+    expect(encounterSubjects(result.turtle)).toEqual([IRI]);
+  });
+
+  it('keeps the newly emitted fields, which is what the re-import was FOR', async () => {
+    const result = await runReconciliation([
+      { content: POD_OLD, systemName: 'existing-pod', existingPod: true },
+      { content: FRESH_NEW, systemName: 'epic-fhir' },
+    ]);
+
+    // The visit identifier the old converter never wrote, on THE surviving
+    // subject. Scoped to it deliberately: with the pair split apart the field is
+    // still somewhere in the output, on a second subject the matcher one layer
+    // up will never join — which is how a re-import intended to FIX the
+    // duplication produced more of it.
+    const subjects = encounterSubjects(result.turtle);
+    expect(subjects).toEqual([IRI]);
+    const onSurvivor = (predicate: string): string[] =>
+      new Parser({ format: 'Turtle' })
+        .parse(result.turtle)
+        .filter((q) => q.subject.value === IRI && q.predicate.value === predicate)
+        .map((q) => q.object.value)
+        .sort();
+    expect(onSurvivor('https://ns.cascadeprotocol.org/core/v1#sourceRecordId')).toContain(
+      '1.2.999:20100000001',
+    );
+    expect(onSurvivor('https://ns.cascadeprotocol.org/clinical/v1#facilityName')).toEqual([
+      'NORTHGATE DERMATOLOGY',
+    ]);
+  });
+
+  it('adopts a CORRECTED value rather than raising a question about it', async () => {
+    // The converter is authoritative for its own source record. Wave 1 changed
+    // which participant becomes providerName; the pod holds the old choice and
+    // the fix is worthless if it arrives as a conflict for a person to answer.
+    const result = await runReconciliation([
+      { content: POD_OLD, systemName: 'existing-pod', existingPod: true },
+      { content: FRESH_NEW, systemName: 'epic-fhir' },
+    ]);
+
+    expect(
+      objectsOf(result.turtle, 'https://ns.cascadeprotocol.org/clinical/v1#providerName'),
+    ).toEqual(['Khiem Tran, MD']);
+  });
+
+  it('preserves lineage and the facts an earlier merge absorbed from a sibling', async () => {
+    // The pod's copy is a merge survivor: it carries a fact that came from a
+    // DIFFERENT source record. Replacing it wholesale with the incoming
+    // conversion would un-merge every cross-transport union on every re-import.
+    const podSurvivor =
+      POD_OLD.trimEnd().slice(0, -1) +
+      `;
+  cascade:documentType "summarization" ;
+  cascade:mergedFrom <${IRI}>, <urn:uuid:enc-absorbed> ;
+  prov:wasDerivedFrom <${IRI}>, <urn:uuid:enc-absorbed> .
+`;
+    const result = await runReconciliation([
+      { content: podSurvivor, systemName: 'existing-pod', existingPod: true },
+      { content: FRESH_NEW, systemName: 'epic-fhir' },
+    ]);
+
+    expect(encounterSubjects(result.turtle)).toEqual([IRI]);
+    // The sibling's contribution: stated by neither the old nor the new
+    // conversion of THIS source record, and still true of the visit.
+    expect(objectsOf(result.turtle, 'https://ns.cascadeprotocol.org/core/v1#documentType')).toEqual([
+      'summarization',
+    ]);
+    expect(
+      objectsOf(result.turtle, 'https://ns.cascadeprotocol.org/core/v1#mergedFrom'),
+    ).toContain('urn:uuid:enc-absorbed');
+    // And the enrichment still landed.
+    expect(
+      objectsOf(result.turtle, 'https://ns.cascadeprotocol.org/clinical/v1#facilityName'),
+    ).toEqual(['NORTHGATE DERMATOLOGY']);
+  });
+
+  it('is a fixed point: the same sequence run again changes nothing', async () => {
+    const first = await runReconciliation([
+      { content: POD_OLD, systemName: 'existing-pod', existingPod: true },
+      { content: FRESH_NEW, systemName: 'epic-fhir' },
+    ]);
+    const second = await runReconciliation([
+      { content: first.turtle, systemName: 'existing-pod', existingPod: true },
+      { content: FRESH_NEW, systemName: 'epic-fhir' },
+    ]);
+    const third = await runReconciliation([
+      { content: second.turtle, systemName: 'existing-pod', existingPod: true },
+      { content: FRESH_NEW, systemName: 'epic-fhir' },
+    ]);
+
+    expect(second.turtle).toBe(third.turtle);
+    expect(second.report.summary.identityCollisionsSplit).toBe(0);
+    expect(third.report.summary.identityCollisionsSplit).toBe(0);
+  });
+
+  it('still splits two DIFFERENT source records that claim one IRI', async () => {
+    // The source ids CONTRADICT, so nothing says these are one record and the
+    // split-and-conflict path is exactly right. This is the case the whole
+    // mechanism exists for and the exemption must not reach it.
+    const otherRecord = FRESH_NEW.replace('"enc-1"', '"enc-2"');
+    const result = await runReconciliation([
+      { content: POD_OLD, systemName: 'existing-pod', existingPod: true },
+      { content: otherRecord, systemName: 'epic-fhir' },
+    ]);
+
+    expect(result.report.summary.identityCollisionsSplit).toBe(1);
+    expect(encounterSubjects(result.turtle)).toHaveLength(2);
+  });
+
+  it('still splits when neither record states a source id to agree on', async () => {
+    // Content-hashed identity with no id anywhere. There is no evidence that the
+    // two are one record, so differing content is a collision as before.
+    const strip = (t: string) =>
+      t.replace(/\n  clinical:sourceRecordId "[^"]*" ;/, '').replace(/\n  cascade:sourceRecordId "[^"]*" ;/, '');
+    const result = await runReconciliation([
+      { content: strip(POD_OLD), systemName: 'existing-pod', existingPod: true },
+      { content: strip(FRESH_NEW), systemName: 'epic-fhir' },
+    ]);
+
+    expect(result.report.summary.identityCollisionsSplit).toBe(1);
+  });
+
+  it('needs an ARRIVING copy: two pod files claiming one IRI are not a re-conversion', async () => {
+    // `pod import --reconcile-existing` loads the pod's files as several inputs,
+    // so a subject written into two of them arrives as a bucket with no incoming
+    // conversion in it. Nothing there is authoritative — neither copy just came
+    // out of a converter — so there is no "replace with the incoming one" to do,
+    // and the pair goes to the collision door as before. Reaching for
+    // `incoming[0]` on such a bucket is a crash, not a merge, which is why the
+    // clause is a guard rather than a preference.
+    const result = await runReconciliation([
+      { content: POD_OLD, systemName: 'existing-pod', existingPod: true },
+      { content: FRESH_NEW, systemName: 'existing-pod', existingPod: true },
+    ]);
+
+    expect(result.report.summary.identityCollisionsSplit).toBe(1);
+    expect(encounterSubjects(result.turtle)).toHaveLength(2);
+  });
+
+  it('still splits when the two copies name different ORIGINS', async () => {
+    // One id string claimed by two organizations is the cross-source collision
+    // the origin axis exists to catch. Agreeing on an id is not enough.
+    const otherOrg = FRESH_NEW.replace('org:providence', 'org:swedish');
+    const result = await runReconciliation([
+      { content: POD_OLD, systemName: 'existing-pod', existingPod: true },
+      { content: otherOrg, systemName: 'epic-fhir' },
+    ]);
+
+    expect(result.report.summary.identityCollisionsSplit).toBe(1);
+  });
+});
+
 describe('the content fingerprint that separates the two cases', () => {
   it('is blind to the order properties were written in', async () => {
     const a = (await parseTurtle(`${PREFIXES}

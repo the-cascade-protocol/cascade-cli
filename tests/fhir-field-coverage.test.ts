@@ -315,8 +315,15 @@ describe('the measurement itself', () => {
     const encounter = COVERAGE.find((c) => c.fixture.resourceType === 'Encounter')!.coverage;
     // Never read.
     expect(encounter.dropped).toContain('Encounter.reasonCode');
-    // Read for identity, never written as a fact.
-    expect(encounter.dropped).toContain('Encounter.identifier');
+    // Read for identity, never written as a fact. `Encounter.identifier` was the
+    // exemplar of this mode and is now emitted (wave 2, the encounter join key),
+    // so the mode is pinned on the resource that still exhibits it: a
+    // DiagnosticReport's `identifier` reaches the identity seed and no triple.
+    const report = COVERAGE.find((c) => c.fixture.resourceType === 'DiagnosticReport')!.coverage;
+    expect(report.dropped).toContain('DiagnosticReport.identifier');
+    // And the exemplar's fix is pinned in the same place the gap was, so a
+    // regression that stops emitting it fails HERE as well as in the manifest.
+    expect(encounter.emitted).toContain('Encounter.identifier');
     // Partial array: the head is emitted, the tail is not.
     expect(encounter.emitted).toContain('Encounter.type[0]');
     expect(encounter.dropped).toContain('Encounter.type[1]');

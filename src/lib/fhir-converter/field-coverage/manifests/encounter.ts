@@ -6,9 +6,9 @@ import type { FieldDropManifest } from '../types.js';
  * Seeded from the differential run over `test-fixtures/field-coverage/encounter.json`,
  * which reproduces the shape measured across 54 Epic R4 Encounters.
  *
- * The clinic and the role-correct provider now survive. What still does not: the
- * reason, the contact serial number, the admission detail, every type coding
- * past the first, and every participant except the one that wins the role
+ * The clinic, the role-correct provider and the visit's contact serial number
+ * now survive. What still does not: the reason, the admission detail, every type
+ * coding past the first, and every participant except the one that wins the role
  * ranking — including that participant's own specialty.
  */
 export const ENCOUNTER_DROPS: FieldDropManifest = {
@@ -21,11 +21,10 @@ export const ENCOUNTER_DROPS: FieldDropManifest = {
       reason:
         "FHIR server bookkeeping (versionId, lastUpdated) about the resource's life on a server, not about the patient. Cascade states its own provenance and keys records on sourceRecordId.",
     },
-    'Encounter.identifier': {
-      disposition: 'pending',
-      backlog: '3.254',
+    'Encounter.identifier[0].use': {
+      disposition: 'acknowledged',
       reason:
-        'The visit contact serial number. Read for identity minting and never written as a fact, which is why the same visit arriving over FHIR and over C-CDA cannot be recognised as one visit: the join key sits on one side of the pair only.',
+        "Whether the health system calls this identifier usual, official or secondary. The identifier itself is emitted, scoped by its assigning system, which is everything the join between a FHIR encounter and its C-CDA twin needs; the use code qualifies the label a chart would print it under and identifies nothing on its own.",
     },
     'Encounter.serviceType': {
       disposition: 'pending',
