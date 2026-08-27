@@ -3,7 +3,8 @@
  * source EHR / organization.
  *
  * Apple Health (and most FHIR) carry these inline on `performer` / `requester` /
- * `recorder` / `asserter` and in the endpoint host of provider reference URLs,
+ * `recorder` / `asserter` — and, on DocumentReference, on `author` /
+ * `authenticator` / `custodian` — and in the endpoint host of provider reference URLs,
  * but the per-type converters historically read them for only three types
  * (DiagnosticReport, Encounter, Immunization). Everything else dropped the
  * provider that the source actually provided, which violates the "Cascade does
@@ -43,14 +44,43 @@ import { sourceIdentity, sourceLabel, type SourceIdentity } from '../source-iden
  */
 export const SOURCE_EHR_UNKNOWN = 'unknown';
 
-/** Resource fields, in priority order, that name the performing/ordering agent. */
+/**
+ * Resource fields, in priority order, that name the performing/ordering agent.
+ *
+ * `author` and `authenticator` are DocumentReference's spelling of the same
+ * thing, and their absence is why this pass — the one that exists to recover
+ * attribution the per-type converters dropped — did nothing whatsoever for
+ * documents. A DocumentReference states none of the first five fields, so every
+ * clinical note in a pod named neither its writer nor its source organization
+ * while the source stated both outright.
+ *
+ * Order is the claim: the AUTHOR wrote the note, and the authenticator is read
+ * only when no author is stated (a note signed by a supervising clinician names
+ * both, and the writer is the one `clinical:providerName` means). One value is
+ * emitted, never one per author — the predicate is `sh:maxCount 1` on every
+ * shape that constrains it.
+ */
 const PROVIDER_FIELDS = [
   'performer',
   'requester',
   'recorder',
   'asserter',
   'serviceProvider',
+  'author',
+  'authenticator',
 ] as const;
+
+/**
+ * Resource fields naming the ORGANIZATION that holds the record.
+ *
+ * `DocumentReference.custodian` is "the organization responsible for the
+ * document" by definition, so unlike a provider display it needs no
+ * institution-word guess to be read as one — `INSTITUTION_KEYWORDS` exists to
+ * decide whether an ambiguous display is a clinic or a clinician, and a
+ * custodian is never a question. It is consulted only after the endpoint host,
+ * which stays the preferred signal for the reason given on `extractSourceEhr`.
+ */
+const ORGANIZATION_FIELDS = ['custodian'] as const;
 
 /** FHIR resource types that represent a clinical record with a performing agent. */
 const CLINICAL_RECORD_TYPES = new Set([
@@ -158,6 +188,10 @@ function sourceHost(resource: unknown): string | undefined {
 export function extractSourceEhr(resource: any): string | undefined {
   const host = sourceHost(resource);
   if (host) return host;
+  for (const field of ORGANIZATION_FIELDS) {
+    const d = displayOf(resource?.[field]);
+    if (d) return d;
+  }
   const display = extractProviderName(resource);
   if (display && INSTITUTION_KEYWORDS.test(display) && !PERSON_ROLE.test(display)) {
     return display;

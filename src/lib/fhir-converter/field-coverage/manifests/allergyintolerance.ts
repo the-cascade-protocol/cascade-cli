@@ -22,11 +22,10 @@ export const ALLERGY_INTOLERANCE_DROPS: FieldDropManifest = {
       reason:
         'The coded clinical status is what is read, and it is emitted. The text is not consulted at all, so an allergy stating its status ONLY as text still arrives without one — mapping free text onto a status code set would be a guess, and the vendor output this was measured against always states the coding.',
     },
-    'AllergyIntolerance.verificationStatus': {
-      disposition: 'pending',
-      backlog: '3.256',
+    'AllergyIntolerance.verificationStatus.text': {
+      disposition: 'acknowledged',
       reason:
-        'confirmed, unconfirmed, refuted or entered-in-error. A refuted allergy presented as confirmed narrows treatment for no reason.',
+        'The coded verification status is what is read, and it is emitted on clinical:verificationStatus. The text is not consulted, so an allergy stating confirmed-or-refuted ONLY as text still arrives without it; mapping free text onto that code set would be a guess.',
     },
     'AllergyIntolerance.type': {
       disposition: 'pending',

@@ -175,12 +175,32 @@ describe('3.208: the C-CDA encounter states its type and id in the canonical cli
     expect(valuesOf(quads, CLINICAL + 'encounterType')).toEqual(['Office Visit']);
   });
 
-  it('keeps dual-writing the cascade: spellings this release', async () => {
-    // The readers are real and still on the old spelling: the pathology corpus
-    // harness's SOURCE_RECORD_ID list and the reconciler's source-id path.
-    // Retiring the dual write is its own change, with its own measurement.
+  it('keeps cascade:sourceRecordId — it is the cross-transport join key, not a legacy spelling', async () => {
+    // NOT a compatibility shim and NOT scheduled for retirement. This is the
+    // predicate the FHIR path writes `Encounter.identifier` on and the one the
+    // reconciler's encounter matcher keys on, so it is the only place the two
+    // transports state the same visit under the same name. `clinical:` cannot
+    // take over: `clinical:EncounterShape` pins `clinical:sourceRecordId` at
+    // `sh:maxCount 1` and it already carries the FHIR server's resource id.
+    //
+    // Deleting either line below breaks encounter deduplication across
+    // transports, silently, with no other test failing.
     const quads = await ccdaTwinQuads();
     expect(encounterSourceIds(quads, CASCADE + 'sourceRecordId')).toEqual([CSN]);
-    expect(valuesOf(quads, CASCADE + 'encounterType')).toEqual(['Office Visit']);
+    expect(encounterSourceIds(quads, CLINICAL + 'sourceRecordId')).toEqual([CSN]);
+  });
+
+  it('no longer writes the retired cascade:encounterType spelling', async () => {
+    // 3.269. `clinical:encounterType` became canonical in the wave that made the
+    // C-CDA encounter state its type at all, and the `cascade:` spelling was
+    // dual-written for one release while its readers migrated. All three were in
+    // this repo; all three now read the canonical predicate.
+    //
+    // `clinical:EncounterShape` constrains `clinical:encounterType` and says
+    // nothing about the `cascade:` one, so the retired spelling was a fact no
+    // shape could check.
+    const quads = await ccdaTwinQuads();
+    expect(valuesOf(quads, CASCADE + 'encounterType')).toEqual([]);
+    expect(valuesOf(quads, CLINICAL + 'encounterType')).toEqual(['Office Visit']);
   });
 });

@@ -146,7 +146,7 @@ export function buildEncounterRecord(
   const quads: Quad[] = [];
   quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Encounter')));
   quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(sourceSystem)));
-  // THE TYPE, IN THE CANONICAL SPELLING AND THE OLD ONE.
+  // THE TYPE, IN THE CANONICAL SPELLING ONLY.
   //
   // `clinical:EncounterShape` constrains `clinical:encounterType` and says
   // nothing about `cascade:encounterType`, and the FHIR path has always written
@@ -155,13 +155,17 @@ export function buildEncounterRecord(
   // the encounters in a pod that holds both. `clinical:` is canonical because
   // the shapes already say so.
   //
-  // The `cascade:` spelling is dual-written for one release rather than
-  // migrated in place: readers exist (this repo's own C-CDA tests, and anything
-  // downstream that learned the old spelling), and retiring a predicate is a
-  // change with its own blast radius and its own measurement.
+  // The `cascade:` spelling was dual-written for ONE release while its readers
+  // migrated. All three were in this repo (`ccda-converter.test.ts`,
+  // `ccda-encounter-dates.test.ts`, `encounter-identifier-join.test.ts`); all
+  // three now read `clinical:`, and the dual write is retired. A pod converted
+  // before this release still holds the old triple, which is inert: nothing
+  // reads it and no shape checks it.
+  //
+  // `cascade:sourceRecordId` below is NOT the same case and is not going
+  // anywhere — see the note there.
   if (displayName) {
     quads.push(makeQuad(subj, namedNode(NS.clinical + 'encounterType'), literal(displayName)));
-    quads.push(makeQuad(subj, namedNode(NS.cascade + 'encounterType'), literal(displayName)));
   }
   // Kept, unchanged and untyped, because the reconciler reads
   // health:effectiveDate. Moving a record's date out from under a matcher in the
@@ -189,11 +193,18 @@ export function buildEncounterRecord(
     if (q) quads.push(q);
   }
 
-  // THE VISIT'S IDENTIFIER, on both spellings, for the same reason as the type
-  // above. `clinical:sourceRecordId` is what
-  // clinical:EncounterShape constrains; `cascade:sourceRecordId` is what the
-  // reconciler's encounter matcher and the FHIR path's `Encounter.identifier`
-  // emission both key on, so it is also the cross-transport join key and stays.
+  // THE VISIT'S IDENTIFIER, on both spellings, and BOTH ARE PERMANENT.
+  //
+  // This is deliberately not the type's story. `clinical:sourceRecordId` is what
+  // clinical:EncounterShape constrains, at `sh:maxCount 1`, and on the FHIR
+  // transport it already carries the FHIR server's resource id — so the visit
+  // identifier cannot move there without evicting it.
+  // `cascade:sourceRecordId` is what the reconciler's encounter matcher and the
+  // FHIR path's `Encounter.identifier` emission both key on, which makes it THE
+  // CROSS-TRANSPORT JOIN KEY: retiring it would silently stop the two halves of
+  // a duplicate visit from being recognised as one. Measured — deleting that one
+  // line turns 12 tests RED across three files. Pinned in
+  // `tests/encounter-identifier-join.test.ts`.
   if (sourceId) {
     quads.push(makeQuad(subj, namedNode(NS.clinical + 'sourceRecordId'), literal(sourceId)));
     quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceRecordId'), literal(sourceId)));

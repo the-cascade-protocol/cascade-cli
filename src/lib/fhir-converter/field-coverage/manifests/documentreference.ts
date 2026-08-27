@@ -6,6 +6,12 @@ import type { FieldDropManifest } from '../types.js';
  * `docStatus` is emitted now, so an amended note is no longer byte-identical to
  * a final one. `status` still is not: a superseded or retracted document reads
  * as a live one.
+ *
+ * Attribution is no longer absent either: `appendProvenanceQuads` reads `author`
+ * (falling back to `authenticator`) and `custodian`, so a note names its writer
+ * and the organization holding it. What remains dropped is narrower — the
+ * co-author, the practitioner references themselves, and the author/attester
+ * DISTINCTION — and each is stated below.
  */
 export const DOCUMENT_REFERENCE_DROPS: FieldDropManifest = {
   resourceType: 'DocumentReference',
@@ -40,23 +46,25 @@ export const DOCUMENT_REFERENCE_DROPS: FieldDropManifest = {
       reason:
         "A pod holds one person's records, so the subject link is the pod itself.",
     },
-    'DocumentReference.author': {
-      disposition: 'pending',
-      backlog: '3.256',
+    'DocumentReference.author[1]': {
+      disposition: 'acknowledged',
       reason:
-        'Who wrote the note. The provenance recovery pass reads performer/requester/recorder/asserter/serviceProvider and DocumentReference states none of them, so the author is lost on every document.',
+        'Only the first author reaches clinical:providerName, which is sh:maxCount 1 on every shape that constrains it, so a co-author cannot be added without producing records that fail validation. Naming the writer is the fact a note most needs; a second author would need a repeatable contributor predicate that does not exist.',
+    },
+    'DocumentReference.author[0].reference': {
+      disposition: 'acknowledged',
+      reason:
+        'Practitioner resources are not imported as records, so the reference would dangle. The display is emitted as clinical:providerName.',
     },
     'DocumentReference.authenticator': {
-      disposition: 'pending',
-      backlog: '3.256',
+      disposition: 'acknowledged',
       reason:
-        'Who attested the note. Distinct from the author on any note signed by a supervising clinician.',
+        'Read only when the document names no author; with an author present that value is the provider. Attestation as a fact DISTINCT from authorship — who signed a note someone else wrote — would need its own predicate, and none exists, so what is dropped here is the distinction rather than the name.',
     },
-    'DocumentReference.custodian': {
-      disposition: 'pending',
-      backlog: '3.256',
+    'DocumentReference.custodian.reference': {
+      disposition: 'acknowledged',
       reason:
-        'The organization holding the document, which is this record\'s source EHR. provenance.ts does not read `custodian`, so a bundle whose only organization signal is this field derives no source label.',
+        'Organization resources are not imported as records, so the reference would dangle. The display is emitted as clinical:sourceEHR.',
     },
     'DocumentReference.description': {
       disposition: 'pending',

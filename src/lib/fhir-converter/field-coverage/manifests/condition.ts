@@ -17,10 +17,10 @@ export const CONDITION_DROPS: FieldDropManifest = {
       reason:
         "The problem's identifier in the issuing system, and the join key for the same problem arriving over two transports.",
     },
-    'Condition.clinicalStatus': {
+    'Condition.clinicalStatus.text': {
       disposition: 'acknowledged',
       reason:
-        "Redundant with the converter's default: health:status is emitted from the stated clinical status, but an ABSENT clinicalStatus is emitted as 'active'. Deleting a stated 'active' therefore changes nothing, while a stated 'resolved' does move the output. The defaulting is the part worth knowing: a source that says nothing is reported as active.",
+        'The coded clinical status is what is read, and it is emitted. The text is not consulted, so a problem stating its status ONLY as text arrives without one — mapping free text onto ConditionClinicalStatusCodes would be a guess, and guessing "active" is precisely the defaulting that was removed here.',
     },
     'Condition.verificationStatus.text': {
       disposition: 'acknowledged',

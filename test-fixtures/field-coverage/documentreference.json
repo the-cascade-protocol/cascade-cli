@@ -42,12 +42,12 @@
   "date": "2025-04-01T18:22:00Z",
   "author": [
     {
-      "reference": "Practitioner/fc-practitioner-attender",
-      "display": "Amara Okoye, MD"
-    },
-    {
       "reference": "Practitioner/fc-practitioner-resident",
       "display": "Noor Habib, MD"
+    },
+    {
+      "reference": "Practitioner/fc-practitioner-attender",
+      "display": "Amara Okoye, MD"
     }
   ],
   "authenticator": {

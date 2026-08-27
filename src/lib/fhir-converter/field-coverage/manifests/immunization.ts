@@ -17,11 +17,6 @@ export const IMMUNIZATION_DROPS: FieldDropManifest = {
       reason:
         'The registry or EHR identifier for the dose, and the join key for the same dose arriving from a state registry and from a clinic.',
     },
-    'Immunization.status': {
-      disposition: 'acknowledged',
-      reason:
-        "Redundant with the converter's default: health:status is emitted, but an ABSENT status is emitted as 'completed', so deleting a 'completed' status changes nothing. A source stating not-done or entered-in-error does move the output — and a source stating nothing is reported as completed, which is the defaulting this entry exists to make visible.",
-    },
     'Immunization.patient': {
       disposition: 'acknowledged',
       reason: "A pod holds one person's records, so the patient link is the pod itself.",
