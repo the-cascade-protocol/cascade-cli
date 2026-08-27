@@ -119,8 +119,11 @@ describe('cascade sources coverage', () => {
     // Deduplicated: the encounter appearing in both bundles is one resource.
     expect(result.stdout).toContain('11 unique of 12 read');
     expect(result.stdout).toMatch(/Encounter \(2 resources\)/);
-    expect(result.stdout).toMatch(/2 {2}Encounter\.identifier\s+pending 3\.254/);
-    expect(result.stdout).toMatch(/Encounter\.reasonCode\s+pending 3\.254/);
+    expect(result.stdout).toMatch(/2 {2}Encounter\.reasonCode\s+pending 3\.254/);
+    // The identifier is EMITTED now (it is the encounter join key), so it must
+    // not appear as a dropped path at all — only its `use` qualifier does.
+    expect(result.stdout).not.toMatch(/Encounter\.identifier\s+pending/);
+    expect(result.stdout).toMatch(/2 {2}Encounter\.identifier\[0\]\.use\s+acknowledged/);
     expect(result.stdout).toMatch(/Observation\.specimen\s+pending 3\.256/);
     // The disclosure says where the data still is, not only that it is missing.
     expect(result.stdout).toContain('retained under sources/');

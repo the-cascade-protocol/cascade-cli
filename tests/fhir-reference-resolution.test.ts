@@ -183,6 +183,48 @@ describe('buildResourceRefsFromQuads (R5 index reconstruction)', () => {
     expect(buildResourceRefsFromQuads(quads)).toEqual([]);
   });
 
+  it('indexes the FHIR resource id, not a business identifier, whatever the quad order', () => {
+    // A record can persist TWO kinds of source id, and only one of them is the
+    // join key a `Reference.reference` string points at. Since wave 2 a FHIR
+    // encounter states its visit identifier (the contact serial number) on
+    // `cascade:sourceRecordId` and the FHIR server's own resource id on
+    // `clinical:sourceRecordId`. First-quad-wins made the index depend on which
+    // one the serializer happened to write first, so `Encounter/enc-1` resolved
+    // or dangled according to emission order — the identity-determinism failure
+    // shape, one layer out. Priority is by PREDICATE, and both orders are
+    // asserted because one of them passed by luck before.
+    const businessIdFirst = [
+      makeQuad(namedNode(S1), namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Encounter')),
+      makeQuad(namedNode(S1), namedNode(NS.cascade + 'sourceRecordId'), literal('1.2.999:20100000001')),
+      makeQuad(namedNode(S1), namedNode(NS.clinical + 'sourceRecordId'), literal('enc-1')),
+      makeQuad(namedNode(S1), namedNode(NS.clinical + 'fhirResourceType'), literal('Encounter')),
+    ];
+    const resourceIdFirst = [
+      businessIdFirst[0],
+      businessIdFirst[2],
+      businessIdFirst[1],
+      businessIdFirst[3],
+    ];
+    expect(buildResourceRefsFromQuads(businessIdFirst)).toEqual([
+      { resourceType: 'Encounter', id: 'enc-1', subject: S1 },
+    ]);
+    expect(buildResourceRefsFromQuads(resourceIdFirst)).toEqual(
+      buildResourceRefsFromQuads(businessIdFirst),
+    );
+  });
+
+  it('still indexes a C-CDA record whose only source id is the cascade: one', () => {
+    // The C-CDA path writes no FHIR resource id at all, so demoting
+    // `cascade:sourceRecordId` must not make those records unindexable.
+    const quads = [
+      makeQuad(namedNode(S2), namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Encounter')),
+      makeQuad(namedNode(S2), namedNode(NS.cascade + 'sourceRecordId'), literal('1.2.999:20100000001')),
+    ];
+    expect(buildResourceRefsFromQuads(quads)).toEqual([
+      { resourceType: '', id: '1.2.999:20100000001', subject: S2 },
+    ]);
+  });
+
   it('feeds resolveReferenceEdges so a relative reference resolves by bare id', async () => {
     // Rebuild the index from a target record, then resolve a placeholder edge
     // that points at it with a typed relative reference.

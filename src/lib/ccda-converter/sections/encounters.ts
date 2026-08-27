@@ -146,7 +146,23 @@ export function buildEncounterRecord(
   const quads: Quad[] = [];
   quads.push(makeQuad(subj, namedNode(NS.rdf + 'type'), namedNode(NS.clinical + 'Encounter')));
   quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(sourceSystem)));
-  if (displayName) quads.push(makeQuad(subj, namedNode(NS.cascade + 'encounterType'), literal(displayName)));
+  // THE TYPE, IN THE CANONICAL SPELLING AND THE OLD ONE.
+  //
+  // `clinical:EncounterShape` constrains `clinical:encounterType` and says
+  // nothing about `cascade:encounterType`, and the FHIR path has always written
+  // the `clinical:` one. So an encounter's type was validated on one transport
+  // and invisible on the other, and a consumer reading either spelling saw half
+  // the encounters in a pod that holds both. `clinical:` is canonical because
+  // the shapes already say so.
+  //
+  // The `cascade:` spelling is dual-written for one release rather than
+  // migrated in place: readers exist (this repo's own C-CDA tests, and anything
+  // downstream that learned the old spelling), and retiring a predicate is a
+  // change with its own blast radius and its own measurement.
+  if (displayName) {
+    quads.push(makeQuad(subj, namedNode(NS.clinical + 'encounterType'), literal(displayName)));
+    quads.push(makeQuad(subj, namedNode(NS.cascade + 'encounterType'), literal(displayName)));
+  }
   // Kept, unchanged and untyped, because the reconciler reads
   // health:effectiveDate. Moving a record's date out from under a matcher in the
   // same change that gives it a second one is two changes wearing one commit.
@@ -173,7 +189,15 @@ export function buildEncounterRecord(
     if (q) quads.push(q);
   }
 
-  if (sourceId) quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceRecordId'), literal(sourceId)));
+  // THE VISIT'S IDENTIFIER, on both spellings, for the same reason as the type
+  // above. `clinical:sourceRecordId` is what
+  // clinical:EncounterShape constrains; `cascade:sourceRecordId` is what the
+  // reconciler's encounter matcher and the FHIR path's `Encounter.identifier`
+  // emission both key on, so it is also the cross-transport join key and stays.
+  if (sourceId) {
+    quads.push(makeQuad(subj, namedNode(NS.clinical + 'sourceRecordId'), literal(sourceId)));
+    quads.push(makeQuad(subj, namedNode(NS.cascade + 'sourceRecordId'), literal(sourceId)));
+  }
 
   return { subject: uri, quads };
 }

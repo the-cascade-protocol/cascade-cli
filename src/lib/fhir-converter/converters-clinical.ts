@@ -1349,6 +1349,58 @@ function selectEncounterFacilityName(resource: any): string | undefined {
   return undefined;
 }
 
+/**
+ * Every business identifier an `Encounter` states, normalized to the ONE
+ * spelling both transports write.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * `Encounter.identifier` is the visit's identifier in the health system — on
+ * Epic output, the contact serial number. The C-CDA export of the same visit
+ * states the same value as `<encounter><id root= extension=/>` and the C-CDA
+ * path has always written it into the pod. This converter read `identifier`
+ * only when `resource.id` was absent (for identity minting) and never wrote it
+ * as a fact, so on a pod holding both transports the join key sat on one side
+ * of every duplicate pair: measured 0 of 54 FHIR-derived encounter blocks
+ * carrying a serial number, against 48 of 52 C-CDA ones naming the same visits.
+ * That is why 177 encounter subjects described about 58 visits and nothing
+ * in-pod could tell.
+ *
+ * THE SPELLING IS `ccdaSourceId`'s, DELIBERATELY
+ * ----------------------------------------------
+ * `<system>:<value>`, with FHIR's `urn:oid:` URI prefix stripped so what remains
+ * is the bare OID the C-CDA `<id root>` carries. A value with no system renders
+ * as `:value`, which is exactly what `ccdaSourceId` produces for an
+ * extension-only `<id>` — a bare `value` would silently join with a
+ * differently-scoped identifier that happens to share it.
+ *
+ * The two derivations are separate functions in separate modules because the
+ * inputs are different shapes; `tests/encounter-identifier-join.test.ts` pins
+ * their OUTPUTS as equal on twin fixtures, so a change to either spelling fails
+ * rather than quietly unjoining the transports.
+ *
+ * @see https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.identifier
+ */
+function encounterIdentifierTokens(resource: any): string[] {
+  const identifiers = Array.isArray(resource?.identifier) ? resource.identifier : [];
+  const tokens: string[] = [];
+  const seen = new Set<string>();
+  for (const identifier of identifiers) {
+    const value = typeof identifier?.value === 'string' ? identifier.value.trim() : '';
+    // An identifier with no value identifies nothing. Emitting `system:` for it
+    // would put a token in the join space that every other system-only
+    // identifier also matches.
+    if (!value) continue;
+    const rawSystem = typeof identifier?.system === 'string' ? identifier.system.trim() : '';
+    const system = rawSystem.startsWith('urn:oid:') ? rawSystem.slice('urn:oid:'.length) : rawSystem;
+    const token = `${system}:${value}`;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    tokens.push(token);
+  }
+  return tokens;
+}
+
 export function convertEncounter(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const subjectUri = mintSubjectUri(resource, warnings);
@@ -1414,8 +1466,28 @@ export function convertEncounter(resource: any): ConversionResult & { _quads: Qu
     quads.push(tripleStr(subjectUri, NS.clinical + 'facilityName', facilityName));
   }
 
+  // The FHIR SERVER's row id. Kept on its own predicate: `clinical:sourceRecordId`
+  // is `sh:maxCount 1` on clinical:EncounterShape, and it is the join key a
+  // `Reference.reference` string points at, which the visit identifier below is
+  // not.
   if (resource.id) {
     quads.push(tripleStr(subjectUri, NS.clinical + 'sourceRecordId', resource.id));
+  }
+
+  // The VISIT's identifier(s) in the health system, on the predicate the C-CDA
+  // path already writes them to, so one visit's two transports carry one join
+  // key. `cascade:sourceRecordId` is core v3's "original source system record
+  // identifier ... preserved for provenance", carries no shape constraint on
+  // Encounter, and is repeatable — all three of which `clinical:sourceRecordId`
+  // is not. See encounterIdentifierTokens.
+  //
+  // A FACT, NOT AN IDENTITY INPUT. `mintSubjectUri` above is unchanged and still
+  // keys on `resource.id`. Deciding that two subjects are one visit is the
+  // reconciler's judgement, made with both records in hand and recorded as
+  // cascade:mergedFrom lineage; the identity layer sees one record at a time and
+  // could only overwrite.
+  for (const token of encounterIdentifierTokens(resource)) {
+    quads.push(tripleStr(subjectUri, NS.cascade + 'sourceRecordId', token));
   }
 
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));

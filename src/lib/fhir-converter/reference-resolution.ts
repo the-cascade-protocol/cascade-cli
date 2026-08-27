@@ -230,17 +230,39 @@ export interface ConvertedResourceRef {
 
 /**
  * Predicates that carry a record's source FHIR id (`resource.id`), the join key
- * a `Reference.reference` string points at. Every importer path persists one of
- * these on a record, so a resolution index can be rebuilt from serialized pod
- * quads without the conversion-time `ConvertedResourceRef[]` in hand.
+ * a `Reference.reference` string points at, MOST SPECIFIC FIRST. Every importer
+ * path persists one of these on a record, so a resolution index can be rebuilt
+ * from serialized pod quads without the conversion-time `ConvertedResourceRef[]`
+ * in hand.
+ *
+ * THE ORDER IS LOAD-BEARING, and it is a list rather than a set because of it.
+ * A record can persist TWO source ids that mean different things: since the
+ * encounter join key landed, a FHIR encounter states the FHIR server's row id on
+ * `clinical:sourceRecordId` and the VISIT's identifier (the contact serial
+ * number, which the C-CDA twin states too) on `cascade:sourceRecordId`. Only the
+ * first is what `Encounter/enc-1` points at. The selection here used to be
+ * first-quad-wins, so which of the two got indexed depended on the order the
+ * serializer happened to emit them in — an edge resolving or dangling by
+ * emission order is the identity-determinism failure shape one layer out.
+ *
+ * `cascade:sourceRecordId` ranks last because it is the only one of the five a
+ * record can carry ALONGSIDE a FHIR resource id. Ranking it last costs nothing
+ * for the C-CDA path, which writes no FHIR resource id at all and is therefore
+ * still indexed by it.
  */
-const SOURCE_ID_PREDICATES = new Set([
+const SOURCE_ID_PREDICATES: readonly string[] = [
+  NS.clinical + 'fhirResourceId',
   NS.health + 'sourceRecordId',
   NS.clinical + 'sourceRecordId',
   NS.coverage + 'sourceRecordId',
   NS.cascade + 'sourceRecordId',
-  NS.clinical + 'fhirResourceId',
-]);
+];
+
+/** Where a predicate sits in {@link SOURCE_ID_PREDICATES}, or undefined. */
+function sourceIdRank(predicate: string): number | undefined {
+  const rank = SOURCE_ID_PREDICATES.indexOf(predicate);
+  return rank < 0 ? undefined : rank;
+}
 
 /** Predicates that carry a record's source FHIR resourceType, when persisted. */
 const SOURCE_TYPE_PREDICATES = new Set([
@@ -276,22 +298,27 @@ export function buildResourceRefsFromQuads(quads: Quad[]): ConvertedResourceRef[
     if (q.predicate.value === NS.rdf + 'type') recordSubjects.add(q.subject.value);
   }
 
-  const ids = new Map<string, string>();
+  const ids = new Map<string, { id: string; rank: number }>();
   const types = new Map<string, string>();
   for (const q of quads) {
     const s = q.subject.value;
     if (!recordSubjects.has(s)) continue;
     if (q.object.termType !== 'Literal') continue;
     const p = q.predicate.value;
-    if (SOURCE_ID_PREDICATES.has(p)) {
-      if (!ids.has(s)) ids.set(s, q.object.value);
+    const rank = sourceIdRank(p);
+    if (rank !== undefined) {
+      // Best PREDICATE wins, not first quad. Within one predicate the first
+      // value still wins, which keeps a repeatable id single-valued here and
+      // independent of nothing but document order within that predicate.
+      const held = ids.get(s);
+      if (!held || rank < held.rank) ids.set(s, { id: q.object.value, rank });
     } else if (SOURCE_TYPE_PREDICATES.has(p)) {
       if (!types.has(s)) types.set(s, q.object.value);
     }
   }
 
   const refs: ConvertedResourceRef[] = [];
-  for (const [subject, id] of ids) {
+  for (const [subject, { id }] of ids) {
     refs.push({ resourceType: types.get(subject) ?? '', id, subject });
   }
   return refs;

@@ -237,6 +237,104 @@ describe('a re-import is still a re-import', () => {
   });
 });
 
+describe('a merge survivor is not a collision with the source it absorbed', () => {
+  /**
+   * THE THIRD REASON two records can share an IRI, and the one the two above do
+   * not cover.
+   *
+   * A near-duplicate merge writes the UNION of the group's facts onto the
+   * winner's subject. On the next import the winner's own source arrives again
+   * and converts to the same IRI carrying only its OWN facts — strictly fewer
+   * than the pod now holds. That is neither a re-import (the contents differ)
+   * nor a collision (nothing disagrees: the pod's copy is that record plus what
+   * a sibling contributed), and treating it as a collision splits the survivor
+   * away from its own source, grows the pod by one on the first re-sync, and
+   * raises a conflict describing a disagreement that does not exist.
+   *
+   * The exemption is evidence-based rather than heuristic: it applies only when
+   * a record in the bucket carries `cascade:mergedFrom` naming the very IRI in
+   * question — the pod itself saying "I already absorbed this" — AND the
+   * arriving copy states nothing the survivor does not already state.
+   */
+  const MERGED_IRI = 'urn:uuid:enc-merge-survivor';
+  const PRE = `@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .
+@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+`;
+
+  /** The pod's copy: the merge winner, carrying the loser's facts and lineage. */
+  const POD_SURVIVOR = `${PRE}<${MERGED_IRI}> a clinical:Encounter ;
+  cascade:sourceSystem "epic-fhir" ;
+  cascade:sourceRecordId "1.2.999:20100000001" ;
+  clinical:sourceRecordId "enc-1" ;
+  clinical:facilityName "NORTHGATE DERMATOLOGY" ;
+  clinical:encounterDate "2025-04-01"^^<http://www.w3.org/2001/XMLSchema#date> ;
+  cascade:documentType "summarization" ;
+  cascade:mergedFrom <${MERGED_IRI}>, <urn:uuid:enc-absorbed> ;
+  prov:wasDerivedFrom <${MERGED_IRI}>, <urn:uuid:enc-absorbed> ;
+  cascade:reconciliationStatus "merged" .
+`;
+
+  /** A fresh conversion of the winner's own source: the same record, thinner. */
+  const FRESH_SOURCE = `${PRE}<${MERGED_IRI}> a clinical:Encounter ;
+  cascade:sourceSystem "epic-fhir" ;
+  cascade:sourceRecordId "1.2.999:20100000001" ;
+  clinical:sourceRecordId "enc-1" ;
+  clinical:facilityName "NORTHGATE DERMATOLOGY" .
+`;
+
+  const encounterSubjects = (ttl: string): string[] =>
+    new Parser({ format: 'Turtle' })
+      .parse(ttl)
+      .filter(
+        (q) =>
+          q.predicate.value === RDF_TYPE &&
+          q.object.value === 'https://ns.cascadeprotocol.org/clinical/v1#Encounter',
+      )
+      .map((q) => q.subject.value)
+      .sort();
+
+  it('does not split the survivor away from a thinner re-import of its own source', async () => {
+    const result = await runReconciliation([
+      { content: POD_SURVIVOR, systemName: 'existing-pod', existingPod: true },
+      { content: FRESH_SOURCE, systemName: 'epic-fhir' },
+    ]);
+
+    expect(result.report.summary.identityCollisionsSplit).toBe(0);
+    expect(result.report.summary.conflictsUnresolved).toBe(0);
+    expect(encounterSubjects(result.turtle)).toEqual([MERGED_IRI]);
+    // And the absorbed facts are still there: the thin copy did not overwrite.
+    expect(result.turtle).toContain('summarization');
+  });
+
+  it('still splits when the arriving copy CONTRADICTS the survivor', async () => {
+    // The exemption is about a subset, never about a disagreement. A different
+    // clinic on the same IRI is the collision the whole mechanism exists for,
+    // and merge lineage must not buy an exemption from it.
+    const contradicting = FRESH_SOURCE.replace('NORTHGATE DERMATOLOGY', 'BALLARD EMERGENCY CENTER');
+    const result = await runReconciliation([
+      { content: POD_SURVIVOR, systemName: 'existing-pod', existingPod: true },
+      { content: contradicting, systemName: 'epic-fhir' },
+    ]);
+
+    expect(result.report.summary.identityCollisionsSplit).toBe(1);
+    expect(encounterSubjects(result.turtle)).toHaveLength(2);
+  });
+
+  it('grants no exemption to a record that never merged', async () => {
+    // Same subset relationship, no lineage. Two records claiming one IRI where
+    // one states strictly less is still a collision when nothing in the pod
+    // says the two were ever reconciled.
+    const noLineage = POD_SURVIVOR.split(' ;\n  cascade:mergedFrom')[0] + ' .\n';
+    const result = await runReconciliation([
+      { content: noLineage, systemName: 'existing-pod', existingPod: true },
+      { content: FRESH_SOURCE, systemName: 'epic-fhir' },
+    ]);
+
+    expect(result.report.summary.identityCollisionsSplit).toBe(1);
+  });
+});
+
 describe('the content fingerprint that separates the two cases', () => {
   it('is blind to the order properties were written in', async () => {
     const a = (await parseTurtle(`${PREFIXES}
