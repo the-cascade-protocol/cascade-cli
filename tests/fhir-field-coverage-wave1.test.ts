@@ -367,6 +367,46 @@ describe('providerName names the clinician who treated the patient', () => {
     expect(valueOf(result, PROVIDER_NAME)).toBe('Primary Performer');
   });
 
+  it("the measured Epic dialect: a local PHYSICIAN role beats a referrer listed first", () => {
+    // The real dermatology-visit shape this fix was measured against: slot 0 is
+    // the referrer (REF), and the clinician who delivered the care appears only
+    // under the vendor's LOCAL spellings — `losAuthorizingPhysician`,
+    // `PHYSICIAN`, `PART` — none of them a v3 ParticipationType code. A rank
+    // table that speaks only v3 falls through to "first named", which is the
+    // referrer: the exact record the audit opened with stays wrong.
+    const result = convertEncounter(encounterResource({
+      participant: [
+        participant('Referring Physician, MD', { code: 'REF', text: 'referrer' }),
+        participant('Treating Dermatologist, MD', { text: 'losAuthorizingPhysician' }),
+        participant('Treating Dermatologist, MD', { code: 'PHYSICIAN', text: 'Physician' }),
+        participant('Treating Dermatologist, MD', { code: 'PART', text: 'Participation' }),
+      ],
+    })) as Converted;
+    expect(valueOf(result, PROVIDER_NAME)).toBe('Treating Dermatologist, MD');
+  });
+
+  it('a neutral unranked name beats an explicitly NON-treating one listed first', () => {
+    // Neither participant is ranked, but `referrer` states this person did NOT
+    // deliver the care, while the generic Participation says nothing either
+    // way. Silence should beat a stated disqualification.
+    const result = convertEncounter(encounterResource({
+      participant: [
+        participant('Referring Physician, MD', { code: 'REF', text: 'referrer' }),
+        participant('Some Participant', { code: 'PART', text: 'Participation' }),
+      ],
+    })) as Converted;
+    expect(valueOf(result, PROVIDER_NAME)).toBe('Some Participant');
+  });
+
+  it('STABILITY PIN: an explicitly non-treating role is still stored when it is the only name', () => {
+    // Losing the only name the encounter has would be a worse answer than an
+    // unlabelled referrer. Labelling it is the wave-4 vocabulary item.
+    const result = convertEncounter(encounterResource({
+      participant: [participant('Referring Physician, MD', { code: 'REF', text: 'referrer' })],
+    })) as Converted;
+    expect(valueOf(result, PROVIDER_NAME)).toBe('Referring Physician, MD');
+  });
+
   it('the preference ORDER holds, not merely the membership', () => {
     // Pins the rank of every entry in the table against the one below it.
     // Membership alone is satisfied by a set; these fail if any single rank

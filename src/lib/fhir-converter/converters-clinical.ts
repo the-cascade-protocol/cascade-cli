@@ -1216,7 +1216,39 @@ const ENCOUNTER_PARTICIPANT_ROLE_RANK: Record<string, number> = {
   CON: 3, // consultant
   ADM: 4, // admitter
   DIS: 5, // discharger
+  // NOT v3: the measured Epic dialect. On the account this fix was verified
+  // against, the treating clinician frequently carries no v3 code at all —
+  // the dermatology visit's dermatologist appears only as `PHYSICIAN`,
+  // `losAuthorizingPhysician` and `PART`. A generic "Physician" is a weaker
+  // claim than any v3 performer role, so it ranks below all of them, but it
+  // is still a treating-role signal and must beat the fallback tier — which
+  // is where the referrer in slot 0 lives.
+  PHYSICIAN: 6,
 };
+
+/**
+ * Whether a participant's role EXPLICITLY says they did not deliver the care:
+ * `referrer` (v3 REF) and Epic's `losAuthorizingPhysician`. These are the two
+ * roles the measurement found sitting in slot 0 on 18 of 52 encounters, which
+ * is what made blind `participant[0]` wrong. They are never ranked, and the
+ * fallback tier prefers any neutrally-typed name over them; they are stored
+ * only when the encounter names nobody else at all.
+ *
+ * `losAuthorizingPhysician` is matched on the `authoriz` stem, not `physician`
+ * — its text CONTAINS "Physician" and must not be mistaken for the treating
+ * role above.
+ */
+function participantIsExplicitlyNonTreating(participant: any): boolean {
+  const types = Array.isArray(participant?.type) ? participant.type : [];
+  for (const type of types) {
+    for (const coding of Array.isArray(type?.coding) ? type.coding : []) {
+      const code = typeof coding?.code === 'string' ? coding.code.trim().toUpperCase() : undefined;
+      if (code === 'REF') return true;
+    }
+    if (typeof type?.text === 'string' && /referrer|authoriz/i.test(type.text)) return true;
+  }
+  return false;
+}
 
 /** Rank of the best role a single `Encounter.participant` declares, or undefined. */
 function participantRoleRank(participant: any): number | undefined {
@@ -1237,6 +1269,11 @@ function participantRoleRank(participant: any): number | undefined {
     if (typeof type?.text === 'string' && /attend/i.test(type.text)) {
       consider(ENCOUNTER_PARTICIPANT_ROLE_RANK.ATND);
     }
+    // Exact match only: `losAuthorizingPhysician` also contains "Physician"
+    // and is an explicitly NON-treating role.
+    if (typeof type?.text === 'string' && /^physician$/i.test(type.text.trim())) {
+      consider(ENCOUNTER_PARTICIPANT_ROLE_RANK.PHYSICIAN);
+    }
   }
   return best;
 }
@@ -1245,10 +1282,11 @@ function participantRoleRank(participant: any): number | undefined {
  * The single name to store as `clinical:providerName` for an encounter.
  *
  * Preference order, highest first: attender, primary performer, any other
- * ranked clinical performer role (see the table above), then — only if no
- * participant declares a ranked role — the first participant that carries a
- * name at all. Ties are broken by source order, so a stable input gives a
- * stable answer.
+ * ranked clinical performer role (see the table above, generic Physician
+ * last), then — only if no participant declares a ranked role — the first
+ * named participant whose role does not explicitly disclaim treating, then
+ * the first participant that carries a name at all. Ties are broken by
+ * source order, so a stable input gives a stable answer.
  *
  * Emitting EVERY participant with its role is the right long-run answer and
  * needs vocabulary that does not exist yet; this keeps the record's single
@@ -1258,6 +1296,7 @@ function selectEncounterProviderName(resource: any): string | undefined {
   const participants = Array.isArray(resource?.participant) ? resource.participant : [];
   let chosen: string | undefined;
   let chosenRank: number | undefined;
+  let firstNeutralNamed: string | undefined;
   let firstNamed: string | undefined;
 
   for (const participant of participants) {
@@ -1265,14 +1304,24 @@ function selectEncounterProviderName(resource: any): string | undefined {
     if (typeof name !== 'string' || name.trim().length === 0) continue;
     if (firstNamed === undefined) firstNamed = name;
     const rank = participantRoleRank(participant);
-    if (rank === undefined) continue;
+    if (rank === undefined) {
+      // The fallback tier is split in two: a name whose role says nothing
+      // (generic Participation, untyped) beats a name whose role explicitly
+      // says NON-treating (referrer, authorising physician). Silence beats a
+      // stated disqualification; a stated disqualification still beats losing
+      // the encounter's only name.
+      if (firstNeutralNamed === undefined && !participantIsExplicitlyNonTreating(participant)) {
+        firstNeutralNamed = name;
+      }
+      continue;
+    }
     if (chosenRank === undefined || rank < chosenRank) {
       chosenRank = rank;
       chosen = name;
     }
   }
 
-  return chosen ?? firstNamed;
+  return chosen ?? firstNeutralNamed ?? firstNamed;
 }
 
 /**
