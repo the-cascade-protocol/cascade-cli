@@ -21,6 +21,17 @@ observed Epic R4 output; vendor-specific identifier systems appear as
 real organization's assigning-authority arc, and vendor extension URLs use
 `vendor.example`.
 
+Where two elements can express the same value, the fixture states **different**
+values for them wherever a real record plausibly would. The differential deletes
+one element at a time, so two elements agreeing on a value both measure as
+dropped — with either one gone the other still produces the same output — and the
+manifest then describes the fixture rather than the converter.
+`documentreference.json` is the case that taught this: its `author` and
+`authenticator` both named the attending physician, so when the provenance pass
+learned to read them, neither could be observed to flip. The note is now authored
+by the resident and attested by the attending, which is both the ordinary shape of
+a supervised note and the shape that lets the instrument see the difference.
+
 References are deliberately **relative** (`Practitioner/fc-practitioner-attender`)
 rather than absolute. The provenance pass derives a record's source EHR from the
 first absolute reference host it finds anywhere in a resource, so an absolute URL

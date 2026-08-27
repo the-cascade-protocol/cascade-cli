@@ -392,8 +392,24 @@ export function convertCondition(resource: any): ConversionResult & { _quads: Qu
     quads.push(tripleStr(subjectUri, NS.health + 'snomedSemanticTag', semanticTagMatch[1]));
   }
 
-  const clinicalStatus = resource.clinicalStatus?.coding?.[0]?.code ?? 'active';
-  quads.push(tripleStr(subjectUri, NS.health + 'status', clinicalStatus));
+  // Condition.clinicalStatus — active | recurrence | relapse | inactive |
+  // remission | resolved.
+  //
+  // NO DEFAULT. This read `?? 'active'`, so a problem list whose entries state
+  // no clinical status arrived as a list of ACTIVE problems — the pod asserting
+  // a person still has every condition anyone ever recorded for them.
+  //
+  // Omitting is safe against the shape: `health:ConditionRecordShape` constrains
+  // `health:status` with `sh:maxCount 1` and an `sh:in` value set, and asserts
+  // no `sh:minCount` — checked before this line changed.
+  //
+  // No IRI moves: `conditionSubjectUri` keys
+  // `codeableConceptKey(resource?.clinicalStatus)`, the raw element, so identity
+  // never saw the default.
+  const clinicalStatus = resource.clinicalStatus?.coding?.[0]?.code;
+  if (clinicalStatus) {
+    quads.push(tripleStr(subjectUri, NS.health + 'status', clinicalStatus));
+  }
 
   // Condition.verificationStatus — `confirmed` and `refuted` are OPPOSITE claims
   // about whether the patient has the problem at all, and the pod stated neither.
@@ -537,6 +553,24 @@ export function convertAllergyIntolerance(resource: any): ConversionResult & { _
   const allergyClinicalStatus = resource.clinicalStatus?.coding?.[0]?.code;
   if (allergyClinicalStatus) {
     quads.push(tripleStr(subjectUri, STATUS_PREDICATE, allergyClinicalStatus));
+  }
+
+  // AllergyIntolerance.verificationStatus — confirmed | unconfirmed | presumed |
+  // refuted | entered-in-error. `confirmed` and `refuted` are OPPOSITE claims
+  // about whether the patient is allergic at all, and the pod stated neither, so
+  // a refuted allergy narrowed treatment exactly as a confirmed one would.
+  //
+  // `clinical:verificationStatus` is the same predicate `convertCondition`
+  // writes this FHIR element on. Its `sh:in` binding lives on
+  // `clinical:ConditionShape`, which targets `clinical:Condition` and therefore
+  // does not reach a `health:AllergyRecord`; nothing in the shape set is
+  // `sh:closed`, so the triple validates. The allergy value set includes
+  // `presumed`, which Condition's does not, and nothing constrains it here.
+  //
+  // Already inside `allergySubjectUri`, so no IRI moves.
+  const allergyVerificationStatus = resource.verificationStatus?.coding?.[0]?.code;
+  if (allergyVerificationStatus) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'verificationStatus', allergyVerificationStatus));
   }
 
   if (Array.isArray(resource.category) && resource.category.length > 0) {

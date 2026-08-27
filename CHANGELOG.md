@@ -36,7 +36,57 @@ predicate to ask for: `convertObservationVital` re-routes non-canonical vitals i
 two different names depending on a routing table.
 
 A status is reported and never invented — no converter defaults one — because asserting `final`
-about a record whose server never said so is the same defect in the opposite direction.
+about a record whose server never said so is the same defect in the opposite direction. Three
+converters that DID default one are corrected below.
+
+**`AllergyIntolerance.verificationStatus` now reaches the pod too**, on `clinical:verificationStatus`,
+the same predicate `Condition` writes the same FHIR element on. `confirmed` and `refuted` are
+opposite claims about whether the patient is allergic at all, and the pod stated neither, so a
+refuted allergy narrowed treatment exactly as a confirmed one would. The field was already in
+`allergySubjectUri`, so no IRI moves. The `sh:in` binding on this predicate lives on
+`clinical:ConditionShape`, which does not target `health:AllergyRecord`, and nothing in the shape
+set is `sh:closed`, so the allergy value set's extra `presumed` code validates.
+
+**Three converters substituted a confident value where the source said nothing, and no longer do.**
+An absent `Immunization.status` was imported as `completed`, an absent `Condition.clinicalStatus` as
+`active`, and a `Coverage.relationship` that stated no coded value as `self`. A source that said
+nothing was therefore stored indistinguishably from a source that asserted the value — the same
+honesty defect as the amended/final collapse above, inverted: there the pod under-claimed, here it
+over-claimed, on a dose that may never have been given, a problem list where every untyped entry
+read as live, and a dependent's policy that read as the patient's own. Each triple is now omitted
+when the source states nothing, and free text is not mapped onto a code set, because picking a
+member of `ConditionClinicalStatusCodes` or the HL7 SubscriberPolicyholder system out of prose is
+the same guess wearing a different hat.
+
+Each shape was checked before the default came out: `health:ConditionRecordShape`,
+`health:ImmunizationRecordShape` and `coverage:InsurancePlanShape` all constrain these paths with
+`sh:maxCount 1` and a value set, and none asserts `sh:minCount`, so omitting validates. Had one
+required the property, removing the default would have been a `spec` question rather than a
+converter change.
+
+**A clinical note names its writer and the organization holding it.**
+`appendProvenanceQuads` exists precisely to recover the clinician and organization the per-type
+converters dropped, and it read `performer` / `requester` / `recorder` / `asserter` /
+`serviceProvider` — of which a `DocumentReference` states none. So the one pass built for this
+recovered nothing at all for documents, while the source named both outright. It now also reads
+`author` (falling back to `authenticator` when a document names no author) onto
+`clinical:providerName`, and `custodian` onto `clinical:sourceEHR`. No new vocabulary: both
+predicates are ones this pass already emits. The endpoint host still wins over the custodian display
+for `sourceEHR`, unchanged, so one source axis does not split into two spellings.
+
+**The `cascade:encounterType` dual-write is retired.**
+`clinical:encounterType` became canonical when the C-CDA encounter learned to state its type at all,
+and the `cascade:` spelling was dual-written for one release while its readers migrated. All three
+readers were in this repository and all three now read the canonical predicate. `clinical:` is
+canonical because `clinical:EncounterShape` constrains it and says nothing about the `cascade:` one,
+so the retired spelling was a fact no shape could check. Pods written before this release still hold
+the old triple; it is inert.
+
+`cascade:sourceRecordId` on encounters is **not** part of that retirement and is not scheduled for
+one. It is the cross-transport join key — the predicate the FHIR path writes `Encounter.identifier`
+on and the reconciler's encounter matcher keys on — and `clinical:sourceRecordId` cannot take it
+over, being `sh:maxCount 1` and already carrying the FHIR server's resource id. Deleting that single
+line was measured to turn 12 tests RED across three files.
 
 Two statuses are **acknowledged drops** rather than silent ones, each with a written reason in the
 converter. `Coverage.status` has no predicate that can hold it truthfully: the coverage namespace
@@ -76,6 +126,15 @@ carrying an `id` is unaffected, and the two fields newly serialized on Condition
 AllergyIntolerance were already in their keys, so no IRI moves there at all. The mechanical audit in
 `clinical-identity.test.ts` gained a row for each.
 
+**Removing the three defaults moves no IRI either**, and the reason is structural rather than
+lucky: all three identity keys read the RAW source element, never the serialized value.
+`immunizationSubjectUri` keys `resource.status` and says so; `conditionSubjectUri` keys
+`codeableConceptKey(resource.clinicalStatus)`; `convertCoverage` mints through `mintSubjectUri`,
+which seeds from `resource.id` or a hash of the raw resource. The id-less IRIs were captured before
+the change and are pinned as literals, so an edit that lets a serialized value back into a key fails
+in the suite rather than in a pod. `AllergyIntolerance.verificationStatus` was likewise already
+keyed, with a comment anticipating this exact change.
+
 ### Tests
 
 `tests/fhir-field-coverage-wave1.test.ts` (27 cases). 16 were observed RED against the parent commit
@@ -84,6 +143,25 @@ acknowledged drops and are not counted as evidence. Two further cases in
 `tests/clinical-identity.test.ts` were likewise observed RED. The role table was additionally
 probed by deletion: removing a single rank entry, and removing the unranked fallback, each turns the
 suite red.
+
+`tests/fhir-absent-fields-and-attribution.test.ts` (23 cases) covers the four corrections above. 11
+were observed RED before the converters changed; the 12 that pass either way are the stability pins
+(a stated status is still emitted, unchanged) and the four identity pins, which had to be green
+BEFORE the change for the no-IRI-movement claim to mean anything. One case in
+`tests/fhir-field-coverage-wave1.test.ts` was amended: a stability pin in a block titled "a status is
+reported, never invented" asserted `health:status` was `active` on a Condition that states no
+clinical status, which was the invention itself.
+
+One field-coverage fixture changed. `documentreference.json` named the same physician as `author`
+and as `authenticator`, so with either element deleted the other produced the same output and the
+differential could not observe the attribution fix at all — the manifest would have described the
+fixture rather than the converter. The note is now authored by the resident and attested by the
+attending, which is both the ordinary shape of a supervised note and the shape that lets the
+instrument see the difference. The rule is written into `test-fixtures/field-coverage/FIXTURES.md`.
+
+Drop manifests: 127 entries to 126 — six flipped to emitted and deleted, five added for narrower
+losses the fixes exposed one level down, and `DocumentReference.authenticator` moved from pending to
+acknowledged. Pending 67 to 63; acknowledged 60 to 63.
 
 ---
 

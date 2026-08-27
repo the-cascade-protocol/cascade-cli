@@ -99,7 +99,7 @@ function encounterByType(quads: Quad[], type: string): string | undefined {
   );
   return quads.find(
     (q) =>
-      q.predicate.value === CASCADE + 'encounterType' &&
+      q.predicate.value === CLINICAL + 'encounterType' &&
       q.object.value === type &&
       isEncounter.has(q.subject.value),
   )?.subject.value;

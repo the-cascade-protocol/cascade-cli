@@ -283,9 +283,21 @@ describe('STABILITY PIN: a status is reported, never invented', () => {
     expect(valuesOf(convertClinicalDocument(noDocStatus) as Converted, STATUS)).toEqual([]);
   });
 
-  it('Condition with no verificationStatus emits none, and still emits clinicalStatus', () => {
+  it('Condition with neither status element emits neither', () => {
+    // AMENDED for 3.257. This asserted `health:status` was 'active' on a
+    // Condition that states no clinicalStatus at all — the converter's default,
+    // read back as though the source had said it. That is the invention this
+    // very describe block is named after, in the direction nobody was looking:
+    // a problem list where every untyped entry reads as a live problem.
     const result = convertCondition(conditionResource()) as Converted;
     expect(valuesOf(result, VERIFICATION_STATUS)).toEqual([]);
+    expect(valuesOf(result, NS.health + 'status')).toEqual([]);
+  });
+
+  it('Condition that states a clinicalStatus still emits it', () => {
+    const result = convertCondition(
+      conditionResource({ clinicalStatus: { coding: [{ code: 'active' }] } }),
+    ) as Converted;
     expect(valueOf(result, NS.health + 'status')).toBe('active');
   });
 

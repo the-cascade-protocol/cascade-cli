@@ -47,15 +47,10 @@ export const COVERAGE_DROPS: FieldDropManifest = {
       reason:
         'Read only when the type states no coding. With a coding present the code is emitted as coverage:coverageType and the text restates it.',
     },
-    'Coverage.relationship.coding': {
-      disposition: 'acknowledged',
-      reason:
-        "Redundant with the converter's default: coverage:subscriberRelationship takes the coded value, and an absent relationship defaults to 'self'. Deleting a stated 'self' therefore changes nothing, while any other stated relationship does move the output.",
-    },
     'Coverage.relationship.text': {
       disposition: 'acknowledged',
       reason:
-        'The coded relationship is what is read; the text restates it and is not consulted.',
+        "The coded relationship is what is read; the text restates it and is not consulted. A relationship stated ONLY as text now yields no triple at all, rather than the 'self' this converter used to substitute — the sh:in list is the HL7 SubscriberPolicyholder system and picking a member of it out of prose would be the same guess.",
     },
     'Coverage.payor[0].reference': {
       disposition: 'acknowledged',

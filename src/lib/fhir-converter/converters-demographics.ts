@@ -207,9 +207,10 @@ export function convertPatient(resource: any): ConversionResult & { _quads: Quad
  * manufacturer and the encounter.
  *
  * `vaccineName` is NOT a key field: the converter defaults it to 'Unknown
- * Vaccine'. Neither is the serialized status, which defaults to 'completed' —
- * the key reads `resource.status` raw, so an absent status stays absent instead
- * of arriving as a constant.
+ * Vaccine'. The status is keyed RAW — `resource.status`, not the serialized
+ * value — so an absent status stays absent instead of arriving as a constant.
+ * That is also why removing the serializer's `?? 'completed'` moved no IRI: the
+ * key never saw the default.
  */
 function immunizationSubjectUri(resource: any, warnings: string[]): string {
   return idOrContentUri('Immunization', resource, {
@@ -217,7 +218,8 @@ function immunizationSubjectUri(resource: any, warnings: string[]): string {
     vaccine: codeableConceptKey(resource?.vaccineCode),
     // Full precision, and `occurrenceString` where the source gives prose.
     occurrence: resource?.occurrenceDateTime ?? resource?.occurrenceString,
-    // Raw, not the serialized `?? 'completed'`.
+    // Raw. The serializer no longer defaults, but keying the raw element is what
+    // made that change free of IRI movement, so it stays stated.
     status: resource?.status,
     lotNumber: resource?.lotNumber,
     dose: structuredKey(resource?.doseQuantity),
@@ -252,7 +254,23 @@ export function convertImmunization(resource: any): ConversionResult & { _quads:
     warnings.push(`Immunization date is a string: ${resource.occurrenceString}`);
   }
 
-  quads.push(tripleStr(subjectUri, NS.health + 'status', resource.status ?? 'completed'));
+  // Immunization.status — completed | entered-in-error | not-done.
+  //
+  // NO DEFAULT. This read `resource.status ?? 'completed'`, so a source that
+  // stated nothing was stored indistinguishably from a source that asserted the
+  // dose was given. That is the amended/final collapse inverted: there the pod
+  // under-claimed, here it over-claimed, on the one field whose whole job is to
+  // say whether the vaccine went in.
+  //
+  // Omitting is safe against the shape: `health:ImmunizationRecordShape`
+  // constrains `health:status` with `sh:maxCount 1` and an `sh:in` value set,
+  // and asserts no `sh:minCount` — checked before this line changed.
+  //
+  // No IRI moves: `immunizationSubjectUri` keys `resource?.status` RAW and says
+  // so in as many words, so identity never saw the default in the first place.
+  if (resource.status) {
+    quads.push(tripleStr(subjectUri, NS.health + 'status', resource.status));
+  }
 
   const codings = extractCodings(resource.vaccineCode);
   for (const c of codings) {
@@ -393,8 +411,24 @@ export function convertCoverage(resource: any): ConversionResult & { _quads: Qua
     }
   }
 
-  if (resource.relationship) {
-    const relCode = resource.relationship.coding?.[0]?.code ?? 'self';
+  // Coverage.relationship — the policyholder's relation to the patient.
+  //
+  // NO DEFAULT. The guard was `if (resource.relationship)` and the value was
+  // `coding[0].code ?? 'self'`, so a relationship that was PRESENT but stated
+  // only as text became the pod asserting the policy is the patient's own. On a
+  // dependent's plan that is the wrong answer to the only question an insurance
+  // record is asked. Free text is not mapped onto the code set either: the
+  // `sh:in` list is the HL7 SubscriberPolicyholder system and picking a member
+  // of it from prose would be the same guess wearing a different hat.
+  //
+  // Omitting is safe against the shape: `coverage:InsurancePlanShape` constrains
+  // this path at `sh:Warning` with `sh:maxCount 1` and no `sh:minCount`.
+  //
+  // No IRI moves: `convertCoverage` mints through `mintSubjectUri`, which seeds
+  // from `resource.id` or from a hash of the RAW resource — never from a
+  // serialized value this function computed.
+  const relCode = resource.relationship?.coding?.[0]?.code;
+  if (relCode) {
     quads.push(tripleStr(subjectUri, NS.coverage + 'subscriberRelationship', relCode));
   }
 

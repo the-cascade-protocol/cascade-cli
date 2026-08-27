@@ -483,7 +483,7 @@ describe('C-CDA converter — encounter extraction and hasEncounter edges (R3)',
 
     // Real fields come through: type (from @_displayName), date (from
     // effectiveTime/low), and the source id (root:extension).
-    expect(encValue(CASCADE + 'encounterType')).toBe('Office Visit');
+    expect(encValue(CLINICAL + 'encounterType')).toBe('Office Visit');
     expect(encValue(HEALTH + 'effectiveDate')).toBe('2025-03-10');
     expect(encValue(CASCADE + 'sourceRecordId')).toBe(
       '1.2.840.114350.1.13.999.2.7.3.111.8:VISIT-778899',
