@@ -968,41 +968,210 @@ function differingPredicates(
 }
 
 /**
- * THE THIRD REASON two records share an IRI, and the one that is neither a
- * re-import nor a collision.
+ * Every predicate on which a record states the SOURCE's own id for itself.
  *
- * A near-duplicate merge writes the UNION of a group's facts onto the winner's
- * subject. On the next import the winner's OWN source arrives again, converts to
- * the same IRI, and carries only its own facts — strictly fewer than the pod now
- * holds. Nothing disagrees: the pod's copy is that record plus what a sibling
- * contributed. Splitting them would separate a survivor from its own source,
- * grow the pod by one on the first re-sync, and raise a conflict describing a
- * disagreement that does not exist.
- *
- * BOTH CLAUSES ARE LOAD-BEARING.
- *
- *   LINEAGE   the survivor must name THIS IRI in its own `cascade:mergedFrom`.
- *             That is the pod stating it already absorbed a record minted here,
- *             so the exemption can never reach a record that never merged.
- *   SUBSET    the arriving copy must state nothing the survivor does not already
- *             state, value for value, on exactly the statements the fingerprint
- *             compares. A CONTRADICTION — a different clinic, a different result
- *             — is the collision this mechanism exists for, and merge lineage
- *             buys no exemption from it.
+ * Not one predicate, because the importers disagree about which to use and a
+ * record routinely carries two that mean different things: a FHIR encounter
+ * states the server's row id on `clinical:sourceRecordId` and the visit's
+ * identifier on `cascade:sourceRecordId`. Agreement is therefore checked
+ * per-predicate, never by flattening them into one bag where a row id could be
+ * compared against a visit identifier.
  */
-function absorbedByMergeSurvivor(
-  survivor: ParsedRecord,
-  arriving: ParsedRecord,
-  uri: string,
+const SOURCE_RECORD_ID_PREDICATES: readonly string[] = [
+  NS.cascade + 'sourceRecordId',
+  NS.clinical + 'sourceRecordId',
+  NS.health + 'sourceRecordId',
+  NS.coverage + 'sourceRecordId',
+  NS.clinical + 'fhirResourceId',
+];
+
+/** The source ids a record states, keyed by the predicate it stated them on. */
+function sourceRecordIds(r: ParsedRecord): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const pred of SOURCE_RECORD_ID_PREDICATES) {
+    const values = new Set(
+      (r.properties.get(pred) ?? []).map((v) => v.value.trim()).filter((v) => v.length > 0),
+    );
+    if (values.size > 0) out.set(pred, values);
+  }
+  return out;
+}
+
+/**
+ * Do two records that claim ONE IRI describe ONE source record?
+ *
+ * THE QUESTION THIS ANSWERS IS NOT "IS THE CONTENT THE SAME". It is deliberately
+ * blind to content, because the case it exists for is precisely two conversions
+ * of one record whose content DIFFERS — the newer one states more, and sometimes
+ * states a corrected value where the older converter chose wrongly.
+ *
+ * Three clauses, each doing work:
+ *
+ *   AGREEMENT      at least one source-id predicate is stated by both with the
+ *                  same value. That is the source's own answer to "is this that
+ *                  record?", the same evidence `ccdaRecordUri` and
+ *                  `mintSubjectUri` key identity on.
+ *   NO CONTRADICTION  no source-id predicate they BOTH state disagrees. A pair
+ *                  agreeing on a FHIR row id while disagreeing on the visit
+ *                  identifier is not one record, and the agreement clause alone
+ *                  would have admitted it.
+ *   SAME ORIGIN    the same organization said both. One id string claimed by two
+ *                  organizations is the cross-source collision the origin axis
+ *                  exists to catch — the C-CDA root-only-id case, where a shared
+ *                  assigning-authority OID is misused as a record id. When either
+ *                  origin is UNKNOWN (a record written before core v3.5, or one
+ *                  whose origin honestly landed on the `transport:` tier) the
+ *                  ingestion label decides instead, which suppresses MORE
+ *                  collapsing and leaves the split-and-conflict path in place.
+ *                  That is the recoverable direction, and it mirrors the cascade
+ *                  `sameSourceStatement` already documents.
+ *
+ * A pair stating no source id at all fails the first clause and stays a
+ * collision, which is right: content-hashed identity plus differing content is
+ * the case the whole mechanism was built for.
+ */
+function sameSourceRecord(a: ParsedRecord, b: ParsedRecord): boolean {
+  const idsA = sourceRecordIds(a);
+  const idsB = sourceRecordIds(b);
+  if (idsA.size === 0 || idsB.size === 0) return false;
+
+  let agreed = false;
+  for (const [pred, valuesA] of idsA) {
+    const valuesB = idsB.get(pred);
+    if (!valuesB) continue;
+    const shared = [...valuesA].some((v) => valuesB.has(v));
+    if (!shared) return false;  // both state this predicate and they disagree
+    agreed = true;
+  }
+  if (!agreed) return false;
+
+  if (isKnownOrigin(a.sourceIdentity) && isKnownOrigin(b.sourceIdentity)) {
+    return a.sourceIdentity === b.sourceIdentity;
+  }
+  return a.sourceSystem === b.sourceSystem;
+}
+
+/**
+ * Fold two conversions of ONE source record into one record, before the
+ * collision door ever sees them.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * Converters get better. When they do, re-importing a pod's own retained source
+ * produces the SAME subject IRI — identity keys on the source's id, which has
+ * not changed — carrying DIFFERENT content. `splitIdentityCollisions` reads
+ * "same IRI, materially different" and reports a collision, which is the one
+ * thing it is not: there is one source record here, converted twice.
+ *
+ * Measured on a real pod re-imported through the enriched converters: 723
+ * identity-collision conflicts, and each of 54 encounters split into an old thin
+ * twin and a new rich one. Worse than the noise, the split defeated the fix: the
+ * thin twins carried no visit identifier — the field the new converter had just
+ * started emitting — so the encounter matcher could not rejoin them, and a
+ * re-import intended to collapse 177 subjects to 58 produced 112.
+ *
+ * WHICH COPY WINS, AND WHY IT IS NOT SYMMETRIC
+ * -------------------------------------------
+ * The INCOMING conversion is authoritative for every predicate it states. A
+ * converter is the authority on its own source record, so a value it changed is
+ * a CORRECTION and must land as one — wave 1's role-aware `providerName` fix is
+ * worthless if it arrives as a question for a person to answer.
+ *
+ * Predicates the incoming conversion does NOT state are kept from the pod's
+ * copy. That clause is not politeness: the pod's copy may be a merge survivor
+ * carrying facts that came from a DIFFERENT source record, and replacing it
+ * wholesale would un-merge every cross-transport union on every re-import.
+ * Keeping them is also what preserves the reconciler's own lineage
+ * (`cascade:mergedFrom`, `prov:wasDerivedFrom`) without naming a list of
+ * predicates that would drift from the ones the reconciler actually writes.
+ *
+ * WHAT IT DOES NOT TOUCH
+ * ----------------------
+ * Two DIFFERENT source records on one IRI, and any pair with no source id to
+ * agree on, are left exactly as they were, for `splitIdentityCollisions` to
+ * split and raise. This narrows what reaches that door; it does not soften it.
+ */
+export function collapseReconversions(
+  records: ParsedRecord[],
   resolveRef?: (raw: string) => string | null,
   derived?: DerivedReferenceValues,
-): boolean {
-  const lineage = survivor.properties.get(NS.cascade + 'mergedFrom') ?? [];
-  if (!lineage.some((v) => v.value === uri)) return false;
-  const stated = new Set(contentParts(survivor, resolveRef, COLLISION_IGNORED_PREDICATES, derived));
-  return contentParts(arriving, resolveRef, COLLISION_IGNORED_PREDICATES, derived).every((part) =>
-    stated.has(part),
-  );
+): { records: ParsedRecord[]; collapsed: number } {
+  const byUri = new Map<string, ParsedRecord[]>();
+  for (const r of records) {
+    const bucket = byUri.get(r.uri);
+    if (bucket) bucket.push(r);
+    else byUri.set(r.uri, [r]);
+  }
+
+  const replacement = new Map<ParsedRecord, ParsedRecord | null>();
+  let collapsed = 0;
+
+  for (const bucket of byUri.values()) {
+    if (bucket.length < 2) continue;
+    const incoming = bucket.filter((r) => !r.fromExistingPod);
+    const prior = bucket.filter((r) => r.fromExistingPod);
+    // Both sides are required. Two POD copies of one IRI is not a re-conversion
+    // — nothing arrived to be authoritative — and two fresh copies within one
+    // batch are the ordinary re-import the pass-over already handles.
+    if (incoming.length === 0 || prior.length === 0) continue;
+
+    // The incoming copies must agree with each other, or "the incoming
+    // conversion" names no single record and choosing one would decide a real
+    // collision by input order.
+    const incomingFingerprints = new Set(
+      incoming.map((r) => recordContentFingerprint(r, resolveRef, COLLISION_IGNORED_PREDICATES, derived)),
+    );
+    if (incomingFingerprints.size > 1) continue;
+
+    const winner = incoming[0];
+    if (!bucket.every((r) => r === winner || sameSourceRecord(winner, r))) continue;
+
+    const properties = new Map(winner.properties);
+    for (const other of bucket) {
+      if (other === winner) continue;
+      for (const [pred, vals] of other.properties) {
+        if (properties.has(pred)) continue;
+        properties.set(pred, vals);
+      }
+    }
+
+    // One exception to "the incoming copy's values win": a record-to-record edge
+    // the pod already holds RESOLVED and the fresh conversion still carries as a
+    // placeholder is the same statement in two spellings, and the resolved one
+    // is the copy whose target provably exists. Taking the placeholder instead
+    // would hand a resolved edge back to the resolution pass to re-resolve, and
+    // on the `pod reconcile` path — which has no resolution pass — would leave
+    // it a placeholder for good.
+    for (const [pred, vals] of properties) {
+      const priorValues = new Set(
+        prior.flatMap((r) => (r.properties.get(pred) ?? []).map((v) => v.value)),
+      );
+      if (priorValues.size === 0) continue;
+      let changed = false;
+      const spelled = vals.map((v) => {
+        const resolvedTo = normalizeEdgeValue(v.value, resolveRef);
+        if (resolvedTo !== undefined && resolvedTo !== v.value && priorValues.has(resolvedTo)) {
+          changed = true;
+          return { value: resolvedTo, datatype: v.datatype, isIri: true };
+        }
+        return v;
+      });
+      if (changed) properties.set(pred, spelled);
+    }
+
+    const merged: ParsedRecord = { ...winner, properties };
+    for (const r of bucket) replacement.set(r, r === winner ? merged : null);
+    collapsed += bucket.length - 1;
+  }
+
+  if (collapsed === 0) return { records, collapsed: 0 };
+  const out: ParsedRecord[] = [];
+  for (const r of records) {
+    if (!replacement.has(r)) { out.push(r); continue; }
+    const to = replacement.get(r);
+    if (to) out.push(to);
+  }
+  return { records: out, collapsed };
 }
 
 /**
@@ -1054,18 +1223,7 @@ export function splitIdentityCollisions(
     }
 
     const rekeyed = new Map<ParsedRecord, string>();
-    for (const [uri, wholeBucket] of byUri) {
-      if (wholeBucket.length < 2) continue;
-      // A source this IRI's merge survivor has already absorbed is not a second
-      // claimant on it. Removed from the bucket rather than reconciled away, so
-      // the ordinary re-import pass-over keeps the survivor and drops the thin
-      // copy — see absorbedByMergeSurvivor.
-      const bucket = wholeBucket.filter(
-        (r) =>
-          !wholeBucket.some(
-            (other) => other !== r && absorbedByMergeSurvivor(other, r, uri, resolveRef, derived),
-          ),
-      );
+    for (const [uri, bucket] of byUri) {
       if (bucket.length < 2) continue;
       const distinct = [...new Set(bucket.map((r) => fingerprints.get(r)!))].sort();
       if (distinct.length < 2) continue;  // a re-import, not a collision
@@ -2374,6 +2532,15 @@ export async function runReconciliation(
   // the same footing rather than on the pipeline stage each was caught at.
   const derivedReferenceValues = buildDerivedReferenceValues(allInputQuads, referenceResolver);
 
+  // Two conversions of ONE source record are folded together FIRST, so the
+  // collision door below only ever sees pairs that are genuinely two records.
+  // Without this every enrichment to a converter turns the next re-import of a
+  // pod's own retained sources into a wall of conflicts — measured at 723 on one
+  // real pod — and splits apart the very records the new fields were emitted to
+  // let the matchers join.
+  const reconverted = collapseReconversions(allRecords, referenceResolver, derivedReferenceValues);
+  allRecords = reconverted.records;
+
   const split = splitIdentityCollisions(allRecords, referenceResolver, derivedReferenceValues);
   allRecords = split.records;
   const identityCollisions = split.collisions;
@@ -2656,7 +2823,11 @@ export async function runReconciliation(
   // reported as a merge.
   const groupedRecords = new Set<ParsedRecord>();
   for (const g of groups) for (const r of g.records) groupedRecords.add(r);
-  const duplicateSubjectsDropped = allRecords.length - groupedRecords.size;
+  // Re-conversions folded before the collision door are counted here too: they
+  // ARE a second arrival of a subject the pod already held, and leaving them out
+  // would report a re-import of an entire pod as having dropped nothing.
+  const duplicateSubjectsDropped =
+    allRecords.length - groupedRecords.size + reconverted.collapsed;
 
   // Tier-0 classification, BEFORE resolution, because resolveGroup reads it.
   // The fingerprint is memoized: it is a SHA-256 over the record's whole property
