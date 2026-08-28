@@ -3,15 +3,19 @@ import type { FieldDropManifest } from '../types.js';
 /**
  * What `convertClinicalDocument` does not emit.
  *
- * `docStatus` is emitted now, so an amended note is no longer byte-identical to
- * a final one. `status` still is not: a superseded or retracted document reads
- * as a live one.
+ * Both statuses are emitted now, on their own predicates: `docStatus` as
+ * `clinical:status` (wave 1) and `status` as `clinical:documentReferenceStatus`
+ * (wave 4), so a superseded reference no longer reads as a live one and
+ * "entered-in-error" is no longer ambiguous between the two.
  *
- * Attribution is no longer absent either: `appendProvenanceQuads` reads `author`
- * (falling back to `authenticator`) and `custodian`, so a note names its writer
- * and the organization holding it. What remains dropped is narrower — the
- * co-author, the practitioner references themselves, and the author/attester
- * DISTINCTION — and each is stated below.
+ * Attribution is complete too. `appendProvenanceQuads` still writes the single
+ * display name to `clinical:providerName`, and wave 4 adds
+ * `clinical:documentAuthorName` for EVERY author and `clinical:authenticatorName`
+ * for the signer — so a note co-signed by a resident and an attending keeps both,
+ * and who SIGNED it is no longer stored as though they wrote it.
+ *
+ * What is left is the practitioner REFERENCES (resources the pod does not hold,
+ * so the links would dangle) and three fields with no term yet.
  */
 export const DOCUMENT_REFERENCE_DROPS: FieldDropManifest = {
   resourceType: 'DocumentReference',
@@ -29,12 +33,6 @@ export const DOCUMENT_REFERENCE_DROPS: FieldDropManifest = {
       reason:
         'The document\'s own identifier in the issuing system, and the key that would let the same note arriving over two transports be recognised as one note.',
     },
-    'DocumentReference.status': {
-      disposition: 'pending',
-      backlog: '3.256',
-      reason:
-        'current, superseded and entered-in-error import identically, so a retracted document reads as a live one.',
-    },
     'DocumentReference.category': {
       disposition: 'pending',
       backlog: '3.256',
@@ -46,20 +44,20 @@ export const DOCUMENT_REFERENCE_DROPS: FieldDropManifest = {
       reason:
         "A pod holds one person's records, so the subject link is the pod itself.",
     },
-    'DocumentReference.author[1]': {
-      disposition: 'acknowledged',
-      reason:
-        'Only the first author reaches clinical:providerName, which is sh:maxCount 1 on every shape that constrains it, so a co-author cannot be added without producing records that fail validation. Naming the writer is the fact a note most needs; a second author would need a repeatable contributor predicate that does not exist.',
-    },
     'DocumentReference.author[0].reference': {
       disposition: 'acknowledged',
       reason:
-        'Practitioner resources are not imported as records, so the reference would dangle. The display is emitted as clinical:providerName.',
+        'Practitioner resources are not imported as records, so the reference would dangle. The display is emitted as clinical:documentAuthorName and, for the first author, as clinical:providerName.',
     },
-    'DocumentReference.authenticator': {
+    'DocumentReference.author[1].reference': {
       disposition: 'acknowledged',
       reason:
-        'Read only when the document names no author; with an author present that value is the provider. Attestation as a fact DISTINCT from authorship — who signed a note someone else wrote — would need its own predicate, and none exists, so what is dropped here is the distinction rather than the name.',
+        'Same as author[0].reference: a link to a Practitioner resource the pod does not hold. Visible to the differential only now that author[1] itself is emitted, because the walk stops descending at a dropped parent. The co-author\'s NAME reaches the pod as clinical:documentAuthorName.',
+    },
+    'DocumentReference.authenticator.reference': {
+      disposition: 'acknowledged',
+      reason:
+        'Same as the author references: the Practitioner resource is not imported, so the link would dangle. The signer\'s NAME is emitted as clinical:authenticatorName, which is the fact that carries the clinical and legal weight; the reference only says where the source would have looked it up.',
     },
     'DocumentReference.custodian.reference': {
       disposition: 'acknowledged',

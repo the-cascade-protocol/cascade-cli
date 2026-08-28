@@ -7,13 +7,13 @@
 # ============================================================================
 # Cascade Protocol -- Core Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.6 (2026-08-14)
+# Version: 1.7 (2026-08-27)
 # Validates: cascade:PatientProfile, cascade:Address, cascade:EmergencyContact,
 #            cascade:PharmacyInfo, cascade:AdvanceDirectives, cascade:ProxyAgent,
 #            cascade:ExportManifest, cascade:RecordSummary,
-#            cascade:InteractionScenario, and the values of
-#            cascade:sourceIdentity and cascade:dataAbsentReason wherever
-#            they appear
+#            cascade:InteractionScenario, cascade:Attachment, and the values of
+#            cascade:sourceIdentity, cascade:dataAbsentReason and
+#            cascade:hasAttachment wherever they appear
 #
 # Severity levels:
 #   sh:Violation -- Must fix (blocks operations)
@@ -700,8 +700,211 @@ cascade:DataAbsentReasonShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Shape: Attachment (core v3.7)
+# ============================================================================
+#
+# WHAT IS REQUIRED, AND WHY EXACTLY THESE THREE
+# ---------------------------------------------
+# An attachment node exists to let a consumer find bytes and know it found the
+# right ones. Three facts are what that takes, and each is a Violation because
+# without any one of them the node does not do its job:
+#   - cascade:attachmentPath, or there is nothing to open;
+#   - cascade:contentHash, or nothing distinguishes the right bytes from any
+#     other bytes at that path;
+#   - cascade:hashAlgorithm, or the digest cannot be recomputed and so cannot be
+#     checked, which makes the second requirement decorative.
+# This is the whole of the Violation set. A media type is sh:Warning: a stored
+# document with no stated type is awkward to render but not lost, and a missing
+# one must not invalidate the record that points at it.
+#
+# THE PATH CONSTRAINT IS A SAFETY CONSTRAINT, NOT A TIDINESS ONE
+# --------------------------------------------------------------
+# The pattern is stated POSITIVELY, as a sequence of "/"-separated segments each
+# of which begins with an alphanumeric and continues in the character set
+# pod-structure.md section 7.2 already requires of a Pod filename. Written that
+# way it excludes, by construction and without any lookahead, the three things
+# that must not appear: a leading "/" (absolute), a "://" (a URL, since ":" is
+# outside the set), and a ".." or "." segment (a segment must start with an
+# alphanumeric).
+#
+# Stating it positively is not a stylistic choice. SHACL evaluates sh:pattern
+# with XPath fn:matches, whose regular expression language is XSD 1.1 and has NO
+# lookahead assertion, so a "reject these three things" pattern is not
+# expressible here at all and an engine that happened to accept one would be
+# applying its host language's regex rather than the specification's.
+#
+# The exclusions matter. An absolute path or a file: URL breaks the moment a Pod
+# is copied or re-rooted, which Pods routinely are. A ".." segment is worse than
+# broken: it makes an attachment reference a way to read a file outside the Pod,
+# so a consumer that resolves paths naively can be walked out of the store by
+# data. Rejecting it in the shape means the check exists once, here, rather than
+# in every consumer that remembers to write it.
+#
+# THE DIGEST FORM IS CONSTRAINED BECAUSE IT IS ALSO A FILENAME
+# ------------------------------------------------------------
+# Lowercase hex, at least 32 characters. Uppercase and base64 are rejected not
+# on taste but because this string names a file: base64's alphabet contains "/"
+# and its case-sensitivity is unsafe on a case-insensitive filesystem, and two
+# spellings of one digest would defeat the deduplication that content addressing
+# exists to provide. The length floor rejects a truncated or placeholder digest
+# without pinning the algorithm, which cascade:hashAlgorithm names explicitly.
+#
+# NO sh:in ON THE ALGORITHM. RFC 6920's registry gains entries over time and an
+# enum here would have to be revised to accept a stronger hash, which is the
+# wrong direction for a constraint whose whole purpose is to let the algorithm
+# be replaced. The pattern accepts a registry-shaped token; core.ttl states that
+# new implementations write sha-256.
+#
+# Severity note: these are Violations rather than Warnings and no ratchet is
+# being skipped. The core v3.5 ratchet governs REQUIRING a property that
+# existing data could not have carried. Nothing here is required of an existing
+# record: cascade:AttachmentShape evaluates only nodes typed cascade:Attachment,
+# a class no pod written before v3.7 contains.
+
+cascade:AttachmentShape a sh:NodeShape ;
+    sh:targetClass cascade:Attachment ;
+    rdfs:label "Attachment Shape"@en ;
+    rdfs:comment "Validation constraints for the metadata node describing a binary document stored in a Pod. Requires what it takes to find the bytes and verify them: a pod-relative path, a digest, and the algorithm the digest was computed with."@en ;
+
+    sh:property [
+        sh:path cascade:attachmentPath ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[a-zA-Z0-9][a-zA-Z0-9._-]*(/[a-zA-Z0-9][a-zA-Z0-9._-]*)*$" ;
+        sh:name "Attachment Path"@en ;
+        sh:message "cascade:attachmentPath must be exactly one pod-relative path whose segments each begin with an alphanumeric and use only [a-zA-Z0-9._-], the character set pod-structure.md requires of Pod filenames. That form excludes an absolute path, a URL, and any '..' segment: the first two break when a Pod is copied, and the third lets an attachment reference read a file outside the Pod."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:contentHash ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[0-9a-f]{32,}$" ;
+        sh:name "Content Hash"@en ;
+        sh:message "cascade:contentHash must be exactly one lowercase hexadecimal digest of at least 32 characters, with no algorithm prefix. Uppercase hex and base64 are rejected because this value is also the file's name: base64 contains '/' and is case-sensitive, and two spellings of one digest defeat content addressing."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:hashAlgorithm ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^[a-z0-9][a-z0-9-]*$" ;
+        sh:name "Hash Algorithm"@en ;
+        sh:message "cascade:hashAlgorithm must be exactly one token from the IANA Named Information Hash Algorithm Registry (RFC 6920), such as 'sha-256'. It is not enumerated here because the registry grows and this property exists precisely so the algorithm can be replaced."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Media type: the FORM of the value is a Violation (two media types on one
+    # set of bytes is a defect, and a value that is not type/subtype is not a
+    # media type), while its PRESENCE is only a Warning, checked separately
+    # below so the two severities are unambiguous.
+    sh:property [
+        sh:path cascade:attachmentMediaType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*/[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*$" ;
+        sh:name "Attachment Media Type"@en ;
+        sh:message "cascade:attachmentMediaType must be a single IANA media type in RFC 6838 type/subtype form, for example 'application/pdf'"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:byteSize ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Byte Size"@en ;
+        sh:message "cascade:byteSize must be a single non-negative integer"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:attachmentTitle ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Attachment Title"@en ;
+        sh:message "cascade:attachmentTitle must be a single string"@en ;
+        sh:severity sh:Violation
+    ] .
+
+# Presence of a media type, kept in its own shape so its severity is
+# unambiguous: this is sh:Warning while every constraint in
+# cascade:AttachmentShape above is sh:Violation. Stored bytes with no stated
+# type are awkward to render but not lost, so a missing one must not invalidate
+# the record that points at them.
+cascade:AttachmentMediaTypeShape a sh:NodeShape ;
+    sh:targetClass cascade:Attachment ;
+    rdfs:label "Attachment Media Type Shape"@en ;
+    sh:property [
+        sh:path cascade:attachmentMediaType ;
+        sh:minCount 1 ;
+        sh:name "Attachment Media Type"@en ;
+        sh:message "An attachment should state its media type; without one, the only way to render the stored bytes is guesswork"@en ;
+        sh:severity sh:Warning
+    ] .
+
+# Open-world edge shape, matching the clinical: record-to-record edge shapes:
+# targets the subjects that USE the predicate, so nothing fires unless the edge
+# is present, asserts no minCount, and reports at sh:Warning.
+#
+# Deliberately NO sh:class on the object, for the reason clinical v1.11 recorded
+# when it removed one: Cascade pods store records partitioned into per-type
+# files and the reference validator validates each file independently, so an
+# edge whose target lives in a sibling file could never satisfy sh:class and the
+# constraint would produce a warning on every well-formed edge and none on a
+# malformed one. sh:nodeKind sh:IRI is retained, because an attachment must be
+# addressable from the file that points at it.
+cascade:HasAttachmentEdgeShape a sh:PropertyShape ;
+    sh:targetSubjectsOf cascade:hasAttachment ;
+    sh:path cascade:hasAttachment ;
+    sh:nodeKind sh:IRI ;
+    sh:severity sh:Warning ;
+    sh:message "cascade:hasAttachment should reference a cascade:Attachment by IRI, so that the record and the attachment can live in different files"@en ;
+    sh:name "Has Attachment Edge"@en .
+
+# ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.7 (2026-08-27)
+# - Added cascade:AttachmentShape, cascade:AttachmentMediaTypeShape and
+#   cascade:HasAttachmentEdgeShape for the core v3.7 attachment vocabulary.
+# - AttachmentShape requires exactly the three facts without which an
+#   attachment node cannot do its job, at sh:Violation: the pod-relative path,
+#   the digest, and the algorithm the digest was computed with. The third is
+#   what makes the second checkable rather than decorative.
+# - The path pattern is stated POSITIVELY, as "/"-separated segments each
+#   beginning with an alphanumeric in the character set pod-structure.md
+#   section 7.2 already requires of Pod filenames. That form excludes an
+#   absolute path, a URL and any ".." segment by construction. It is not
+#   written as an exclusion because SHACL evaluates sh:pattern with XPath
+#   fn:matches, whose XSD 1.1 regular expressions have no lookahead; a
+#   "reject these" pattern would only work on engines applying their host
+#   language's regex instead of the specification's.
+# - The digest is constrained to lowercase hex of at least 32 characters,
+#   because the value is also a filename: base64 contains "/" and is
+#   case-sensitive, and two spellings of one digest defeat the deduplication
+#   content addressing exists to provide. The algorithm carries a
+#   registry-shaped pattern and NO sh:in — RFC 6920's registry grows, and an
+#   enum would have to be revised to accept a stronger hash, which is the wrong
+#   direction for a property whose purpose is to let the algorithm be replaced.
+# - Media type is split across two shapes so the severities are unambiguous:
+#   its FORM (single value, RFC 6838 type/subtype) is a Violation, its PRESENCE
+#   only a Warning in AttachmentMediaTypeShape. Bytes with no stated type are
+#   awkward to render, not lost.
+# - HasAttachmentEdgeShape is open-world (sh:targetSubjectsOf, sh:Warning,
+#   sh:nodeKind sh:IRI, no minCount) and carries NO sh:class, for the reason
+#   clinical v1.11 recorded when it removed one: per-file validation makes a
+#   cross-file sh:class produce warnings only on well-formed edges.
+# - No ratchet is skipped by the Violations here. The core v3.5 ratchet governs
+#   REQUIRING something existing data could not have carried; AttachmentShape
+#   evaluates only nodes typed cascade:Attachment, a class no pod written
+#   before v3.7 contains.
 #
 # Version 1.6 (2026-08-14)
 # - Added DataAbsentReasonShape for core v3.6's cascade:dataAbsentReason.

@@ -14,6 +14,62 @@
 # different data sources (EHR, device, patient-reported).
 #
 # Changelog:
+# v1.16 (2026-08-27): Describe the facts the records now carry. Additive and
+#     strictly widening: nothing that validated under v1.15 stops validating,
+#     and every new finding on an existing predicate is at sh:Warning.
+#
+#     1. clinical:status is declared, with a per-class FHIR value set, on the
+#        shapes whose records carry it. Through v1.15 it was written onto five
+#        record types and declared on none of them, so nothing was closed and
+#        nothing was checked: the value set was unenforced and validation passed
+#        in silence. The sets are verbatim from the FHIR R4 value set each
+#        record type's source resource binds:
+#          clinical:VitalSignShape          Observation.status, 8 codes
+#          clinical:LaboratoryReportShape   DiagnosticReport.status, 10 codes
+#          clinical:ClinicalDocumentShape   see the note on that shape
+#          health:LabResultRecordShape      Observation.status, 8 codes
+#          health:AllergyRecordShape        AllergyIntolerance.clinicalStatus,
+#                                           3 codes
+#        The last two are in health.shapes.ttl v1.5, which is where those two
+#        shapes live. All five are sh:Warning, per the core v3.5 ratchet: a
+#        value existing data carries is reported, not rejected, and the severity
+#        is raised only after a release in which the warning is observably
+#        absent from conforming output.
+#     2. ClinicalDocumentShape's status set is the ten-code diagnostic-report
+#        set rather than the four-code composition set that DocumentReference.
+#        docStatus is bound to. clinical:LaboratoryReportShape reaches this
+#        shape through sh:node, and a lab report converted from a
+#        DiagnosticReport legitimately carries "partial", "corrected" or
+#        "appended". composition-status is a strict subset of
+#        diagnostic-report-status, so the wider set is the only one correct for
+#        every class under this shape. The full argument, and the ratchet step
+#        that would tighten it, are stated at the constraint.
+#     3. NEW property shapes on clinical:ClinicalDocumentShape for
+#        clinical:documentReferenceStatus (sh:in current | superseded |
+#        entered-in-error, FHIR R4 DocumentReference.status, required binding),
+#        clinical:documentAuthorName (repeatable, NO maxCount — the
+#        sh:maxCount 1 on clinical:providerName is what was discarding every
+#        author past the first), clinical:authenticatorName (0..1) and
+#        clinical:businessIdentifier (repeatable).
+#     4. NEW property shapes on clinical:EncounterShape for the nine encounter
+#        facts clinical v1.16 defines: encounterClassDisplay,
+#        encounterClassSystem, encounterReason (repeatable), admitSource,
+#        dischargeDisposition, hasParticipant (repeatable) and
+#        businessIdentifier (repeatable). None of the source-text properties
+#        carries a value set: FHIR binds reasonCode and admitSource PREFERRED
+#        and dischargeDisposition EXAMPLE, and an enum over an example-strength
+#        binding rejects conformant data by construction.
+#        clinical:sourceRecordId keeps sh:maxCount 1 and now says why: it holds
+#        one logical id, and the 0..* business identifiers have their own
+#        predicate.
+#     5. NEW clinical:EncounterParticipantShape, targeting the new
+#        clinical:EncounterParticipant class. Constrains cardinality and
+#        datatype only. It requires no field, because FHIR makes every
+#        sub-element of Encounter.participant optional, and it binds no role
+#        vocabulary, because that binding is extensible at source. It does not
+#        require sh:nodeKind sh:IRI: unlike an Encounter, nothing references a
+#        participation from another file.
+#
 # v1.15 (2026-08-14): Check what was unchecked, keep what was being dropped, and
 #     stop failing records that carry the thing they are failing for missing.
 #     Additive and strictly widening: no graph that validated under v1.14 stops
@@ -225,6 +281,88 @@ clinical:ClinicalDocumentShape a sh:NodeShape ;
         sh:path clinical:hasSection ;
         sh:class clinical:ClinicalSection ;
         sh:name "Sections"@en
+    ] ;
+
+    # ------------------------------------------------------------------
+    # v1.16: the two status axes, and the two attribution axes
+    # ------------------------------------------------------------------
+    #
+    # WHY THE STATUS SET HERE IS THE DIAGNOSTIC-REPORT SET AND NOT THE
+    # COMPOSITION SET. On a DocumentReference-derived record clinical:status
+    # carries DocumentReference.docStatus, whose required binding is
+    # composition-status: preliminary | final | amended | entered-in-error.
+    # But clinical:LaboratoryReportShape reaches these constraints through
+    # sh:node, and a laboratory report is converted from a DiagnosticReport,
+    # whose status value set is the ten-code diagnostic-report-status. Binding
+    # the four-code set here would therefore report a conformant DiagnosticReport
+    # status of "partial", "corrected" or "appended" as out of set on every lab
+    # report in the pod.
+    #
+    # composition-status is a strict SUBSET of diagnostic-report-status, so the
+    # ten-code set is the union of the two value sets that reach this shape and
+    # is the only set that is correct for every class under it. It is bound here
+    # verbatim from https://hl7.org/fhir/R4/valueset-diagnostic-report-status.html
+    #
+    # The narrower composition-status binding for the DocumentReference-derived
+    # document subtypes specifically is deliberately NOT added in this version.
+    # It would have to live on shapes targeting those subtypes alone, and this
+    # release has no measurement of what those records actually carry; per the
+    # core v3.5 ratchet a constraint is added once conforming output is observed,
+    # not on the assumption that it will be. That is the next step here, and it
+    # is one version's work, not a judgement call.
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("registered" "partial" "preliminary" "final" "amended" "corrected"
+               "appended" "cancelled" "entered-in-error" "unknown") ;
+        sh:name "Status"@en ;
+        sh:message "Document status should be one of the FHIR R4 codes a document-class record can carry: the four composition-status codes (preliminary, final, amended, entered-in-error) that DocumentReference.docStatus is bound to, or the ten diagnostic-report-status codes a DiagnosticReport-derived report carries"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # FHIR R4 DocumentReference.status, required binding, verbatim.
+    # A DIFFERENT fact from clinical:status above: this is whether the pod's
+    # POINTER to the document is current, and "entered-in-error" here means the
+    # reference was filed in error, not that the clinical content is repudiated.
+    sh:property [
+        sh:path clinical:documentReferenceStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("current" "superseded" "entered-in-error") ;
+        sh:name "Document Reference Status"@en ;
+        sh:message "Document reference status should be one of the FHIR R4 DocumentReferenceStatus codes: current, superseded, entered-in-error"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # Repeatable by design: DocumentReference.author is 0..*, and the
+    # sh:maxCount 1 on clinical:providerName is what was discarding every author
+    # after the first. NO maxCount is asserted here.
+    sh:property [
+        sh:path clinical:documentAuthorName ;
+        sh:datatype xsd:string ;
+        sh:name "Document Author Name"@en ;
+        sh:message "Each document author name must be a string"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # DocumentReference.authenticator is 0..1.
+    sh:property [
+        sh:path clinical:authenticatorName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Authenticator Name"@en ;
+        sh:message "A document has at most one authenticator, matching FHIR R4 DocumentReference.authenticator 0..1"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # FHIR .identifier is 0..* on every resource; no maxCount.
+    sh:property [
+        sh:path clinical:businessIdentifier ;
+        sh:datatype xsd:string ;
+        sh:name "Business Identifier"@en ;
+        sh:message "Each business identifier must be a string"@en ;
+        sh:severity sh:Violation
     ] .
 
 # ============================================================================
@@ -373,6 +511,26 @@ clinical:LaboratoryReportShape a sh:NodeShape ;
         sh:minCount 1 ;
         sh:name "Document Date"@en ;
         sh:message "Lab reports must have a document date"@en
+    ] ;
+
+    # v1.16: FHIR R4 DiagnosticReport.status, required binding, verbatim and in
+    # the value set's own order
+    # (https://hl7.org/fhir/R4/valueset-diagnostic-report-status.html). A
+    # laboratory report is converted from a DiagnosticReport, so this is the
+    # value set its clinical:status is drawn from. Restated here rather than
+    # left to the inherited ClinicalDocumentShape constraint, because a reader
+    # of this shape needs to see which of the two document status value sets
+    # applies to a lab report; the two sets are identical here by construction,
+    # since composition-status is a strict subset of this one.
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("registered" "partial" "preliminary" "final" "amended" "corrected"
+               "appended" "cancelled" "entered-in-error" "unknown") ;
+        sh:name "Status"@en ;
+        sh:message "Laboratory report status should be one of the FHIR R4 DiagnosticReportStatus codes: registered, partial, preliminary, final, amended, corrected, appended, cancelled, entered-in-error, unknown"@en ;
+        sh:severity sh:Warning
     ] .
 
 # ============================================================================
@@ -1314,6 +1472,26 @@ clinical:VitalSignShape a sh:NodeShape ;
         sh:name "Data Provenance"@en
     ] ;
 
+    # v1.16: FHIR R4 Observation.status, required binding, verbatim and in the
+    # value set's own order
+    # (https://hl7.org/fhir/R4/valueset-observation-status.html). A vital sign
+    # is converted from an Observation, so this is the value set its
+    # clinical:status is drawn from. sh:Warning, not sh:Violation: this is a
+    # newly bound value set on a predicate existing pods already carry, and the
+    # core v3.5 ratchet is that such a value is reported, never rejected, until
+    # a release in which the warning is observably absent from conforming
+    # output.
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("registered" "preliminary" "final" "amended" "corrected"
+               "cancelled" "entered-in-error" "unknown") ;
+        sh:name "Status"@en ;
+        sh:message "Vital sign status should be one of the FHIR R4 ObservationStatus codes: registered, preliminary, final, amended, corrected, cancelled, entered-in-error, unknown"@en ;
+        sh:severity sh:Warning
+    ] ;
+
     # Required: schemaVersion
     sh:property [
         sh:path cascade:schemaVersion ;
@@ -1826,12 +2004,91 @@ clinical:EncounterShape a sh:NodeShape ;
         sh:severity sh:Violation
     ] ;
 
+    # v1.16: the rest of the Encounter.class Coding. The CODE keeps its
+    # unconstrained sh:datatype above; these two carry the display and the code
+    # system, without which a local class code is unreadable and cannot be told
+    # apart from a ratified ActEncounterCode. No enum on either, for the same
+    # reason the code carries none.
+    sh:property [
+        sh:path clinical:encounterClassDisplay ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Class Display"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:encounterClassSystem ;
+        sh:or ( [ sh:datatype xsd:anyURI ] [ sh:datatype xsd:string ] ) ;
+        sh:maxCount 1 ;
+        sh:name "Encounter Class System"@en ;
+        sh:message "Encounter Class System must be a single xsd:anyURI (an xsd:string is accepted, because serializers differ on which of the two they write for a URI-valued literal)"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # v1.16: why the visit happened, and the admission signals. All three are
+    # verbatim source text and NONE carries a value set: FHIR binds reasonCode
+    # and admitSource only PREFERRED and dischargeDisposition only EXAMPLE, and
+    # an enum on an example-strength binding rejects conformant data by
+    # construction. encounterReason is repeatable because Encounter.reasonCode
+    # is 0..*; the hospitalization fields are 0..1 in the source.
+    sh:property [
+        sh:path clinical:encounterReason ;
+        sh:datatype xsd:string ;
+        sh:name "Encounter Reason"@en ;
+        sh:message "Each encounter reason must be a string"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:admitSource ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Admit Source"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:dischargeDisposition ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Discharge Disposition"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # v1.16: participations. Repeatable, and no sh:class on the object: the
+    # v1.11 note under HasEncounterEdgeShape explains why a class check across
+    # a per-file validation boundary produced only false positives, and while a
+    # participant is written into the same file as its encounter today, that is
+    # a serializer's choice and not something a shape should require. The node
+    # itself is constrained by clinical:EncounterParticipantShape below.
+    sh:property [
+        sh:path clinical:hasParticipant ;
+        sh:name "Has Participant"@en ;
+        sh:severity sh:Violation
+    ] ;
+
     # Optional: source linkage back to the record this was converted from.
+    #
+    # sourceRecordId stays sh:maxCount 1 because it holds ONE thing: the
+    # server-assigned logical id of the resource this record was converted
+    # from. The visit's business identifiers, which are 0..* in FHIR and are
+    # what a cross-transport join keys on, go to clinical:businessIdentifier
+    # below. Through v1.15 both were written to this single-valued predicate,
+    # which is why a second identifier had nowhere to go.
     sh:property [
         sh:path clinical:sourceRecordId ;
         sh:datatype xsd:string ;
         sh:maxCount 1 ;
         sh:name "Source Record ID"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:businessIdentifier ;
+        sh:datatype xsd:string ;
+        sh:name "Business Identifier"@en ;
+        sh:message "Each business identifier must be a string; FHIR Encounter.identifier is 0..* so no maximum is asserted"@en ;
         sh:severity sh:Violation
     ] ;
 
@@ -1882,6 +2139,71 @@ clinical:EncounterTemporalShape a sh:NodeShape ;
     ) ;
     sh:message "Encounter should carry a start, an end or an encounter date so that records linked to it can be placed in time"@en ;
     sh:severity sh:Warning .
+
+# ============================================================================
+# Shape: Encounter Participant (v1.16)
+# ============================================================================
+#
+# One participation in a visit: a name together with the role it was played in.
+# Constrains SHAPE only, for the same reason clinical:EncounterShape does.
+#
+# NO VALUE SET on the role code, deliberately. FHIR R4 binds
+# Encounter.participant.type EXTENSIBLY to encounter-participant-type, which
+# draws twelve concepts from v3-ParticipationType and the FHIR participant-type
+# code system; an extensible binding means a server may send a local code and
+# still be conformant, and rejecting it here would discard the participant along
+# with the code.
+#
+# NO REQUIRED FIELD, deliberately. FHIR makes every sub-element of
+# Encounter.participant optional: participant.type is 0..*, participant.individual
+# is 0..1, and a participation carrying only a period is legal. A minCount here
+# would fail conformant source data. The shape's value is in constraining
+# cardinality and datatype so that a participation cannot carry two names or two
+# specialties, which is where a merge of two records silently corrupts one.
+#
+# The node is NOT constrained to sh:nodeKind sh:IRI. Unlike clinical:Encounter,
+# nothing points at a participation from another file, so requiring an IRI would
+# forbid the blank node a serializer may reasonably write for a structural
+# sub-node.
+
+clinical:EncounterParticipantShape a sh:NodeShape ;
+    sh:targetClass clinical:EncounterParticipant ;
+    rdfs:label "Encounter Participant Shape"@en ;
+    rdfs:comment "Validation constraints for one participation in an encounter. Mirrors FHIR R4 Encounter.participant: constrains cardinality and datatype, and deliberately constrains neither the role vocabulary (extensibly bound at source) nor the presence of any single field (every sub-element is optional at source)."@en ;
+
+    sh:property [
+        sh:path clinical:participantName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Participant Name"@en ;
+        sh:message "A participation names at most one individual, matching FHIR R4 Encounter.participant.individual 0..1"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:participantRole ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Participant Role"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    # Repeatable: Encounter.participant.type is 0..*.
+    sh:property [
+        sh:path clinical:participantRoleCode ;
+        sh:datatype xsd:string ;
+        sh:name "Participant Role Code"@en ;
+        sh:message "Each participant role code must be a string; no value set is enforced because FHIR R4 binds Encounter.participant.type extensibly"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path clinical:participantSpecialty ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Participant Specialty"@en ;
+        sh:severity sh:Violation
+    ] .
 
 # ============================================================================
 # Graph Edge Property Shapes (v1.10)

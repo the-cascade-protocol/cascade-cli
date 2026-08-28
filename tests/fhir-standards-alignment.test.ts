@@ -295,7 +295,13 @@ describe('a conformant Epic-shaped FHIR bundle converts and validates', () => {
     // subject no shape targeted, and an unchecked subject reports PASS.
     expect(result.coverage.unshapedSubjects.map((u) => u.types.join(','))).toEqual([]);
     expect(result.coverage.checkedSubjects).toBe(result.coverage.totalSubjects);
-    expect(result.coverage.totalSubjects).toBe(5);
+    // 5 -> 6 with clinical v1.16: the encounter's participation is a subject of
+    // its own now, and `clinical:EncounterParticipantShape` targets it. That the
+    // count moved and `unshapedSubjects` stayed empty is the load-bearing part —
+    // a new subject type reaching the pod with no shape aimed at it would report
+    // PASS while being checked by nothing, which is the exact defect the
+    // Encounter itself exhibited before clinical v1.14 gave it a shape.
+    expect(result.coverage.totalSubjects).toBe(6);
   });
 
   it('raises no warning on a conformant subscriber relationship', () => {

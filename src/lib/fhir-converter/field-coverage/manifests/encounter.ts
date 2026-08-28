@@ -6,10 +6,17 @@ import type { FieldDropManifest } from '../types.js';
  * Seeded from the differential run over `test-fixtures/field-coverage/encounter.json`,
  * which reproduces the shape measured across 54 Epic R4 Encounters.
  *
- * The clinic, the role-correct provider and the visit's contact serial number
- * now survive. What still does not: the reason, the admission detail, every type
- * coding past the first, and every participant except the one that wins the role
- * ranking — including that participant's own specialty.
+ * WHAT WAVE 4 CLOSED. The reason, the admission detail, the readable class label
+ * and its code system, every participant with its role and specialty, and the
+ * visit's business identifiers on the canonical predicate all reach the pod now,
+ * so their entries are gone from this file rather than downgraded. Eight entries
+ * were deleted; what replaces them are the four SUB-elements the differential can
+ * only see now that it descends into paths their parents used to hide.
+ *
+ * WHAT IS STILL LOST, and it is worth being precise about how little is left:
+ * every `type` coding past the first, `serviceType`, and every `location` past
+ * the one that becomes the facility. All three need vocabulary that clinical
+ * v1.16 did not author.
  */
 export const ENCOUNTER_DROPS: FieldDropManifest = {
   resourceType: 'Encounter',
@@ -41,17 +48,10 @@ export const ENCOUNTER_DROPS: FieldDropManifest = {
       reason:
         'Duration is derivable from the emitted encounterStart and encounterEnd. Storing it as a second fact invites the two to disagree.',
     },
-    'Encounter.reasonCode': {
-      disposition: 'pending',
-      backlog: '3.254',
+    'Encounter.reasonCode[1].coding': {
+      disposition: 'acknowledged',
       reason:
-        'Why the visit happened, which is the single most orienting fact on a visit card. Needs vocabulary: check US Core and IPS Encounter before authoring a clinical: term.',
-    },
-    'Encounter.hospitalization': {
-      disposition: 'pending',
-      backlog: '3.254',
-      reason:
-        'Admit source and discharge disposition. Present on inpatient encounters only, and the part of an admission a reader most wants. Needs vocabulary.',
+        "The coded form of a reason whose text is emitted. clinical:encounterReason carries the reason AS WRITTEN, and FHIR binds Encounter.reasonCode only preferred, so real exports mix local, free-text and SNOMED reasons in one element; a code beside an emitted text adds no fact the pod can act on. Where a coded reason names a record the pod already holds, clinical:indicationReference carries that as a traversable edge instead.",
     },
     'Encounter.location[1]': {
       disposition: 'pending',
@@ -68,18 +68,6 @@ export const ENCOUNTER_DROPS: FieldDropManifest = {
       disposition: 'acknowledged',
       reason:
         "The interval the patient spent at that location. Same reasoning as location[0].status: intra-stay movement needs vocabulary, and the encounter's own period is emitted.",
-    },
-    'Encounter.class.system': {
-      disposition: 'pending',
-      backlog: '3.254',
-      reason:
-        'clinical:encounterClass is emitted as a bare code, so a vendor category id and a v3-ActCode arrive indistinguishable. The system is what makes the code readable.',
-    },
-    'Encounter.class.display': {
-      disposition: 'pending',
-      backlog: '3.254',
-      reason:
-        'The human label for the class ("Appointment", "Hospital Encounter"). Emitting the code without it leaves a bare id on screen.',
     },
     'Encounter.type[0].coding': {
       disposition: 'acknowledged',
@@ -104,29 +92,10 @@ export const ENCOUNTER_DROPS: FieldDropManifest = {
       reason:
         'Same gap as type[1]. Epic routinely states four types on one encounter and three of them reach nothing.',
     },
-    'Encounter.participant[0]': {
-      disposition: 'pending',
-      backlog: '3.254',
+    'Encounter.participant[0].period': {
+      disposition: 'acknowledged',
       reason:
-        'Provider selection now ranks participants by declared role, so this generic-role participant reaches nothing once a treating role is present. Exactly ONE participant becomes clinical:providerName; the rest of the care team, roles included, is still dropped.',
-    },
-    'Encounter.participant[1].extension': {
-      disposition: 'pending',
-      backlog: '3.254',
-      reason:
-        'The specialty extension on the participant who WAS selected. The name reaches the pod and the specialty beside it does not, so "who treated me" arrives without "as what".',
-    },
-    'Encounter.participant[2]': {
-      disposition: 'pending',
-      backlog: '3.254',
-      reason:
-        'Same gap as participant[0]. A visit with four participants keeps one name and loses three, roles and all.',
-    },
-    'Encounter.participant[3]': {
-      disposition: 'pending',
-      backlog: '3.254',
-      reason:
-        'Same gap as participant[0]. A participant losing the ranking is a participant the pod never mentions.',
+        "The interval this individual took part in, as distinct from the encounter's own period. clinical:EncounterParticipant models FHIR's participant as a name, a role and a specialty and deliberately carries no time: a participation interval describes movement WITHIN a visit, the same intra-stay axis Encounter.location[0].period sits on, and the encounter's own period is emitted. Both would need the same vocabulary, and neither should get it piecemeal.",
     },
   },
 };

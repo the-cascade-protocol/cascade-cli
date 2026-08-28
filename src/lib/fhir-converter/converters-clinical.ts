@@ -42,6 +42,8 @@ import {
   codeableConceptSetKey,
   structuredKey,
   canonicalSetKey,
+  encounterParticipantUri,
+  type EncounterParticipation,
 } from './types.js';
 import {
   referencePlaceholder,
@@ -1148,23 +1150,60 @@ export function convertClinicalDocument(resource: any): ConversionResult & { _qu
   const docType = codeableConceptText(resource.type) ?? 'Unknown Document';
   quads.push(tripleStr(subjectUri, NS.clinical + 'documentType', docType));
 
-  // DocumentReference.docStatus — preliminary | final | amended | entered-in-error.
-  // This is the status of the DOCUMENT, which is what clinical:ClinicalDocument
-  // models, so it is the one that belongs on clinical:status.
+  // A DocumentReference carries TWO independent status elements, and from
+  // clinical v1.16 each has its own predicate.
   //
-  // ACKNOWLEDGED DROP: `DocumentReference.status` (current | superseded |
-  // entered-in-error) is a statement about the REFERENCE rather than about the
-  // document, and putting it on the same predicate would leave a reader seeing
-  // `entered-in-error` unable to tell which of the two elements said so. It
-  // needs its own predicate, which does not exist.
+  // docStatus is the status of the DOCUMENT (preliminary | final | amended |
+  // entered-in-error) and stays on clinical:status, which is what
+  // clinical:ClinicalDocument models and what every other converter here spells
+  // FHIR `.status` as.
+  //
+  // status is the status of the REFERENCE (current | superseded |
+  // entered-in-error): whether this pod entry is still the current pointer to
+  // the document. Sharing one predicate was not merely lossy, it was ambiguous
+  // in the costliest case — "entered-in-error" appears in BOTH value sets, and
+  // means the FILING was a mistake in one and the clinical CONTENT is repudiated
+  // in the other. A reader could not tell which had been said.
+  //
+  // Neither is defaulted. A document whose source states no status is stored
+  // stating none.
   if (resource.docStatus) {
     quads.push(tripleStr(subjectUri, STATUS_PREDICATE, resource.docStatus));
+  }
+  if (resource.status) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'documentReferenceStatus', resource.status));
   }
 
   // Date
   const docDate = resource.date ?? resource.indexed;
   if (docDate) {
     quads.push(tripleDateTime(subjectUri, NS.clinical + 'documentDate', docDate));
+  }
+
+  // EVERY author, and separately the authenticator.
+  //
+  // `DocumentReference.author` is 0..*, and until clinical v1.16 the only
+  // predicate available was `clinical:providerName`, which is `sh:maxCount 1` on
+  // every shape that constrains it — so a note co-signed by a resident and an
+  // attending arrived naming one of them, with nothing recording that the other
+  // had been discarded. `clinical:providerName` is unchanged and still holds the
+  // single display name (written by the provenance pass from the first author);
+  // this predicate holds all of them, that one included.
+  //
+  // The authenticator is a DIFFERENT FACT, not another author. A resident writes
+  // and an attending signs: recording only the author loses the signature, which
+  // is the part of a note carrying clinical and legal weight, and recording the
+  // signer as an author asserts they wrote the content, which the source did not
+  // say. FHIR keeps them as two elements for that reason and so does this.
+  for (const author of Array.isArray(resource.author) ? resource.author : []) {
+    const display = author?.display;
+    if (typeof display === 'string' && display.trim().length > 0) {
+      quads.push(tripleStr(subjectUri, NS.clinical + 'documentAuthorName', display.trim()));
+    }
+  }
+  const authenticator = resource.authenticator?.display;
+  if (typeof authenticator === 'string' && authenticator.trim().length > 0) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'authenticatorName', authenticator.trim()));
   }
 
   // Content type and URL from first attachment
@@ -1435,6 +1474,125 @@ function encounterIdentifierTokens(resource: any): string[] {
   return tokens;
 }
 
+/**
+ * Every business identifier an `Encounter` states, in FHIR TOKEN form.
+ *
+ * `{system}|{value}`, the ratified way to write a system-qualified identifier as
+ * one string (https://hl7.org/fhir/R4/search.html#token), which `spec` names
+ * normatively on `clinical:businessIdentifier` as of clinical v1.16. Where the
+ * source states no system the BARE VALUE is written and no system is invented.
+ *
+ * THE SYSTEM IS VERBATIM. It is NOT stripped of `urn:oid:`, and the difference
+ * from {@link encounterIdentifierTokens} directly below is the entire point:
+ * that function produces the FROZEN colon form for `cascade:sourceRecordId`, a
+ * compatibility artifact whose spelling can never change because changing it
+ * would unjoin every pair of encounters already matched on it. This one produces
+ * the canonical form. Two spellings, two predicates, and per the ratified
+ * migration plan a value of one form is never compared
+ * against a value of the other.
+ *
+ * @see https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.identifier
+ */
+function encounterBusinessIdentifiers(resource: any): string[] {
+  const identifiers = Array.isArray(resource?.identifier) ? resource.identifier : [];
+  const tokens: string[] = [];
+  const seen = new Set<string>();
+  for (const identifier of identifiers) {
+    const value = typeof identifier?.value === 'string' ? identifier.value.trim() : '';
+    // Same rule as the colon form: an identifier with no value identifies
+    // nothing, and `system|` would sit in the join space matching every other
+    // value-less identifier from that system.
+    if (!value) continue;
+    const system = typeof identifier?.system === 'string' ? identifier.system.trim() : '';
+    const token = system ? `${system}|${value}` : value;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+/**
+ * The specialty a participant acted in, where the source carries one.
+ *
+ * FHIR models this as `PractitionerRole.specialty`, but servers routinely convey
+ * it on `Encounter.participant` as an EXTENSION rather than by publishing a
+ * resolvable PractitionerRole — which is why `clinical:participantSpecialty`
+ * carries a string rather than an edge, and why this reads an extension at all.
+ *
+ * The url is matched on containing `specialty` rather than on one vendor's exact
+ * StructureDefinition URI. A fixed URI list would silently drop the value from
+ * every server whose URI is not on it, and the failure would look exactly like
+ * "this server does not send specialty" — the class of silent loss this whole
+ * effort exists to end. The value is read from `valueCodeableConcept`,
+ * `valueCoding.display` or `valueString`, which is every spelling observed.
+ *
+ * @see https://hl7.org/fhir/R4/practitionerrole-definitions.html#PractitionerRole.specialty
+ */
+function participantSpecialty(participant: any): string | undefined {
+  for (const ext of Array.isArray(participant?.extension) ? participant.extension : []) {
+    const url = typeof ext?.url === 'string' ? ext.url : '';
+    if (!/specialty/i.test(url)) continue;
+    const fromConcept = codeableConceptText(ext.valueCodeableConcept);
+    if (fromConcept && fromConcept.trim().length > 0) return fromConcept.trim();
+    const display = ext?.valueCoding?.display;
+    if (typeof display === 'string' && display.trim().length > 0) return display.trim();
+    if (typeof ext?.valueString === 'string' && ext.valueString.trim().length > 0) {
+      return ext.valueString.trim();
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Every participation an `Encounter` describes, reduced to the facts
+ * `clinical:EncounterParticipant` models.
+ *
+ * A participation the source said NOTHING about — no name, no role, no
+ * specialty — yields no entry. A node carrying only a link back to its own
+ * encounter asserts that somebody participated while describing nobody, which
+ * is a claim the source did not make and which no reader could act on.
+ *
+ * Roles are collected in BOTH spellings because they answer different questions:
+ * `participantRole` is the label that makes a stored name interpretable to a
+ * reader, and `participantRoleCode` is what a consumer selects on. FHIR binds
+ * `participant.type` only EXTENSIBLY, so a server may send a local code and stay
+ * conformant; nothing here filters against a value set, because rejecting an
+ * unrecognised role would discard the participant along with it.
+ *
+ * The LABEL is the first one stated and the CODES are all of them, matching the
+ * cardinalities `clinical:EncounterParticipantShape` asserts (role 0..1, role
+ * code 0..*). One participation with two typed roles therefore keeps both codes
+ * and one label, rather than losing a code or failing validation with two
+ * labels.
+ */
+function encounterParticipations(resource: any): EncounterParticipation[] {
+  const out: EncounterParticipation[] = [];
+  for (const participant of Array.isArray(resource?.participant) ? resource.participant : []) {
+    const rawName = participant?.individual?.display;
+    const name = typeof rawName === 'string' && rawName.trim().length > 0 ? rawName.trim() : undefined;
+
+    let role: string | undefined;
+    const roleCodes: string[] = [];
+    for (const type of Array.isArray(participant?.type) ? participant.type : []) {
+      const label = codeableConceptText(type);
+      if (role === undefined && typeof label === 'string' && label.trim().length > 0) {
+        role = label.trim();
+      }
+      for (const coding of Array.isArray(type?.coding) ? type.coding : []) {
+        const code = typeof coding?.code === 'string' ? coding.code.trim() : '';
+        if (code && !roleCodes.includes(code)) roleCodes.push(code);
+      }
+    }
+
+    const specialty = participantSpecialty(participant);
+
+    if (!name && role === undefined && roleCodes.length === 0 && !specialty) continue;
+    out.push({ name, role, roleCodes, specialty });
+  }
+  return out;
+}
+
 export function convertEncounter(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const subjectUri = mintSubjectUri(resource, warnings);
@@ -1443,19 +1601,31 @@ export function convertEncounter(resource: any): ConversionResult & { _quads: Qu
   quads.push(tripleType(subjectUri, NS.clinical + 'Encounter'));
   quads.push(...commonTriples(subjectUri));
 
-  // Encounter class (ambulatory, emergency, inpatient, etc.)
+  // Encounter class (ambulatory, emergency, inpatient, etc.) — the Coding
+  // MIRRORED, not reduced to one of its parts.
   //
-  // ACKNOWLEDGED DROP: `class.display`. On vendor output the code is often a
-  // local identifier — one Epic account returns `"5"` — while the display beside
-  // it is the readable name (`Appointment`, `HOV`, `Surgery Log`, `Support OP
-  // Encounter`). Both are worth keeping, but there is no predicate for the
-  // display: `clinical:encounterClass` is the code, and `clinical:encounterType`
-  // already carries `type[0]`, which is a different FHIR element. Overwriting
-  // the code with the display is not an option either — the code is what the
-  // reverse converter needs to rebuild `Encounter.class`. Needs vocabulary.
-  const encounterClass = resource.class?.code ?? resource.class?.coding?.[0]?.code;
+  // `Encounter.class` is a Coding bound only EXTENSIBLY, so a conformant server
+  // may send `AMB` from v3-ActCode or a local category id from its own system;
+  // one Epic account returns `"5"`. All three parts are kept because each
+  // answers a question the others cannot: the CODE is what a round-trip export
+  // must restore and what a code-system lookup keys on, the DISPLAY is the only
+  // readable thing when the code is local (`Appointment`, `Hospital Encounter`),
+  // and the SYSTEM is the only thing that distinguishes a ratified ActEncounterCode
+  // from a locally-numbered category that happens to look like one. Storing the
+  // display INSTEAD of the code was never available; storing the code alone left
+  // a bare id on screen. clinical v1.16 authored the other two.
+  const classCoding = resource.class?.coding?.[0];
+  const encounterClass = resource.class?.code ?? classCoding?.code;
   if (encounterClass) {
     quads.push(tripleStr(subjectUri, NS.clinical + 'encounterClass', encounterClass));
+  }
+  const classDisplay = resource.class?.display ?? classCoding?.display;
+  if (typeof classDisplay === 'string' && classDisplay.trim().length > 0) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'encounterClassDisplay', classDisplay.trim()));
+  }
+  const classSystem = resource.class?.system ?? classCoding?.system;
+  if (typeof classSystem === 'string' && classSystem.trim().length > 0) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'encounterClassSystem', classSystem.trim()));
   }
 
   // Status
@@ -1487,11 +1657,92 @@ export function convertEncounter(resource: any): ConversionResult & { _quads: Qu
     quads.push(tripleDateTime(subjectUri, NS.clinical + 'encounterEnd', resource.period.end));
   }
 
+  // Why the visit happened, in the chart's own words. REPEATABLE, because
+  // Encounter.reasonCode is 0..* and one visit routinely states several. The
+  // value is CodeableConcept.text where the source gives one, else the first
+  // coding's display: the reason as WRITTEN, never normalized to a code. FHIR
+  // binds this element only PREFERRED, and real exports carry local, free-text
+  // and SNOMED reasons in the same field, so an enum here would reject
+  // conformant data.
+  if (Array.isArray(resource.reasonCode)) {
+    const seenReasons = new Set<string>();
+    for (const reason of resource.reasonCode) {
+      const text = codeableConceptText(reason);
+      if (typeof text !== 'string') continue;
+      const trimmed = text.trim();
+      if (!trimmed || seenReasons.has(trimmed)) continue;
+      seenReasons.add(trimmed);
+      quads.push(tripleStr(subjectUri, NS.clinical + 'encounterReason', trimmed));
+    }
+  }
+
+  // The admission detail. The PRESENCE of Encounter.hospitalization is itself
+  // the structured signal that a visit was an admission rather than an office
+  // visit, and through clinical v1.15 this vocabulary had nowhere to put it, so
+  // that distinction was unrecoverable from the pod. Neither predicate is
+  // defaulted: an absent element means the source did not say, and inventing
+  // "Home or Self Care" for it would be 3.257's defect on a new field.
+  const admitSource = codeableConceptText(resource.hospitalization?.admitSource);
+  if (typeof admitSource === 'string' && admitSource.trim().length > 0) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'admitSource', admitSource.trim()));
+  }
+  const dischargeDisposition = codeableConceptText(resource.hospitalization?.dischargeDisposition);
+  if (typeof dischargeDisposition === 'string' && dischargeDisposition.trim().length > 0) {
+    quads.push(
+      tripleStr(subjectUri, NS.clinical + 'dischargeDisposition', dischargeDisposition.trim()),
+    );
+  }
+
   // Provider: the participant whose declared ROLE says they treated the patient,
   // not merely the one the server listed first. See selectEncounterProviderName.
+  //
+  // UNCHANGED by the participation nodes below, deliberately. This is the SUMMARY
+  // slot — the one name an application displays — and `clinical:providerName` is
+  // `sh:maxCount 1` on every shape that constrains it. The participations are the
+  // full record. Two facts, two predicates; replacing the summary with the record
+  // would break every reader that asks an encounter who the provider was.
   const providerName = selectEncounterProviderName(resource);
   if (providerName) {
     quads.push(tripleStr(subjectUri, NS.clinical + 'providerName', providerName));
+  }
+
+  // The whole care team, each participation as its own node with its role
+  // attached. A name recorded with no role is indistinguishable from a treating
+  // clinician's and cannot be corrected by a reader; that is why the referrer in
+  // slot 0 was previously stored as the provider on 18 of 52 measured encounters
+  // with nothing on the record to say so.
+  //
+  // Node IRIs come from `encounterParticipantUri` and from nowhere else. It is a
+  // pure function of this encounter's subject IRI and the participation's own
+  // content — never the array index, never a clock — so re-importing the same
+  // resource produces the same nodes and adds nothing. See that function for why
+  // the index in particular is disqualified.
+  //
+  // Two participations stating IDENTICAL facts mint one IRI and are written
+  // once. RDF would collapse the repeated triples anyway — a graph is a set —
+  // so the alternative was not two nodes but the same node emitted twice, which
+  // only makes the quad list disagree with the graph it serializes to.
+  const seenParticipants = new Set<string>();
+  for (const participation of encounterParticipations(resource)) {
+    const participantUri = encounterParticipantUri(subjectUri, participation);
+    if (seenParticipants.has(participantUri)) continue;
+    seenParticipants.add(participantUri);
+    quads.push(tripleRef(subjectUri, NS.clinical + 'hasParticipant', participantUri));
+    quads.push(tripleType(participantUri, NS.clinical + 'EncounterParticipant'));
+    if (participation.name) {
+      quads.push(tripleStr(participantUri, NS.clinical + 'participantName', participation.name));
+    }
+    if (participation.role) {
+      quads.push(tripleStr(participantUri, NS.clinical + 'participantRole', participation.role));
+    }
+    for (const code of participation.roleCodes) {
+      quads.push(tripleStr(participantUri, NS.clinical + 'participantRoleCode', code));
+    }
+    if (participation.specialty) {
+      quads.push(
+        tripleStr(participantUri, NS.clinical + 'participantSpecialty', participation.specialty),
+      );
+    }
   }
 
   // Facility: serviceProvider, falling back to the first named location.
@@ -1522,6 +1773,16 @@ export function convertEncounter(resource: any): ConversionResult & { _quads: Qu
   // could only overwrite.
   for (const token of encounterIdentifierTokens(resource)) {
     quads.push(tripleStr(subjectUri, NS.cascade + 'sourceRecordId', token));
+  }
+
+  // The SAME identifiers on the CANONICAL predicate, in FHIR token form. This is
+  // the transition step of the ratified identifier migration plan:
+  // dual-emit, migrate the reconciler's match key to this predicate, and only
+  // then is retiring the frozen spelling above schedulable. Until every pod has
+  // been re-imported, some encounters carry only the old predicate, which is why
+  // the matcher reads both — each in its own form, never one against the other.
+  for (const token of encounterBusinessIdentifiers(resource)) {
+    quads.push(tripleStr(subjectUri, NS.clinical + 'businessIdentifier', token));
   }
 
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));

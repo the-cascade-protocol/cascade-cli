@@ -119,7 +119,17 @@ describe('cascade sources coverage', () => {
     // Deduplicated: the encounter appearing in both bundles is one resource.
     expect(result.stdout).toContain('11 unique of 12 read');
     expect(result.stdout).toMatch(/Encounter \(2 resources\)/);
-    expect(result.stdout).toMatch(/2 {2}Encounter\.reasonCode\s+pending 3\.254/);
+    // `Encounter.reasonCode` stood here until clinical v1.16 gave the reason a
+    // predicate. What is left of the encounter's pending debt is the type
+    // codings past the first, the service type and the second location — all
+    // three still without a term. Pinning one of them keeps this assertion doing
+    // what it did: proving the command reports a PENDING path with its id, not
+    // only acknowledged ones.
+    expect(result.stdout).toMatch(/2 {2}Encounter\.serviceType\s+pending 3\.254/);
+    // And an acknowledged one, so the two dispositions are both exercised.
+    expect(result.stdout).toMatch(/2 {2}Encounter\.participant\[0\]\.period\s+acknowledged/);
+    // The reason is EMITTED now and must not appear as a dropped path at all.
+    expect(result.stdout).not.toMatch(/Encounter\.reasonCode\s+pending/);
     // The identifier is EMITTED now (it is the encounter join key), so it must
     // not appear as a dropped path at all — only its `use` qualifier does.
     expect(result.stdout).not.toMatch(/Encounter\.identifier\s+pending/);

@@ -9,7 +9,7 @@
 # ============================================================================
 # Cascade Protocol — Health & Wellness Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.4 (2026-08-14)
+# Version: 1.5 (2026-08-27)
 # Validates: health:SelfReport, health:VO2MaxStatistics, health:HRVStatistics,
 #            health:BPStatistics, health:MetricTrend, health:ActivitySnapshot,
 #            health:SleepSnapshot, health:HealthProfile,
@@ -25,7 +25,35 @@
 # - sh:Warning = Should address (important for completeness) - e.g., missing period
 # - sh:Info = Nice to have (suggested enrichment) - e.g., optional context fields
 #
-# Validates against: health.ttl v2.6 (2026-08-08)
+# Validates against: health.ttl v2.8 (2026-08-27)
+#
+# CHANGELOG
+# v1.5 (2026-08-27): Bind the status a health: record already carries.
+#     Shapes-only, additive, and every new finding is at sh:Warning.
+#
+#     Three property shapes, on two existing node shapes, for two predicates in
+#     the clinical: namespace. The namespace is not a mistake: clinical:status
+#     and clinical:verificationStatus are the domain-free carriers both import
+#     paths write onto these records, and minting health: spellings for them
+#     would give one fact two predicates.
+#
+#     1. health:LabResultRecordShape declares clinical:status with the 8 codes
+#        of FHIR R4 Observation.status, required binding, verbatim.
+#     2. health:AllergyRecordShape declares clinical:status with the 3 codes of
+#        FHIR R4 AllergyIntolerance.clinicalStatus. Three, not four:
+#        "entered-in-error" belongs to the verification axis, and admitting it
+#        here would merge "no longer reacts" with "never real".
+#     3. health:AllergyRecordShape declares clinical:verificationStatus with
+#        the 4 codes of FHIR R4 AllergyIntolerance.verificationStatus. The
+#        allergy set has no "provisional" or "differential"; that Condition
+#        carries two codes an allergy does not is why clinical v1.16 dropped
+#        that property's rdfs:domain rather than widening it.
+#
+#     All three at sh:Warning, per the core v3.5 ratchet: existing pods carry
+#     these predicates and this is the first release to bind their values, so a
+#     value outside the set is reported and never rejected. Raise to
+#     sh:Violation only after a release in which the warning is observably
+#     absent from conforming output.
 # ============================================================================
 
 # ============================================================================
@@ -956,6 +984,33 @@ health:LabResultRecordShape a sh:NodeShape ;
         sh:severity sh:Violation
     ] ;
 
+    # v1.5: clinical:status on a health: record, declared here because this is
+    # where the shape for this class lives.
+    #
+    # A lab result record is converted from a FHIR Observation, so the value set
+    # is Observation.status, required binding, verbatim and in the value set's
+    # own order (https://hl7.org/fhir/R4/valueset-observation-status.html).
+    # Naming the codes matters beyond conformance: "amended" and "corrected"
+    # are what distinguish a superseded result from the one that replaced it,
+    # and a record whose status is unchecked cannot be trusted to make that
+    # distinction.
+    #
+    # The predicate is clinical:, not health:, and that is deliberate: it is the
+    # domain-free status carrier both import paths already write, and minting a
+    # health: spelling for it would give one fact two predicates. sh:Warning per
+    # the core v3.5 ratchet, since existing pods carry this predicate and this
+    # is the first release to bind its value.
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("registered" "preliminary" "final" "amended" "corrected"
+               "cancelled" "entered-in-error" "unknown") ;
+        sh:name "Status"@en ;
+        sh:message "Lab result status should be one of the FHIR R4 ObservationStatus codes: registered, preliminary, final, amended, corrected, cancelled, entered-in-error, unknown"@en ;
+        sh:severity sh:Warning
+    ] ;
+
     sh:property [
         sh:path health:performedDate ;
         sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
@@ -1253,6 +1308,51 @@ health:AllergyRecordShape a sh:NodeShape ;
         sh:name "Schema Version"@en ;
         sh:message "Allergy must declare exactly one schemaVersion in major.minor form"@en ;
         sh:severity sh:Violation
+    ] ;
+
+    # v1.5: clinical:status on an allergy record carries FHIR R4
+    # AllergyIntolerance.clinicalStatus, required binding to
+    # http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical:
+    # active | inactive | resolved
+    # (https://hl7.org/fhir/R4/valueset-allergyintolerance-clinical.html).
+    #
+    # THREE codes, not four. "entered-in-error" belongs to
+    # AllergyIntolerance.verificationStatus, a different element with a
+    # different value set, which this vocabulary carries on
+    # clinical:verificationStatus. Admitting it here would merge "the patient no
+    # longer reacts to this" with "this allergy was never real", which are
+    # opposite clinical facts and the one pair a safety-relevant record must
+    # never conflate.
+    #
+    # sh:Warning per the core v3.5 ratchet: existing pods carry this predicate
+    # and this is the first release to bind its value.
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("active" "inactive" "resolved") ;
+        sh:name "Status"@en ;
+        sh:message "Allergy clinical status should be one of the FHIR R4 AllergyIntolerance clinical status codes: active, inactive, resolved. A repudiated record is entered-in-error on clinical:verificationStatus, which is a different element"@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    # v1.5: clinical:verificationStatus on an allergy record. FHIR R4
+    # AllergyIntolerance.verificationStatus, required binding, verbatim
+    # (https://hl7.org/fhir/R4/valueset-allergyintolerance-verification.html).
+    # FOUR codes: the allergy value set does not contain the "provisional" and
+    # "differential" that Condition.verificationStatus carries, because a
+    # differential diagnosis is not a thing one has about an allergy. This is
+    # why clinical v1.16 dropped that property's rdfs:domain clinical:Condition
+    # rather than widening it: the two classes bind the same predicate to two
+    # different value sets, which is a SHACL job and not an rdfs:domain one.
+    sh:property [
+        sh:path clinical:verificationStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("unconfirmed" "confirmed" "refuted" "entered-in-error") ;
+        sh:name "Verification Status"@en ;
+        sh:message "Allergy verification status should be one of the FHIR R4 AllergyIntolerance verification status codes: unconfirmed, confirmed, refuted, entered-in-error"@en ;
+        sh:severity sh:Warning
     ] .
 
 # ============================================================================

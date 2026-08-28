@@ -18,8 +18,8 @@
     dct:description "Domain vocabulary for patient-owned insurance, benefits, and financial health data. Layer 2 vocabulary resolving the overlap between checkup:InsuranceInfo (patient-reported) and clinical:CoverageRecord (EHR-imported) with a unified, standardized representation."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-02-18"^^xsd:date ;
-    dct:modified "2026-08-08"^^xsd:date ;
-    owl:versionInfo "1.4" ;
+    dct:modified "2026-08-27"^^xsd:date ;
+    owl:versionInfo "1.5" ;
     rdfs:comment "Insurance and benefits data is cross-cutting: not clinical (it's administrative/financial), not app-specific (any health app benefits from knowing coverage), and contributed by both patient self-report and EHR import. This vocabulary provides a single Layer 2 domain model that both checkup: (Layer 3, patient-reported) and clinical: (Layer 2, EHR-imported) can reference via the mixed namespace pattern. Recommended Pod storage path: /coverage/"@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/coverage/v1/> .
 
@@ -176,6 +176,29 @@ coverage:rxGroup a owl:DatatypeProperty ;
 #   rdfs:seeAlso mappings to HL7 ClaimResponse.adjudication and CARIN IG adjudication codes.
 #
 # v1.2 (2026-03-16): Added coverage:DenialNotice class, coverage:AppealRecord class, and 11 new properties for denial/appeal workflow.
+#
+# Version 1.5 (2026-08-27)
+# - ONE new property, coverage:status, for FHIR R4 Coverage.status: a code,
+#   1..1 at source, REQUIRED binding to
+#   https://hl7.org/fhir/R4/valueset-fm-status.html — active | cancelled |
+#   draft | entered-in-error. Through v1.4 coverage:InsurancePlan had no status
+#   property at all, so the one element FHIR requires a Coverage resource to
+#   carry had nowhere to go. coverage:claimStatus and
+#   coverage:adjudicationStatus were not substitutes: they belong to the
+#   denial/appeal workflow and describe a claim, not whether a plan is in force.
+#   FHIR marks Coverage.status a modifier element, which is the reason this is
+#   not a nice-to-have: a cancelled plan read as an active one is a wrong answer
+#   to "am I covered", not a missing one.
+# - SHACL (coverage.shapes.ttl 1.1 to 1.2): the VALUE is constrained at
+#   sh:Violation, because the FHIR binding is required and no pod has ever
+#   carried this property, so a constraint here cannot invalidate existing data.
+#   PRESENCE is deliberately not required in this version: no producer has yet
+#   had the chance to write it, and a minCount would turn every existing plan
+#   record red for something nobody could have supplied. The ratchet is the one
+#   core v3.5 wrote down — presence at sh:Warning once producers emit it, then
+#   sh:Violation after a release in which that warning is observably absent.
+# - COMPATIBILITY. Additive. Every graph that validated under v1.4 validates
+#   under v1.5 unchanged.
 #
 # Version 1.4 (2026-08-08)
 # - SHACL only; no class or property added, removed or renamed.
@@ -380,6 +403,21 @@ coverage:relatedClaim a owl:ObjectProperty ;
     rdfs:range coverage:ClaimRecord ;
     rdfs:label "Related Claim"@en ;
     rdfs:comment "Links an ExplanationOfBenefit to its corresponding Claim."@en .
+
+# ============================================================================
+# v1.5 InsurancePlan Properties
+# ============================================================================
+
+coverage:status a owl:DatatypeProperty ;
+    rdfs:label "Status"@en ;
+    rdfs:comment """Lifecycle state of the coverage record itself: whether the plan is in force, was cancelled, is still a draft, or was entered in error. FHIR alignment: Coverage.status, code 1..1, REQUIRED binding to https://hl7.org/fhir/R4/valueset-fm-status.html, values active | cancelled | draft | entered-in-error (https://hl7.org/fhir/R4/coverage-definitions.html#Coverage.status). FHIR marks the element a modifier: a cancelled or erroneous Coverage must not be read as describing coverage the patient has.
+
+Through v1.4 this vocabulary had no status property for coverage:InsurancePlan at all, so an importer reading a conformant Coverage resource had to discard the one element FHIR requires it to carry. coverage:claimStatus and coverage:adjudicationStatus are not substitutes: their domains are coverage:DenialNotice and the claim workflow, and they describe what happened to a claim, not whether the plan is in force.
+
+DISTINCT FROM coverage:effectiveStart / coverage:effectiveEnd. A date range says when the plan is meant to apply; the status says what the payer currently asserts about the record. A plan whose effective period has not ended can still be cancelled, and a plan can be drafted before any period is stated."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-fm-status.html> ;
+    rdfs:domain coverage:InsurancePlan ;
+    rdfs:range xsd:string .
 
 # ============================================================================
 # v1.2 DenialNotice Properties

@@ -713,6 +713,97 @@ export function medicationUri(
   );
 }
 
+/**
+ * One participation in an encounter, reduced to the facts
+ * `clinical:EncounterParticipant` models.
+ *
+ * The field set is exactly what `clinical:EncounterParticipantShape` permits a
+ * node to carry: one name, one role LABEL, any number of role CODES, one
+ * specialty. That correspondence is deliberate — the IRI below is derived from
+ * these fields, so it is a function of precisely the facts the node states and
+ * of nothing else, which `tests/encounter-participant-identity.test.ts` asserts
+ * directly rather than leaving as a claim.
+ *
+ * `roleCodes` is a SET, not a sequence: `Encounter.participant.type` is a
+ * repeating CodeableConcept whose order carries no meaning, and two servers
+ * listing the same two codes in different order describe one participation.
+ */
+export interface EncounterParticipation {
+  /** `participant.individual.display`. */
+  name?: string;
+  /** The readable role: `type[0].text`, or its first coding's display. */
+  role?: string;
+  /** Coded roles: every `type[].coding[].code`. */
+  roleCodes: string[];
+  /** The specialty the participant acted in, where the source states one. */
+  specialty?: string;
+}
+
+/**
+ * THE ONLY WAY AN `clinical:EncounterParticipant` NODE GETS AN IRI.
+ *
+ * WHY THIS IS A FUNCTION AND NOT FOUR LINES AT THE CALL SITE
+ * ----------------------------------------------------------
+ * This repository has had three identity-determinism incidents, and the shape
+ * was the same one every time: a correct derivation existed somewhere, the next
+ * writer of the next converter did not find it, and minted an IRI from
+ * something that was not the record's content — a clock, a counter, a random
+ * value, an array index. Fixing the sites did not end the class; a chokepoint
+ * did. This is that chokepoint for participation nodes, and
+ * `tests/encounter-participant-identity.test.ts` proves two conversions of one
+ * resource in SEPARATE PROCESSES agree byte for byte.
+ *
+ * THE DERIVATION, AND WHAT IT DELIBERATELY EXCLUDES
+ * ------------------------------------------------
+ * A pure function of two things and nothing else:
+ *
+ *   1. the ENCOUNTER's subject IRI, so one participation belongs to one visit
+ *      and "Amara Okoye, MD, attender" at two different visits is two nodes;
+ *   2. the participation's own CONTENT — name, role, role codes, specialty —
+ *      which is EXACTLY the set of facts the node goes on to state. Nothing
+ *      the IRI depends on is invisible in the record it names.
+ *
+ * Not the array index. An index is a property of the SERIALIZATION, and FHIR
+ * does not promise `participant[]` order across two reads of one resource: an
+ * index-keyed IRI moves when a server reorders the array, which re-mints a node
+ * whose content never changed and duplicates it on the next import. Not the
+ * import time, not a counter, not the input file path.
+ *
+ * That makes re-import idempotent, which is the property the whole re-import
+ * re-import repair path rests on: the same source resource converted
+ * twice produces the same participation IRIs, so the second import adds nothing.
+ *
+ * TWO IDENTICAL PARTICIPATIONS ON ONE ENCOUNTER COLLAPSE TO ONE NODE, and that
+ * is chosen rather than tolerated. If a source lists the same name in the same
+ * role with the same specialty twice, nothing in the record distinguishes them,
+ * and this codebase's stated rule for that case (see `contentHashedUri`) is to
+ * merge what nothing can tell apart rather than mint a second IRI per import —
+ * a duplicate set that grows forever and never announces itself.
+ *
+ * The multi-valued member goes through `canonicalSetKey`, so role-code order and
+ * a repeated role code do not move the IRI. The separator is ',' because this is
+ * a NEW site and core v3.6 requires U+002C of new implementations.
+ *
+ * ONE BOUNDED CAVEAT, stated rather than hidden: `contentHashedUri` builds its
+ * key as `k=v` pairs joined with `|`, so a participant DISPLAY NAME containing
+ * those characters could in principle spell a different field set. It is the
+ * same exposure every other content-keyed converter in this module already
+ * carries for names, and narrowing it would move every identity those converters
+ * have ever written; it is recorded here rather than papered over.
+ */
+export function encounterParticipantUri(
+  encounterUri: string,
+  participation: EncounterParticipation,
+): string {
+  return contentHashedUri('EncounterParticipant', {
+    encounter: encounterUri,
+    name: participation.name,
+    role: participation.role,
+    roleCode: canonicalSetKey(participation.roleCodes, ','),
+    specialty: participation.specialty,
+  });
+}
+
 /** Common triples every Cascade resource gets */
 export function commonTriples(subject: string): Quad[] {
   return [

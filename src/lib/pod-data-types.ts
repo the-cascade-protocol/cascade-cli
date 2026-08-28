@@ -134,7 +134,27 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
   },
   encounters: {
     label: 'Encounters',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'Encounter'],
+    rdfTypes: [
+      CASCADE_NAMESPACES.clinical + 'Encounter',
+      // The participation SUB-NODE lives in the same file as the encounter that
+      // owns it, and that is not a filing convenience.
+      //
+      // Pods are partitioned per type and `cascade validate` validates each file
+      // INDEPENDENTLY, so a `clinical:hasParticipant` edge crossing a file
+      // boundary would be unresolvable to the validator — the same problem that
+      // forced the sh:class constraints off the v1.10 graph edges. Routing it
+      // anywhere else also sends it through `routeTypeKey`'s unknown-type
+      // fallback into the FHIR passthrough bucket, where a Cascade-typed node
+      // would sit among unconverted FHIR JSON and be counted as an imported
+      // record of its own.
+      //
+      // It is deliberately NOT given a bucket of its own. A participation has no
+      // existence apart from its encounter (FHIR models it as a BackboneElement,
+      // which cannot be addressed independently at all), and a file of
+      // participations detached from the visits they belong to would be a list
+      // of names nobody could interpret.
+      CASCADE_NAMESPACES.clinical + 'EncounterParticipant',
+    ],
     directory: 'clinical',
     filename: 'encounters.ttl',
   },
@@ -212,3 +232,32 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
     isFhirPassthroughBucket: true,
   },
 };
+
+/**
+ * Subjects that are STRUCTURAL SUB-NODES of a record rather than records.
+ *
+ * A sub-node is stored in the pod, validated by its own shape, and routed into
+ * the same file as the record that owns it — but it is not a thing a person has
+ * one of. `clinical:EncounterParticipant` mirrors FHIR's
+ * `Encounter.participant`, a BackboneElement with no independent existence in
+ * FHIR at all: it exists to say who took part in ONE visit, and it is reached
+ * only from that visit.
+ *
+ * WHY THIS SET EXISTS. Import counts subjects, which was exact for as long as
+ * every subject was a record. The moment a converter minted its first sub-node
+ * that stopped being true, and the arithmetic failed in the direction that
+ * misleads: one Synthea bundle's 44 visits reported as 57 "Encounters", so
+ * "Records imported" and the per-type summary would both have overstated what
+ * the person actually has. The nodes are still written, still validated and
+ * still read back; they are not COUNTED as records, because they are not
+ * records.
+ */
+export const STRUCTURAL_SUBNODE_TYPES: ReadonlySet<string> = new Set([
+  CASCADE_NAMESPACES.clinical + 'EncounterParticipant',
+]);
+
+/** True when a subject's quads describe a structural sub-node, not a record. */
+export function isStructuralSubNode(quads: ReadonlyArray<{ predicate: { value: string }; object: { value: string } }>): boolean {
+  const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+  return quads.some((q) => q.predicate.value === RDF_TYPE && STRUCTURAL_SUBNODE_TYPES.has(q.object.value));
+}

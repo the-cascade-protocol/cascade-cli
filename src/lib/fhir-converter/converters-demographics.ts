@@ -339,26 +339,27 @@ export function convertImmunization(resource: any): ConversionResult & { _quads:
 // ---------------------------------------------------------------------------
 
 /**
- * ACKNOWLEDGED DROP: `Coverage.status` (active | cancelled | draft |
- * entered-in-error).
+ * `Coverage.status` reaches the pod as `coverage:status`, from coverage v1.5.
  *
- * Whether a plan is still in force is worth storing — a cancelled policy
- * displayed like a current one is a wrong answer to the only question anyone
- * asks an insurance record. It is not emitted because there is no predicate
- * that can carry it truthfully:
+ * Whether a plan is in force is the only question an insurance record is really
+ * asked, and FHIR marks the element a MODIFIER: a cancelled or erroneous
+ * Coverage must not be read as describing coverage the patient has. It is also
+ * 1..1 with a REQUIRED binding, so it is the one element a conformant Coverage
+ * has to carry — and through coverage v1.4 this vocabulary had no property for
+ * it, so an importer reading a conformant resource had to discard it.
  *
- *   - The coverage: namespace defines no status property for
- *     `coverage:InsurancePlan`. `coverage:claimStatus` is domain-restricted to
- *     `coverage:ClaimRecord` and `coverage:adjudicationStatus` to
- *     `coverage:BenefitStatement`; both would be false here.
- *   - `clinical:status` declares no domain, but clinical: is the EHR clinical
- *     record namespace and an insurance plan is not one of its records. The
- *     health:/clinical: split is documented as historical rather than semantic;
- *     coverage: carries no such note, so borrowing across it would be a
- *     judgement made in a converter about vocabulary scope.
+ * The predicate is `coverage:status` and not `clinical:status`, which the
+ * converter could have borrowed at any point. It was not borrowed because
+ * clinical: is the EHR clinical-record namespace and an insurance plan is not
+ * one of its records; `coverage:claimStatus` and `coverage:adjudicationStatus`
+ * are not substitutes either, since they describe what happened to a CLAIM
+ * rather than whether a plan is in force. Deciding vocabulary scope inside a
+ * converter is what the wait avoided.
  *
- * The fix is a `coverage:status` term, authored through the vocabulary
- * checklist. Until then this is a stated omission rather than a silent one.
+ * NOT DEFAULTED, unlike `coverageType` two fields below (tracked separately): a
+ * source that states no status is stored stating none. Substituting "active"
+ * for a missing modifier element is 3.257's defect on the field where it costs
+ * the most.
  */
 export function convertCoverage(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
@@ -367,6 +368,12 @@ export function convertCoverage(resource: any): ConversionResult & { _quads: Qua
 
   quads.push(tripleType(subjectUri, NS.coverage + 'InsurancePlan'));
   quads.push(...commonTriples(subjectUri));
+
+  // See the note above this function: a modifier element, reported and never
+  // invented.
+  if (resource.status) {
+    quads.push(tripleStr(subjectUri, NS.coverage + 'status', resource.status));
+  }
 
   if (Array.isArray(resource.payor) && resource.payor.length > 0) {
     const payorName = resource.payor[0]?.display ?? 'Unknown Insurance';
