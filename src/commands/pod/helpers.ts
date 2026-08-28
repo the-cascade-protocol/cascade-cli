@@ -18,7 +18,12 @@ import { openPod } from '../../lib/pod-read.js';
 // The registry of record files and the pod file-system helpers moved into
 // `lib/` so the read layer can use them without importing a command module.
 
-export { DATA_TYPES, type DataTypeInfo } from '../../lib/pod-data-types.js';
+export {
+  DATA_TYPES,
+  type DataTypeInfo,
+  STRUCTURAL_SUBNODE_TYPES,
+  isStructuralSubNode,
+} from '../../lib/pod-data-types.js';
 export {
   resolvePodDir,
   isDirectory,

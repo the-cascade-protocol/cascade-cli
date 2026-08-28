@@ -972,14 +972,23 @@ function differingPredicates(
  *
  * Not one predicate, because the importers disagree about which to use and a
  * record routinely carries two that mean different things: a FHIR encounter
- * states the server's row id on `clinical:sourceRecordId` and the visit's
- * identifier on `cascade:sourceRecordId`. Agreement is therefore checked
- * per-predicate, never by flattening them into one bag where a row id could be
- * compared against a visit identifier.
+ * states the server's row id on `clinical:sourceRecordId`, the visit's
+ * identifier in colon form on `cascade:sourceRecordId`, and the same visit
+ * identifier in FHIR token form on `clinical:businessIdentifier`. Agreement is
+ * therefore checked per-predicate, never by flattening them into one bag where a
+ * row id could be compared against a visit identifier, or one form of an
+ * identifier against the other form of the same one.
+ *
+ * `clinical:businessIdentifier` joined this list with clinical v1.16. It
+ * strengthens the NO-CONTRADICTION clause and cannot weaken the AGREEMENT one:
+ * the clause below only considers a predicate BOTH records state, so a pre-v1.16
+ * record that carries no business identifier is unaffected, while two records
+ * that both carry one and disagree are correctly refused as one record.
  */
 const SOURCE_RECORD_ID_PREDICATES: readonly string[] = [
   NS.cascade + 'sourceRecordId',
   NS.clinical + 'sourceRecordId',
+  NS.clinical + 'businessIdentifier',
   NS.health + 'sourceRecordId',
   NS.coverage + 'sourceRecordId',
   NS.clinical + 'fhirResourceId',
@@ -1591,29 +1600,64 @@ function matchVitalSigns(a: ParsedRecord, b: ParsedRecord): MatchResult {
 }
 
 /**
- * The predicate carrying a visit's identifier, on BOTH transports.
+ * The predicates carrying a visit's identifier, CANONICAL FIRST.
  *
- * The C-CDA path writes `<encounter><id root= extension=/>` here as
- * `root:extension`; the FHIR path writes each `Encounter.identifier` entry here
- * as `system:value` with `urn:oid:` stripped. On Epic output those are the same
- * contact serial number written twice, which is what makes a cross-transport
- * join possible at all.
+ * TWO PREDICATES, TWO VALUE FORMS, NEVER COMPARED ACROSS
+ * -----------------------------------------------------
+ * `clinical:businessIdentifier` (clinical v1.16) is canonical and holds the FHIR
+ * TOKEN form, `{system}|{value}`, with the system verbatim. `cascade:sourceRecordId`
+ * is the FROZEN compatibility spelling and holds the colon form, `{system}:{value}`
+ * with `urn:oid:` stripped — the shape the C-CDA path has always written from
+ * `<encounter><id root= extension=/>`, and which the FHIR path dual-writes so the
+ * two transports keep joining.
  *
- * NOT `clinical:sourceRecordId`. On a FHIR encounter that predicate holds
+ * The SAME identifier therefore renders as two different strings, one per
+ * predicate. `urn:oid:1.2.3|X` and `1.2.3:X` are equal identifiers and unequal
+ * values, so a matcher that pooled them into one bag would find no match where
+ * one exists. Worse, the reverse: `a:b` in the colon form and a token-form value
+ * that happens to read `a:b` (an identifier with no system, whose bare value
+ * contains a colon) are UNRELATED and would compare equal. Both failures are
+ * silent. Hence the rule the ratified migration plan states and this structure
+ * enforces: a value is only ever compared against values from the SAME
+ * predicate, and no conversion between the forms exists anywhere in this file.
+ *
+ * ORDER IS THE CANONICAL PREFERENCE and is read by {@link matchEncounters} when
+ * it has to name the identifier a match was made on.
+ *
+ * NEITHER IS `clinical:sourceRecordId`. On a FHIR encounter that predicate holds
  * `Encounter.id`, the FHIR SERVER's row id, which names nothing outside that
- * server and shares no key space with a visit identifier. Reading both would
- * mix two id spaces in one comparison for no gain: the C-CDA path writes the
- * visit identifier to BOTH predicates, so the cascade: one alone already sees
- * every identifier either transport states.
+ * server and shares no key space with a visit identifier.
  */
-const ENCOUNTER_IDENTIFIER_PREDICATE = NS.cascade + 'sourceRecordId';
+const ENCOUNTER_IDENTIFIER_PREDICATES: readonly string[] = [
+  NS.clinical + 'businessIdentifier',
+  NS.cascade + 'sourceRecordId',
+];
 
-/** Every visit identifier a record states, trimmed and de-duplicated. */
-function encounterIdentifiers(r: ParsedRecord): Set<string> {
-  const out = new Set<string>();
-  for (const v of r.properties.get(ENCOUNTER_IDENTIFIER_PREDICATE) ?? []) {
-    const value = v.value.trim();
-    if (value) out.add(value);
+/**
+ * Every visit identifier a record states, KEYED BY THE PREDICATE IT STATED IT ON.
+ *
+ * The single place a stored identifier value is normalized, and the normalization
+ * is deliberately only `trim()`: whitespace is a serialization artifact, and
+ * everything else about a value is load-bearing. In particular this function does
+ * NOT rewrite one form into the other. It cannot, and the attempt is the trap:
+ * recovering `urn:oid:1.2.3|X` from `1.2.3:X` requires guessing that the system
+ * was an OID and re-adding a prefix the colon form deliberately dropped, and
+ * splitting either form on its separator is ambiguous because both separators
+ * occur inside real identifier values.
+ *
+ * Returning a map rather than a set is what makes the never-compare-across rule
+ * structural instead of a comment: a caller physically cannot reach two forms'
+ * values through one lookup.
+ */
+function encounterIdentifiersByPredicate(r: ParsedRecord): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const pred of ENCOUNTER_IDENTIFIER_PREDICATES) {
+    const values = new Set<string>();
+    for (const v of r.properties.get(pred) ?? []) {
+      const value = v.value.trim();
+      if (value) values.add(value);
+    }
+    if (values.size > 0) out.set(pred, values);
   }
   return out;
 }
@@ -1629,28 +1673,58 @@ function encounterIdentifiers(r: ParsedRecord): Set<string> {
  * re-points. An encounter carrying NO identifier therefore never merges with
  * anything — absence of a join key is not evidence of a match.
  *
- * The empty-set guard below is REDUNDANT with the intersection that follows
+ * PER-PREDICATE INTERSECTION, WHICH IS THE MIGRATION IN ONE LINE. Two encounters
+ * match when their identifier sets intersect UNDER SOME ONE PREDICATE, each
+ * predicate compared only against itself in its own value form. See
+ * {@link ENCOUNTER_IDENTIFIER_PREDICATES} for why a cross-form comparison is
+ * wrong in both directions and silent in both.
+ *
+ * That is what lets the canonical predicate become the match key without
+ * stranding anyone. Three populations exist at once during the transition and
+ * all three converge:
+ *
+ *   - both records imported after this release: they carry both predicates and
+ *     intersect under `clinical:businessIdentifier`;
+ *   - both written by a pod repaired BEFORE this release: they carry only
+ *     `cascade:sourceRecordId` and intersect under it, exactly as they did
+ *     before this change;
+ *   - one of each: they intersect under `cascade:sourceRecordId`, which is
+ *     precisely why the frozen predicate is still dual-written and why retiring
+ *     it is not schedulable yet.
+ *
+ * The empty-map guard below is REDUNDANT with the intersection that follows
  * (nothing intersects an empty set) and is kept for the same reason the `b === a`
  * clause in the matching loop is: it states the rule directly, rather than
  * leaving the most important property of this matcher to be inferred from a
  * filter. `tests/reconciler-encounter-dedupe.test.ts` pins the behaviour either
  * way.
  *
- * `matchedOn` names the SHARED identifier and picks it deterministically (the
- * lexicographically smallest of the intersection), because `generateConflictId`
- * builds a persisted conflict id out of this string: a constant there would give
- * every encounter conflict in a pod one id, which is the defect the medication
- * matcher's `partial-name` comment records paying for.
+ * `matchedOn` names the SHARED identifier and picks it deterministically —
+ * canonical predicate first, then the lexicographically smallest of that
+ * predicate's intersection — because `generateConflictId` builds a persisted
+ * conflict id out of this string: a constant there would give every encounter
+ * conflict in a pod one id, which is the defect the medication matcher's
+ * `partial-name` comment records paying for. Records carrying only the frozen
+ * predicate keep exactly the `matchedOn` they had before this change, so no
+ * conflict id already written to a pod moves.
  */
 function matchEncounters(a: ParsedRecord, b: ParsedRecord): MatchResult {
   const noMatch: MatchResult = { match: false, confidence: 0, matchedOn: '' };
-  const idsA = encounterIdentifiers(a);
+  const idsA = encounterIdentifiersByPredicate(a);
   if (idsA.size === 0) return noMatch;
-  const shared = [...encounterIdentifiers(b)].filter((id) => idsA.has(id)).sort();
-  if (shared.length === 0) return noMatch;
-  // The source assigned this identifier to both records. That is the source
-  // stating they are one act, not a similarity score.
-  return { match: true, confidence: 1.0, matchedOn: `encounter-id:${shared[0]}` };
+  const idsB = encounterIdentifiersByPredicate(b);
+
+  for (const pred of ENCOUNTER_IDENTIFIER_PREDICATES) {
+    const valuesA = idsA.get(pred);
+    const valuesB = idsB.get(pred);
+    if (!valuesA || !valuesB) continue;
+    const shared = [...valuesB].filter((id) => valuesA.has(id)).sort();
+    if (shared.length === 0) continue;
+    // The source assigned this identifier to both records. That is the source
+    // stating they are one act, not a similarity score.
+    return { match: true, confidence: 1.0, matchedOn: `encounter-id:${shared[0]}` };
+  }
+  return noMatch;
 }
 
 /**

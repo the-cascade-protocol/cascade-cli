@@ -97,7 +97,12 @@ export function restoreInsurancePlan(pv: PV, _warnings: string[]): FhirResource 
 
   const fhirResource: FhirResource = {
     resourceType: 'Coverage',
-    status: 'active',
+    // 3.262 / coverage v1.5. This was a hardcoded 'active', which exported a
+    // CANCELLED plan as one still in force — and `Coverage.status` is a FHIR
+    // modifier element, so that is not a missing answer but a wrong one. The
+    // literal remains only as the fallback for records written before the
+    // predicate existed, because the element is 1..1.
+    status: getFirst(NS.coverage + 'status') ?? 'active',
   };
 
   const providerName = getFirst(NS.coverage + 'providerName');

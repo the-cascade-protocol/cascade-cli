@@ -313,8 +313,12 @@ describe('the measurement itself', () => {
     // lands that fixes one of these, its manifest entry goes stale and the test
     // above fails first, which is the intended order.
     const encounter = COVERAGE.find((c) => c.fixture.resourceType === 'Encounter')!.coverage;
-    // Never read.
-    expect(encounter.dropped).toContain('Encounter.reasonCode');
+    // Never read. Was `Encounter.reasonCode` until wave 4 emitted it, which is
+    // the intended order this comment describes happening: the manifest entry
+    // went stale, the test above failed first, and the exemplar moved to a field
+    // still exhibiting the mode. `serviceType` — the specialty the visit was
+    // booked under — is read by no line of `convertEncounter`.
+    expect(encounter.dropped).toContain('Encounter.serviceType');
     // Read for identity, never written as a fact. `Encounter.identifier` was the
     // exemplar of this mode and is now emitted (wave 2, the encounter join key),
     // so the mode is pinned on the resource that still exhibits it: a

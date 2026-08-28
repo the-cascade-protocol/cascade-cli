@@ -95,6 +95,18 @@ export function restoreConditionRecord(pv: PV, _warnings: string[]): FhirResourc
     };
   }
 
+  // 3.262: `Condition.verificationStatus` has been emitted since wave 1 and was
+  // read back by nothing, so `confirmed` and `refuted` — opposite claims about
+  // whether the patient has the condition at all — exported identically.
+  const verification = getFirst(NS.clinical + 'verificationStatus');
+  if (verification) {
+    fhirResource.verificationStatus = {
+      coding: [
+        { system: 'http://terminology.hl7.org/CodeSystem/condition-ver-status', code: verification },
+      ],
+    };
+  }
+
   const onset = getFirst(NS.health + 'onsetDate');
   if (onset) fhirResource.onsetDateTime = onset;
 
@@ -124,6 +136,32 @@ export function restoreAllergyRecord(pv: PV, _warnings: string[]): FhirResource 
     resourceType: 'AllergyIntolerance',
     code: { text: getFirst(NS.health + 'allergen') ?? '' },
   };
+
+  // 3.262: both of AllergyIntolerance's status elements, emitted since wave 1
+  // and read back by neither. A REFUTED allergy exported as an unqualified one
+  // narrows treatment exactly as a confirmed allergy would.
+  const clinicalStatus = getFirst(NS.clinical + 'status');
+  if (clinicalStatus) {
+    fhirResource.clinicalStatus = {
+      coding: [
+        {
+          system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical',
+          code: clinicalStatus,
+        },
+      ],
+    };
+  }
+  const allergyVerification = getFirst(NS.clinical + 'verificationStatus');
+  if (allergyVerification) {
+    fhirResource.verificationStatus = {
+      coding: [
+        {
+          system: 'http://terminology.hl7.org/CodeSystem/allergyintolerance-verification',
+          code: allergyVerification,
+        },
+      ],
+    };
+  }
 
   const cat = getFirst(NS.health + 'allergyCategory');
   if (cat) fhirResource.category = [cat];
@@ -158,6 +196,15 @@ export function restoreLabResultRecord(pv: PV, _warnings: string[]): FhirResourc
     code: { text: getFirst(NS.health + 'testName') ?? '' },
     category: [{ coding: [{ code: 'laboratory' }] }],
   };
+
+  // 3.262: `Observation.status` reaches the pod on clinical:status (wave 1) and
+  // was read back by nothing, so an AMENDED result exported as though nothing
+  // had been amended — the same collapse on the way out that wave 1 fixed on
+  // the way in. Observation.status is 1..1, so a record written before wave 1,
+  // which states none, is exported without one rather than with an invented
+  // value; that is a gap the pod can show, where "final" would be a claim.
+  const obsStatus = getFirst(NS.clinical + 'status');
+  if (obsStatus) fhirResource.status = obsStatus;
 
   const codingArr: any[] = [];
   for (const uri of pv.get(NS.health + 'testCode') ?? []) {
@@ -204,6 +251,10 @@ export function restoreVitalSign(pv: PV, warnings: string[]): FhirResource {
     code: {},
     category: [{ coding: [{ system: 'http://terminology.hl7.org/CodeSystem/observation-category', code: 'vital-signs' }] }],
   };
+
+  // 3.262: same element, same predicate, same omission as the lab branch above.
+  const vitalStatus = getFirst(NS.clinical + 'status');
+  if (vitalStatus) fhirResource.status = vitalStatus;
 
   const loincUri = getFirst(NS.clinical + 'loincCode');
   if (loincUri) {
@@ -272,12 +323,40 @@ export function restoreClinicalDocument(pv: PV, _warnings: string[]): FhirResour
 
   const fhirResource: FhirResource = {
     resourceType: 'DocumentReference',
-    status: 'current',
+    // `status` is 1..1 in FHIR, so the resource must carry one; "current" stands
+    // in only when the pod states none, which is every record written before the
+    // predicate existed. Where the pod DOES state it, the pod wins — a
+    // superseded document exported as current is the forward defect (3.256)
+    // reappearing on the way out.
+    status: getFirst(NS.clinical + 'documentReferenceStatus') ?? 'current',
     type: { text: getFirst(NS.clinical + 'documentType') ?? '' },
   };
 
+  // docStatus is 0..1 and is written only when the pod states it: unlike
+  // `status` there is no value FHIR forces the resource to carry, so inventing
+  // one would assert a document lifecycle the pod never recorded.
+  const docStatus = getFirst(NS.clinical + 'status');
+  if (docStatus) fhirResource.docStatus = docStatus;
+
   const docDate = getFirst(NS.clinical + 'documentDate');
   if (docDate) fhirResource.date = docDate;
+
+  // EVERY author, in stored order, and the authenticator as its own element.
+  // Restoring the authenticator as an author (or dropping it) would re-lose the
+  // distinction the forward converter exists to keep: who signed a note is not
+  // who wrote it.
+  const authors = pv.get(NS.clinical + 'documentAuthorName') ?? [];
+  if (authors.length > 0) {
+    fhirResource.author = authors.map((display) => ({ display }));
+  } else {
+    // Pre-v1.16 records carry only the single display name. One author is a
+    // truer restoration than none.
+    const providerName = getFirst(NS.clinical + 'providerName');
+    if (providerName) fhirResource.author = [{ display: providerName }];
+  }
+
+  const authenticator = getFirst(NS.clinical + 'authenticatorName');
+  if (authenticator) fhirResource.authenticator = { display: authenticator };
 
   const contentType = getFirst(NS.clinical + 'contentType');
   const docUrl = getFirst(NS.clinical + 'documentUrl');
@@ -300,7 +379,18 @@ export function restoreClinicalDocument(pv: PV, _warnings: string[]): FhirResour
 // Encounter
 // ---------------------------------------------------------------------------
 
-export function restoreEncounter(pv: PV, _warnings: string[]): FhirResource {
+/**
+ * @param resolveNode reads the predicate-value map of another subject in the
+ *   same graph, so `clinical:hasParticipant` edges can be followed to their
+ *   `clinical:EncounterParticipant` nodes. Optional: a caller with only one
+ *   subject in hand restores everything except the participations, which is what
+ *   this function did before clinical v1.16 gave participations a node at all.
+ */
+export function restoreEncounter(
+  pv: PV,
+  _warnings: string[],
+  resolveNode?: (iri: string) => PV | undefined,
+): FhirResource {
   const getFirst = (pred: string) => pv.get(pred)?.[0];
 
   const fhirResource: FhirResource = {
@@ -308,11 +398,37 @@ export function restoreEncounter(pv: PV, _warnings: string[]): FhirResource {
     status: getFirst(NS.clinical + 'encounterStatus') ?? 'finished',
   };
 
+  // The class Coding, restored WHOLE. Writing back only the code would export a
+  // bare vendor category id (`"5"`) with nothing saying which system it came
+  // from — readable by nobody and mappable by no one, which is the state
+  // clinical v1.16 was authored to end.
   const encClass = getFirst(NS.clinical + 'encounterClass');
-  if (encClass) fhirResource.class = { code: encClass };
+  const classDisplay = getFirst(NS.clinical + 'encounterClassDisplay');
+  const classSystem = getFirst(NS.clinical + 'encounterClassSystem');
+  if (encClass || classDisplay || classSystem) {
+    fhirResource.class = {};
+    if (encClass) fhirResource.class.code = encClass;
+    if (classDisplay) fhirResource.class.display = classDisplay;
+    if (classSystem) fhirResource.class.system = classSystem;
+  }
 
   const encType = getFirst(NS.clinical + 'encounterType');
   if (encType) fhirResource.type = [{ text: encType }];
+
+  // Every reason, because Encounter.reasonCode is 0..* and the pod holds them
+  // all. Restored as `.text`, which is the element the forward converter read.
+  const reasons = pv.get(NS.clinical + 'encounterReason') ?? [];
+  if (reasons.length > 0) fhirResource.reasonCode = reasons.map((text) => ({ text }));
+
+  const admitSource = getFirst(NS.clinical + 'admitSource');
+  const dischargeDisposition = getFirst(NS.clinical + 'dischargeDisposition');
+  if (admitSource || dischargeDisposition) {
+    fhirResource.hospitalization = {};
+    if (admitSource) fhirResource.hospitalization.admitSource = { text: admitSource };
+    if (dischargeDisposition) {
+      fhirResource.hospitalization.dischargeDisposition = { text: dischargeDisposition };
+    }
+  }
 
   const start = getFirst(NS.clinical + 'encounterStart');
   const end = getFirst(NS.clinical + 'encounterEnd');
@@ -322,14 +438,80 @@ export function restoreEncounter(pv: PV, _warnings: string[]): FhirResource {
     if (end) fhirResource.period.end = end;
   }
 
-  const provName = getFirst(NS.clinical + 'providerName');
-  if (provName) fhirResource.participant = [{ individual: { display: provName } }];
+  // Participants: the participation NODES where the graph has them, and the
+  // single summary name only where it has none.
+  //
+  // The order matters and is not a preference. Restoring providerName as a
+  // participant AS WELL would emit the treating clinician twice, once with their
+  // role and once without — and a consumer reading `participant[]` cannot tell
+  // the duplicate from a second real participation. The nodes carry strictly
+  // more than the summary slot does, including the summary name itself, so where
+  // they exist they are the whole answer.
+  const participantIris = pv.get(NS.clinical + 'hasParticipant') ?? [];
+  const participants: any[] = [];
+  for (const iri of participantIris) {
+    const node = resolveNode?.(iri);
+    if (!node) continue;
+    const first = (pred: string) => node.get(pred)?.[0];
+    const entry: any = {};
+    const name = first(NS.clinical + 'participantName');
+    if (name) entry.individual = { display: name };
+
+    const role = first(NS.clinical + 'participantRole');
+    const roleCodes = node.get(NS.clinical + 'participantRoleCode') ?? [];
+    if (role || roleCodes.length > 0) {
+      const type: any = {};
+      if (role) type.text = role;
+      if (roleCodes.length > 0) type.coding = roleCodes.map((code) => ({ code }));
+      entry.type = [type];
+    }
+
+    const specialty = first(NS.clinical + 'participantSpecialty');
+    if (specialty) {
+      // Round-tripped through an extension because that is where the source
+      // carried it and where the forward converter reads it. FHIR has no
+      // Encounter.participant.specialty element; the standard's home for the
+      // fact is PractitionerRole.specialty, and minting a PractitionerRole here
+      // would invent a resource the pod does not hold.
+      entry.extension = [
+        {
+          url: 'https://ns.cascadeprotocol.org/fhir/StructureDefinition/participant-specialty',
+          valueCodeableConcept: { text: specialty },
+        },
+      ];
+    }
+    if (Object.keys(entry).length > 0) participants.push(entry);
+  }
+  if (participants.length > 0) {
+    fhirResource.participant = participants;
+  } else {
+    const provName = getFirst(NS.clinical + 'providerName');
+    if (provName) fhirResource.participant = [{ individual: { display: provName } }];
+  }
 
   const facility = getFirst(NS.clinical + 'facilityName');
   if (facility) fhirResource.serviceProvider = { display: facility };
 
   const srcId = getFirst(NS.clinical + 'sourceRecordId');
   if (srcId) fhirResource.id = srcId;
+
+  // Business identifiers, split back out of the token form they are stored in.
+  //
+  // This is the ONE place the token form is decomposed, and it is sound here in
+  // a way it is never sound in the matcher: `{system}|{value}` is produced by
+  // this codebase and `|` is not a character FHIR permits in an Identifier.system
+  // URI, so the FIRST `|` is unambiguously the separator. A value with no `|`
+  // was written bare, meaning the source stated no system — and no system is
+  // invented for it here either.
+  const businessIds = pv.get(NS.clinical + 'businessIdentifier') ?? [];
+  if (businessIds.length > 0) {
+    fhirResource.identifier = businessIds.map((token) => {
+      const cut = token.indexOf('|');
+      return cut === -1
+        ? { value: token }
+        : { system: token.slice(0, cut), value: token.slice(cut + 1) };
+    });
+  }
 
   return fhirResource;
 }
@@ -343,7 +525,12 @@ export function restoreLaboratoryReport(pv: PV, _warnings: string[]): FhirResour
 
   const fhirResource: FhirResource = {
     resourceType: 'DiagnosticReport',
-    status: 'final',
+    // 3.262: this was a hardcoded 'final'. The forward converter has emitted
+    // DiagnosticReport.status on clinical:status since wave 1, so an `amended`
+    // or `entered-in-error` report exported as `final` was the pod's own
+    // correction being discarded on the way out. The literal remains as the
+    // fallback for records written before that, because status is 1..1.
+    status: getFirst(NS.clinical + 'status') ?? 'final',
     code: { text: getFirst(NS.clinical + 'panelName') ?? '' },
   };
 

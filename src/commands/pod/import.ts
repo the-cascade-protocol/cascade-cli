@@ -41,6 +41,7 @@ import {
 import { detectSource, type FileSourceMeta, type CompletenessCheck } from '../../lib/source-adapters/registry.js';
 import {
   DATA_TYPES,
+  isStructuralSubNode,
   resolvePodDir,
   fileExists,
   applyCardIdentityName,
@@ -996,6 +997,11 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       const sourceBreakdown: Record<string, number> = {};
       const SRC_EHR_IRI = 'https://ns.cascadeprotocol.org/clinical/v1#sourceEHR';
       for (const [, quads] of subjectQuads) {
+        // Records only, on the same rule as `recordsAdded` below. This block and
+        // the "Records imported" line are printed together in one summary, so
+        // counting structural sub-nodes here and not there would put two
+        // different totals for the same import three lines apart.
+        if (isStructuralSubNode(quads)) continue;
         const ehr = quads.find((q) => q.predicate.value === SRC_EHR_IRI);
         const key = ehr ? ehr.object.value : SOURCE_EHR_UNKNOWN;
         sourceBreakdown[key] = (sourceBreakdown[key] ?? 0) + 1;
@@ -1029,10 +1035,17 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
 
         const allNewQuads = subjectQArrays.flat();
 
-        let recordsAdded = subjectQArrays.length;
+        // Every subject in this bucket is WRITTEN; only the ones that are
+        // records are COUNTED. A structural sub-node is stored, validated and
+        // read back like anything else, but it is not a thing the person has one
+        // of, and counting it would report a visit's four participations as four
+        // more encounters. See `isStructuralSubNode`.
+        const countableSubjects = subjectQArrays.filter((quads) => !isStructuralSubNode(quads));
+
+        let recordsAdded = countableSubjects.length;
         // Of those, the subjects this file did not already hold. Equal to
         // recordsAdded on a fresh file; zero on a fully duplicate re-import.
-        let recordsNew = subjectQArrays.length;
+        let recordsNew = countableSubjects.length;
         const isNewFile = !(await fileExists(targetFile));
 
         // Every write below goes through the ONE bucket chokepoint, so the
@@ -1055,9 +1068,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
                 return incoming;
               },
             });
-            recordsAdded = subjectQArrays.length;
+            recordsAdded = countableSubjects.length;
             if (!isNewFile) {
-              recordsNew = subjectQArrays.filter(
+              recordsNew = countableSubjects.filter(
                 (quads) => quads.length > 0 && !priorSubjects.has(quads[0].subject.value),
               ).length;
             }
@@ -1077,7 +1090,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
                 for (const [subjectUri, quads] of subjectQuads) {
                   if (routeTypeKey(quads) === typeKey && !bySubject.has(subjectUri)) {
                     bySubject.set(subjectUri, quads);
-                    addedCount++;
+                    // Written either way; counted only if it is a record.
+                    if (!isStructuralSubNode(quads)) addedCount++;
                   }
                 }
                 return Array.from(bySubject.values()).flat();

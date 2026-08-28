@@ -9,7 +9,89 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+**The FHIR converters now emit the thirteen predicates clinical v1.16 and coverage v1.5 authored,
+so the facts that had nowhere to go stop being dropped.** Every one of these was a written-down
+omission on a drop manifest; each manifest entry is deleted in the same change as the emission that
+closes it.
+
+`convertEncounter` — a visit record went from nine facts to the resource the server actually sent:
+
+| Source element | Predicate |
+|---|---|
+| `Encounter.reasonCode` (all of them, `0..*`) | `clinical:encounterReason` |
+| `Encounter.hospitalization.admitSource` | `clinical:admitSource` |
+| `Encounter.hospitalization.dischargeDisposition` | `clinical:dischargeDisposition` |
+| `Encounter.class.display` / `.system` | `clinical:encounterClassDisplay` / `clinical:encounterClassSystem` |
+| `Encounter.participant[]` | `clinical:hasParticipant` → `clinical:EncounterParticipant` nodes carrying `participantName`, `participantRole`, `participantRoleCode`, `participantSpecialty` |
+| `Encounter.identifier` (all of them, `0..*`) | `clinical:businessIdentifier` |
+
+The class CODE is unchanged and still emitted: the display is stored alongside it, never instead of
+it, because the code is what a round-trip export must restore. `clinical:providerName` is also
+unchanged — it is the one-name summary slot an application displays, and the participations are the
+full record.
+
+Participation nodes are the first structured sub-node this converter mints, so their IRIs come from
+a single chokepoint, `encounterParticipantUri`, and are a pure function of the encounter's subject
+IRI and the participation's own stated content. Not the array index, which is a property of the
+serialization rather than of the data: FHIR does not promise `participant[]` order across two reads,
+and an index-keyed IRI would re-mint a node whose content never changed. Re-import therefore adds
+nothing. `tests/encounter-participant-identity.test.ts` proves it across two processes run from two
+different working directories against the built artifact, because an in-process check shares a
+module cache and one `process.cwd()` and cannot see a defect keyed on either.
+
+`convertClinicalDocument`:
+
+| Source element | Predicate |
+|---|---|
+| `DocumentReference.status` | `clinical:documentReferenceStatus` |
+| `DocumentReference.author` (every one) | `clinical:documentAuthorName` |
+| `DocumentReference.authenticator` | `clinical:authenticatorName` |
+
+`docStatus` stays on `clinical:status`. The two status elements are separate because
+"entered-in-error" appears in BOTH value sets and means the filing was a mistake in one and the
+clinical content is repudiated in the other; a reader seeing it on one shared predicate could not
+tell which had been said. Authorship and attestation are separate for the same kind of reason: a
+resident writes and an attending signs, and recording the signer as an author asserts they wrote
+the content.
+
+`convertCoverage` emits `coverage:status`. FHIR makes `Coverage.status` `1..1` with a required
+binding and marks it a MODIFIER element, so a cancelled policy imported indistinguishably from an
+active one was a wrong answer to the only question an insurance record is asked. No status is
+defaulted anywhere above: a source that states nothing is stored stating nothing.
+
 ### Changed
+
+**The encounter reconciler matches on `clinical:businessIdentifier`, keeping a compatibility read of
+`cascade:sourceRecordId`.** One visit identifier is written in two spellings — FHIR token form
+`{system}|{value}` with the system verbatim on the canonical predicate, and the frozen colon form
+`{system}:{value}` with `urn:oid:` stripped on the compatibility one — so the same identifier is two
+unequal strings. Identifier sets are therefore intersected PER PREDICATE, each in its own form, and
+no code path converts between them. Comparing across the forms fails silently in both directions: it
+misses real matches (`urn:oid:1.2.3|X` against `1.2.3:X`) and can manufacture false ones (a
+system-less token value containing a colon, read as a colon-form `system:value`). Converters
+dual-emit, so pods repaired before this release still converge on the frozen predicate and retiring
+it is not yet schedulable.
+
+**Reverse converters read back every predicate the import path writes.** `cascade convert --to fhir`
+was discarding the pod's own corrections: `restoreLaboratoryReport` hardcoded `status: 'final'`,
+`restoreClinicalDocument` hardcoded `'current'`, `restoreInsurancePlan` hardcoded `'active'`, and
+nothing read `clinical:status` or `clinical:verificationStatus` on any type. An amended report, a
+superseded filing, a cancelled plan and a REFUTED condition or allergy all exported as the confident
+default. Now restored: both DocumentReference statuses, every author, the authenticator, the whole
+`Encounter.class` Coding, every reason, the hospitalization pair, every participation with its role
+and specialty, the business identifiers split back out of token form, `coverage:status`, and the
+wave-1 statuses on Observation (lab and vital), DiagnosticReport, Condition and AllergyIntolerance.
+The hardcoded literals survive only as fallbacks for records written before the predicates existed,
+on the three elements FHIR makes `1..1`.
+
+**Structural sub-nodes are stored and validated but not counted as records.** A participation is
+routed into `clinical/encounters.ttl` beside the encounter that owns it — pods are partitioned by
+type and `cascade validate` validates each file independently, so a `clinical:hasParticipant` edge
+crossing a file boundary would be unresolvable — and it is excluded from "Records imported", the
+per-type summary and the source breakdown. Counting it would have reported one Synthea bundle's 44
+visits as 57 encounters.
 
 **Embedded shapes re-synced from `spec`: core 3.6 → 3.7, health 2.7 → 2.8, clinical 1.15 → 1.16,
 coverage 1.4 → 1.5.** spec PR the-cascade-protocol/spec#31; tags `vocab/core-v3.7`,

@@ -15,12 +15,6 @@ export const COVERAGE_DROPS: FieldDropManifest = {
       reason:
         'Read only as a fallback for coverage:memberId when the resource states no subscriberId. With a subscriberId present that value is the member id.',
     },
-    'Coverage.status': {
-      disposition: 'pending',
-      backlog: '3.256',
-      reason:
-        'active, cancelled or draft. A cancelled policy that reads as active is a plan a person may believe still covers them.',
-    },
     'Coverage.subscriber': {
       disposition: 'acknowledged',
       reason:

@@ -306,36 +306,53 @@ describe('STABILITY PIN: a status is reported, never invented', () => {
   });
 });
 
-describe('ACKNOWLEDGED DROP: statuses with no predicate to carry them', () => {
+/**
+ * CLOSED BY WAVE 4. All three drops this block guarded had one cause — no
+ * predicate could carry the value — and clinical v1.16 / coverage v1.5 authored
+ * all three terms, so the block now asserts the emissions instead of the
+ * omissions.
+ *
+ * The `coverage:status` case is worth keeping a note on because it is what a
+ * tripwire is FOR. It did not merely document a gap; it failed, by itself, on
+ * the commit that synced the new vocabulary in, before any converter had been
+ * touched — which is how the omission got closed in the same change as the term
+ * that closed it rather than outliving the reason for it by a release.
+ *
+ * The emission behaviour is asserted in depth in `fhir-field-coverage-wave4.test.ts`.
+ * What stays here is the half these cases uniquely hold: that the NEW value did
+ * not displace the OLD one. The code is not overwritten by the display, and the
+ * document's status is not overwritten by the reference's.
+ */
+describe('WAS an acknowledged drop: statuses that now have a predicate', () => {
   const SHAPES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'shapes');
 
-  it('Coverage.status is not emitted, and the coverage vocabulary still has nowhere to put it', () => {
-    // Two halves on purpose. The first states today's behaviour; the second is
-    // the tripwire that makes this a REVIEWABLE omission rather than a silent
-    // one — the day a `coverage:status` term is authored, this fails and sends
-    // the reader back here to emit it.
+  it('Coverage.status is emitted, on the coverage: term the vocabulary now defines', () => {
     const result = convertCoverage(coverageResource({ status: 'cancelled' })) as Converted;
+    expect(valuesOf(result, NS.coverage + 'status')).toEqual(['cancelled']);
+    // Still NOT on clinical:status. The predicate was authored in coverage:
+    // rather than borrowed from clinical:, and borrowing it later would be the
+    // same scope decision made in a converter that this wave avoided making.
     expect(valuesOf(result, STATUS)).toEqual([]);
-    expect(result._quads.some((q) => q.object.value === 'cancelled')).toBe(false);
 
     const vocab = fs.readFileSync(path.join(SHAPES, 'coverage.ttl'), 'utf8');
-    expect(/^coverage:status\s+a\s+owl:/m.test(vocab), 'coverage:status now exists — emit it').toBe(false);
+    expect(/^coverage:status\s+a\s+owl:/m.test(vocab), 'the bundled vocabulary must define the term being emitted').toBe(true);
   });
 
-  it('Encounter.class.display is not emitted, and the class CODE is not overwritten by it', () => {
+  it('Encounter.class.display is emitted and the class CODE is not overwritten by it', () => {
     // The code is what the reverse converter needs to rebuild Encounter.class,
-    // so "store the readable one instead" is not an available shortcut. Both
-    // want keeping; only one predicate exists.
+    // so "store the readable one instead" was never an available shortcut. Both
+    // are kept now, on predicates of their own.
     const result = convertEncounter(encounterResource({ class: { code: '5', display: 'Appointment' } })) as Converted;
     expect(valueOf(result, ENCOUNTER_CLASS)).toBe('5');
-    expect(result._quads.some((q) => q.object.value === 'Appointment')).toBe(false);
+    expect(valuesOf(result, NS.clinical + 'encounterClassDisplay')).toEqual(['Appointment']);
   });
 
-  it('DocumentReference.status (the reference, not the document) is not conflated with docStatus', () => {
+  it('DocumentReference.status and docStatus land on their own predicates, unconflated', () => {
     // `status: current` and `docStatus: final` are different elements. Exactly
-    // one value reaches clinical:status, and it is the document's.
+    // one value reaches clinical:status, and it is still the document's.
     const result = convertClinicalDocument(documentReference({ status: 'current', docStatus: 'final' })) as Converted;
     expect(valuesOf(result, STATUS)).toEqual(['final']);
+    expect(valuesOf(result, NS.clinical + 'documentReferenceStatus')).toEqual(['current']);
   });
 });
 

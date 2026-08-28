@@ -71,6 +71,31 @@ export async function convertCascadeToFhir(turtle: string): Promise<{
     subjects.get(subj)!.push(q);
   }
 
+  /** Predicate-value map for one subject. */
+  const pvOf = (quadsForSubject: Quad[]): Map<string, string[]> => {
+    const map = new Map<string, string[]>();
+    for (const q of quadsForSubject) {
+      const pred = q.predicate.value;
+      if (!map.has(pred)) map.set(pred, []);
+      map.get(pred)!.push(q.object.value);
+    }
+    return map;
+  };
+
+  /**
+   * Read another subject in this graph, for restorers that have to follow an
+   * edge to a structural SUB-NODE — today only `clinical:hasParticipant`.
+   *
+   * A sub-node is not a resource of its own: it exists to be read back into the
+   * FHIR BackboneElement it came from. Passing a reader, rather than dispatching
+   * on the node's own type, is what keeps that true — the node is reached from
+   * the encounter that owns it and from nowhere else.
+   */
+  const resolveNode = (iri: string): Map<string, string[]> | undefined => {
+    const quadsForSubject = subjects.get(iri);
+    return quadsForSubject ? pvOf(quadsForSubject) : undefined;
+  };
+
   for (const [subjectUri, subjectQuads] of subjects) {
     // Find rdf:type
     const typeQuad = subjectQuads.find(q => q.predicate.value === NS.rdf + 'type');
@@ -78,13 +103,16 @@ export async function convertCascadeToFhir(turtle: string): Promise<{
 
     const rdfType = typeQuad.object.value;
 
+    // Structural sub-nodes are restored BY the record that owns them, never as
+    // resources of their own. `clinical:EncounterParticipant` mirrors FHIR's
+    // Encounter.participant BackboneElement, which has no independent existence
+    // in FHIR at all; emitting one as a top-level resource would invent a
+    // resource type, and falling through to the unknown-type branch below would
+    // warn about a node this converter handles perfectly well.
+    if (rdfType === NS.clinical + 'EncounterParticipant') continue;
+
     // Build predicate->value map
-    const pv = new Map<string, string[]>();
-    for (const q of subjectQuads) {
-      const pred = q.predicate.value;
-      if (!pv.has(pred)) pv.set(pred, []);
-      pv.get(pred)!.push(q.object.value);
-    }
+    const pv = pvOf(subjectQuads);
 
     // Dispatch to per-type handler
     let resource: any | null = null;
@@ -110,7 +138,7 @@ export async function convertCascadeToFhir(turtle: string): Promise<{
     } else if (rdfType === NS.clinical + 'ClinicalDocument') {
       resource = restoreClinicalDocument(pv, warnings);
     } else if (rdfType === NS.clinical + 'Encounter') {
-      resource = restoreEncounter(pv, warnings);
+      resource = restoreEncounter(pv, warnings, resolveNode);
     } else if (rdfType === NS.clinical + 'LaboratoryReport') {
       resource = restoreLaboratoryReport(pv, warnings);
     } else if (rdfType === NS.clinical + 'MedicationAdministration') {
