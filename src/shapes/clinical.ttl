@@ -21,8 +21,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-08-14"^^xsd:date ;
-    owl:versionInfo "1.15" ;
+    dct:modified "2026-08-27"^^xsd:date ;
+    owl:versionInfo "1.16" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -326,8 +326,9 @@ clinical:seriesPanelMembership a owl:ObjectProperty ;
 
 clinical:providerName a owl:DatatypeProperty ;
     rdfs:label "Provider Name"@en ;
-    rdfs:comment "Insurance company or plan provider name."@en ;
-    rdfs:domain clinical:CoverageRecord ;
+    rdfs:comment """Name of the party a record names as its provider. On a clinical:CoverageRecord this is the insurance company or plan provider; on an encounter, a document or any other clinical record it is the responsible clinician or organization.
+
+DOMAIN DELIBERATELY ABSENT (v1.16). Through v1.15 this property declared rdfs:domain clinical:CoverageRecord while being written on every clinical record type this vocabulary defines and constrained on encounters by clinical:EncounterShape. An OWL reasoner reading that domain infers that every encounter and every document carrying a provider name IS a coverage record, which is false of the data and of the intent. The domain is therefore dropped rather than widened to a union, following the v1.11 treatment of clinical:indicationReference and matching clinical:sourceEHR, clinical:status, clinical:recordDate and clinical:sourceRecordId, which are cross-class in the same way and carry no domain either. Where the property means something specific to one class, that is stated in SHACL on that class's shape. No emitted triple changes and nothing that validated before stops validating."""@en ;
     rdfs:range xsd:string .
 
 clinical:memberId a owl:DatatypeProperty ;
@@ -420,6 +421,43 @@ clinical:fhirResourceId a owl:DatatypeProperty ;
 clinical:fhirResourceType a owl:DatatypeProperty ;
     rdfs:label "FHIR Resource Type"@en ;
     rdfs:comment "FHIR resource type (e.g., 'DiagnosticReport', 'Composition')"@en ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:string .
+
+# --- Document status, authorship and attestation (v1.16) --------------------
+#
+# A document carries TWO independent status facts and, separately, two
+# independent attribution facts. Through v1.15 each pair had one predicate, so
+# each pair's second member was dropped on import.
+
+clinical:documentReferenceStatus a owl:DatatypeProperty ;
+    rdfs:label "Document Reference Status"@en ;
+    rdfs:comment """Status of the REFERENCE to a document: whether this pod entry is the current pointer to the document, has been replaced by a later one, or was created in error. FHIR alignment: DocumentReference.status (1..1, required binding to https://hl7.org/fhir/R4/valueset-document-reference-status.html), values current | superseded | entered-in-error.
+
+DISTINCT FROM clinical:status, which on a document carries DocumentReference.docStatus, "the status of the underlying document" (required binding to composition-status: preliminary | final | amended | entered-in-error). FHIR keeps these as two elements because they answer different questions: a document can be a final, unamended clinical note (docStatus "final") whose reference has since been superseded by a corrected filing (status "superseded"). Folding them onto one predicate is not merely lossy, it is ambiguous in the one case where ambiguity is most costly: "entered-in-error" appears in BOTH value sets and means the reference was filed in error in one and the clinical content is repudiated in the other."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-document-reference-status.html> ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:string .
+
+clinical:documentAuthorName a owl:DatatypeProperty ;
+    rdfs:label "Document Author Name"@en ;
+    rdfs:comment """Name of a party responsible for the content of a document. FHIR alignment: DocumentReference.author, "identifies who is responsible for adding the information to the document", Reference(Practitioner | PractitionerRole | Organization | Device | Patient | RelatedPerson) 0..* (https://hl7.org/fhir/R4/documentreference-definitions.html#DocumentReference.author).
+
+REPEATABLE, 0..*, because the source element is. A note co-signed by a resident and an attending, or authored by a clinician and an organization, has two authors; through v1.15 the only predicate available was clinical:providerName, which clinical:ClinicalDocumentShape and the record shapes constrain to sh:maxCount 1, so every author after the first was discarded on import with nothing recording that it had happened.
+
+RELATION TO clinical:providerName. providerName is retained and unchanged: on a document it holds the single name an application displays as the responsible provider, and is written from the first author where a source has several. documentAuthorName holds every author the source stated, including that one. A consumer wanting the complete attribution reads documentAuthorName; a consumer wanting one display name may keep reading providerName."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/documentreference-definitions.html#DocumentReference.author> ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:string .
+
+clinical:authenticatorName a owl:DatatypeProperty ;
+    rdfs:label "Authenticator Name"@en ;
+    rdfs:comment """Name of the person or organization that ATTESTED a document: who signed it, as opposed to who wrote it. FHIR alignment: DocumentReference.authenticator, "which person or organization authenticates that this document is valid", Reference(Practitioner | PractitionerRole | Organization) 0..1 (https://hl7.org/fhir/R4/documentreference-definitions.html#DocumentReference.authenticator). The same fact is Composition.attester.party in a Composition and legalAuthenticator in a C-CDA header.
+
+Attestation is a different fact from authorship and is routinely a different person: a resident authors, an attending signs. Recording only the author loses the signature, which is the part of a note that carries clinical and legal weight; recording the authenticator as if it were an author asserts that the signer wrote the content, which the source did not say.
+
+NOT MODELLED THIS RELEASE: FHIR Composition.attester also carries a mode (personal | professional | legal | official, required binding) and a time (https://hl7.org/fhir/R4/composition-definitions.html#Composition.attester). Neither is added here, because DocumentReference — the resource both import paths actually read — carries a bare authenticator reference with no mode and no timestamp, and a predicate whose only possible value would be invented is worse than its absence. Add them when a Composition-reading path exists to populate them."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/documentreference-definitions.html#DocumentReference.authenticator> ;
     rdfs:domain clinical:ClinicalDocument ;
     rdfs:range xsd:string .
 
@@ -785,8 +823,19 @@ clinical:clinicalStatus a owl:DatatypeProperty ;
 
 clinical:verificationStatus a owl:DatatypeProperty ;
     rdfs:label "Verification Status"@en ;
-    rdfs:comment "Verification status (unconfirmed, provisional, differential, confirmed, refuted)"@en ;
-    rdfs:domain clinical:Condition ;
+    rdfs:comment """How certain the recording clinician is that the asserted finding is real. Permitted values depend on the record class and are constrained per-shape, not on this property.
+
+FHIR R4 sources, both required bindings:
+  Condition.verificationStatus          unconfirmed | provisional | differential |
+                                        confirmed | refuted | entered-in-error
+                                        https://hl7.org/fhir/R4/valueset-condition-ver-status.html
+  AllergyIntolerance.verificationStatus  unconfirmed | confirmed | refuted |
+                                        entered-in-error
+                                        https://hl7.org/fhir/R4/valueset-allergyintolerance-verification.html
+
+DOMAIN DELIBERATELY ABSENT (v1.16). Through v1.15 this property declared rdfs:domain clinical:Condition while an importer writes it on allergy records too, which is exactly what FHIR does: verificationStatus is an element of AllergyIntolerance as well as of Condition, and the two are different value sets over the same idea. The domain is dropped rather than widened to a union, for the reason given on clinical:providerName: a domain union on a cross-class predicate makes a reasoner infer that an allergy record is a Condition. Nothing is invented and no value changes meaning; the per-class value set belongs in SHACL, where the two bindings can differ."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-condition-ver-status.html> ,
+                 <https://hl7.org/fhir/R4/valueset-allergyintolerance-verification.html> ;
     rdfs:range xsd:string .
 
 clinical:icd10Code a owl:DatatypeProperty ;
@@ -1006,13 +1055,34 @@ clinical:performingLab a owl:DatatypeProperty ;
 
 clinical:observationStatus a owl:DatatypeProperty ;
     rdfs:label "Observation Status"@en ;
-    rdfs:comment "FHIR observation-status code: final, preliminary, amended, corrected, cancelled, entered-in-error. See http://hl7.org/fhir/observation-status"@en ;
-    rdfs:domain clinical:LabResult ;
-    rdfs:range xsd:string .
+    rdfs:comment """FHIR R4 observation-status code (https://hl7.org/fhir/R4/valueset-observation-status.html).
+
+DEPRECATED in clinical v1.16: use clinical:status, which is the domain-free status carrier every import path already writes, and whose per-class FHIR value sets are bound by SHACL from v1.16 on.
+
+Retired rather than re-domained, and the reason is worth stating so it is not reversed by mistake. This property was defined in v1.4 with rdfs:domain clinical:LabResult, a class deprecated in v1.13 in favour of health:LabResultRecord and which no import path emits; it is bound by no shape and written by no converter. Re-domaining it onto health:LabResultRecord would give an Observation-derived record TWO status predicates with the same FHIR source element behind both, which is the ambiguity this release exists to remove, not a second place to look. Retained, not removed, on the same terms as the four classes deprecated in v1.13: any pod that happens to carry it stays valid and readers must continue to accept it."""@en ;
+    rdfs:range xsd:string ;
+    owl:deprecated true ;
+    rdfs:seeAlso clinical:status ;
+    owl:versionInfo "Deprecated in clinical v1.16; superseded by clinical:status" .
 
 clinical:sourceRecordId a owl:DatatypeProperty ;
     rdfs:label "Source Record ID"@en ;
-    rdfs:comment "FHIR resource identifier from the source system for traceability"@en ;
+    rdfs:comment """The LOGICAL id the source system assigned the resource this record was converted from: FHIR Resource.id (https://hl7.org/fhir/R4/resource.html#id), or the equivalent row identifier of another transport. Server-assigned, opaque, and stable only within the system that issued it.
+
+This is NOT a business identifier. FHIR draws the distinction explicitly: Resource.id is "the logical id of the resource, as used in the URL", while .identifier carries "business identifiers assigned to this resource by the performer or other systems" (https://hl7.org/fhir/R4/datatypes.html#Identifier). The two id spaces do not join: one system's logical id for a visit and another system's business identifier for the same visit are different strings, and the same string in the two spaces means nothing in common. Write a business identifier to clinical:businessIdentifier, added in v1.16 for exactly this reason."""@en ;
+    rdfs:seeAlso clinical:businessIdentifier ;
+    rdfs:range xsd:string .
+
+clinical:businessIdentifier a owl:DatatypeProperty ;
+    rdfs:label "Business Identifier"@en ;
+    rdfs:comment """An identifier the source system publishes for the real-world thing a record describes, as opposed to the server row it happens to live in. FHIR alignment: the .identifier element (Identifier 0..*) carried by every FHIR resource, https://hl7.org/fhir/R4/datatypes.html#Identifier. On an encounter this is Encounter.identifier, "identifier(s) by which this encounter is known" (https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.identifier), which US Core marks Must Support on its Encounter profile (https://hl7.org/fhir/us/core/StructureDefinition-us-core-encounter.html); a visit or contact serial number is the ordinary value.
+
+REPEATABLE, 0..*, because the source element is. A resource that publishes three identifiers has three, and keeping only one discards the very value another transport may key on.
+
+VALUE FORM. Where the source states an Identifier.system, the value is written as the FHIR token form "{system}|{value}" (https://hl7.org/fhir/R4/search.html#token), which is the ratified way to write a system-qualified identifier as one string and is what makes two identifiers comparable across transports without a side table. Where the source states no system, the bare value is written. An implementation MUST NOT invent a system.
+
+WHY IT IS SEPARATE FROM clinical:sourceRecordId. Through v1.15 a converter had one predicate for both id spaces, so a consumer reading a value could not tell whether it held a server row id or a business identifier, and reconciling two transports on it either compared unrelated strings or refused to compare related ones. The two are now distinct predicates because they are distinct facts. Domain is deliberately absent: the source element exists on every FHIR resource, so restricting it to encounters would be false in the same way the domains corrected elsewhere in v1.16 were false."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/datatypes.html#Identifier> ;
     rdfs:range xsd:string .
 
 clinical:panelMembership a owl:ObjectProperty ;
@@ -1352,6 +1422,79 @@ clinical:isActive a owl:DatatypeProperty ;
 # Changelog
 # ============================================================================
 #
+# Version 1.16 (2026-08-27)
+# - FIFTEEN new terms (14 properties and 1 class), two domains dropped, one
+#   property deprecated, and the
+#   first per-class value sets on clinical:status. Everything here comes from a
+#   field-coverage measurement against real R4 exports: each term below is a
+#   source element that a conformant server sends and this vocabulary had
+#   nowhere to put, so an importer dropped it. Every term cites the FHIR R4
+#   element it mirrors by canonical URL; nothing is invented.
+# - ENCOUNTER (9 terms). clinical:encounterReason (Encounter.reasonCode 0..*,
+#   preferred binding, US Core Must Support); clinical:admitSource and
+#   clinical:dischargeDisposition (Encounter.hospitalization.admitSource /
+#   .dischargeDisposition, the only structured signal separating an admission
+#   from an office visit, and dischargeDisposition is US Core Must Support);
+#   clinical:encounterClassDisplay and clinical:encounterClassSystem, which
+#   restore the other two parts of the Encounter.class Coding — the code stays
+#   in clinical:encounterClass for round-trip, and because the binding is only
+#   extensible a local code such as "5" is unreadable and unmappable without
+#   its display and system. And the participation structure:
+#   clinical:EncounterParticipant (new class), clinical:hasParticipant,
+#   clinical:participantName, clinical:participantRole,
+#   clinical:participantRoleCode, clinical:participantSpecialty. FHIR models
+#   participation as a repeating BackboneElement carrying a role AND an
+#   individual, and US Core marks all three Must Support; the rejected
+#   alternative, a flat family of role-qualified predicates, cannot represent
+#   two participants in one role and silently drops the local role codes an
+#   extensible binding permits. The full argument is above the class.
+# - IDENTITY (1 term). clinical:businessIdentifier, domain-free and repeatable,
+#   for the .identifier element every FHIR resource carries; on an encounter,
+#   Encounter.identifier (US Core Must Support). clinical:sourceRecordId keeps
+#   its meaning and now states it: the server-assigned LOGICAL id
+#   (Resource.id). FHIR draws this distinction explicitly and the two id spaces
+#   do not join, so one predicate holding both made a stored value
+#   uninterpretable. MIGRATION: a converter that has been writing a business
+#   identifier to clinical:sourceRecordId must move it; the two predicates are
+#   not interchangeable and a reader cannot repair the confusion after the
+#   fact.
+# - DOCUMENTS (3 terms). clinical:documentReferenceStatus for
+#   DocumentReference.status (current | superseded | entered-in-error), which
+#   is a different assertion from the docStatus clinical:status carries — the
+#   code "entered-in-error" is in BOTH value sets and means different things in
+#   each, so sharing one predicate was ambiguous exactly where ambiguity costs
+#   most. clinical:authenticatorName for DocumentReference.authenticator: who
+#   SIGNED a document, routinely not who wrote it. clinical:documentAuthorName,
+#   repeatable, for DocumentReference.author 0..*; clinical:providerName is
+#   sh:maxCount 1 on the document shapes, so every author past the first was
+#   discarded. providerName is retained and unchanged as the single display
+#   name.
+# - DOMAINS DROPPED (2). clinical:providerName declared rdfs:domain
+#   clinical:CoverageRecord while being written on every clinical record type,
+#   and clinical:verificationStatus declared rdfs:domain clinical:Condition
+#   while FHIR carries verificationStatus on AllergyIntolerance as well. Both
+#   domains are dropped rather than widened to a union, following the v1.11
+#   treatment of clinical:indicationReference: a union on a cross-class
+#   predicate makes a reasoner infer that an allergy record is a Condition.
+#   Vocabulary-correctness only; no shape encoded either domain, so no pod is
+#   affected.
+# - DEPRECATED (1). clinical:observationStatus, owl:deprecated true,
+#   superseded by clinical:status. Defined in v1.4 with rdfs:domain
+#   clinical:LabResult — a class deprecated in v1.13 that no path emits — bound
+#   by no shape and written by no converter. Retired rather than re-domained:
+#   re-domaining would give an Observation-derived record two status predicates
+#   with one FHIR element behind both, which is the ambiguity this release
+#   removes. Retained not removed, on the v1.13 terms.
+# - SHACL. clinical:status gains per-class FHIR value sets on the shapes whose
+#   records carry it, all at sh:Warning per the core v3.5 ratchet; new
+#   clinical:EncounterParticipantShape; the new encounter, identifier and
+#   document properties declared on their shapes. Detail in
+#   clinical.shapes.ttl's own changelog.
+# - COMPATIBILITY. Additive and strictly widening. Every graph that validated
+#   under v1.15 validates under v1.16 at the same severity, with new findings
+#   at sh:Warning only. No class or property is removed or renamed, and the one
+#   deprecation removes nothing.
+#
 # Version 1.15 (2026-08-14)
 # - ONE new property, clinical:interpretationSourceCode: the source's verbatim
 #   interpretation code, written only when that code is a member of neither
@@ -1629,7 +1772,57 @@ clinical:encounterClass a owl:DatatypeProperty ;
     rdfs:domain clinical:Encounter ;
     rdfs:range xsd:string ;
     rdfs:label "Encounter Class"@en ;
-    rdfs:comment "Values: ambulatory, emergency, inpatient, home-health"@en .
+    rdfs:comment """The CODE of Encounter.class, verbatim as the source sent it. FHIR R4 Encounter.class is a Coding, 1..1, bound extensibly to the v3-ActCode ActEncounterCode value set (https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.class), so a conformant server may send AMB, EMER, IMP, HH — or a local code from its own system. Both are stored here unchanged, because the code is what a round-trip export must put back.
+
+A local code is not readable on its own. From v1.16 the accompanying Coding.display goes to clinical:encounterClassDisplay and the Coding.system to clinical:encounterClassSystem, so a value like "5" can be read as what it says it is and can be recognised as not being an ActEncounterCode. Writers SHOULD emit all three when the source states them."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.class> .
+
+clinical:encounterClassDisplay a owl:DatatypeProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range xsd:string ;
+    rdfs:label "Encounter Class Display"@en ;
+    rdfs:comment """Human-readable display of Encounter.class, verbatim from Coding.display, "a representation of the meaning of the code in the system, following the rules of the system" (https://hl7.org/fhir/R4/datatypes.html#Coding).
+
+Added in v1.16 alongside, never instead of, clinical:encounterClass. The code stays because it is what a round-trip export must restore and what a code-system lookup keys on; the display is stored because where the code comes from a local system, and Encounter.class is bound only extensibly so it often does, the code alone is unreadable and unmappable. This mirrors the Coding datatype rather than choosing between its parts."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/datatypes.html#Coding> .
+
+clinical:encounterClassSystem a owl:DatatypeProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range xsd:anyURI ;
+    rdfs:label "Encounter Class System"@en ;
+    rdfs:comment """The code system Encounter.class's code is drawn from, verbatim from Coding.system: "the identification of the code system that defines the meaning of the symbol in the code" (https://hl7.org/fhir/R4/datatypes.html#Coding). Typically http://terminology.hl7.org/CodeSystem/v3-ActCode, or a urn:oid: URI where the source used a local system.
+
+Stored because it is the only thing that distinguishes a ratified ActEncounterCode from a locally-numbered category that happens to look like one. Without it a consumer cannot tell whether a stored class code is safe to map."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/datatypes.html#Coding> .
+
+clinical:encounterReason a owl:DatatypeProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range xsd:string ;
+    rdfs:label "Encounter Reason"@en ;
+    rdfs:comment """Why the visit happened, in the chart's own words. FHIR alignment: Encounter.reasonCode, "reason the encounter takes place, expressed as a code", CodeableConcept 0..*, preferred binding to https://hl7.org/fhir/R4/valueset-encounter-reason.html (https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.reasonCode). US Core marks it Must Support on its Encounter profile (https://hl7.org/fhir/us/core/StructureDefinition-us-core-encounter.html).
+
+Value is CodeableConcept.text where the source states it, otherwise the first coding's display: the reason as written, not a normalization of it. REPEATABLE, 0..*, because the source element is.
+
+NO VALUE SET is bound to this property or its shape. The FHIR binding is PREFERRED, the weakest binding that still names a value set, and real exports carry local, free-text and SNOMED CT reasons in the same field. An enum here would reject conformant data. Where a coded reason resolves to a record already in the pod, clinical:indicationReference / clinical:parsedIndicationReference carry the traversable edge; this property carries what the source said."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.reasonCode> .
+
+clinical:admitSource a owl:DatatypeProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range xsd:string ;
+    rdfs:label "Admit Source"@en ;
+    rdfs:comment """Where the patient came from before this encounter. FHIR alignment: Encounter.hospitalization.admitSource, "from where patient was admitted (physician referral, transfer)", CodeableConcept 0..1, preferred binding to https://hl7.org/fhir/R4/valueset-encounter-admit-source.html (https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.hospitalization.admitSource).
+
+Value is CodeableConcept.text or the first coding's display, verbatim. Presence of an Encounter.hospitalization element is itself the structured signal that an encounter was an admission rather than an office visit, and through v1.15 this vocabulary had nowhere to put it, so that distinction was unrecoverable from the pod. No value set is bound, for the reason given on clinical:encounterReason: the FHIR binding is preferred, not required."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.hospitalization.admitSource> .
+
+clinical:dischargeDisposition a owl:DatatypeProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range xsd:string ;
+    rdfs:label "Discharge Disposition"@en ;
+    rdfs:comment """Where the patient went after this encounter. FHIR alignment: Encounter.hospitalization.dischargeDisposition, "category or kind of location after discharge", CodeableConcept 0..1 (https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.hospitalization.dischargeDisposition). The R4 base binding is EXAMPLE strength; US Core marks the element Must Support and binds it preferred to its own USEncounterDischargeDisposition value set (https://hl7.org/fhir/us/core/StructureDefinition-us-core-encounter.html).
+
+Value is CodeableConcept.text or the first coding's display, verbatim: "Home or Self Care", "Non-Healthcare Facility Point of Origin". No value set is bound here, and an example-strength binding is the clearest possible case for not binding one."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.hospitalization.dischargeDisposition> .
 
 clinical:encounterStatus a owl:DatatypeProperty ;
     rdfs:domain clinical:Encounter ;
@@ -1657,6 +1850,87 @@ clinical:facilityName a owl:DatatypeProperty ;
     rdfs:domain clinical:Encounter ;
     rdfs:range xsd:string ;
     rdfs:label "Facility Name"@en .
+
+# ============================================================================
+# New Class: clinical:EncounterParticipant
+# Added in v1.16 — supports FHIR Encounter.participant conversion
+# ============================================================================
+#
+# WHY A STRUCTURED NODE RATHER THAN ROLE-QUALIFIED PREDICATES
+# ----------------------------------------------------------
+# FHIR R4 models participation as Encounter.participant, a BackboneElement 0..*
+# holding a type (CodeableConcept 0..*, extensibly bound to
+# https://hl7.org/fhir/R4/valueset-encounter-participant-type.html) and an
+# individual (Reference(Practitioner | PractitionerRole | RelatedPerson) 0..1).
+# US Core marks participant, participant.type and participant.individual all
+# Must Support on its Encounter profile. The standard's own shape is a repeating
+# structure precisely because a name means something different depending on the
+# role attached to it, and the pairing is what carries the meaning.
+#
+# The alternative considered and rejected was a family of role-qualified flat
+# predicates on the Encounter itself (an attending name, a referrer name, and so
+# on). It fails on both axes of the real data: the role vocabulary is
+# EXTENSIBLE, so any fixed family of predicates silently drops the local roles a
+# server is entitled to send; and a visit routinely carries several participants
+# in the SAME role, which a one-predicate-per-role scheme cannot represent
+# without reintroducing the maxCount-1 loss it was meant to fix.
+#
+# The node deliberately holds the participant's DISPLAY NAME rather than a
+# reference to a Practitioner record. This vocabulary defines no practitioner
+# class, and inventing one to hold a display string would be a larger claim than
+# the source supports; the exports these records are converted from carry
+# participant.individual.display and nothing resolvable behind it.
+#
+# Modelled with no rdfs:subClassOf, matching clinical:ClinicalSection and
+# clinical:ClinicalNarrative, the other structural sub-nodes in this vocabulary.
+# A participation is not an entity in the PROV sense and is not asserted to be
+# one.
+
+clinical:EncounterParticipant a owl:Class ;
+    rdfs:label "Encounter Participant"@en ;
+    rdfs:comment "One participation in an encounter: a named person together with the role they played in that visit, and their specialty where the source states it. Mirrors the FHIR R4 Encounter.participant BackboneElement (https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.participant). Attached to the encounter with clinical:hasParticipant."@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.participant> .
+
+clinical:hasParticipant a owl:ObjectProperty ;
+    rdfs:domain clinical:Encounter ;
+    rdfs:range clinical:EncounterParticipant ;
+    rdfs:label "Has Participant"@en ;
+    rdfs:comment "Links an encounter to one of its participations. REPEATABLE, 0..*, matching FHIR R4 Encounter.participant. An encounter commonly carries an attender, a referrer and an authorizing physician at once, and which of them actually saw the patient is only answerable if all of them are kept with their roles attached."@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.participant> .
+
+clinical:participantName a owl:DatatypeProperty ;
+    rdfs:domain clinical:EncounterParticipant ;
+    rdfs:range xsd:string ;
+    rdfs:label "Participant Name"@en ;
+    rdfs:comment "Display name of the person who participated, verbatim from Encounter.participant.individual.display (Reference(Practitioner | PractitionerRole | RelatedPerson) 0..1). A display name, not a resolvable reference: see the note above this class for why no practitioner record is minted."@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.participant.individual> .
+
+clinical:participantRole a owl:DatatypeProperty ;
+    rdfs:domain clinical:EncounterParticipant ;
+    rdfs:range xsd:string ;
+    rdfs:label "Participant Role"@en ;
+    rdfs:comment "Human-readable role this participant played in the encounter, from Encounter.participant.type CodeableConcept.text or the first coding's display: \"attender\", \"referrer\", \"consultant\". The label is what makes a stored name interpretable; a name recorded with no role is indistinguishable from a treating clinician's and cannot be corrected by a reader."@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/encounter-definitions.html#Encounter.participant.type> .
+
+clinical:participantRoleCode a owl:DatatypeProperty ;
+    rdfs:domain clinical:EncounterParticipant ;
+    rdfs:range xsd:string ;
+    rdfs:label "Participant Role Code"@en ;
+    rdfs:comment """Coded role from Encounter.participant.type, verbatim. FHIR R4 binds this element EXTENSIBLY to https://hl7.org/fhir/R4/valueset-encounter-participant-type.html, which draws twelve concepts from two code systems: http://terminology.hl7.org/CodeSystem/v3-ParticipationType (ATND attender, PPRF primary performer, SPRF secondary performer, CON consultant, ADM admitter, DIS discharger, REF referrer, CALLBCK, ESC, PART) and http://terminology.hl7.org/CodeSystem/participant-type (translator, emergency).
+
+REPEATABLE, 0..*, because Encounter.participant.type is. NO sh:in is bound, in either direction: the binding is extensible, so a server may send a local role code and remain conformant, and rejecting one would discard the participant along with it."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-encounter-participant-type.html> .
+
+clinical:participantSpecialty a owl:DatatypeProperty ;
+    rdfs:domain clinical:EncounterParticipant ;
+    rdfs:range xsd:string ;
+    rdfs:label "Participant Specialty"@en ;
+    rdfs:comment """The clinical specialty this participant acted in during the encounter, as a display string: \"Dermatology\", \"Sleep Medicine\".
+
+STANDARDS BASIS. The specialty of a practitioner acting in a particular role is FHIR R4 PractitionerRole.specialty, CodeableConcept 0..*, preferred binding to https://hl7.org/fhir/R4/valueset-c80-practice-codes.html (https://hl7.org/fhir/R4/practitionerrole-definitions.html#PractitionerRole.specialty). That is the element whose semantics this property mirrors. It is recorded on the participation rather than on a practitioner because specialty in FHIR is a property of the ROLE, not of the person: the same clinician has different specialties in different roles, and it is the one they acted in on this visit that describes the visit.
+
+Servers commonly convey it on Encounter.participant as an extension rather than by resolving a PractitionerRole, which is why the value is carried here as a string rather than as an edge. No value set is bound: the source binding is preferred, and exports carry local specialty labels."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/practitionerrole-definitions.html#PractitionerRole.specialty> .
 
 # ============================================================================
 # New Class: clinical:MedicationAdministration

@@ -117,9 +117,36 @@
 #   from spec. That drift predates this change and belongs to its own sync; the
 #   sync script was run and those two files were deliberately reverted.
 #
-core=3.6
-health=2.7
-clinical=1.15
-coverage=1.4
+# 2026-08-28 — core 3.6→3.7, health 2.7→2.8, clinical 1.15→1.16, coverage 1.4→1.5
+#   The wave-4 field-coverage vocabulary release. spec PR
+#   the-cascade-protocol/spec#31; tags vocab/core-v3.7, vocab/health-v2.8,
+#   vocab/clinical-v1.16, vocab/coverage-v1.5. Shapes re-synced with
+#   scripts/sync-shapes-from-spec.sh; every file in src/shapes/ is now
+#   byte-identical to spec (npm run check:shapes-drift).
+#   - clinical v1.16 adds the nine encounter facts convertEncounter had nowhere
+#     to put (encounterReason, admitSource, dischargeDisposition,
+#     encounterClassDisplay, encounterClassSystem, and the
+#     clinical:EncounterParticipant node reached by clinical:hasParticipant with
+#     participantName / participantRole / participantRoleCode /
+#     participantSpecialty); the three document terms
+#     (documentReferenceStatus, documentAuthorName, authenticatorName); and
+#     clinical:businessIdentifier, the domain-free repeatable business-identifier
+#     predicate whose VALUE FORM is FHIR token form "{system}|{value}".
+#     clinical:observationStatus is deprecated in favour of clinical:status.
+#   - clinical.shapes.ttl declares clinical:status with a per-class FHIR value
+#     set on the five shapes whose records already carried it, all at
+#     sh:Warning, and adds clinical:EncounterParticipantShape.
+#   - coverage v1.5 adds coverage:status (FHIR Coverage.status, required
+#     binding: active | cancelled | draft | entered-in-error), constrained at
+#     sh:Violation because no pod has ever written the predicate.
+#   - health v2.8 is SHACL only: no class or property added, removed or renamed.
+#   - core v3.7 adds the cascade:Attachment vocabulary (hasAttachment,
+#     attachmentPath, attachmentMediaType, contentHash, hashAlgorithm,
+#     byteSize, attachmentTitle) for content-addressed binary storage. Synced
+#     and bundled; no converter emits it yet (root backlog 3.276).
+core=3.7
+health=2.8
+clinical=1.16
+coverage=1.5
 checkup=3.3
 pots=1.4

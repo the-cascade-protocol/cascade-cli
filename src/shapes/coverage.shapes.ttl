@@ -82,6 +82,33 @@ coverage:InsurancePlanShape a sh:NodeShape ;
         sh:severity sh:Violation
     ] ;
 
+    # v1.2: coverage:status — FHIR R4 Coverage.status, required binding to
+    # https://hl7.org/fhir/R4/valueset-fm-status.html, verbatim.
+    #
+    # The VALUE is a Violation while coverage:coverageType's value, two
+    # constraints above, is only a Warning. The two are not inconsistent: FHIR
+    # binds Coverage.type EXTENSIBLY, where a payer may conformantly send a code
+    # from outside the value set, and binds Coverage.status REQUIRED, where it
+    # may not. The severity follows the binding strength of the element the data
+    # is converted from, which is the rule coverage v1.4 established here.
+    #
+    # PRESENCE is deliberately NOT required, although the source element is
+    # 1..1. This property is new in coverage v1.5 and no pod contains it, so a
+    # minCount would turn every existing plan record red for a property no
+    # producer has yet had the chance to write — the exact failure the core v3.5
+    # ratchet exists to prevent. Add sh:minCount 1 at sh:Warning once producers
+    # emit it, and raise to sh:Violation only after a release in which that
+    # warning is observably absent from conforming output.
+    sh:property [
+        sh:path coverage:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("active" "cancelled" "draft" "entered-in-error") ;
+        sh:name "Status"@en ;
+        sh:message "Coverage status must be one of the FHIR R4 fm-status codes: active, cancelled, draft, entered-in-error"@en ;
+        sh:severity sh:Violation
+    ] ;
+
     # ------------------------------------------------------------------
     # WARNING (sh:Warning) — Important for coverage verification
     # ------------------------------------------------------------------
@@ -273,6 +300,15 @@ coverage:CoverageTypeVocabularyShape a sh:NodeShape ;
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.2 (2026-08-27) — coverage v1.5
+# - coverage:InsurancePlanShape declares coverage:status, bound to the four
+#   fm-status codes FHIR R4 requires of Coverage.status: active, cancelled,
+#   draft, entered-in-error. Value at sh:Violation, because that binding is
+#   REQUIRED and because no pod has ever carried the property, so the constraint
+#   cannot invalidate existing data. Presence deliberately not required this
+#   version; the ratchet to minCount is stated at the constraint.
+# - Additive. Nothing that validated under v1.1 fails under v1.2.
 #
 # Version 1.1 (2026-08-08) — coverage v1.4
 # - coverage:subscriberRelationship: the sh:in list is now the HL7

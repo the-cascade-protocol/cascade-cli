@@ -21,8 +21,8 @@
     dct:description "Vocabulary for consumer-generated wellness observations from wearable devices and HealthKit. Maps Cascade wellness properties to established SNOMED CT and LOINC codes following the three-layer ontology architecture."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-01-29"^^xsd:date ;
-    dct:modified "2026-08-14"^^xsd:date ;
-    owl:versionInfo "2.7" ;
+    dct:modified "2026-08-27"^^xsd:date ;
+    owl:versionInfo "2.8" ;
     rdfs:comment """Three-layer ontology for wellness data:
         Layer 1 (Established standards): SNOMED CT concept IDs + LOINC observation codes
         Layer 2 (Cascade health vocabulary): health: namespace properties linking to Layer 1
@@ -30,6 +30,28 @@
     rdfs:seeAlso <https://cascadeprotocol.org/docs/health/v1/> .
 
 # Changelog:
+# v2.8 (2026-08-27): SHACL only; no class or property added, removed, renamed
+#     or deprecated in this file. Two health: record shapes gain the value sets
+#     for a status their records already carry. Summarised here because the
+#     version number lives in this file; full detail in health.shapes.ttl v1.5.
+#
+#     health:LabResultRecordShape declares clinical:status bound to the 8 codes
+#     of FHIR R4 Observation.status. health:AllergyRecordShape declares
+#     clinical:status bound to the 3 codes of AllergyIntolerance.clinicalStatus
+#     and clinical:verificationStatus bound to the 4 codes of
+#     AllergyIntolerance.verificationStatus. Through v2.7 an importer wrote
+#     these predicates onto these records and no shape declared them, so the
+#     value sets were unenforced and validation passed in silence.
+#
+#     The predicates stay in the clinical: namespace deliberately. They are the
+#     domain-free carriers both import paths already write; a health: spelling
+#     would give one fact two predicates, which is the defect health v2.5 spent
+#     a release removing. Paired with clinical v1.16, which drops the
+#     rdfs:domain that made clinical:verificationStatus look Condition-only.
+#
+#     All three constraints are sh:Warning, per the core v3.5 ratchet. Nothing
+#     that validated under v2.7 stops validating.
+#
 # v2.7 (2026-08-14): Let a source's absence and a source's unrecognised code
 #     both survive import. Additive: one new property, one widened value set,
 #     and nothing that validated under v2.6 stops validating.

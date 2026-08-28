@@ -19,8 +19,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-08-14"^^xsd:date ;
-    owl:versionInfo "3.6" ;
+    dct:modified "2026-08-27"^^xsd:date ;
+    owl:versionInfo "3.7" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -812,6 +812,53 @@ WHAT THIS IS NOT. It is not an interpretation, and it is not a substitute for on
 
 # ============================================================================
 # Changelog
+#
+# Version 3.7 (2026-08-27)
+# - Defined pod attachments: one class and seven properties for binary
+#   documents stored alongside a Pod's RDF. cascade:Attachment,
+#   cascade:hasAttachment, cascade:attachmentPath,
+#   cascade:attachmentMediaType, cascade:contentHash, cascade:hashAlgorithm,
+#   cascade:byteSize, cascade:attachmentTitle. The class mirrors the FHIR R4
+#   Attachment datatype and each property cites the element it mirrors; the
+#   companion pod layout is normative in pod-structure.md section 4.3.
+# - THE BYTES ARE A FILE, NOT A LITERAL. FHIR permits either, via
+#   Attachment.data (inline base64) or Attachment.url. Cascade takes the second
+#   because a Pod is not a message: Turtle files here are parse-critical, read
+#   in full by every consumer to answer any question, so an unbounded base64
+#   literal is paid for by readers that will never look at the attachment. The
+#   Turtle carries a small metadata node and the bytes live as an ordinary
+#   file, which the retained sources/ directory already establishes as a shape
+#   a Pod can have.
+# - THE FILE NAME IS THE DIGEST. Content addressing is not a storage
+#   optimisation here, it is what makes the metadata checkable: a consumer
+#   hashes what it read and compares it with where it read it from, and nothing
+#   has to be trusted to keep name and content in agreement. Deduplication
+#   across sources and idempotent re-import follow from it without a mechanism.
+#   The name carries the digest and nothing else, because a media type or an
+#   extension in the name would be a second claim about the same bytes that
+#   nothing verifies; the media type is stated in RDF instead.
+# - THE ALGORITHM IS NAMED, AND IS NOT FHIR'S. Attachment.hash fixes SHA-1 and
+#   base64 in the specification. Neither is followed. SHA-1 is collision-broken
+#   and a collision in a content-addressed store is a mechanism for one
+#   document to silently replace another, so cascade:hashAlgorithm carries an
+#   explicit IANA Named Information Hash Algorithm Registry token (RFC 6920)
+#   and sha-256 is required of new implementations. The digest is lowercase hex
+#   rather than base64 because it is also a filename, and base64's alphabet
+#   includes "/" and is case-sensitive.
+# - IMPLEMENTATION-DEFINED THIS RELEASE, stated so it is a decision and not an
+#   omission: encryption at rest for attachment files, and how the directory
+#   participates in Pod sync. An implementation may encrypt these files by
+#   whatever means it already encrypts a Pod; this vocabulary says nothing
+#   about it, so nothing here is revised when a ratified answer arrives.
+# - SHACL: cascade:AttachmentShape and cascade:HasAttachmentEdgeShape
+#   (core.shapes.ttl 1.6 to 1.7). The node shape requires the three facts an
+#   attachment is useless without, at sh:Violation: the path, the digest and
+#   the algorithm. Its media type is sh:Warning, because a stored document with
+#   no stated media type is still recoverable and a missing one must not
+#   invalidate the record. The edge shape is open-world, sh:targetSubjectsOf.
+# - COMPATIBILITY. Purely additive. Both shapes evaluate only nodes that carry
+#   the new terms, so every pod written before v3.7 validates exactly as it did.
+#   No class or property was removed, renamed or deprecated.
 #
 # Version 3.6 (2026-08-14)
 # - Added cascade:dataAbsentReason (owl:DatatypeProperty, domain owl:Thing,
@@ -1647,3 +1694,134 @@ cascade:loincCode a owl:ObjectProperty ;
     rdfs:comment "LOINC reference for an observation, as an IRI."@en ;
     rdfs:seeAlso <http://loinc.org/> ;
     owl:versionInfo "Added in core v3.4" .
+
+# ============================================================================
+# Attachments (v3.7)
+# ============================================================================
+#
+# A clinical record frequently POINTS AT a document that is not RDF: the PDF a
+# DiagnosticReport was rendered as, the scanned page behind a DocumentReference.
+# Until v3.7 a Pod had nowhere to put those bytes, so the pointer was kept and
+# the content was not, and a record that says "the report is at this URL" stops
+# being answerable the moment the URL stops resolving or the session that could
+# fetch it ends.
+#
+# WHY BYTES GO IN A FILE AND NOT IN THE TURTLE
+# --------------------------------------------
+# FHIR's Attachment datatype permits either: Attachment.data carries base64
+# bytes inline, Attachment.url points at them
+# (https://hl7.org/fhir/R4/datatypes.html#Attachment). A Pod is not a message,
+# and the trade is different here. Turtle files in a Pod are parse-critical:
+# every consumer reads them in full to answer any question, so an unbounded
+# base64 literal is paid for by every reader on every query, including the ones
+# that will never look at the attachment. Bytes therefore live as ordinary files
+# and the Turtle carries a small metadata node. The retained sources/ directory
+# is the existing precedent for non-Turtle content in a Pod.
+#
+# WHY THE FILES ARE CONTENT-ADDRESSED
+# -----------------------------------
+# The file's name IS its digest, so the name is verifiable against the bytes and
+# nothing else has to be trusted to keep them in agreement. Three properties
+# follow from that and none of them needs a mechanism: the same document
+# arriving from two sources is stored once; re-importing is idempotent without a
+# dedupe pass; and a consumer can tell whether the bytes it holds are the ones
+# the metadata describes. A media type or an extension in the filename would be
+# a second, unverifiable claim about the same bytes, so the name carries only
+# the digest and the media type is stated in RDF.
+#
+# The layout, the digest form and the directory are normative in
+# pod-structure.md section 4.3. In summary: attachments/{algorithm}/{digest},
+# with the digest lowercase hex and no extension.
+#
+# HASH ALGORITHM: DELIBERATELY NOT FHIR'S
+# ---------------------------------------
+# FHIR R4 Attachment.hash is "the calculated hash of the data using SHA-1,
+# represented using base64". Cascade deliberately does not follow it. SHA-1 is
+# collision-broken, and a collision in a content-addressed store is not a
+# theoretical concern about signatures but a mechanism by which one document
+# silently overwrites another. The algorithm is therefore named explicitly in
+# cascade:hashAlgorithm, using a token registry FHIR has no equivalent of, and
+# sha-256 is required of new implementations.
+#
+# DELIBERATELY OUT OF SCOPE THIS RELEASE
+# --------------------------------------
+# Encryption at rest for attachment files, and how an attachment directory
+# participates in Pod sync, are IMPLEMENTATION-DEFINED in v3.7. Both are real
+# and both are deferred rather than forgotten: an implementation may encrypt
+# these files by whatever means it already encrypts a Pod, and this vocabulary
+# states nothing about it, so nothing here has to be revised when a ratified
+# answer arrives.
+
+cascade:Attachment a owl:Class ;
+    rdfs:label "Attachment"@en ;
+    rdfs:comment "Metadata for a binary document stored alongside a Pod's RDF: its media type, its content digest, and the pod-relative location of the bytes. Mirrors the FHIR R4 Attachment datatype (https://hl7.org/fhir/R4/datatypes.html#Attachment), with the bytes held as a content-addressed file rather than inline. Attached to the record it renders with cascade:hasAttachment."@en ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/datatypes.html#Attachment> ;
+    owl:versionInfo "Added in core v3.7" .
+
+cascade:hasAttachment a owl:ObjectProperty ;
+    rdfs:label "Has Attachment"@en ;
+    rdfs:comment """Links a record to a cascade:Attachment holding a binary rendering of it. FHIR alignment: DiagnosticReport.presentedForm (Attachment 0..*, "rich text representation of the entire result as issued by the diagnostic service", https://hl7.org/fhir/R4/diagnosticreport-definitions.html#DiagnosticReport.presentedForm) and DocumentReference.content.attachment (https://hl7.org/fhir/R4/documentreference-definitions.html#DocumentReference.content).
+
+REPEATABLE, because both source elements are: one report legitimately has a PDF and an HTML rendering of the same content.
+
+The domain is intentionally broad, any record that can be rendered as a document, so it is left unrestricted here and constrained by SHACL, matching clinical:hasEncounter and the other cross-class edges in these vocabularies. The range IS committed, because unlike a clinical reference this edge always points at a node this vocabulary defines."""@en ;
+    rdfs:range cascade:Attachment ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/diagnosticreport-definitions.html#DiagnosticReport.presentedForm> ;
+    owl:versionInfo "Added in core v3.7" .
+
+cascade:attachmentPath a owl:DatatypeProperty ;
+    rdfs:label "Attachment Path"@en ;
+    rdfs:comment """Location of the bytes, as a path relative to the Pod root: for example "attachments/sha-256/3f786850e387550fdab836ed7e6dc881de23001b". FHIR alignment: Attachment.url, "a location where the data can be accessed".
+
+RELATIVE, NEVER ABSOLUTE. A Pod is copied, exported and re-rooted, and an absolute path or a file: URL breaks on the first of those. A path that leaves the Pod (any segment equal to "..") is malformed rather than merely discouraged: it turns an attachment reference into a way to read a file the Pod does not contain.
+
+This is not the URL the bytes were originally fetched from. Where that matters it is ordinary provenance and belongs on the attachment as prov:wasDerivedFrom, not in this property."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/datatypes.html#Attachment> ;
+    rdfs:domain cascade:Attachment ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.7" .
+
+cascade:attachmentMediaType a owl:DatatypeProperty ;
+    rdfs:label "Attachment Media Type"@en ;
+    rdfs:comment """IANA media type of the bytes, for example "application/pdf" or "text/html". FHIR alignment: Attachment.contentType, "identifies the type of the data in the attachment and allows a method to be chosen to interpret or render the data". Registered names and syntax are RFC 6838 (https://www.rfc-editor.org/rfc/rfc6838); the same fact is what DCAT states with dcat:mediaType (https://www.w3.org/TR/vocab-dcat-3/), which takes an IRI rather than the literal FHIR and this property carry.
+
+Stated in RDF rather than in the file name, because the file name is the digest and must stay verifiable against the bytes. A media type in a filename is a claim nothing checks."""@en ;
+    rdfs:seeAlso <https://www.rfc-editor.org/rfc/rfc6838> ;
+    rdfs:domain cascade:Attachment ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.7" .
+
+cascade:contentHash a owl:DatatypeProperty ;
+    rdfs:label "Content Hash"@en ;
+    rdfs:comment """Digest of the attachment bytes, LOWERCASE HEXADECIMAL, with no algorithm prefix and no separator. The algorithm is stated separately in cascade:hashAlgorithm, and this value is byte-for-byte the file's name under attachments/{algorithm}/, which is what makes the store verifiable: a consumer hashes what it read and compares it with where it read it from.
+
+Lowercase hex rather than the base64 FHIR uses for Attachment.hash, because this value is also a filename: base64's alphabet includes "/" and its case-sensitivity is unsafe on a case-insensitive filesystem. A single canonical spelling also means two Pods holding the same document hold the same string, which is the whole point of addressing by content."""@en ;
+    rdfs:domain cascade:Attachment ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.7" .
+
+cascade:hashAlgorithm a owl:DatatypeProperty ;
+    rdfs:label "Hash Algorithm"@en ;
+    rdfs:comment """Algorithm cascade:contentHash was computed with, named by its token in the IANA Named Information Hash Algorithm Registry (RFC 6920, https://www.rfc-editor.org/rfc/rfc6920): "sha-256", "sha-512". New implementations MUST write "sha-256".
+
+Stated rather than assumed. An unlabelled digest cannot be verified by a consumer that does not already know how it was produced, and cannot be migrated when an algorithm weakens without rewriting every reference; naming it makes both a matter of reading one triple. This is also why FHIR's Attachment.hash is not followed: it fixes SHA-1 in the specification, and a collision-capable digest in a content-addressed store is a mechanism for one document to silently replace another."""@en ;
+    rdfs:seeAlso <https://www.rfc-editor.org/rfc/rfc6920> ;
+    rdfs:domain cascade:Attachment ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.7" .
+
+cascade:byteSize a owl:DatatypeProperty ;
+    rdfs:label "Byte Size"@en ;
+    rdfs:comment "Size of the attachment in bytes. FHIR alignment: Attachment.size, \"the number of bytes of data that make up this attachment (before base64 encoding, if that is done)\"; the same quantity DCAT states with dcat:byteSize. Recorded so a consumer can decide whether to read a file before opening it, and so a truncated copy is detectable without rehashing."@en ;
+    rdfs:seeAlso <https://www.w3.org/TR/vocab-dcat-3/> ;
+    rdfs:domain cascade:Attachment ;
+    rdfs:range xsd:integer ;
+    owl:versionInfo "Added in core v3.7" .
+
+cascade:attachmentTitle a owl:DatatypeProperty ;
+    rdfs:label "Attachment Title"@en ;
+    rdfs:comment "Label to show in place of the bytes, verbatim from the source. FHIR alignment: Attachment.title, \"a label or set of text to display in place of the data\". Without it the only thing a reader can display for an attachment is a digest."@en ;
+    rdfs:domain cascade:Attachment ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in core v3.7" .

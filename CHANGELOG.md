@@ -9,6 +9,30 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+**Embedded shapes re-synced from `spec`: core 3.6 → 3.7, health 2.7 → 2.8, clinical 1.15 → 1.16,
+coverage 1.4 → 1.5.** spec PR the-cascade-protocol/spec#31; tags `vocab/core-v3.7`,
+`vocab/health-v2.8`, `vocab/clinical-v1.16`, `vocab/coverage-v1.5`. All 20 files in `src/shapes/`
+are byte-identical to `spec` (`npm run check:shapes-drift`), and `VOCAB_VERSIONS` records the
+rationale per vocabulary.
+
+What the release makes available to `cascade validate` and to the converters:
+
+| Vocabulary | Added |
+|---|---|
+| `clinical` v1.16 | `encounterReason`, `admitSource`, `dischargeDisposition`, `encounterClassDisplay`, `encounterClassSystem`; the `clinical:EncounterParticipant` class reached by `clinical:hasParticipant`, with `participantName` / `participantRole` / `participantRoleCode` / `participantSpecialty`; `documentReferenceStatus`, `documentAuthorName`, `authenticatorName`; `businessIdentifier` |
+| `coverage` v1.5 | `coverage:status` — FHIR `Coverage.status`, a required binding (`active` \| `cancelled` \| `draft` \| `entered-in-error`) that this vocabulary previously had nowhere to put |
+| `core` v3.7 | The `cascade:Attachment` vocabulary for content-addressed binary storage. Bundled so it validates; no converter emits it yet |
+| `health` v2.8 | SHACL only — no class or property added, removed or renamed |
+
+`clinical.shapes.ttl` also declares `clinical:status` with a per-class FHIR value set on the five
+shapes whose records already carried it, all at `sh:Warning` per the core v3.5 ratchet, and adds
+`clinical:EncounterParticipantShape`. `clinical:observationStatus` is deprecated in favour of
+`clinical:status`; it was emitted by no converter, so nothing changes on the write side.
+
+Shapes-only in this commit. The converter work that emits the new predicates follows.
+
 ### Fixed
 
 **Record `status` now reaches the pod, so an amended result is no longer identical to a final one.**
