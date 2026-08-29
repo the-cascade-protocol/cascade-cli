@@ -14,6 +14,78 @@
 # different data sources (EHR, device, patient-reported).
 #
 # Changelog:
+# v1.17 (2026-08-28): Stop sh:node from escalating a nested sh:Warning into a
+#     sh:Violation. Strictly widening: no graph that validated under v1.16 stops
+#     validating, and six document classes stop being REJECTED for a value
+#     v1.16 said would only be reported.
+#
+#     THE DEFECT. SHACL defines conformance as an EMPTY validation result
+#     (https://www.w3.org/TR/shacl/#conformance-checking), and that definition
+#     does not read severities: a nested sh:Warning is a result, so the value
+#     node does not conform, so the referring sh:node constraint fires — at ITS
+#     OWN severity, which with nothing declared is sh:Violation. v1.16 put the
+#     clinical:status and clinical:documentReferenceStatus warnings ON
+#     clinical:ClinicalDocumentShape, which is exactly the shape the six
+#     document subtypes reach through sh:node. So the ratchet v1.16 wrote down
+#     held for clinical:ClinicalDocument and was inverted for
+#     clinical:LaboratoryReport, clinical:ProgressNote,
+#     clinical:DischargeSummary, clinical:ConsultationNote,
+#     clinical:ImagingReport and clinical:VisitSummary: an out-of-set status
+#     rejected the record. Confirmed on two independent engines (pyshacl and
+#     rdf-validate-shacl); on clinical:ProgressNote the underlying warning was
+#     not even reported, only an opaque sh:NodeConstraintComponent naming no
+#     field.
+#
+#     THE FIX, AND WHY IT IS NOT sh:severity ON THE sh:node CONSTRAINT.
+#     Declaring sh:severity sh:Warning next to the sh:node reference would demote
+#     the WHOLE referenced shape: a discharge summary missing clinical:sourceEHR,
+#     or carrying a malformed cascade:schemaVersion, would stop being rejected
+#     too. sh:severity is a property of the shape a constraint belongs to and
+#     cannot be applied to one nested result. The escalation is therefore removed
+#     at the source instead: a shape that is used as an sh:node referent carries
+#     Violation-severity constraints ONLY, and every non-Violation constraint is
+#     declared on a shape that TARGETS the classes it applies to. Warnings then
+#     reach a document subtype the same way they reach clinical:ClinicalDocument,
+#     by sh:targetClass, and are reported as themselves.
+#
+#     1. clinical:ClinicalDocumentShape loses its two Warning property shapes
+#        (clinical:status, clinical:documentReferenceStatus). It keeps every
+#        Violation-severity constraint and stays the sh:node referent for the
+#        six subtypes, which is now sound because it carries no non-Violation
+#        constraint.
+#     2. NEW clinical:DocumentReferenceStatusShape: the
+#        clinical:documentReferenceStatus binding, verbatim from v1.16, at
+#        sh:Warning, targeting all SEVEN document classes.
+#     3. NEW clinical:DocumentStatusShape: the clinical:status binding, verbatim
+#        from v1.16, at sh:Warning, targeting all SEVEN document classes.
+#     4. clinical:LaboratoryReportShape loses the clinical:status restatement
+#        v1.16 put on it. Its value set was the same ten codes, so nothing it
+#        enforced is lost; it kept only a lab-specific message, and that message
+#        is now folded into the shared one, which names DiagnosticReport
+#        explicitly. It could NOT be kept as a lab-only shape beside
+#        clinical:DocumentStatusShape: SHACL class targets follow
+#        rdfs:subClassOf* wherever the axioms are in the validated graph, and
+#        the conformance harness loads them, so two shapes binding
+#        clinical:status would report a laboratory report's status twice there
+#        and once under a validator that omits the axioms. Measured during this
+#        fix, not assumed. The full argument, and what it means for the
+#        composition-status ratchet, is at clinical:DocumentStatusShape.
+#     5. clinical:LaboratoryReportShape keeps its documentDate constraint and
+#        the sh:node reference, both unchanged.
+#
+#     GUARD. scripts/check-nested-severity.py fails any sh:node or
+#     sh:qualifiedValueShape reference into a shape carrying sh:Warning or
+#     sh:Info, against a baseline in scripts/nested-severity-baseline.json that
+#     can only shrink. No existing check could see this class: it is not an
+#     entailment question, so check-shape-targets.py is silent on it, and spec
+#     runs no SHACL validator (see the root backlog on that).
+#
+#     DOC FIX. Item 4 of the v1.16 entry below said "the nine encounter facts"
+#     and then listed seven property shapes. The encounter group is eleven terms
+#     (ten properties and clinical:EncounterParticipant); seven of them are
+#     property shapes on clinical:EncounterShape. Corrected in place; no
+#     constraint changes.
+#
 # v1.16 (2026-08-27): Describe the facts the records now carry. Additive and
 #     strictly widening: nothing that validated under v1.15 stops validating,
 #     and every new finding on an existing predicate is at sh:Warning.
@@ -51,11 +123,15 @@
 #        sh:maxCount 1 on clinical:providerName is what was discarding every
 #        author past the first), clinical:authenticatorName (0..1) and
 #        clinical:businessIdentifier (repeatable).
-#     4. NEW property shapes on clinical:EncounterShape for the nine encounter
-#        facts clinical v1.16 defines: encounterClassDisplay,
+#     4. NEW property shapes on clinical:EncounterShape for seven of the facts
+#        clinical v1.16 defines: encounterClassDisplay,
 #        encounterClassSystem, encounterReason (repeatable), admitSource,
-#        dischargeDisposition, hasParticipant (repeatable) and
-#        businessIdentifier (repeatable). None of the source-text properties
+#        dischargeDisposition, hasParticipant (repeatable) and the domain-free
+#        businessIdentifier (repeatable). The encounter group itself is eleven
+#        terms — ten properties and clinical:EncounterParticipant — and the four
+#        it does not list here are the participation sub-properties, constrained
+#        by clinical:EncounterParticipantShape in item 5.
+#        None of the source-text properties
 #        carries a value set: FHIR binds reasonCode and admitSource PREFERRED
 #        and dischargeDisposition EXAMPLE, and an enum over an example-strength
 #        binding rejects conformant data by construction.
@@ -284,56 +360,21 @@ clinical:ClinicalDocumentShape a sh:NodeShape ;
     ] ;
 
     # ------------------------------------------------------------------
-    # v1.16: the two status axes, and the two attribution axes
+    # v1.16: the two attribution axes
     # ------------------------------------------------------------------
     #
-    # WHY THE STATUS SET HERE IS THE DIAGNOSTIC-REPORT SET AND NOT THE
-    # COMPOSITION SET. On a DocumentReference-derived record clinical:status
-    # carries DocumentReference.docStatus, whose required binding is
-    # composition-status: preliminary | final | amended | entered-in-error.
-    # But clinical:LaboratoryReportShape reaches these constraints through
-    # sh:node, and a laboratory report is converted from a DiagnosticReport,
-    # whose status value set is the ten-code diagnostic-report-status. Binding
-    # the four-code set here would therefore report a conformant DiagnosticReport
-    # status of "partial", "corrected" or "appended" as out of set on every lab
-    # report in the pod.
-    #
-    # composition-status is a strict SUBSET of diagnostic-report-status, so the
-    # ten-code set is the union of the two value sets that reach this shape and
-    # is the only set that is correct for every class under it. It is bound here
-    # verbatim from https://hl7.org/fhir/R4/valueset-diagnostic-report-status.html
-    #
-    # The narrower composition-status binding for the DocumentReference-derived
-    # document subtypes specifically is deliberately NOT added in this version.
-    # It would have to live on shapes targeting those subtypes alone, and this
-    # release has no measurement of what those records actually carry; per the
-    # core v3.5 ratchet a constraint is added once conforming output is observed,
-    # not on the assumption that it will be. That is the next step here, and it
-    # is one version's work, not a judgement call.
-    sh:property [
-        sh:path clinical:status ;
-        sh:datatype xsd:string ;
-        sh:maxCount 1 ;
-        sh:in ("registered" "partial" "preliminary" "final" "amended" "corrected"
-               "appended" "cancelled" "entered-in-error" "unknown") ;
-        sh:name "Status"@en ;
-        sh:message "Document status should be one of the FHIR R4 codes a document-class record can carry: the four composition-status codes (preliminary, final, amended, entered-in-error) that DocumentReference.docStatus is bound to, or the ten diagnostic-report-status codes a DiagnosticReport-derived report carries"@en ;
-        sh:severity sh:Warning
-    ] ;
-
-    # FHIR R4 DocumentReference.status, required binding, verbatim.
-    # A DIFFERENT fact from clinical:status above: this is whether the pod's
-    # POINTER to the document is current, and "entered-in-error" here means the
-    # reference was filed in error, not that the clinical content is repudiated.
-    sh:property [
-        sh:path clinical:documentReferenceStatus ;
-        sh:datatype xsd:string ;
-        sh:maxCount 1 ;
-        sh:in ("current" "superseded" "entered-in-error") ;
-        sh:name "Document Reference Status"@en ;
-        sh:message "Document reference status should be one of the FHIR R4 DocumentReferenceStatus codes: current, superseded, entered-in-error"@en ;
-        sh:severity sh:Warning
-    ] ;
+    # THE TWO STATUS AXES ARE NOT HERE, AND MUST NOT BE MOVED HERE. v1.16
+    # declared clinical:status and clinical:documentReferenceStatus on this
+    # shape, at sh:Warning. Six subtype shapes reach this shape through sh:node,
+    # and SHACL defines conformance as an EMPTY result set, so a nested Warning
+    # made the node non-conforming and the sh:node constraint fired at its own
+    # default severity: every one of those six classes REJECTED a status value
+    # this vocabulary says should only be reported. From v1.17 the two bindings
+    # live on clinical:DocumentStatusShape and
+    # clinical:DocumentReferenceStatusShape, which reach the same classes by
+    # sh:targetClass instead. Everything declared on THIS shape is a
+    # sh:Violation for that reason, and scripts/check-nested-severity.py fails
+    # the build if a non-Violation constraint is added to it.
 
     # Repeatable by design: DocumentReference.author is 0..*, and the
     # sh:maxCount 1 on clinical:providerName is what was discarding every author
@@ -511,27 +552,18 @@ clinical:LaboratoryReportShape a sh:NodeShape ;
         sh:minCount 1 ;
         sh:name "Document Date"@en ;
         sh:message "Lab reports must have a document date"@en
-    ] ;
-
-    # v1.16: FHIR R4 DiagnosticReport.status, required binding, verbatim and in
-    # the value set's own order
-    # (https://hl7.org/fhir/R4/valueset-diagnostic-report-status.html). A
-    # laboratory report is converted from a DiagnosticReport, so this is the
-    # value set its clinical:status is drawn from. Restated here rather than
-    # left to the inherited ClinicalDocumentShape constraint, because a reader
-    # of this shape needs to see which of the two document status value sets
-    # applies to a lab report; the two sets are identical here by construction,
-    # since composition-status is a strict subset of this one.
-    sh:property [
-        sh:path clinical:status ;
-        sh:datatype xsd:string ;
-        sh:maxCount 1 ;
-        sh:in ("registered" "partial" "preliminary" "final" "amended" "corrected"
-               "appended" "cancelled" "entered-in-error" "unknown") ;
-        sh:name "Status"@en ;
-        sh:message "Laboratory report status should be one of the FHIR R4 DiagnosticReportStatus codes: registered, partial, preliminary, final, amended, corrected, appended, cancelled, entered-in-error, unknown"@en ;
-        sh:severity sh:Warning
     ] .
+
+# NOTE (v1.17): the clinical:status binding v1.16 restated here is gone, and
+# must not be restored. It cannot live on this shape, because this shape is an
+# sh:node referent and a nested sh:Warning would be reported as a sh:Violation
+# on the referring shape. It cannot live on a lab-only shape beside
+# clinical:DocumentStatusShape either, because SHACL class targets follow
+# rdfs:subClassOf* wherever the axioms are present, so both shapes would match a
+# laboratory report and report its status twice. The single binding over all
+# seven document classes, with a message that names DiagnosticReport, is at
+# clinical:DocumentStatusShape below; its value set is the same ten codes this
+# restatement carried.
 
 # ============================================================================
 # Shape: Imaging Report
@@ -576,6 +608,115 @@ clinical:VisitSummaryShape a sh:NodeShape ;
         sh:maxCount 1 ;
         sh:name "Encounter Date"@en ;
         sh:message "Visit summary must specify the encounter date"@en
+    ] .
+
+# ============================================================================
+# Shapes: the two document status axes (v1.17)
+# ============================================================================
+#
+# WHY THESE ARE SEPARATE SHAPES WITH THEIR OWN sh:targetClass, RATHER THAN
+# PROPERTY SHAPES ON clinical:ClinicalDocumentShape.
+#
+# The six subtype shapes above reach clinical:ClinicalDocumentShape through
+# sh:node. SHACL defines conformance as an empty validation result
+# (https://www.w3.org/TR/shacl/#conformance-checking); the definition does not
+# consult severity, so a nested sh:Warning is enough to make the value node
+# non-conforming, and the sh:node constraint then reports at the severity of the
+# shape it is written on — sh:Violation, none being declared. A Warning
+# published on the referenced shape is therefore a Violation on every class that
+# references it. That is what v1.16 shipped, and it inverted the ratchet it had
+# just written down.
+#
+# Declaring sh:severity sh:Warning beside the sh:node reference is not the fix.
+# Severity attaches to a shape, not to one nested result, so it would demote the
+# entire referenced shape: a document missing clinical:sourceEHR or carrying a
+# malformed cascade:schemaVersion would stop being rejected. The referenced
+# shape keeps only Violation-severity constraints, and anything softer is
+# targeted directly at the classes it applies to, as here.
+#
+# The invariant is machine-checked: scripts/check-nested-severity.py fails any
+# sh:node or sh:qualifiedValueShape reference into a shape carrying sh:Warning
+# or sh:Info.
+
+# FHIR R4 DocumentReference.status, required binding, verbatim.
+# A DIFFERENT fact from clinical:status: this is whether the pod's POINTER to
+# the document is current, and "entered-in-error" here means the reference was
+# filed in error, not that the clinical content is repudiated. It applies to
+# every document class, laboratory reports included, because the pointer exists
+# independently of what the document is.
+clinical:DocumentReferenceStatusShape a sh:NodeShape ;
+    sh:targetClass clinical:ClinicalDocument ;
+    sh:targetClass clinical:ProgressNote ;
+    sh:targetClass clinical:DischargeSummary ;
+    sh:targetClass clinical:ConsultationNote ;
+    sh:targetClass clinical:LaboratoryReport ;
+    sh:targetClass clinical:ImagingReport ;
+    sh:targetClass clinical:VisitSummary ;
+    rdfs:label "Document Reference Status Shape"@en ;
+    rdfs:comment "Advisory binding of clinical:documentReferenceStatus to FHIR R4 DocumentReferenceStatus, on every document class. Warning severity, per the core v3.5 ratchet."@en ;
+
+    sh:property [
+        sh:path clinical:documentReferenceStatus ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("current" "superseded" "entered-in-error") ;
+        sh:name "Document Reference Status"@en ;
+        sh:message "Document reference status should be one of the FHIR R4 DocumentReferenceStatus codes: current, superseded, entered-in-error"@en ;
+        sh:severity sh:Warning
+    ] .
+
+# WHY THE STATUS SET HERE IS THE DIAGNOSTIC-REPORT SET AND NOT THE COMPOSITION
+# SET. On a DocumentReference-derived record clinical:status carries
+# DocumentReference.docStatus, whose required binding is composition-status:
+# preliminary | final | amended | entered-in-error. composition-status is a
+# strict SUBSET of diagnostic-report-status, so the ten-code set is the union of
+# the two value sets a document-class record can draw from, and binding the
+# four-code set to a class that may carry "partial", "corrected" or "appended"
+# would report conformant data as out of set. It is bound here verbatim from
+# https://hl7.org/fhir/R4/valueset-diagnostic-report-status.html
+#
+# WHY ONE SHAPE OVER ALL SEVEN CLASSES, AND NOT A PER-CLASS SPLIT. The obvious
+# alternative was two shapes with disjoint targets, so that a laboratory report
+# could carry a message naming DiagnosticReport and the note/summary subtypes
+# one naming DocumentReference. It does not work, and the reason is the same
+# entailment question validation/index.md is about, seen from the other side:
+# SHACL's class targets are resolved over SHACL-instances, and that relation
+# follows rdfs:subClassOf* wherever the axioms are present in the graph being
+# validated. The conformance harness loads exactly those axioms. A shape
+# targeting clinical:ClinicalDocument therefore ALSO reaches every subtype
+# there, so a second shape binding clinical:status to clinical:LaboratoryReport
+# reports the same field twice under an axiom-loading validator and once under
+# one that omits them. Measured, not assumed: the split emitted two warnings on
+# a laboratory report and one on a progress note. One shape, one property shape,
+# every class named explicitly — so the target set is stated rather than
+# inferred, and the same node is reported exactly once either way.
+#
+# The narrower composition-status binding for the five note/summary subtypes is
+# still the next step here and is deliberately NOT taken in this version: what
+# is missing is a measurement of what those records actually carry, and per the
+# core v3.5 ratchet a constraint is added once conforming output is observed.
+# Whoever takes it should read the paragraph above first — the narrowing cannot
+# be a second shape laid over a subset of these classes, for exactly that reason.
+clinical:DocumentStatusShape a sh:NodeShape ;
+    sh:targetClass clinical:ClinicalDocument ;
+    sh:targetClass clinical:ProgressNote ;
+    sh:targetClass clinical:DischargeSummary ;
+    sh:targetClass clinical:ConsultationNote ;
+    sh:targetClass clinical:LaboratoryReport ;
+    sh:targetClass clinical:ImagingReport ;
+    sh:targetClass clinical:VisitSummary ;
+    rdfs:label "Document Status Shape"@en ;
+    rdfs:comment "Advisory binding of clinical:status on every document class. The value set is the ten-code diagnostic-report-status, which is the union of the two sets a document-class record can draw from, since composition-status is a strict subset of it. Warning severity, per the core v3.5 ratchet."@en ;
+
+    sh:property [
+        sh:path clinical:status ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("registered" "partial" "preliminary" "final" "amended" "corrected"
+               "appended" "cancelled" "entered-in-error" "unknown") ;
+        sh:name "Status"@en ;
+        sh:message "Document status should be one of the FHIR R4 codes a document-class record can carry: the four composition-status codes (preliminary, final, amended, entered-in-error) that DocumentReference.docStatus is bound to, or the ten diagnostic-report-status codes (registered, partial, preliminary, final, amended, corrected, appended, cancelled, entered-in-error, unknown) that a DiagnosticReport-derived report such as a laboratory report carries"@en ;
+        sh:severity sh:Warning
     ] .
 
 # ============================================================================

@@ -9,6 +9,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+**Shapes synced to spec 9b13ae4: clinical v1.17, coverage v1.6, core v3.8 (0.21.1).**
+clinical v1.17 stops `sh:node` escalating the Warning-severity status bindings to
+Violation on the six document subtypes (the warnings now fire named from
+target-class shapes); coverage v1.6 admits `cascade:AIExtracted` provenance on
+`InsurancePlanShape`; core v3.8 defines `cascade:PatientReported`, the provenance
+individual seventeen shapes already accepted. No converter behavior changes;
+validation verdicts on document-subtype statuses soften from spurious rejection
+to the intended named warning.
+
 ### Added
 
 **The FHIR converters now emit the thirteen predicates clinical v1.16 and coverage v1.5 authored,

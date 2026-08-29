@@ -18,8 +18,8 @@
     dct:description "Domain vocabulary for patient-owned insurance, benefits, and financial health data. Layer 2 vocabulary resolving the overlap between checkup:InsuranceInfo (patient-reported) and clinical:CoverageRecord (EHR-imported) with a unified, standardized representation."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-02-18"^^xsd:date ;
-    dct:modified "2026-08-27"^^xsd:date ;
-    owl:versionInfo "1.5" ;
+    dct:modified "2026-08-28"^^xsd:date ;
+    owl:versionInfo "1.6" ;
     rdfs:comment "Insurance and benefits data is cross-cutting: not clinical (it's administrative/financial), not app-specific (any health app benefits from knowing coverage), and contributed by both patient self-report and EHR import. This vocabulary provides a single Layer 2 domain model that both checkup: (Layer 3, patient-reported) and clinical: (Layer 2, EHR-imported) can reference via the mixed namespace pattern. Recommended Pod storage path: /coverage/"@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/coverage/v1/> .
 
@@ -176,6 +176,21 @@ coverage:rxGroup a owl:DatatypeProperty ;
 #   rdfs:seeAlso mappings to HL7 ClaimResponse.adjudication and CARIN IG adjudication codes.
 #
 # v1.2 (2026-03-16): Added coverage:DenialNotice class, coverage:AppealRecord class, and 11 new properties for denial/appeal workflow.
+#
+# Version 1.6 (2026-08-28)
+# - NO new terms. A SHACL value-set correction plus one stale header; coverage.ttl
+#   changes only in this changelog, its dct:modified and its owl:versionInfo.
+# - SHACL (coverage.shapes.ttl 1.2 to 1.3). coverage:InsurancePlanShape's
+#   cascade:dataProvenance list gains cascade:AIExtracted. BEHAVIOUR CHANGE: an
+#   insurance plan carrying that provenance was rejected at sh:Violation and now
+#   validates. The class has existed since core v3.3, and every clinical and
+#   health record shape accepted it from clinical v1.9; this shape was missed.
+#   The gap mattered more here than the oversight suggests, because an insurance
+#   card is a photograph before it is data, so AI extraction is a primary path
+#   into this class rather than an exotic one.
+# - COMPATIBILITY. Strictly widening. Nothing that validated under v1.5 fails
+#   under v1.6, no pod needs rewriting, and one class of conformant record stops
+#   being rejected.
 #
 # Version 1.5 (2026-08-27)
 # - ONE new property, coverage:status, for FHIR R4 Coverage.status: a code,

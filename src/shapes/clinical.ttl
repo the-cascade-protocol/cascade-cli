@@ -21,8 +21,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-08-27"^^xsd:date ;
-    owl:versionInfo "1.16" ;
+    dct:modified "2026-08-28"^^xsd:date ;
+    owl:versionInfo "1.17" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -1422,6 +1422,39 @@ clinical:isActive a owl:DatatypeProperty ;
 # Changelog
 # ============================================================================
 #
+# Version 1.17 (2026-08-28)
+# - NO new terms, and no term changes meaning. This version is a SHACL severity
+#   correction plus one prose fix; clinical.ttl itself changes only in this
+#   changelog, its dct:modified and its owl:versionInfo.
+# - SHACL. v1.16 declared the clinical:status and clinical:documentReferenceStatus
+#   value sets at sh:Warning on clinical:ClinicalDocumentShape. Six document
+#   subtype shapes reach that shape through sh:node, and SHACL defines
+#   conformance as an EMPTY validation result
+#   (https://www.w3.org/TR/shacl/#conformance-checking) — a definition that does
+#   not consult severity. A nested Warning therefore made the node
+#   non-conforming, and the sh:node constraint reported at its own default
+#   severity. clinical:LaboratoryReport, clinical:ProgressNote,
+#   clinical:DischargeSummary, clinical:ConsultationNote, clinical:ImagingReport
+#   and clinical:VisitSummary all REJECTED status values v1.16 said would only
+#   be reported, and on clinical:ProgressNote the underlying warning was not
+#   surfaced at all. Confirmed on pyshacl and on rdf-validate-shacl. The two
+#   bindings now live on clinical:DocumentStatusShape and
+#   clinical:DocumentReferenceStatusShape, which reach all seven document
+#   classes by sh:targetClass; clinical:ClinicalDocumentShape keeps only
+#   Violation-severity constraints, which is what makes it safe to reference.
+#   Value sets, messages and severities are otherwise unchanged. Detail in
+#   clinical.shapes.ttl's own changelog.
+# - COMPATIBILITY. Strictly widening, in the direction that matters: no graph
+#   that validated under v1.16 stops validating, and six classes of record stop
+#   being rejected for a value this vocabulary always said was advisory. A
+#   consumer that was suppressing document-status violations to work around the
+#   defect can stop.
+# - DOC FIX. The v1.16 entry below counted its encounter group as nine terms;
+#   the group is eleven (ten properties and clinical:EncounterParticipant),
+#   which is what makes its own FIFTEEN total add up: 11 encounter + 1 identity
+#   + 3 documents. Corrected in place, along with the matching miscounts in
+#   CHANGELOG.md and clinical.shapes.ttl. No term is added, removed or renamed.
+#
 # Version 1.16 (2026-08-27)
 # - FIFTEEN new terms (14 properties and 1 class), two domains dropped, one
 #   property deprecated, and the
@@ -1430,7 +1463,8 @@ clinical:isActive a owl:DatatypeProperty ;
 #   source element that a conformant server sends and this vocabulary had
 #   nowhere to put, so an importer dropped it. Every term cites the FHIR R4
 #   element it mirrors by canonical URL; nothing is invented.
-# - ENCOUNTER (9 terms). clinical:encounterReason (Encounter.reasonCode 0..*,
+# - ENCOUNTER (11 terms: 10 properties and 1 class). clinical:encounterReason
+#   (Encounter.reasonCode 0..*,
 #   preferred binding, US Core Must Support); clinical:admitSource and
 #   clinical:dischargeDisposition (Encounter.hospitalization.admitSource /
 #   .dischargeDisposition, the only structured signal separating an admission
