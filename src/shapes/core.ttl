@@ -19,8 +19,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-08-27"^^xsd:date ;
-    owl:versionInfo "3.7" ;
+    dct:modified "2026-08-28"^^xsd:date ;
+    owl:versionInfo "3.8" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -58,6 +58,20 @@ cascade:SelfReported a owl:Class ;
     rdfs:subClassOf cascade:ConsumerGenerated ;
     rdfs:label "Self-Reported"@en ;
     rdfs:comment "Data manually entered by the patient (symptom logs, medication adherence, intake form fields)."@en .
+
+# Added in core v3.8. Seventeen SHACL constraints across the clinical, health and
+# coverage shapes had accepted cascade:PatientReported since their first release,
+# and the health vocabulary's provenance guidance instructs consumers to key on
+# it — but the individual itself was never defined, so any consumer deriving the
+# provenance set from this ontology rejected a value every shape permits. A
+# direct subclass of cascade:DataProvenance rather than of ClinicalGenerated or
+# ConsumerGenerated: a patient's reported history reaches a record through
+# either setting, and the parent must not assert one.
+cascade:PatientReported a owl:Class ;
+    rdfs:subClassOf cascade:DataProvenance ;
+    rdfs:label "Patient-Reported"@en ;
+    rdfs:comment "Information originating from the patient's own account and recorded by another party or system (history related to a clinician, imported questionnaire responses). Distinct from cascade:SelfReported, where the patient enters the data directly."@en ;
+    owl:versionInfo "Added in core v3.8" .
 
 cascade:ConsumerWellness a owl:Class ;
     rdfs:subClassOf cascade:ConsumerGenerated ;

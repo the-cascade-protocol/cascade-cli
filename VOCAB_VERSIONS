@@ -144,9 +144,9 @@
 #     attachmentPath, attachmentMediaType, contentHash, hashAlgorithm,
 #     byteSize, attachmentTitle) for content-addressed binary storage. Synced
 #     and bundled; no converter emits it yet (root backlog 3.276).
-core=3.7
+core=3.8
 health=2.8
-clinical=1.16
-coverage=1.5
+clinical=1.17
+coverage=1.6
 checkup=3.3
 pots=1.4

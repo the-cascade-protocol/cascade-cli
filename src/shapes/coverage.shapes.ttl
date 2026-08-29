@@ -6,7 +6,13 @@
 
 # ============================================================================
 # Cascade Protocol — Coverage Vocabulary SHACL Validation Shapes
-# Version: 1.0 (Phase 4, 2026-02-18)
+# Version: 1.3 (coverage v1.6, 2026-08-28)
+#
+# This header is not read by any gate, which is how it sat at "1.0 (Phase 4,
+# 2026-02-18)" through the 1.1 and 1.2 revisions recorded in the changelog at
+# the foot of this file. The changelog is the authority; keep this line in step
+# with it.
+#
 # Validates: coverage:InsurancePlan
 #
 # Layer 2 domain-specific vocabulary for patient-owned insurance and benefits data.
@@ -234,9 +240,16 @@ coverage:InsurancePlanShape a sh:NodeShape ;
     # ------------------------------------------------------------------
 
     # Required: provenance
+    #
+    # cascade:AIExtracted (a ClinicalGenerated subclass, core v3.3) is in the
+    # list from coverage v1.6. Every clinical and health record shape gained it
+    # in clinical v1.9 and this one was missed, so an insurance card read by a
+    # document-extraction pipeline carried the correct provenance for what it
+    # was and was REJECTED at sh:Violation for saying so. Photographing a card
+    # is one of the most likely AI-extraction paths there is.
     sh:property [
         sh:path cascade:dataProvenance ;
-        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported) ;
+        sh:in (cascade:ClinicalGenerated cascade:EHRVerified cascade:DeviceGenerated cascade:PatientReported cascade:SelfReported cascade:AIExtracted) ;
         sh:minCount 1 ;
         sh:maxCount 1 ;
         sh:name "Data Provenance"@en ;
@@ -300,6 +313,19 @@ coverage:CoverageTypeVocabularyShape a sh:NodeShape ;
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.3 (2026-08-28) — coverage v1.6
+# - coverage:InsurancePlanShape's cascade:dataProvenance sh:in list gains
+#   cascade:AIExtracted. BEHAVIOUR CHANGE, and the only one in this version: an
+#   insurance plan whose provenance is cascade:AIExtracted was REJECTED at
+#   sh:Violation and now validates. Every clinical and health record shape
+#   gained this member in clinical v1.9, when core v3.3 introduced the class;
+#   this shape was missed, so the one document type a patient is most likely to
+#   capture with a camera was the one that could not say how it was captured.
+# - Strictly widening. Nothing that validated under 1.2 fails under 1.3, and one
+#   class of previously-rejected conformant record now passes. No pod needs
+#   rewriting: this list is a value set, not a requirement.
+# - The header at the top of this file, stale since 1.0, now states 1.3.
 #
 # Version 1.2 (2026-08-27) — coverage v1.5
 # - coverage:InsurancePlanShape declares coverage:status, bound to the four
