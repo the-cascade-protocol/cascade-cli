@@ -315,6 +315,29 @@ report would otherwise have been filed as an unmapped Layer 1 record and would n
 FHIR resource); without that arm an imaging report would have been exported as an unknown Cascade
 type. Subjects are unchanged: routing picks the class and never touches the identity door.
 
+**A four-series MRI imported as one series stops calling itself fully mapped (3.222).**
+`convertImagingStudy` reads the modality from `series[0]` and the retrieve URL from
+`series[0].endpoint[0]`, and then asserted `cascade:layerPromotionStatus = cascade:FullyMapped`
+regardless, so a partial import was indistinguishable from a complete one. Worse,
+`clinical:numberOfSeries` sat next to the single modality saying "4", which reads as a fact about
+the study rather than as the count of what was discarded.
+
+A study that states more series than this record represents now carries
+`cascade:PendingLayerTwoPromotion` and a conversion warning naming the count
+(`kept series 1 of 4`). Both counts are consulted: an inlined `series` array of four, and one
+inlined series beside `numberOfSeries: 3`, are the same loss. Single-series studies are unchanged
+and still earn `cascade:FullyMapped`.
+
+Only the statement is fixed. The record still carries series 1 alone — emitting every series needs a
+decision about how a series is modelled in the pod, and that is sequenced separately. Making the
+converter honest is separable from making it complete, and shipping the honesty first is what stops
+the loss being silent in the meantime.
+
+One existing test changed rather than being added to: `sampleImagingStudy` in
+`tests/fhir-converter.test.ts` declares `numberOfSeries: 3` and inlines one series, and its
+`should be annotated FullyMapped` case asserted exactly the claim this removes. The fixture written
+to exercise the happy path was itself a partial import calling itself a complete one.
+
 ---
 
 ## [0.20.4] - 2026-08-21

@@ -2170,10 +2170,55 @@ export function convertDevice(resource: any): ConversionResult & { _quads: Quad[
 // ImagingStudy converter (B5)
 // ---------------------------------------------------------------------------
 
+/**
+ * How much of an `ImagingStudy` this converter actually represents.
+ *
+ * `stated` is what the source says the study holds: the larger of the inlined
+ * `series` array and the `numberOfSeries` count. Both are counted because they
+ * fail differently — a server can inline four series, or inline one and declare
+ * three, and in the second case two series exist that this record does not
+ * describe just as surely as in the first.
+ *
+ * `represented` is what the record below carries: one series if any was inlined,
+ * none otherwise. It is not derived from anything; it is the literal fact that
+ * modality and retrieve URL are read from `series[0]`.
+ */
+function imagingStudySeriesCoverage(resource: any): { represented: number; stated: number } {
+  const inlined = Array.isArray(resource?.series) ? resource.series.length : 0;
+  const declared =
+    typeof resource?.numberOfSeries === 'number' && Number.isFinite(resource.numberOfSeries)
+      ? resource.numberOfSeries
+      : 0;
+  return { represented: inlined > 0 ? 1 : 0, stated: Math.max(inlined, declared) };
+}
+
 export function convertImagingStudy(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
+
+  // WHAT THIS RECORD REPRESENTS, DECIDED BEFORE IT CLAIMS ANYTHING (3.222).
+  //
+  // Modality and retrieve URL below are read from `series[0]` and from nowhere
+  // else, so a four-series MRI arrives carrying one series' modality. Until this
+  // check the record then asserted `cascade:FullyMapped` regardless, which made
+  // a partial import indistinguishable from a complete one — and
+  // `clinical:numberOfSeries` sat next to the single modality saying "4", which
+  // reads as a fact about the study rather than the count of what was dropped.
+  //
+  // Only the STATEMENT is fixed here. Emitting every series needs a decision
+  // about how a series is modelled in the pod, and that decision is pending;
+  // making the converter honest is separable from making it complete, and
+  // shipping the honesty first is what stops the loss being silent meanwhile.
+  const series = imagingStudySeriesCoverage(resource);
+  const partial = series.stated > series.represented;
+  if (partial) {
+    warnings.push(
+      `ImagingStudy states ${series.stated} series; this record represents only the first ` +
+        `(kept series ${series.represented} of ${series.stated}). Modality and retrieve URL are ` +
+        `read from that series alone, so the record is not marked fully mapped.`,
+    );
+  }
 
   quads.push(tripleType(subjectUri, NS.clinical + 'ImagingStudy'));
   quads.push(...commonTriples(subjectUri));
@@ -2218,7 +2263,15 @@ export function convertImagingStudy(resource: any): ConversionResult & { _quads:
   // The visit this imaging study was performed in (ImagingStudy.encounter).
   pushEncounterEdge(quads, subjectUri, resource.encounter);
 
-  quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
+  // A single-series study that reached every field it has is fully mapped and
+  // stays so. A partially represented one says what it is.
+  quads.push(
+    tripleRef(
+      subjectUri,
+      NS.cascade + 'layerPromotionStatus',
+      NS.cascade + (partial ? 'PendingLayerTwoPromotion' : 'FullyMapped'),
+    ),
+  );
 
   return {
     turtle: '',
