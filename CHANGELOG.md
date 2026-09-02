@@ -280,6 +280,41 @@ Drop manifests: 127 entries to 126 — six flipped to emitted and deleted, five 
 losses the fixes exposed one level down, and `DocumentReference.authenticator` moved from pending to
 acknowledged. Pending 67 to 63; acknowledged 60 to 63.
 
+### Fixed
+
+**A radiology report no longer enters the pod as a laboratory report (3.221).**
+Every `DiagnosticReport` was dispatched to one converter whose first act was to assert
+`clinical:LaboratoryReport`, so a radiology or pathology report was not merely mislabelled but
+invisible: "what imaging do I have?" reads `clinical:ImagingReport` and `clinical:ImagingStudy`, and
+the record was neither.
+
+`DiagnosticReport.category` now routes the class, on the HL7 v2-0074 diagnostic service section
+codes the element is bound to:
+
+| Category | Class |
+|---|---|
+| `LAB`, `CH`, `HM`, `MB`, `BLB`, `SR`, `TX`, `VR`, `MYC`, `MCB`, `IMM`, `BG`, `OSL`, or absent | `clinical:LaboratoryReport` (unchanged) |
+| `RAD`, `CT`, `CTH`, `CUS`, `MR`, `NMR`, `NMS`, `OUS`, `RUS`, `RX`, `US`, `VUS`, `XRC` | `clinical:ImagingReport` |
+| anything else (`SP`, `CG`, `PF`, …) | `clinical:LaboratoryReport`, plus a warning naming the category, and NOT `cascade:FullyMapped` |
+
+An absent category still means laboratory: that is what the pod already holds and what an
+uncategorised `DiagnosticReport` overwhelmingly is, and retyping those on no evidence would trade
+one silent miscategorisation for another.
+
+No vocabulary is added. `clinical:ImagingReport` is ratified in `clinical.ttl` with a shape in
+`clinical.shapes.ttl` and was already named in the converter's required-fields table. The third row
+is the point of the change: pathology and cytogenetics have no ratified Cascade class, a converter
+is not where one gets minted, and so those records say what they are missing instead of being filed
+under a class that does not describe them.
+
+Two consequences carried with it. `clinical:ImagingReport` is registered in the pod's `imaging`
+bucket — an `rdf:type` no bucket claims falls through to `fhir-passthrough`, so a correctly typed
+report would otherwise have been filed as an unmapped Layer 1 record and would not have appeared in
+`pod info` at all. And the reverse converter restores both classes to `DiagnosticReport`
+(`restoreLaboratoryReport` is renamed `restoreDiagnosticReport`, one function because there is one
+FHIR resource); without that arm an imaging report would have been exported as an unknown Cascade
+type. Subjects are unchanged: routing picks the class and never touches the identity door.
+
 ---
 
 ## [0.20.4] - 2026-08-21

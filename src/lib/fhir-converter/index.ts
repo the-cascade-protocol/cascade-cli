@@ -15,7 +15,7 @@
  *   - Procedure                               -> clinical:Procedure
  *   - DocumentReference                       -> clinical:ClinicalDocument
  *   - Encounter                               -> clinical:Encounter
- *   - DiagnosticReport                        -> clinical:LaboratoryReport
+ *   - DiagnosticReport                        -> clinical:LaboratoryReport | clinical:ImagingReport
  *   - MedicationAdministration                -> clinical:MedicationAdministration
  *   - Device                                  -> clinical:ImplantedDevice
  *   - ImagingStudy                            -> clinical:ImagingStudy

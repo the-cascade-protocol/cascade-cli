@@ -26,7 +26,7 @@ import {
   restoreProcedure,
   restoreClinicalDocument,
   restoreEncounter,
-  restoreLaboratoryReport,
+  restoreDiagnosticReport,
   restoreMedicationAdministration,
   restoreImplantedDevice,
   restoreImagingStudy,
@@ -139,8 +139,16 @@ export async function convertCascadeToFhir(turtle: string): Promise<{
       resource = restoreClinicalDocument(pv, warnings);
     } else if (rdfType === NS.clinical + 'Encounter') {
       resource = restoreEncounter(pv, warnings, resolveNode);
-    } else if (rdfType === NS.clinical + 'LaboratoryReport') {
-      resource = restoreLaboratoryReport(pv, warnings);
+    } else if (
+      rdfType === NS.clinical + 'LaboratoryReport' ||
+      rdfType === NS.clinical + 'ImagingReport'
+    ) {
+      // Both classes come from a FHIR DiagnosticReport and restore to one.
+      // Without the second arm an imaging report would fall past every branch
+      // to the passthrough test, fail it (no cascade:fhirJson), and be
+      // reported as an unknown Cascade type — the export losing exactly the
+      // records 3.221 just started typing correctly.
+      resource = restoreDiagnosticReport(pv, warnings);
     } else if (rdfType === NS.clinical + 'MedicationAdministration') {
       resource = restoreMedicationAdministration(pv, warnings);
     } else if (rdfType === NS.clinical + 'ImplantedDevice') {

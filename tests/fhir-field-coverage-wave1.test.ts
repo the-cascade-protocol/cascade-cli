@@ -51,7 +51,7 @@ import {
   convertAllergyIntolerance,
   convertClinicalDocument,
   convertEncounter,
-  convertLaboratoryReport,
+  convertDiagnosticReport,
 } from '../src/lib/fhir-converter/converters-clinical.js';
 import { convertCoverage } from '../src/lib/fhir-converter/converters-demographics.js';
 import { NS } from '../src/lib/fhir-converter/types.js';
@@ -234,10 +234,10 @@ describe('an amended record is distinguishable from a final one', () => {
   });
 
   it('DiagnosticReport: `status` reaches the pod', () => {
-    const amended = convertLaboratoryReport(diagnosticReport({ status: 'amended' })) as Converted;
+    const amended = convertDiagnosticReport(diagnosticReport({ status: 'amended' })) as Converted;
     expect(valueOf(amended, STATUS)).toBe('amended');
     expect(statementsOf(amended))
-      .not.toEqual(statementsOf(convertLaboratoryReport(diagnosticReport({ status: 'final' })) as Converted));
+      .not.toEqual(statementsOf(convertDiagnosticReport(diagnosticReport({ status: 'final' })) as Converted));
   });
 
   it('Condition: `refuted` is not stored as though the problem were confirmed', () => {

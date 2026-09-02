@@ -23,7 +23,7 @@ import {
   convertProcedure,
   convertClinicalDocument,
   convertEncounter,
-  convertLaboratoryReport,
+  convertDiagnosticReport,
   convertMedicationAdministration,
   convertDevice,
   convertImagingStudy,
@@ -1480,7 +1480,7 @@ describe('Encounter -> clinical:Encounter', () => {
 
 describe('DiagnosticReport -> clinical:LaboratoryReport', () => {
   it('should convert DiagnosticReport to clinical:LaboratoryReport', () => {
-    const result = convertLaboratoryReport(sampleDiagnosticReport);
+    const result = convertDiagnosticReport(sampleDiagnosticReport);
     expect(result.cascadeType).toBe('clinical:LaboratoryReport');
 
     const quads = result._quads;
@@ -1495,7 +1495,7 @@ describe('DiagnosticReport -> clinical:LaboratoryReport', () => {
     // The converter no longer mints a subject IRI directly (that only dangled);
     // it emits a placeholder that the batch loop resolves to the Observation's
     // real subject. Here, pre-resolution, we assert the raw references survive.
-    const result = convertLaboratoryReport(sampleDiagnosticReport);
+    const result = convertDiagnosticReport(sampleDiagnosticReport);
     const labResults = findAllQuadValues(result._quads, NS.clinical + 'hasLabResult');
     expect(labResults).toHaveLength(2);
     for (const v of labResults) expect(isReferencePlaceholder(v)).toBe(true);
@@ -1505,13 +1505,13 @@ describe('DiagnosticReport -> clinical:LaboratoryReport', () => {
   });
 
   it('should extract LOINC code', () => {
-    const result = convertLaboratoryReport(sampleDiagnosticReport);
+    const result = convertDiagnosticReport(sampleDiagnosticReport);
     const loincCodes = findAllQuadValues(result._quads, NS.clinical + 'loincCode');
     expect(loincCodes).toContain(NS.loinc + '58410-2');
   });
 
   it('should be annotated FullyMapped', () => {
-    const result = convertLaboratoryReport(sampleDiagnosticReport);
+    const result = convertDiagnosticReport(sampleDiagnosticReport);
     expect(findQuadValue(result._quads, NS.cascade + 'layerPromotionStatus')).toBe(NS.cascade + 'FullyMapped');
   });
 });

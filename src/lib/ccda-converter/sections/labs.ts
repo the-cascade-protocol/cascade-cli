@@ -6,7 +6,7 @@
  *    organizer).
  *  - clinical:LaboratoryReport — one per BATTERY organizer (a lab panel), with a
  *    clinical:hasLabResult edge to each of its member results. This mirrors the
- *    FHIR converter's convertLaboratoryReport so both import paths produce
+ *    FHIR converter's convertDiagnosticReport so both import paths produce
  *    shape-compatible panel records.
  *
  * CLUSTER organizers in this section are left as plain member observations (no

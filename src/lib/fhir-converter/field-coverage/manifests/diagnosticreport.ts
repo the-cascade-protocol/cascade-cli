@@ -1,7 +1,7 @@
 import type { FieldDropManifest } from '../types.js';
 
 /**
- * What `convertLaboratoryReport` does not emit.
+ * What `convertDiagnosticReport` does not emit.
  *
  * `presentedForm` is the report as the lab rendered it. The pod describes
  * reports whose content it cannot show.
