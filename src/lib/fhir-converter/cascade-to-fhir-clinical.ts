@@ -14,6 +14,7 @@
  *   clinical:ClinicalDocument        -> DocumentReference
  *   clinical:Encounter               -> Encounter
  *   clinical:LaboratoryReport        -> DiagnosticReport
+ *   clinical:ImagingReport           -> DiagnosticReport
  *   clinical:MedicationAdministration -> MedicationAdministration
  *   clinical:ImplantedDevice         -> Device
  *   clinical:ImagingStudy            -> ImagingStudy
@@ -517,10 +518,23 @@ export function restoreEncounter(
 }
 
 // ---------------------------------------------------------------------------
-// Laboratory report (DiagnosticReport)
+// Diagnostic report (clinical:LaboratoryReport and clinical:ImagingReport)
 // ---------------------------------------------------------------------------
 
-export function restoreLaboratoryReport(pv: PV, _warnings: string[]): FhirResource {
+/**
+ * Restore a `DiagnosticReport` from either class the forward converter routes
+ * it to.
+ *
+ * One function, because there is one FHIR resource. `clinical:ImagingReport`
+ * and `clinical:LaboratoryReport` differ in what they MEAN, not in which
+ * predicates a DiagnosticReport-derived record carries — the forward converter
+ * emits the same set for both and chooses only the class — so a second
+ * restorer would be the same body with a different name and one more place for
+ * the two to drift apart. The class is not restated on the way out because
+ * FHIR has no field for it: `category` already carries the distinction, which
+ * is what the class was derived FROM, and it is restored below.
+ */
+export function restoreDiagnosticReport(pv: PV, _warnings: string[]): FhirResource {
   const getFirst = (pred: string) => pv.get(pred)?.[0];
 
   const fhirResource: FhirResource = {

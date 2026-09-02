@@ -183,8 +183,22 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
     filename: 'devices.ttl',
   },
   imaging: {
-    label: 'Imaging Studies',
-    rdfTypes: [CASCADE_NAMESPACES.clinical + 'ImagingStudy'],
+    label: 'Imaging',
+    // The study (what was acquired) and the report (what a radiologist wrote
+    // about it) are one part of the record picture and share one file. The
+    // report class was added when the FHIR converter started routing
+    // DiagnosticReport on category (3.221): an rdf:type no bucket claims falls
+    // through routeTypeKey to `fhir-passthrough`, so a correctly typed
+    // radiology report would have been filed as an unmapped Layer 1 record and
+    // would not appear in `pod info` at all.
+    //
+    // ImagingStudy stays FIRST: `solid:forClass` in the type index is minted
+    // from rdfTypes[0], so reordering would rewrite the registration that
+    // existing pods already carry.
+    rdfTypes: [
+      CASCADE_NAMESPACES.clinical + 'ImagingStudy',
+      CASCADE_NAMESPACES.clinical + 'ImagingReport',
+    ],
     directory: 'clinical',
     filename: 'imaging.ttl',
   },

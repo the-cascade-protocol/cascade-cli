@@ -28,7 +28,7 @@ import {
   convertProcedure,
   convertClinicalDocument,
   convertEncounter,
-  convertLaboratoryReport,
+  convertDiagnosticReport,
   convertMedicationAdministration,
   convertDevice,
   convertImagingStudy,
@@ -104,7 +104,10 @@ function dispatchFhirResource(fhirResource: any, passthroughMinimal: boolean): (
     case 'Encounter':
       return convertEncounter(fhirResource);
     case 'DiagnosticReport':
-      return convertLaboratoryReport(fhirResource);
+      // Not always a laboratory report: the converter routes on
+      // DiagnosticReport.category and may return clinical:ImagingReport. See
+      // routeDiagnosticReport (3.221).
+      return convertDiagnosticReport(fhirResource);
     case 'MedicationAdministration':
       return convertMedicationAdministration(fhirResource);
     case 'Device':

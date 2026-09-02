@@ -10,7 +10,8 @@
  *   - Procedure -> clinical:Procedure
  *   - DocumentReference -> clinical:ClinicalDocument
  *   - Encounter -> clinical:Encounter
- *   - DiagnosticReport -> clinical:LaboratoryReport
+ *   - DiagnosticReport -> clinical:LaboratoryReport or clinical:ImagingReport,
+ *                         routed on DiagnosticReport.category (see routeDiagnosticReport)
  *   - MedicationAdministration -> clinical:MedicationAdministration
  *   - Device -> clinical:ImplantedDevice
  *   - ImagingStudy -> clinical:ImagingStudy
@@ -1798,15 +1799,158 @@ export function convertEncounter(resource: any): ConversionResult & { _quads: Qu
 }
 
 // ---------------------------------------------------------------------------
-// LaboratoryReport (DiagnosticReport) converter (B5)
+// DiagnosticReport converter (B5), routed on category (3.221)
 // ---------------------------------------------------------------------------
 
-export function convertLaboratoryReport(resource: any): ConversionResult & { _quads: Quad[] } {
+/**
+ * The HL7 v2-0074 diagnostic service sections that mean "this report describes
+ * pictures of the patient".
+ *
+ * `DiagnosticReport.category` is bound in FHIR R4 to
+ * http://terminology.hl7.org/CodeSystem/v2-0074, whose members are service
+ * SECTIONS rather than modalities — but several sections are named for the
+ * modality that produced the study (CT scan, nuclear magnetic resonance,
+ * radiograph), which is why this set is longer than "RAD". `MR` and `US` are
+ * not v2-0074 members at all; they are the DICOM modality abbreviations, and
+ * real exports put them in this element often enough that omitting them would
+ * send an MRI report back to the laboratory branch.
+ *
+ * @see https://terminology.hl7.org/CodeSystem-v2-0074.html
+ */
+const IMAGING_SERVICE_SECTIONS = new Set([
+  'RAD', // Radiology
+  'CT', // CAT scan
+  'CTH', // Cardiac catheterization
+  'CUS', // Cardiac ultrasound
+  'MR', // Magnetic resonance (DICOM modality, not v2-0074)
+  'NMR', // Nuclear magnetic resonance
+  'NMS', // Nuclear medicine scan
+  'OUS', // OB ultrasound
+  'RUS', // Radiology ultrasound
+  'RX', // Radiograph
+  'US', // Ultrasound (DICOM modality, not v2-0074)
+  'VUS', // Vascular ultrasound
+  'XRC', // Cineradiograph
+]);
+
+/**
+ * The v2-0074 sections that mean "a specimen was analysed" — the sections
+ * `clinical:LaboratoryReport` already describes correctly.
+ *
+ * This set exists so that an unrecognised category can be told apart from a
+ * laboratory one. Before 3.221 there was no such distinction: everything was a
+ * laboratory report, so a section this table does not know still lands on the
+ * laboratory class, but now it says so (see `routeDiagnosticReport`).
+ */
+const LABORATORY_SERVICE_SECTIONS = new Set([
+  'BG', // Blood gases
+  'BLB', // Blood bank
+  'CH', // Chemistry
+  'HM', // Hematology
+  'IMM', // Immunology
+  'LAB', // Laboratory
+  'MB', // Microbiology
+  'MCB', // Mycobacteriology
+  'MYC', // Mycology
+  'OSL', // Outside lab
+  'SR', // Serology
+  'TX', // Toxicology
+  'VR', // Virology
+]);
+
+/**
+ * Category texts an export writes instead of a code. Only the unambiguous ones:
+ * a text this table does not hold is treated as unrouted and reported, which is
+ * the honest outcome, rather than guessed at with a substring match.
+ */
+const IMAGING_CATEGORY_TEXTS = new Set(['RADIOLOGY', 'IMAGING', 'DIAGNOSTIC IMAGING']);
+const LABORATORY_CATEGORY_TEXTS = new Set(['LAB', 'LABS', 'LABORATORY', 'LABORATORY REPORT']);
+
+export interface DiagnosticReportRoute {
+  /** The Cascade class this report is typed as. Both are ratified in clinical.ttl. */
+  cascadeClass: 'LaboratoryReport' | 'ImagingReport';
+  /**
+   * The category token, verbatim, when it is neither a laboratory nor an
+   * imaging service section. Undefined when the report routed cleanly.
+   */
+  unroutedCategory?: string;
+}
+
+/**
+ * The category token this report is routed and labelled by.
+ *
+ * Deliberately the SAME derivation as the `clinical:reportCategory` triple
+ * below — first category entry, its first coding's code, else its text — so
+ * that the fact the pod records and the decision the converter makes can never
+ * disagree about what the source said.
+ */
+function diagnosticReportCategoryToken(resource: any): string | undefined {
+  if (!Array.isArray(resource?.category) || resource.category.length === 0) return undefined;
+  const first = resource.category[0];
+  const token = first?.coding?.[0]?.code ?? codeableConceptText(first);
+  if (typeof token !== 'string') return undefined;
+  const trimmed = token.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Which Cascade class a `DiagnosticReport` becomes.
+ *
+ * THE DEFECT THIS CLOSES (3.221). Every DiagnosticReport was typed
+ * `clinical:LaboratoryReport`, because the dispatcher had one branch for the
+ * resource type and the converter asserted that class as its first act. A
+ * radiology report therefore entered the pod as a lab report: not merely
+ * mislabelled, but invisible — "what imaging do I have?" reads
+ * `clinical:ImagingReport` and `clinical:ImagingStudy`, and the record was
+ * neither.
+ *
+ * THREE OUTCOMES, AND THE THIRD IS THE POINT.
+ *
+ *   Laboratory section, or no category at all -> `clinical:LaboratoryReport`.
+ *   Absent stays laboratory because that is what the pod already holds and
+ *   what an uncategorised DiagnosticReport overwhelmingly is; retyping those
+ *   on no evidence would trade one silent miscategorisation for another.
+ *
+ *   Imaging section -> `clinical:ImagingReport`. Ratified in clinical.ttl with
+ *   a SHACL shape in clinical.shapes.ttl, and already named in this module's
+ *   required-fields table. No vocabulary is invented here.
+ *
+ *   Anything else (surgical pathology, cytogenetics, pulmonary function) keeps
+ *   `clinical:LaboratoryReport` and is REPORTED. There is no ratified Cascade
+ *   class for those, and a converter is not where vocabulary gets minted. The
+ *   caller is told which category went unrouted and the record stops claiming
+ *   `cascade:FullyMapped`, so a known gap is stated rather than papered over.
+ */
+export function routeDiagnosticReport(resource: any): DiagnosticReportRoute {
+  const token = diagnosticReportCategoryToken(resource);
+  if (token === undefined) return { cascadeClass: 'LaboratoryReport' };
+
+  const normalized = token.toUpperCase();
+  if (IMAGING_SERVICE_SECTIONS.has(normalized) || IMAGING_CATEGORY_TEXTS.has(normalized)) {
+    return { cascadeClass: 'ImagingReport' };
+  }
+  if (LABORATORY_SERVICE_SECTIONS.has(normalized) || LABORATORY_CATEGORY_TEXTS.has(normalized)) {
+    return { cascadeClass: 'LaboratoryReport' };
+  }
+  return { cascadeClass: 'LaboratoryReport', unroutedCategory: token };
+}
+
+export function convertDiagnosticReport(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
 
-  quads.push(tripleType(subjectUri, NS.clinical + 'LaboratoryReport'));
+  const route = routeDiagnosticReport(resource);
+  if (route.unroutedCategory !== undefined) {
+    warnings.push(
+      `DiagnosticReport category "${route.unroutedCategory}" is neither a laboratory nor an ` +
+        `imaging diagnostic service section (HL7 v2-0074). The record keeps ` +
+        `clinical:LaboratoryReport, which is not what it is: no ratified Cascade class covers ` +
+        `this category, so it is not marked fully mapped.`,
+    );
+  }
+
+  quads.push(tripleType(subjectUri, NS.clinical + route.cascadeClass));
   quads.push(...commonTriples(subjectUri));
 
   // Panel name from code.text or first coding display
@@ -1882,14 +2026,25 @@ export function convertLaboratoryReport(resource: any): ConversionResult & { _qu
   // The visit this report was produced in (DiagnosticReport.encounter).
   pushEncounterEdge(quads, subjectUri, resource.encounter);
 
-  quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
+  // A report whose category routed cleanly is fully mapped. One that did not is
+  // sitting on a class that does not describe it, and saying "fully mapped"
+  // about that is the exact claim 3.221 exists to stop.
+  quads.push(
+    tripleRef(
+      subjectUri,
+      NS.cascade + 'layerPromotionStatus',
+      NS.cascade +
+        (route.unroutedCategory === undefined ? 'FullyMapped' : 'PendingLayerTwoPromotion'),
+    ),
+  );
 
+  const cascadeType = `clinical:${route.cascadeClass}`;
   return {
     turtle: '',
-    jsonld: quadsToJsonLd(quads, 'clinical:LaboratoryReport'),
+    jsonld: quadsToJsonLd(quads, cascadeType),
     warnings,
     resourceType: 'DiagnosticReport',
-    cascadeType: 'clinical:LaboratoryReport',
+    cascadeType,
     _quads: quads,
   };
 }
@@ -2015,10 +2170,55 @@ export function convertDevice(resource: any): ConversionResult & { _quads: Quad[
 // ImagingStudy converter (B5)
 // ---------------------------------------------------------------------------
 
+/**
+ * How much of an `ImagingStudy` this converter actually represents.
+ *
+ * `stated` is what the source says the study holds: the larger of the inlined
+ * `series` array and the `numberOfSeries` count. Both are counted because they
+ * fail differently — a server can inline four series, or inline one and declare
+ * three, and in the second case two series exist that this record does not
+ * describe just as surely as in the first.
+ *
+ * `represented` is what the record below carries: one series if any was inlined,
+ * none otherwise. It is not derived from anything; it is the literal fact that
+ * modality and retrieve URL are read from `series[0]`.
+ */
+function imagingStudySeriesCoverage(resource: any): { represented: number; stated: number } {
+  const inlined = Array.isArray(resource?.series) ? resource.series.length : 0;
+  const declared =
+    typeof resource?.numberOfSeries === 'number' && Number.isFinite(resource.numberOfSeries)
+      ? resource.numberOfSeries
+      : 0;
+  return { represented: inlined > 0 ? 1 : 0, stated: Math.max(inlined, declared) };
+}
+
 export function convertImagingStudy(resource: any): ConversionResult & { _quads: Quad[] } {
   const warnings: string[] = [];
   const subjectUri = mintSubjectUri(resource, warnings);
   const quads: Quad[] = [];
+
+  // WHAT THIS RECORD REPRESENTS, DECIDED BEFORE IT CLAIMS ANYTHING (3.222).
+  //
+  // Modality and retrieve URL below are read from `series[0]` and from nowhere
+  // else, so a four-series MRI arrives carrying one series' modality. Until this
+  // check the record then asserted `cascade:FullyMapped` regardless, which made
+  // a partial import indistinguishable from a complete one — and
+  // `clinical:numberOfSeries` sat next to the single modality saying "4", which
+  // reads as a fact about the study rather than the count of what was dropped.
+  //
+  // Only the STATEMENT is fixed here. Emitting every series needs a decision
+  // about how a series is modelled in the pod, and that decision is pending;
+  // making the converter honest is separable from making it complete, and
+  // shipping the honesty first is what stops the loss being silent meanwhile.
+  const series = imagingStudySeriesCoverage(resource);
+  const partial = series.stated > series.represented;
+  if (partial) {
+    warnings.push(
+      `ImagingStudy states ${series.stated} series; this record represents only the first ` +
+        `(kept series ${series.represented} of ${series.stated}). Modality and retrieve URL are ` +
+        `read from that series alone, so the record is not marked fully mapped.`,
+    );
+  }
 
   quads.push(tripleType(subjectUri, NS.clinical + 'ImagingStudy'));
   quads.push(...commonTriples(subjectUri));
@@ -2063,7 +2263,15 @@ export function convertImagingStudy(resource: any): ConversionResult & { _quads:
   // The visit this imaging study was performed in (ImagingStudy.encounter).
   pushEncounterEdge(quads, subjectUri, resource.encounter);
 
-  quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'FullyMapped'));
+  // A single-series study that reached every field it has is fully mapped and
+  // stays so. A partially represented one says what it is.
+  quads.push(
+    tripleRef(
+      subjectUri,
+      NS.cascade + 'layerPromotionStatus',
+      NS.cascade + (partial ? 'PendingLayerTwoPromotion' : 'FullyMapped'),
+    ),
+  );
 
   return {
     turtle: '',
