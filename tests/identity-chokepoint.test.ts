@@ -309,6 +309,35 @@ describe('identity minting has exactly one door', () => {
     ).toEqual([]);
   });
 
+  it('no identity-minting module orders anything by LOCALE COLLATION', () => {
+    // The same defect class as a clock in a key, wearing different clothes.
+    // `localeCompare` asks ICU for the reader's alphabet, so a key set ordered
+    // with it is ordered by the MACHINE: `alpha` before `Zeta` in every
+    // Latin-script collation, `Zeta` first by code point. core.ttl says which
+    // one identity uses, and says why in the same breath:
+    //
+    //   "Sort ascending by Unicode code point. (Code point, not locale
+    //    collation: a locale-dependent order would make identity depend on
+    //    the machine.)"
+    //     -- spec/ontologies/core/v1/core.ttl, cascade:cascadeUri,
+    //        "CANONICAL FORM OF A MULTI-VALUED IDENTITY INPUT (v3.6, NORMATIVE)"
+    //
+    // No exemption, for the same reason randomness has none here: an importer
+    // sorts things only to build keys. Sorting for DISPLAY is fine and lives
+    // in `commands/` and the validator, which are outside these modules.
+    const offenders: string[] = [];
+    for (const file of FILES) {
+      if (!isUnder(file, IDENTITY_MODULES)) continue;
+      const code = stripComments(CODE.get(file)!);
+      if (/\blocaleCompare\s*\(/.test(code)) offenders.push(`${file}: localeCompare()`);
+    }
+    expect(
+      offenders,
+      'Order identity keys with an explicit code-unit comparator: (a, b) => a < b ? -1 : a > b ? 1 : 0. ' +
+        'A locale-ordered key mints a different URI on a differently-configured machine.',
+    ).toEqual([]);
+  });
+
   it('ctx.importedAt appears in no identity key anywhere', () => {
     const offenders: string[] = [];
     for (const file of FILES) {

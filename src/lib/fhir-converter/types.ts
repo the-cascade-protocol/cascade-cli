@@ -402,7 +402,7 @@ export function mintSubjectUri(resource: any, warnings?: string[]): string {
  *   "{resourceType}::{sortedKeyValuePairs}"
  *   where sortedKeyValuePairs =
  *     entries of contentFields where value is non-null and non-empty after .trim()
- *     sorted ascending by key (localeCompare)
+ *     sorted ascending by key, by Unicode code point (NOT locale collation)
  *     mapped as "key=value"
  *     joined with "|"
  *
@@ -460,9 +460,46 @@ export function contentHashedUri(
   // coerced to string before trimming: the type says string, but real-world
   // FHIR (e.g. an Apple Health Patient) can slip a non-string field through, and
   // String(s) === s for valid string inputs, so the derived URI is unchanged.
+  //
+  // THE COMPARATOR IS EXPLICIT AND MUST STAY THAT WAY.
+  //
+  // This sorted with `a.localeCompare(b)` until 2026-09. `localeCompare` asks
+  // ICU for the READER'S alphabet, and every Latin-script collation puts
+  // `alpha` before `Zeta` where code point puts `Zeta` first ('Z' is U+005A,
+  // 'a' is U+0061). That made the identity string, and therefore the URI, a
+  // function of the importing machine's locale as well as of the record — the
+  // one property an identifier may not have. The same document imported on two
+  // differently-configured machines would mint two URIs, so the pod would
+  // duplicate instead of reconcile and every cross-reference written by the
+  // other machine would dangle. `spec/ontologies/core/v1/core.ttl`,
+  // `cascade:cascadeUri`, "CANONICAL FORM OF A MULTI-VALUED IDENTITY INPUT
+  // (v3.6, NORMATIVE)", step 3, names the rule and its reason in one line:
+  //
+  //   "Sort ascending by Unicode code point. (Code point, not locale
+  //    collation: a locale-dependent order would make identity depend on
+  //    the machine.)"
+  //
+  // `<`/`>` on JS strings compare UTF-16 CODE UNITS. That is the same order as
+  // code point for every character in the BMP, which is every character any
+  // identity key in this repo contains: every one is a lowercase-initial ASCII
+  // camelCase field name written literally in source, never a value derived
+  // from patient data, so no code or system URI can reach the comparator as a
+  // KEY. The two orders part only above U+FFFF, where a surrogate pair sorts
+  // by its lead unit (U+D800..U+DBFF) rather than by its scalar value — so an
+  // astral-plane key would sort below one in U+E000..U+FFFF. No such key exists
+  // and none can arrive without a source edit, but the caveat is stated rather
+  // than left implicit, because "code unit" and "code point" are not synonyms.
+  //
+  // Written out rather than left to `.sort()`'s default because a bare
+  // `.sort()` is indistinguishable at a glance from someone forgetting the
+  // comparator; `canonicalSetKey` below relies on that same default order, and
+  // this comparator is exactly it. `tests/identity-chokepoint.test.ts` bans
+  // `localeCompare` anywhere under the identity modules so the next writer
+  // cannot reintroduce it, and `tests/uri-generation.test.ts` pins both the
+  // ordering and the resulting URIs.
   const content = Object.entries(contentFields)
     .filter(([, v]) => v != null && String(v).trim().length > 0)
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([k, v]) => `${k}=${String(v)}`)
     .join('|');
 
