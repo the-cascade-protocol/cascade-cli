@@ -437,7 +437,9 @@ describe('production identity key sets mint unchanged URIs', () => {
     // claim: the two orderings agree on these key sets BECAUSE the names are
     // drawn from this shape. A key carrying an uppercase initial, an
     // underscore, or a non-ASCII character would be the case where they part.
-    // Collected from every literal key object passed to an identity minter.
+    // The 64 field names at today's identity call sites, plus `family` and
+    // `given` from the Patient key this repo shipped historically, so pods
+    // written before that key widened are covered too.
     const PRODUCTION_KEYS = [
       'abatement', 'address', 'allergenName', 'category', 'clinicalStatus', 'code',
       'condition', 'conditionName', 'criticality', 'cvxCode', 'date', 'deceased',
