@@ -352,6 +352,79 @@ const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[
  *   deterministicUuid("hello") == "aaf4c61d-dcc5-58a2-9abe-de0f3b482cd9"
  *   (verify this value before using in any SDK implementation)
  */
+/**
+ * Compare two strings by Unicode CODE POINT, ascending. The identity comparator.
+ *
+ * MIRRORS `compareCodePoints` IN THE TYPESCRIPT SDK (`sdk-typescript`,
+ * `src/utils/deterministic-uri.ts`), deliberately as a second copy rather than
+ * as a dependency: this repository does not depend on that package, and a
+ * shared identity comparator that only one of the two can reach is worse than
+ * two copies that the shared conformance vectors hold to the same answer.
+ * `tests/identity-conformance-vectors.test.ts` is what keeps them honest — both
+ * copies are measured against the same file, so a divergence between them
+ * surfaces as a failing vector in whichever one drifted.
+ *
+ * WHY JAVASCRIPT'S TWO OBVIOUS CHOICES ARE BOTH WRONG HERE.
+ *
+ * Not `localeCompare`. core v3.6 states the rule normatively on
+ * `cascade:cascadeUri`: "Sort ascending by Unicode code point. (Code point, not
+ * locale collation: a locale-dependent order would make identity depend on the
+ * machine.)" A collator orders `alpha` before `Zeta` and `_under` before
+ * `Alpha`; code point orders both the other way, and a collator's answer varies
+ * with locale and ICU build. An identifier is not an identifier if the machine
+ * that minted it is an input. This repository sorted identity keys that way
+ * until 2026-09.
+ *
+ * Not `<`/`>` or a bare `.sort()` either, which is the correction this function
+ * makes. Those compare UTF-16 CODE UNITS. Code-unit order and code-point order
+ * agree across the entire Basic Multilingual Plane and disagree on exactly one
+ * shape of input: an astral-plane character (>= U+10000, encoded as a surrogate
+ * pair whose leading unit is U+D800..U+DBFF) compared with a BMP character at
+ * or above U+E000. The leading surrogate is the lower unit, so the astral
+ * character sorts FIRST by code unit and LAST by code point. So `！` (U+FF01)
+ * and `𝔞` (U+1D51E) order oppositely under the two rules.
+ *
+ * Every JavaScript implementation shared the code-unit behaviour, so no
+ * identifier split BETWEEN them — but none agreed with the spec, and an
+ * implementation whose native string order is by code point (Python's,
+ * Swift's) disagrees with all of them on the same record. The conformance
+ * corpus measures it at both sort sites: `keyOrderVectors/key-order-astral-vs-bmp`
+ * for the keys and `multiValuedFieldVectors/condition-member-order-astral-vs-bmp`
+ * for the members. Both failed here before this function existed.
+ *
+ * WHAT IT COSTS. Correcting the comparator re-mints an identifier only where an
+ * astral character was sorted against a BMP character at or above U+E000, at
+ * either sort site. Every identifier over Basic-Multilingual-Plane content —
+ * every terminology code, date, name and URI this repository has ever hashed —
+ * is bit-identical before and after, because the two orders agree there by
+ * construction.
+ *
+ * Unpaired surrogates (a lone U+D800..U+DFFF, which `codePointAt` reports as
+ * itself) compare by their own value. They are not valid Unicode scalars, no
+ * canonical order for them exists to be right about, and the comparison stays
+ * total and deterministic, which is all identity needs of them.
+ */
+export function compareCodePoints(a: string, b: string): number {
+  if (a === b) return 0;
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const ca = a.codePointAt(i)!;
+    const cb = b.codePointAt(j)!;
+    if (ca !== cb) return ca < cb ? -1 : 1;
+    // A code point above U+FFFF occupies two UTF-16 code units, everything else
+    // one. `ca === cb` here, so both sides advance by the same amount.
+    const width = ca > 0xffff ? 2 : 1;
+    i += width;
+    j += width;
+  }
+  // One side ran out; the shorter string is a prefix of the longer and sorts
+  // first, which is the same tie-break `<` applies, reached the same way.
+  if (i < a.length) return 1;
+  if (j < b.length) return -1;
+  return 0;
+}
+
 export function deterministicUuid(input: string): string {
   const hash = createHash('sha1').update(input).digest('hex');
   const v = ((parseInt(hash.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, '0');
@@ -463,15 +536,8 @@ export function contentHashedUri(
   //
   // THE COMPARATOR IS EXPLICIT AND MUST STAY THAT WAY.
   //
-  // This sorted with `a.localeCompare(b)` until 2026-09. `localeCompare` asks
-  // ICU for the READER'S alphabet, and every Latin-script collation puts
-  // `alpha` before `Zeta` where code point puts `Zeta` first ('Z' is U+005A,
-  // 'a' is U+0061). That made the identity string, and therefore the URI, a
-  // function of the importing machine's locale as well as of the record — the
-  // one property an identifier may not have. The same document imported on two
-  // differently-configured machines would mint two URIs, so the pod would
-  // duplicate instead of reconcile and every cross-reference written by the
-  // other machine would dangle. `spec/ontologies/core/v1/core.ttl`,
+  // This sorted with `a.localeCompare(b)` until 2026-09, then with `<`/`>`,
+  // and now with `compareCodePoints`. `spec/ontologies/core/v1/core.ttl`,
   // `cascade:cascadeUri`, "CANONICAL FORM OF A MULTI-VALUED IDENTITY INPUT
   // (v3.6, NORMATIVE)", step 3, names the rule and its reason in one line:
   //
@@ -479,27 +545,26 @@ export function contentHashedUri(
   //    collation: a locale-dependent order would make identity depend on
   //    the machine.)"
   //
-  // `<`/`>` on JS strings compare UTF-16 CODE UNITS. That is the same order as
-  // code point for every character in the BMP, which is every character any
-  // identity key in this repo contains: every one is a lowercase-initial ASCII
-  // camelCase field name written literally in source, never a value derived
-  // from patient data, so no code or system URI can reach the comparator as a
-  // KEY. The two orders part only above U+FFFF, where a surrogate pair sorts
-  // by its lead unit (U+D800..U+DBFF) rather than by its scalar value — so an
-  // astral-plane key would sort below one in U+E000..U+FFFF. No such key exists
-  // and none can arrive without a source edit, but the caveat is stated rather
-  // than left implicit, because "code unit" and "code point" are not synonyms.
+  // `localeCompare` asks ICU for the READER'S alphabet, which made the identity
+  // string a function of the importing machine's locale as well as of the
+  // record — the one property an identifier may not have. `<`/`>` fixed that
+  // but compares UTF-16 CODE UNITS, which is code-point order everywhere on the
+  // Basic Multilingual Plane and NOT code-point order once an astral-plane
+  // character meets a BMP character at or above U+E000. See `compareCodePoints`
+  // for the whole statement, including which identifiers move as a result
+  // (only those, and no others).
   //
   // Written out rather than left to `.sort()`'s default because a bare
   // `.sort()` is indistinguishable at a glance from someone forgetting the
-  // comparator; `canonicalSetKey` below relies on that same default order, and
-  // this comparator is exactly it. `tests/identity-chokepoint.test.ts` bans
-  // `localeCompare` anywhere under the identity modules so the next writer
-  // cannot reintroduce it, and `tests/uri-generation.test.ts` pins both the
-  // ordering and the resulting URIs.
+  // comparator — and because the default is the code-unit order this line no
+  // longer uses. `tests/identity-chokepoint.test.ts` bans `localeCompare`
+  // anywhere under the identity modules so the next writer cannot reintroduce
+  // it, `tests/uri-generation.test.ts` pins both the ordering and the resulting
+  // URIs, and `tests/identity-conformance-vectors.test.ts` holds this line to
+  // the shared cross-implementation vectors.
   const content = Object.entries(contentFields)
     .filter(([, v]) => v != null && String(v).trim().length > 0)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .sort(([a], [b]) => compareCodePoints(a, b))
     .map(([k, v]) => `${k}=${String(v)}`)
     .join('|');
 
@@ -667,7 +732,13 @@ export function canonicalSetKey(parts: string[], separator: string): string | un
     const t = p.trim();
     if (t.length > 0) seen.add(t);
   }
-  return seen.size > 0 ? [...seen].sort().join(separator) : undefined;
+  // `compareCodePoints`, not a bare `.sort()`: the default comparator is UTF-16
+  // code-unit order, which parts from the code-point order core v3.6 requires
+  // as soon as an astral-plane member meets a BMP member at or above U+E000.
+  // This was the LATENT half of that divergence — the key sort had a
+  // conformance vector and this one did not, so a fix reaching only the keys
+  // would have read as fully green while still splitting such a record.
+  return seen.size > 0 ? [...seen].sort(compareCodePoints).join(separator) : undefined;
 }
 
 /**
