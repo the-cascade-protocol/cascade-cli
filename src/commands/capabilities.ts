@@ -70,7 +70,7 @@ export function buildCapabilities(program: Command): CapabilitiesOutput {
         'cascade-agent server at --agent-url (http://127.0.0.1:8765 by default, i.e. your machine). ' +
         'No telemetry, no analytics, no implicit calls.',
       dataStorage: 'local filesystem only',
-      provenance: 'all agent-written data tagged with AIGenerated provenance',
+      provenance: 'all agent-written data tagged with AIExtracted provenance',
       auditLog: 'all MCP operations logged to provenance/audit-log.ttl',
     },
     tools: describeCommands(program, COMMAND_ENRICHMENT),

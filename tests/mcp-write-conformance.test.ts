@@ -83,13 +83,38 @@ const FIXTURE_NAME_FIELDS: Record<string, string[]> = {
  * Fixing them means giving the map a per-type dimension, which is a larger
  * change than this suite's subject.
  */
-const EXPECTED_FAILURES: Record<string, string> = {};
+const EXPECTED_FAILURES: Record<string, string> = {
+  // `isActive: true` maps to `clinical:status`, and formatTurtleValue
+  // serializes a JSON boolean as a bare `true` (xsd:boolean). The shape wants
+  // an xsd:string status word ("active"). One key cannot mean both a boolean
+  // flag and a status vocabulary word.
+  'med-001': 'clinical:status — isActive serialized as xsd:boolean, shape requires xsd:string',
+  'med-002': 'clinical:status — isActive serialized as xsd:boolean, shape requires xsd:string',
+  'med-003': 'clinical:status — isActive serialized as xsd:boolean, shape requires xsd:string',
+  'med-004': 'clinical:status — isActive serialized as xsd:boolean, shape requires xsd:string',
+  'med-005': 'clinical:status — isActive serialized as xsd:boolean, shape requires xsd:string',
+  'med-006': 'clinical:status — isActive serialized as xsd:boolean, shape requires xsd:string',
+  'med-007': 'clinical:status — isActive serialized as xsd:boolean, shape requires xsd:string',
+  'med-011': 'clinical:status — isActive serialized as xsd:boolean, shape requires xsd:string',
+
+  // formatTurtleValue stamps `^^xsd:dateTime` on any key whose name contains
+  // "date" or "time", whatever the value's precision. A date-precision value
+  // ("2031-02-09") becomes an ill-formed xsd:dateTime literal, which is neither
+  // of the two types health:performedDate accepts.
+  'lab-009': 'health:performedDate — date-precision value stamped ^^xsd:dateTime, so it is neither xsd:date nor a well-formed xsd:dateTime',
+
+  // PROPERTY_PREDICATES has no `regulatoryStatus` key, so the field is dropped
+  // and the predicate the Supplement shape requires is simply absent.
+  'supp-001': 'clinical:regulatoryStatus — no PROPERTY_PREDICATES entry, so the field is dropped and the required predicate is missing',
+};
 
 interface Fixture {
   id: string;
   dataType?: string;
   vocabulary?: string;
   input?: Record<string, unknown>;
+  /** `false` marks a fixture built to be REJECTED by the shapes. */
+  shouldAccept?: boolean;
 }
 
 function loadRootFixtures(): Fixture[] {
@@ -97,13 +122,23 @@ function loadRootFixtures(): Fixture[] {
     .readdirSync(FIXTURES_DIR, { withFileTypes: true })
     .filter((e) => e.isFile() && e.name.endsWith('.json'))
     .map((e) => JSON.parse(fs.readFileSync(path.join(FIXTURES_DIR, e.name), 'utf-8')) as Fixture)
-    .filter((f) => f.input !== undefined && f.vocabulary !== undefined)
+    // Negative fixtures (`shouldAccept: false`) are records built to violate a
+    // shape — an empty allergen, an interpretation outside the code system. The
+    // write path faithfully serializing one still produces a violation, so
+    // including them would measure the fixture, not the writer.
+    .filter((f) => f.input !== undefined && f.vocabulary !== undefined && f.shouldAccept !== false)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
 /** Build the record object an agent would hand `cascade_write` for a fixture. */
 function mcpRecordFor(mcpType: string, input: Record<string, unknown>): Record<string, unknown> {
   const record: Record<string, unknown> = { ...input };
+  // `id` and `type` are the fixture's own RDF discriminators, not record data.
+  // `cascade_write` mints the IRI itself and derives rdf:type from `dataType`,
+  // so an agent would not send either — and leaving `type` in would feed the
+  // class name ("VitalSign") to the tool as the record's display name.
+  delete record.id;
+  delete record.type;
   const nameKey = TYPE_MAPPING[mcpType].nameKey;
   if (record[nameKey] === undefined) {
     for (const field of FIXTURE_NAME_FIELDS[mcpType] ?? []) {
