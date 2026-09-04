@@ -407,7 +407,7 @@ function registerConvert(server: McpServer): void {
 function registerWrite(server: McpServer): void {
   server.tool(
     'cascade_write',
-    'Write a health record to a Cascade Pod with AIGenerated provenance. The record is serialized as Turtle and appended to the appropriate file in the Pod.',
+    'Write a health record to a Cascade Pod with AIExtracted provenance. The record is serialized as Turtle and appended to the appropriate file in the Pod.',
     {
       path: z.string().optional().describe('Path to the Pod directory. Uses CASCADE_POD_PATH if omitted.'),
       dataType: z
@@ -475,7 +475,7 @@ function registerWrite(server: McpServer): void {
         recordUri,
         file: `${typeInfo.directory}/${typeInfo.filename}`,
         provenance: {
-          type: 'AIGenerated',
+          type: 'AIExtracted',
           agentId: provenance?.agentId ?? 'unknown-agent',
           timestamp,
           reason: provenance?.reason,
@@ -511,7 +511,7 @@ function registerCapabilities(server: McpServer): void {
           // calls, and neither is reachable through an MCP tool.
           networkCalls: 'zero — every tool on this server reads and writes the local filesystem only',
           dataStorage: 'local filesystem only',
-          provenance: 'all agent-written data tagged with AIGenerated provenance',
+          provenance: 'all agent-written data tagged with AIExtracted provenance',
           auditLog: 'all operations logged to provenance/audit-log.ttl in the Pod',
         },
         tools,
@@ -527,8 +527,7 @@ function registerCapabilities(server: McpServer): void {
           'cascade:ClinicalGenerated — Data from clinical/EHR sources',
           'cascade:DeviceGenerated — Data from wearable/medical devices',
           'cascade:SelfReported — Patient-entered data',
-          'cascade:AIExtracted — AI-extracted from existing clinical documents',
-          'cascade:AIGenerated — AI-generated observations, analyses, or recommendations',
+          'cascade:AIExtracted — written by an AI agent, including everything cascade_write records',
         ],
         cliEquivalents: Object.fromEntries(
           tools.filter((tool) => tool.cliEquivalent).map((tool) => [tool.name, tool.cliEquivalent]),
@@ -636,15 +635,30 @@ export function buildRecordTurtle(
     }
   }
 
-  // Add provenance — always AIGenerated for agent-written data
-  lines.push(`    cascade:dataProvenance cascade:AIGenerated ;`);
+  // Always cascade:AIExtracted for agent-written data. The agent does not
+  // choose its own provenance: an agent that could label its output
+  // EHRVerified would defeat the point of recording provenance at all.
+  //
+  // AIExtracted is the vocabulary's only DataProvenance value for
+  // agent-authored content, and the only one admitted by the `sh:in`
+  // constraint every record shape puts on cascade:dataProvenance. This line
+  // used to emit `cascade:AIGenerated`, a term declared nowhere, so every
+  // record written through this path violated its own shape.
+  lines.push(`    cascade:dataProvenance cascade:AIExtracted ;`);
   lines.push(`    cascade:schemaVersion "1.3" ;`);
 
   // Add provenance metadata as blank node
   const agentId = provenance?.agentId ?? 'unknown-agent';
   const reason = provenance?.reason ?? 'Agent-generated record';
   lines.push(`    prov:wasGeneratedBy [`);
-  lines.push(`        a prov:Activity, cascade:AIGenerated ;`);
+  // A bare prov:Activity, deliberately. The obvious-looking subclass here is
+  // cascade:AIExtractionActivity, but that class means an LLM extraction run
+  // over narrative text and its shape requires cascade:extractionModel and
+  // cascade:extractionConfidence — neither of which cascade_write has, because
+  // it is not extracting from a document. Typing the node as one would trade an
+  // undeclared class for a false claim about how the record was produced. The
+  // record's own cascade:dataProvenance above is what marks it agent-written.
+  lines.push(`        a prov:Activity ;`);
   lines.push(`        prov:wasAssociatedWith "${agentId}" ;`);
   lines.push(`        prov:atTime "${timestamp}"^^xsd:dateTime ;`);
   lines.push(`        cascade:generationReason ${escapeTurtleString(reason)}`);

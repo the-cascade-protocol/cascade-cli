@@ -301,7 +301,7 @@ describe('buildRecordTurtle', () => {
     expect(turtle).toContain('clinical:dosage "81 mg"');
     expect(turtle).toContain('clinical:frequency "daily"');
     expect(turtle).toContain('clinical:status true');
-    expect(turtle).toContain('cascade:dataProvenance cascade:AIGenerated');
+    expect(turtle).toContain('cascade:dataProvenance cascade:AIExtracted');
     expect(turtle).toContain('cascade:schemaVersion "1.3"');
     expect(turtle).toContain('prov:wasGeneratedBy');
     expect(turtle).toContain('"test-agent"');

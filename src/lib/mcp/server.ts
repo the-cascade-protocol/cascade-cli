@@ -49,7 +49,7 @@ export function createServer(): McpServer {
         'Cascade Protocol MCP Server — Local-first access to structured health data. ' +
         'Use cascade_capabilities to discover all available tools. ' +
         'All operations are local (zero network calls). ' +
-        'All agent-written data is automatically tagged with AIGenerated provenance. ' +
+        'All agent-written data is automatically tagged with AIExtracted provenance. ' +
         'Set CASCADE_POD_PATH environment variable to specify the default Pod directory.',
     },
   );
