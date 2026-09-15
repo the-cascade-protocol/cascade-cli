@@ -21,8 +21,8 @@
     dct:description "Vocabulary for consumer-generated wellness observations from wearable devices and HealthKit. Maps Cascade wellness properties to established SNOMED CT and LOINC codes following the three-layer ontology architecture."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-01-29"^^xsd:date ;
-    dct:modified "2026-08-27"^^xsd:date ;
-    owl:versionInfo "2.8" ;
+    dct:modified "2026-09-05"^^xsd:date ;
+    owl:versionInfo "2.9" ;
     rdfs:comment """Three-layer ontology for wellness data:
         Layer 1 (Established standards): SNOMED CT concept IDs + LOINC observation codes
         Layer 2 (Cascade health vocabulary): health: namespace properties linking to Layer 1
@@ -30,6 +30,66 @@
     rdfs:seeAlso <https://cascadeprotocol.org/docs/health/v1/> .
 
 # Changelog:
+# v2.9 (2026-09-05): A coded substance and a coded manifestation on
+#     health:AllergyRecord. Two new properties, both owl:ObjectProperty, both
+#     repeatable, both optional. Additive: nothing that validated under v2.8
+#     stops validating, and every new SHACL finding is at sh:Warning per the
+#     core v3.5 ratchet.
+#
+#     WHY. The canonical layer's external form is the HL7 FHIR International
+#     Patient Summary, whose Allergies and Intolerances section is one of the
+#     three required sections. The IPS AllergyIntolerance profile
+#     (https://hl7.org/fhir/uv/ips/StructureDefinition-AllergyIntolerance-uv-ips.html)
+#     makes AllergyIntolerance.code 1..1 must-support, bound to
+#     allergies-intolerances-uv-ips, and reaction.manifestation 1..* must-support
+#     per reaction, bound to allergy-reaction-uv-ips. Through v2.8 this
+#     vocabulary could supply neither: health:allergen and health:reaction are
+#     xsd:string display text and no term carried a code. An importer therefore
+#     had nowhere to put code.coding and reaction.manifestation.coding, and the
+#     information was discarded at import rather than stored and left unexported.
+#
+#     1. NEW health:allergenCode. The coded substance, one IRI per
+#        AllergyIntolerance.code.coding, in the code system's own IRI space
+#        (http://snomed.info/sct/..., http://www.nlm.nih.gov/research/umls/rxnorm/...,
+#        UNII). Modelled exactly on health:icd10Code: an IRI, no lexical
+#        pattern, repeatable because FHIR R4 CodeableConcept.coding is 0..*
+#        (https://hl7.org/fhir/R4/datatypes.html#CodeableConcept) and a
+#        substance is routinely coded twice, an ingredient beside a product.
+#        health:allergen is unchanged, still required, and remains the display
+#        text (code.text).
+#     2. NEW health:manifestationCode. The coded manifestation(s), one IRI per
+#        reaction.manifestation.coding, same modelling. health:reaction remains
+#        the display text beside it and its comment now says what the shape has
+#        always permitted: one literal per manifestation, repeatable. An
+#        importer that joins several manifestations into one comma-separated
+#        literal is destroying data the shape was already willing to hold.
+#
+#     THE MODELLING CHOICE, STATED SO IT IS NOT REDISCOVERED AS AN OVERSIGHT.
+#     FHIR groups manifestation[] and severity inside each reaction[] element.
+#     This release is FLAT: manifestations and one severity sit on the record.
+#     Flat loses the grouping in exactly one case, an allergy with two or more
+#     reactions whose severities differ. It is chosen because a layer 1 record
+#     is a named thing and a blank node inside one has no name of its own,
+#     because the additive path leaves every existing pod and fixture valid, and
+#     because a nested health:AllergyReaction node can still be added later
+#     without retiring the flat spelling. Measured against the Synthea R4 sample
+#     corpus, no AllergyIntolerance carried two reactions at all, so the case
+#     flat cannot represent did not occur; the nested form is deferred until a
+#     corpus shows it.
+#
+#     3. NOT NEW, and named here because their absence from this file would
+#        otherwise read as a gap: allergy type and criticality are carried by
+#        clinical:allergyType and clinical:criticality, whose rdfs:domain
+#        clinical:Allergy is dropped in the paired clinical v1.18. They are the
+#        domain-free carriers, on the v2.8 principle: minting health: spellings
+#        for facts a clinical: predicate already names would give one fact two
+#        predicates. health:AllergyRecordShape binds both value sets.
+#     4. health:allergySeverity does not change, but its comment now says what
+#        it has always meant and what an importer got wrong: it is the severity
+#        of an OBSERVED reaction (FHIR reaction.severity), never criticality.
+#        Criticality is the risk a FUTURE exposure carries and lives on
+#        clinical:criticality. Folding one into the other is not recoverable.
+#
 # v2.8 (2026-08-27): SHACL only; no class or property added, removed, renamed
 #     or deprecated in this file. Two health: record shapes gain the value sets
 #     for a status their records already carry. Summarised here because the
@@ -1367,18 +1427,43 @@ health:allergyCategory a owl:DatatypeProperty ;
 
 health:reaction a owl:DatatypeProperty ;
     rdfs:label "Reaction"@en ;
-    rdfs:comment "Description of the manifestation the allergen produces (for example 'Hives (urticaria)')."@en ;
+    rdfs:comment "Display text for one manifestation the allergen produces (for example 'Hives (urticaria)'). Repeatable, and ONE LITERAL PER MANIFESTATION: FHIR R4 AllergyIntolerance.reaction.manifestation is 1..* and the IPS profile marks it must-support, so joining several manifestations into one comma-separated literal destroys the boundaries and cannot be undone by a reader. The shape has never imposed an sh:maxCount here. This is the display text that sits beside health:manifestationCode, which carries the same manifestations as codes."@en ;
     rdfs:domain health:AllergyRecord ;
     rdfs:range xsd:string ;
-    owl:versionInfo "Added in health v2.5" .
+    rdfs:seeAlso <https://hl7.org/fhir/R4/allergyintolerance-definitions.html#AllergyIntolerance.reaction.manifestation> ;
+    owl:versionInfo "Added in health v2.5; documented as one literal per manifestation in health v2.9" .
 
 health:allergySeverity a owl:DatatypeProperty ;
     rdfs:label "Allergy Severity"@en ;
-    rdfs:comment "Severity of the reaction as a whole, using the FHIR R4 AllergyIntoleranceSeverity value set: mild, moderate, severe."@en ;
+    rdfs:comment "Severity of an OBSERVED reaction, using the FHIR R4 AllergyIntoleranceSeverity value set: mild, moderate, severe. This is FHIR R4 AllergyIntolerance.reaction.severity and nothing else. It is NEVER criticality: criticality is the potential clinical harm of a FUTURE exposure (AllergyIntolerance.criticality: low, high, unable-to-assess) and is carried by clinical:criticality. The two are different assertions on different axes; an importer that folds criticality into this property when no reaction severity is present makes both facts unrecoverable, because a reader cannot afterwards tell which axis a stored value came from."@en ;
     rdfs:domain health:AllergyRecord ;
     rdfs:range xsd:string ;
     rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-reaction-event-severity.html> ;
-    owl:versionInfo "Added in health v2.5" .
+    owl:versionInfo "Added in health v2.5; scope clarified as reaction severity only in health v2.9" .
+
+health:allergenCode a owl:ObjectProperty ;
+    rdfs:label "Allergen Code"@en ;
+    rdfs:comment "Coded reference for the substance the patient reacts to, as an IRI in the code system's own IRI space (for example http://snomed.info/sct/373270004 or http://www.nlm.nih.gov/research/umls/rxnorm/7980). One value per FHIR R4 AllergyIntolerance.code.coding; repeatable, because CodeableConcept.coding is 0..* and a substance is routinely coded twice, an ingredient beside a product. No lexical pattern is imposed: SNOMED CT identifiers, RxNorm concept identifiers and UNII codes have unrelated formats, and format belongs to the code system that defines it. health:allergen remains the required display text (code.text). The IPS profile makes AllergyIntolerance.code 1..1 must-support, so a record intended for an International Patient Summary needs at least one of these."@en ;
+    rdfs:domain health:AllergyRecord ;
+    rdfs:seeAlso <https://hl7.org/fhir/uv/ips/StructureDefinition-AllergyIntolerance-uv-ips.html> ;
+    rdfs:seeAlso <https://hl7.org/fhir/uv/ips/ValueSet-allergies-intolerances-uv-ips.html> ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/datatypes.html#CodeableConcept> ;
+    owl:versionInfo "Added in health v2.9" .
+
+health:manifestationCode a owl:ObjectProperty ;
+    rdfs:label "Manifestation Code"@en ;
+    rdfs:comment "Coded reference for a manifestation the allergen produces, as an IRI in the code system's own IRI space (for example http://snomed.info/sct/247472004 for hives). One value per FHIR R4 AllergyIntolerance.reaction.manifestation.coding; repeatable, because manifestation is 1..* per reaction and CodeableConcept.coding is 0..* within each. No lexical pattern, for the same reason as health:allergenCode. health:reaction carries the matching display text, one literal per manifestation. The IPS profile marks reaction.manifestation must-support and binds it to allergy-reaction-uv-ips."@en ;
+    rdfs:domain health:AllergyRecord ;
+    rdfs:seeAlso <https://hl7.org/fhir/uv/ips/StructureDefinition-AllergyIntolerance-uv-ips.html> ;
+    rdfs:seeAlso <https://hl7.org/fhir/uv/ips/ValueSet-allergy-reaction-uv-ips.html> ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/datatypes.html#CodeableConcept> ;
+    owl:versionInfo "Added in health v2.9" .
+
+# Allergy type and criticality are NOT health: terms. They are carried by
+# clinical:allergyType (allergy | intolerance) and clinical:criticality
+# (low | high | unable-to-assess), which clinical v1.18 makes domain-free for
+# exactly this purpose, and both are bound on health:AllergyRecordShape. See
+# the v2.9 changelog block above for why a health: spelling was not minted.
 
 # ----------------------------------------------------------------------------
 # Immunization properties

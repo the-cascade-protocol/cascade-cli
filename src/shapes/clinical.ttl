@@ -21,8 +21,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-08-28"^^xsd:date ;
-    owl:versionInfo "1.17" ;
+    dct:modified "2026-09-06"^^xsd:date ;
+    owl:versionInfo "1.19" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -731,8 +731,12 @@ clinical:allergyCategory a owl:DatatypeProperty ;
 
 clinical:criticality a owl:DatatypeProperty ;
     rdfs:label "Criticality"@en ;
-    rdfs:comment "Potential clinical harm (low, high, unable-to-assess)"@en ;
-    rdfs:domain clinical:Allergy ;
+    rdfs:comment """Potential clinical harm a FUTURE exposure to the substance carries: low | high | unable-to-assess. FHIR R4 AllergyIntolerance.criticality, required binding (https://hl7.org/fhir/R4/valueset-allergy-intolerance-criticality.html).
+
+This is NOT the severity of a reaction that has already happened. That is AllergyIntolerance.reaction.severity, which this vocabulary carries on health:allergySeverity with the value set mild | moderate | severe. The two axes cannot be folded into one slot: a reader given a single stored value cannot afterwards tell which question it answers.
+
+DOMAIN DELIBERATELY ABSENT (v1.18). Through v1.17 this property declared rdfs:domain clinical:Allergy, a class deprecated in v1.13 that no import path emits, so the property was unreachable in practice. The domain is dropped rather than moved to health:AllergyRecord or widened to a union, following the v1.16 treatment of clinical:verificationStatus: a domain on a cross-class predicate makes a reasoner infer the record's class, and the value set belongs in SHACL. In practice this property is written on health:AllergyRecord, where health:AllergyRecordShape binds it."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-allergy-intolerance-criticality.html> ;
     rdfs:range xsd:string .
 
 # ============================================================================
@@ -811,9 +815,13 @@ clinical:onsetDate a owl:DatatypeProperty ;
 
 clinical:abatementDate a owl:DatatypeProperty ;
     rdfs:label "Abatement Date"@en ;
-    rdfs:comment "Date when the condition resolved"@en ;
-    rdfs:domain clinical:Condition ;
-    rdfs:range xsd:dateTime .
+    rdfs:comment """Date when the condition resolved. FHIR R4 Condition.abatement[x] (https://hl7.org/fhir/R4/condition-definitions.html#Condition.abatement_x_).
+
+WRITTEN ON health:ConditionRecord. That is the class every import path emits for a condition; clinical:Condition is the class this property used to declare as its rdfs:domain, and that domain is DELIBERATELY ABSENT from v1.19. Dropping it rather than widening it to a union is the v1.16 treatment of clinical:verificationStatus, applied again in v1.18 to clinical:allergyType and clinical:criticality: a union on a cross-class predicate makes a reasoner infer that a health: record is a clinical:Condition, and a per-class constraint belongs in SHACL, where two classes can bind the same predicate differently. The constraint for this property is on health:ConditionRecordShape in health.shapes.ttl v1.7.
+
+health:abatementDate IS NOT A SECOND SPELLING. It is the predicate a reference import path currently writes, and no Cascade vocabulary declares it; see the note on clinical:startDate for the reasoning and the migration window, which this property shares."""@en ;
+    rdfs:range xsd:dateTime ;
+    owl:versionInfo "rdfs:domain clinical:Condition dropped in clinical v1.19" .
 
 clinical:clinicalStatus a owl:DatatypeProperty ;
     rdfs:label "Clinical Status"@en ;
@@ -1019,13 +1027,21 @@ clinical:instructions a owl:DatatypeProperty ;
 
 clinical:startDate a owl:DatatypeProperty ;
     rdfs:label "Start Date"@en ;
-    rdfs:comment "Start date for medication or treatment"@en ;
-    rdfs:range xsd:dateTime .
+    rdfs:comment """Start date for medication or treatment. This is the CANONICAL and only defined spelling: it is the property this vocabulary declares, the one clinical:MedicationShape names from v1.19, and the one the JSON-LD context maps. On a medication it carries FHIR R4 MedicationStatement.effective[x], which the IPS MedicationStatement profile makes 1..1 must-support (https://hl7.org/fhir/uv/ips/StructureDefinition-MedicationStatement-uv-ips.html); an effectivePeriod contributes its start here and its end to clinical:endDate.
+
+THE health: SPELLING IS NOT A SECOND SPELLING (v1.19). A reference import path writes the medication start to a `health:startDate` predicate that the health vocabulary does not define, on records it types clinical:Medication. So the only supplier for a 1..1 must-support IPS element is a predicate that officially does not exist: no shape constrains it and no context maps it. This is resolved in favour of clinical:startDate on the health v2.8 principle that one fact gets one predicate, and because the record is typed clinical:Medication, which makes a health: date on it a namespace mismatch inside a single record rather than a coherent alternative serialization.
+
+MIGRATION, and what a reader must re-query. The dates are OPTIONAL, so unlike clinical:procedureName in v1.15 there is nothing for an sh:or to rescue: no pod fails today for carrying the health: spelling and none will. clinical:MedicationDateSpellingShape fires a warning wherever health:startDate or health:endDate is present, and that warning is the whole window. Producers write clinical:startDate only. The shape is removed in a later clinical version, once the warning is observably absent from conforming output. A consumer querying health:startDate must add clinical:startDate to its query now and can drop the health: term at that later version."""@en ;
+    rdfs:range xsd:dateTime ;
+    owl:versionInfo "Canonical spelling restated, and the health: emission given a migration window, in clinical v1.19" .
 
 clinical:endDate a owl:DatatypeProperty ;
     rdfs:label "End Date"@en ;
-    rdfs:comment "End date for medication or treatment"@en ;
-    rdfs:range xsd:dateTime .
+    rdfs:comment """End date for medication or treatment. This is the CANONICAL and only defined spelling, on the same terms as clinical:startDate above. On a medication it carries the end of FHIR R4 MedicationStatement.effectivePeriod, part of the effective[x] element the IPS MedicationStatement profile makes 1..1 must-support (https://hl7.org/fhir/uv/ips/StructureDefinition-MedicationStatement-uv-ips.html).
+
+`health:endDate` is undefined by every Cascade vocabulary and is accepted only during the clinical v1.19 migration window, warned by clinical:MedicationDateSpellingShape. The rationale, the window and what a consumer must re-query are stated on clinical:startDate."""@en ;
+    rdfs:range xsd:dateTime ;
+    owl:versionInfo "Canonical spelling restated, and the health: emission given a migration window, in clinical v1.19" .
 
 # ============================================================================
 # Data Properties - Additional Allergy
@@ -1033,8 +1049,10 @@ clinical:endDate a owl:DatatypeProperty ;
 
 clinical:allergyType a owl:DatatypeProperty ;
     rdfs:label "Allergy Type"@en ;
-    rdfs:comment "Type of allergy (allergy vs intolerance)"@en ;
-    rdfs:domain clinical:Allergy ;
+    rdfs:comment """Whether the record is an immune-mediated allergy or a non-immune intolerance: allergy | intolerance. FHIR R4 AllergyIntolerance.type, required binding (https://hl7.org/fhir/R4/valueset-allergy-intolerance-type.html).
+
+DOMAIN DELIBERATELY ABSENT (v1.18). Through v1.17 this property declared rdfs:domain clinical:Allergy, a class deprecated in v1.13 that no import path emits, so the property was unreachable in practice. The domain is dropped rather than moved to health:AllergyRecord or widened to a union, following the v1.16 treatment of clinical:verificationStatus: a domain on a cross-class predicate makes a reasoner infer the record's class, and the value set belongs in SHACL. In practice this property is written on health:AllergyRecord, where health:AllergyRecordShape binds it."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/valueset-allergy-intolerance-type.html> ;
     rdfs:range xsd:string .
 
 # ============================================================================
@@ -1117,7 +1135,11 @@ clinical:issuedDate a owl:DatatypeProperty ;
 
 clinical:category a owl:DatatypeProperty ;
     rdfs:label "Category"@en ;
-    rdfs:comment "Category classification of the record"@en ;
+    rdfs:comment """Category classification of the record. Domain-free: what the category means is set by the class that carries it, and the value set therefore lives in SHACL rather than on this property.
+
+ON A CONDITION it carries FHIR R4 Condition.category: problem-list-item | encounter-diagnosis, extensible binding (https://hl7.org/fhir/R4/valueset-condition-category.html), which IPS marks must-support on Condition (https://hl7.org/fhir/uv/ips/StructureDefinition-Condition-uv-ips.html). That binding is declared on health:ConditionRecordShape in health.shapes.ttl v1.7, which targets the class conditions are actually typed as. Note what these two codes are NOT: "diagnosis" and "problem" are C-CDA section words, not members of this value set.
+
+health:conditionCategory IS NOT A DEFINED SPELLING. No Cascade vocabulary declares it; it is what a reference import path writes today, warned during the clinical v1.19 migration window by health:ConditionSpellingShape. See clinical:startDate for the reasoning and the ratchet."""@en ;
     rdfs:range xsd:string .
 
 clinical:notes a owl:DatatypeProperty ;
@@ -1421,6 +1443,95 @@ clinical:isActive a owl:DatatypeProperty ;
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.19 (2026-09-06)
+# - NO new terms, no term removed, renamed or deprecated, and no rdfs:range
+#   changes. One rdfs:domain is dropped and four rdfs:comment blocks are
+#   rewritten; clinical.ttl otherwise changes only in this changelog, its
+#   dct:modified and its owl:versionInfo. v1.18 is the allergy domain removals;
+#   this is the dates release the same proposal anticipated, which is why the
+#   number differs from the one that proposal named.
+# - THE GAP. A reference import path writes four predicates that no ontology in
+#   this repository declares: health:startDate and health:endDate on records it
+#   types clinical:Medication, and health:conditionCategory and
+#   health:abatementDate on health:ConditionRecord. Meanwhile clinical:startDate,
+#   clinical:endDate, clinical:abatementDate and clinical:category are all
+#   declared here. The vocabulary already had the terms, under a different prefix
+#   from the one the data used, so no shape constrained the written value and no
+#   context mapped it — and two of the four are the only supplier for an IPS
+#   must-support element: MedicationStatement.effective[x] is 1..1 must-support
+#   (https://hl7.org/fhir/uv/ips/StructureDefinition-MedicationStatement-uv-ips.html)
+#   and Condition.category is must-support
+#   (https://hl7.org/fhir/uv/ips/StructureDefinition-Condition-uv-ips.html).
+#   This is the clinical v1.15 clinical:procedureName defect, in four more places.
+# - THE RULING: the declared clinical: spellings win, on the health v2.8
+#   principle that a second spelling gives one fact two predicates. No health:
+#   term is minted, which is the point of the change: health.ttl is untouched and
+#   health stays at v2.9.
+# - DOMAIN DROPPED (1). clinical:abatementDate loses rdfs:domain
+#   clinical:Condition, so it is writable on health:ConditionRecord, the class
+#   every import path emits. Dropped rather than widened to a union, the v1.16
+#   treatment of clinical:verificationStatus applied again in v1.18 to
+#   clinical:allergyType and clinical:criticality: a union on a cross-class
+#   predicate makes a reasoner infer that a health: record is a clinical:Condition,
+#   and the per-class value set belongs in SHACL.
+# - COMMENTS REWRITTEN (4). clinical:startDate and clinical:endDate now state
+#   that they are the canonical and only defined spelling of
+#   MedicationStatement.effective[x], and that health:startDate / health:endDate
+#   are undefined and accepted only during this migration window.
+#   clinical:abatementDate states its FHIR element and its deliberately absent
+#   domain. clinical:category states the R4 condition-category codes it carries
+#   on a condition, and that health:conditionCategory is not a defined spelling.
+# - SHACL. clinical:MedicationShape declares clinical:startDate and
+#   clinical:endDate (xsd:date or xsd:dateTime, sh:maxCount 1) and the new
+#   clinical:MedicationDateSpellingShape warns on the health: spellings.
+#   health.shapes.ttl v1.7 declares clinical:abatementDate and clinical:category
+#   on health:ConditionRecordShape, with health:ConditionSpellingShape for the
+#   health: spellings there; those two live in that file because a shape reaches
+#   a class by sh:targetClass and the class is health:ConditionRecord, exactly as
+#   v1.6 did for clinical:allergyType. Everything new is at sh:Warning, per the
+#   core v3.5 ratchet.
+# - MIGRATION WINDOW. Unlike v1.15 there is no sh:or: these dates and this
+#   category are optional at the shape level, so no pod fails today for carrying
+#   the health: spelling and none will. The warning shapes are the whole window,
+#   and they are removed in a later clinical version once the warning is
+#   observably absent from conforming output. A consumer querying the health:
+#   spellings must add the clinical: ones now.
+# - COMPATIBILITY. Strictly widening. Dropping an rdfs:domain removes an
+#   entailment and adds none, no shape encoded it, and every new finding is at
+#   sh:Warning, so every graph that validated under v1.18 validates under v1.19.
+#   Nothing in any pod has to be rewritten.
+#
+# Version 1.18 (2026-09-05)
+# - NO new terms, no term removed, renamed or deprecated, and no value changes
+#   meaning. Two rdfs:domain declarations are dropped and two rdfs:comment
+#   blocks are rewritten; clinical.ttl otherwise changes only in this
+#   changelog, its dct:modified and its owl:versionInfo.
+# - DOMAINS DROPPED (2). clinical:allergyType and clinical:criticality each
+#   declared rdfs:domain clinical:Allergy. That class was deprecated in v1.13
+#   and no import path emits it, so both properties were unreachable in
+#   practice while the facts they name — FHIR R4 AllergyIntolerance.type and
+#   AllergyIntolerance.criticality, both required bindings — had nowhere to go
+#   on the record that IS emitted, health:AllergyRecord.
+# - This is the v1.16 pattern, applied a second time. v1.16 dropped
+#   clinical:verificationStatus's rdfs:domain clinical:Condition for the same
+#   reason and with the same reasoning: the domain is DROPPED rather than
+#   widened to a union, because a union on a cross-class predicate makes a
+#   reasoner infer that an allergy record is a Condition, and because the
+#   per-class value set belongs in SHACL where two classes can bind the same
+#   predicate differently.
+# - No health: spelling was minted for either fact. That follows the health
+#   v2.8 principle: clinical:status and clinical:verificationStatus are already
+#   the domain-free carriers both import paths write onto health: records, and
+#   a second spelling would give one fact two predicates.
+# - SHACL. No change in this file. The two value sets are declared on
+#   health:AllergyRecordShape in health.shapes.ttl v1.6, which targets the class
+#   that actually carries them, both at sh:Warning per the core v3.5 ratchet.
+#   Paired with health v2.9, which adds health:allergenCode and
+#   health:manifestationCode.
+# - COMPATIBILITY. Strictly widening. Dropping an rdfs:domain removes an
+#   entailment and adds none; no shape encoded either domain, so no pod is
+#   affected and every graph that validated under v1.17 validates under v1.18.
 #
 # Version 1.17 (2026-08-28)
 # - NO new terms, and no term changes meaning. This version is a SHACL severity

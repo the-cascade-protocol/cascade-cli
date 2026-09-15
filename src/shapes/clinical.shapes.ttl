@@ -14,6 +14,38 @@
 # different data sources (EHR, device, patient-reported).
 #
 # Changelog:
+# v1.19 (2026-09-06): Declare the medication effective dates on the shape that
+#     carries them, and warn on the undefined health: spelling. Shapes-only,
+#     additive, and both new findings are at sh:Warning.
+#
+#     Paired with clinical v1.19 (comment-only on clinical:startDate and
+#     clinical:endDate, plus the clinical:abatementDate domain drop) and
+#     health.shapes.ttl v1.7 (the condition half of the same ruling). health.ttl
+#     is NOT touched: this release mints no health: term, which is the point.
+#
+#     1. clinical:MedicationShape declares clinical:startDate and
+#        clinical:endDate, each sh:or ( xsd:date xsd:dateTime ) with
+#        sh:maxCount 1, modelled on health:onsetDate in
+#        health:ConditionRecordShape: FHIR's dateTime primitive permits date
+#        precision, so a source that stated only a calendar day must not be
+#        given an invented time. Through v1.18 the shape named neither, so the
+#        only supplier for MedicationStatement.effective[x] — 1..1 must-support
+#        in IPS — was unconstrained.
+#     2. NEW clinical:MedicationDateSpellingShape, sh:targetSubjectsOf
+#        health:startDate and sh:targetSubjectsOf health:endDate, each with an
+#        sh:maxCount 0 property shape at sh:Warning. Modelled on
+#        clinical:ProcedureNameSpellingShape (v1.15): targeting the SUBJECTS OF
+#        the deprecated predicate fires exactly once per record that carries it
+#        and never on a record that does not, whatever that record is typed.
+#
+#     UNLIKE v1.15, THERE IS NO sh:or ON THE NODE SHAPE. clinical:procedureName
+#     needed one because the name is REQUIRED and every converted procedure was
+#     failing that requirement while carrying a name. These dates are optional
+#     at the shape level, so no pod fails today for carrying the health:
+#     spelling and none will; the warning shape is the whole migration window.
+#     It is removed in a later clinical version once the warning is observably
+#     absent from conforming output, and nothing has to be restored when it goes.
+#
 # v1.17 (2026-08-28): Stop sh:node from escalating a nested sh:Warning into a
 #     sh:Violation. Strictly widening: no graph that validated under v1.16 stops
 #     validating, and six document classes stop being REJECTED for a value
@@ -898,6 +930,39 @@ clinical:MedicationShape a sh:NodeShape ;
         sh:name "Clinical Intent"@en
     ] ;
 
+    # v1.19: the medication effective dates. FHIR R4
+    # MedicationStatement.effective[x], which the IPS MedicationStatement
+    # profile makes 1..1 must-support
+    # (https://hl7.org/fhir/uv/ips/StructureDefinition-MedicationStatement-uv-ips.html);
+    # an effectivePeriod contributes .start here and .end below.
+    #
+    # clinical:startDate and clinical:endDate are the canonical and only defined
+    # spellings; the health: spellings a reference import path writes are warned
+    # by clinical:MedicationDateSpellingShape below. The rationale and the
+    # migration window are on clinical:startDate in clinical.ttl.
+    #
+    # The sh:or over xsd:date and xsd:dateTime is the health:onsetDate form: a
+    # source that stated only a calendar day must not be given an invented time.
+    # sh:Warning per the core v3.5 ratchet: first release to constrain either
+    # predicate, so an untyped or xsd:string literal is reported, not rejected.
+    sh:property [
+        sh:path clinical:startDate ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:maxCount 1 ;
+        sh:name "Start Date"@en ;
+        sh:message "Start Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path clinical:endDate ;
+        sh:or ( [ sh:datatype xsd:date ] [ sh:datatype xsd:dateTime ] ) ;
+        sh:maxCount 1 ;
+        sh:name "End Date"@en ;
+        sh:message "End Date must be an xsd:date or an xsd:dateTime. FHIR's dateTime primitive permits date precision (YYYY, YYYY-MM, YYYY-MM-DD), so a source that stated only a calendar day must not be given an invented time; an untyped or xsd:string literal is not either type."@en ;
+        sh:severity sh:Warning
+    ] ;
+
     # Optional: refillsAllowed
     sh:property [
         sh:path clinical:refillsAllowed ;
@@ -931,6 +996,46 @@ clinical:MedicationShape a sh:NodeShape ;
         sh:maxCount 1 ;
         sh:in ("community" "inpatient" "discharge") ;
         sh:name "Prescription Category"@en
+    ] .
+
+# The migration signal for the medication effective-date spellings (clinical v1.19).
+#
+# Kept in its own shape so that its severity is unambiguous: this is sh:Warning,
+# while clinical:MedicationShape's own constraints keep their declared severities.
+# It targets the SUBJECTS OF the deprecated predicates rather than the class, so
+# it fires exactly once per record that carries a health: date and never on a
+# record that does not, whatever that record is typed. One shape carries both
+# targets: sh:targetSubjectsOf is repeatable and the targets union, so a record
+# carrying both spellings is reached once and reports one result per predicate.
+#
+# UNLIKE clinical:ProcedureNameSpellingShape (v1.15) there is NO sh:or window on
+# clinical:MedicationShape to pair with this. The name that shape rescues is
+# REQUIRED, and every converted procedure was failing that requirement while
+# carrying a name; these dates are OPTIONAL at the shape level, so no pod fails
+# today for carrying the health: spelling and none will. This warning is the
+# whole migration window. It closes when the warning is observably absent from
+# conforming output, at which point this shape is simply removed and nothing has
+# to be restored in its place.
+clinical:MedicationDateSpellingShape a sh:NodeShape ;
+    sh:targetSubjectsOf health:startDate ;
+    sh:targetSubjectsOf health:endDate ;
+    rdfs:label "Medication Date Spelling Shape"@en ;
+    rdfs:comment "Warns that a record carries the deprecated health:startDate or health:endDate spelling. Accepted during the clinical v1.19 migration window; removed with the window."@en ;
+
+    sh:property [
+        sh:path health:startDate ;
+        sh:maxCount 0 ;
+        sh:name "Start Date (deprecated spelling)"@en ;
+        sh:message "Medication start is written on health:startDate, which no Cascade vocabulary defines. Write clinical:startDate instead: it is the canonical spelling, the one clinical:MedicationShape names, and the one the JSON-LD context maps. It carries FHIR R4 MedicationStatement.effective[x], 1..1 must-support in the IPS MedicationStatement profile. Accepted during the clinical v1.19 migration window; this becomes a VIOLATION when the window closes."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:endDate ;
+        sh:maxCount 0 ;
+        sh:name "End Date (deprecated spelling)"@en ;
+        sh:message "Medication end is written on health:endDate, which no Cascade vocabulary defines. Write clinical:endDate instead: it is the canonical spelling, the one clinical:MedicationShape names, and the one the JSON-LD context maps. It carries the end of FHIR R4 MedicationStatement.effectivePeriod. Accepted during the clinical v1.19 migration window; this becomes a VIOLATION when the window closes."@en ;
+        sh:severity sh:Warning
     ] .
 
 # ============================================================================

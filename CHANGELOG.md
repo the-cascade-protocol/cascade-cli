@@ -11,6 +11,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+**Shapes synced to spec d819bc2: core v3.9, health v2.9, clinical v1.19 (0.21.1).**
+A catch-up sync of three releases spec published between 2026-09-05 and 2026-09-08,
+which this repo never pulled; the vendored-shapes CI gate had been red since the
+bump with no PR open to show it. health v2.9 adds `health:allergenCode` and
+`health:manifestationCode` (IRI-valued, repeatable, optional) so a coded allergen
+and a coded manifestation have somewhere to go; clinical v1.18 makes
+`clinical:allergyType` and `clinical:criticality` writable on
+`health:AllergyRecord` by dropping a domain on a deprecated class; clinical v1.19
+rules the declared `clinical:` spellings canonical for the medication effective
+dates and the condition abatement and category, opening a migration window with
+two `sh:Warning` spelling shapes; core v3.9 mints nothing and adds
+`cascade:ExtendedProfileShape` for the pod owner's name on `profile/extended.ttl`.
+
+Every release is strictly widening and every new constraint is at `sh:Warning`,
+so no converter behavior, fixture or expected output changes. Two consequences
+are deliberately left to their own changes: this repo still writes
+`health:startDate` and `health:endDate` on medications, so its output now raises
+the new migration warning against its own bundled shapes; and the FHIR Patient
+builder still reads `cascade:PatientProfile` only, so it emits a Patient with no
+name even though the name now has a declared home.
+
 **Shapes synced to spec 9b13ae4: clinical v1.17, coverage v1.6, core v3.8 (0.21.1).**
 clinical v1.17 stops `sh:node` escalating the Warning-severity status bindings to
 Violation on the six document subtypes (the warnings now fire named from
