@@ -51,6 +51,7 @@
     "docs/pod-encryption.md",
     "README.md",
     "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
     "DOCKER.md"
   ],
   "dependencies": {
