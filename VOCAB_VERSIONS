@@ -144,9 +144,49 @@
 #     attachmentPath, attachmentMediaType, contentHash, hashAlgorithm,
 #     byteSize, attachmentTitle) for content-addressed binary storage. Synced
 #     and bundled; no converter emits it yet (root backlog 3.276).
-core=3.8
-health=2.8
-clinical=1.17
+#
+# 2026-09-15 — core 3.8→3.9, health 2.8→2.9, clinical 1.17→1.19 (two releases)
+#   A catch-up sync, not a release of its own: spec published these between
+#   2026-09-05 and 2026-09-08 and this repo never ran step 4 of the vocabulary
+#   change checklist. The "Vendored shapes match spec" gate had been red since
+#   the bump and nobody saw it, because main's last CI run predated it and no PR
+#   opened in between (root backlog 3.441). Synced from spec d819bc2 with
+#   scripts/sync-shapes-from-spec.sh; six files changed and no other.
+#   - health v2.9 adds health:allergenCode and health:manifestationCode, both
+#     IRI-valued, repeatable and optional, so an importer reading code.coding on
+#     an allergy has somewhere to put it (IPS AllergyIntolerance.code is 1..1
+#     must-support and reaction.manifestation is must-support). health:reaction
+#     is documented as one literal per manifestation, and health:allergySeverity
+#     as reaction severity and never criticality.
+#   - clinical v1.18 drops rdfs:domain clinical:Allergy from clinical:allergyType
+#     and clinical:criticality, the class deprecated in v1.13 that no import path
+#     emits, so both become writable on health:AllergyRecord. health.shapes.ttl
+#     v1.6 binds them to the FHIR R4 required value sets.
+#   - clinical v1.19 drops rdfs:domain clinical:Condition from
+#     clinical:abatementDate and rules the declared clinical: spellings canonical
+#     for four predicates a reference import path writes under health:
+#     (startDate, endDate, abatementDate, conditionCategory). Two new spelling
+#     shapes, clinical:MedicationDateSpellingShape and
+#     health:ConditionSpellingShape, target the SUBJECTS of the undefined
+#     health: spellings at sh:maxCount 0 and sh:Warning: the migration window.
+#     **The converter change is NOT in this sync.** This repo still writes
+#     health:startDate and health:endDate on clinical:Medication, so its own
+#     output now raises those warnings against its own bundled shapes. That is
+#     the window working as designed, and closing it is a separate change.
+#   - core v3.9 mints nothing. core.shapes.ttl v1.8 adds
+#     cascade:ExtendedProfileShape (sh:targetSubjectsOf cascade:dateOfBirth,
+#     with foaf:givenName / foaf:familyName / foaf:name, each xsd:string,
+#     maxCount 1, minLength 1, at sh:Warning), giving the pod owner's name a
+#     declared home on profile/extended.ttl. The Patient builder here still reads
+#     cascade:PatientProfile only and emits a Patient with no name; teaching it
+#     the extended profile is a separate change (root backlog 3.396).
+#   Every release above is strictly widening and every new finding is at
+#   sh:Warning per the core v3.5 ratchet, so no pod, fixture or expected output
+#   changes. evidence.ttl and genomics.shapes.ttl, deliberately held back from
+#   three previous syncs, produced no diff this time and were not touched.
+core=3.9
+health=2.9
+clinical=1.19
 coverage=1.6
 checkup=3.3
 pots=1.4

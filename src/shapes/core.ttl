@@ -19,8 +19,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-08-28"^^xsd:date ;
-    owl:versionInfo "3.8" ;
+    dct:modified "2026-09-08"^^xsd:date ;
+    owl:versionInfo "3.9" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -258,22 +258,46 @@ cascade:preferredUnits a owl:DatatypeProperty ;
     rdfs:range xsd:string .
 
 # ============================================================================
-# Patient Profile (v2.0)
+# Patient Profile (v2.0, name home corrected in v3.9)
 # ============================================================================
 # Health-specific patient demographics, designed to complement a Solid-compatible
 # foaf:Agent identity profile. The general identity profile (/profile/card.ttl)
 # uses foaf:/vcard:/dct: vocabularies. This health profile (/profile/health.ttl)
 # uses cascade: for health-relevant demographics that are always private.
 #
-# Two-document profile model (Solid WebID Profile pattern):
-#   /profile/card.ttl  -- foaf:Agent with foaf:givenName, foaf:familyName,
-#                          vcard:hasEmail, vcard:hasTelephone, dct:language
-#                          (linked via rdfs:seeAlso to health profile)
-#   /profile/health.ttl -- cascade:PatientProfile with health-specific data
+# THE OWNER'S REAL NAME DOES NOT LIVE IN card.ttl. This block said until core
+# v3.9 that /profile/card.ttl carries foaf:givenName and foaf:familyName. It does
+# not, and it must not: pod-structure.md section 3.2 makes card.ttl publicly
+# readable and forbids PHI in it, and a person's name is PHI. The name lives on
+# <#me> in /profile/extended.ttl, the Solid extended profile, using
+# foaf:givenName, foaf:familyName and foaf:name (pod-structure.md section 3.6).
+# foaf:name in card.ttl stays, and is a GENERIC DISPLAY NAME -- the string a
+# client can show before the pod has been unlocked -- not the owner's real name.
+#
+# /profile/extended.ttl is inside the encrypted pod, exactly like every other
+# pod file. Nothing about holding a name there is a new exposure; the reason it
+# is not in card.ttl is that card.ttl is the one profile document a pod is
+# expected to serve to unauthenticated readers.
+#
+# Three-document profile model (Solid WebID Profile pattern):
+#   /profile/card.ttl     -- foaf:Person, PUBLIC. foaf:name as a generic display
+#                            name, pim:storage, solid:publicTypeIndex,
+#                            rdfs:seeAlso to the extended profile. No PHI.
+#   /profile/extended.ttl -- the same <#me> subject, OWNER-ONLY. The real name
+#                            (foaf:givenName, foaf:familyName, foaf:name),
+#                            cascade:dateOfBirth, vcard:hasTelephone,
+#                            vcard:hasEmail, address.
+#   /profile/health.ttl   -- cascade:PatientProfile with health-specific data
 #
 # Design rationale: Separate documents enable different access control policies.
-# The general profile may be shared; the health profile is always private.
-# See Schema Refactoring Plan WS6 for full architectural discussion.
+# The general profile may be shared; the extended and health profiles are always
+# private. See Schema Refactoring Plan WS6 for full architectural discussion.
+#
+# NO CASCADE NAME TERM IS MINTED. FOAF already defines foaf:givenName,
+# foaf:familyName and foaf:name, and this vocabulary does not name again what a
+# ratified vocabulary has already named. cascade:ExtendedProfileShape in
+# core.shapes.ttl is what core v3.9 adds, and it constrains the FOAF terms
+# wherever an extended profile carries them.
 
 cascade:PatientProfile a owl:Class ;
     rdfs:label "Patient Profile"@en ;
@@ -826,6 +850,51 @@ WHAT THIS IS NOT. It is not an interpretation, and it is not a substitute for on
 
 # ============================================================================
 # Changelog
+#
+# Version 3.9 (2026-09-08)
+# - THE POD OWNER'S NAME GETS A DECLARED HOME, AND IT IS NOT A NEW TERM. No
+#   class and no property is added by this version. The name of the person a
+#   pod belongs to lives on <#me> in /profile/extended.ttl as foaf:givenName,
+#   foaf:familyName and foaf:name. FOAF already defines all three, so minting a
+#   cascade: spelling would give one fact two predicates for no gain.
+# - THE GAP THIS CLOSES. The canonical layer's external form is the HL7 FHIR
+#   International Patient Summary, and Patient-uv-ips makes Patient.name 1..*
+#   with the SHALL:populate obligation and invariant ips-pat-1, which requires
+#   at least one of family, given or text. No ontology in this repository
+#   declared a name for the pod owner, so an export had nowhere to read one
+#   from. See
+#   https://hl7.org/fhir/uv/ips/StructureDefinition-Patient-uv-ips.html
+# - WHY THE EXTENDED PROFILE AND NOT card.ttl. pod-structure.md section 3.2
+#   makes /profile/card.ttl the publicly-readable profile document and forbids
+#   PHI in it; a real name is PHI. Section 3.6 is where PHI about the WebID
+#   subject already lives, which is the Solid extended-profile convention, and
+#   the file is inside the encrypted pod exactly like every other pod file.
+#   foaf:name in card.ttl is unchanged and remains a generic display name shown
+#   before the pod is unlocked. The Patient Profile comment block above said the
+#   name lived in card.ttl and has been corrected; it planned the FOAF terms and
+#   named the wrong file.
+# - SHACL: cascade:ExtendedProfileShape (core.shapes.ttl 1.7 to 1.8). Open-world
+#   and sh:targetSubjectsOf cascade:dateOfBirth, because an extended profile
+#   carries no rdf:type of its own to target. Each of the three name properties
+#   is xsd:string, sh:maxCount 1, sh:minLength 1, at sh:Warning per the core
+#   v3.5 ratchet. Presence is not required at any severity.
+# - CARDINALITY OF givenName IS A DELIBERATE 1, even though FOAF and FHIR both
+#   allow several. A second given name goes in foaf:name, which carries the
+#   whole name as one string and is what IPS Patient.name.text is built from.
+#   The mapping is family <- foaf:familyName, given <- foaf:givenName,
+#   text <- foaf:name.
+# - JSON-LD: contexts/v1/core.jsonld gains givenName, familyName and name,
+#   mapped to the FOAF IRIs with "@type": "xsd:string". The foaf prefix was
+#   already declared there and none of the three keys collided with an existing
+#   term in any published context.
+# - COMPATIBILITY. Strictly widening. Nothing is renamed, removed or deprecated,
+#   and no pod is rewritten. cascade:ExtendedProfileShape evaluates only nodes
+#   that already carry cascade:dateOfBirth, and every constraint on it is
+#   optional-with-maxCount, so a node reached by it that carries no name reports
+#   nothing. cascade:PatientProfile nodes in /profile/health.ttl also carry
+#   cascade:dateOfBirth and are therefore ALSO reached by this shape; that is
+#   harmless for the same reason, and they continue to be constrained by
+#   cascade:PatientProfileShape as before.
 #
 # Version 3.7 (2026-08-27)
 # - Defined pod attachments: one class and seven properties for binary

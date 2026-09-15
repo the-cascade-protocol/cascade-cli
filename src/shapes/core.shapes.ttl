@@ -3,17 +3,29 @@
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix dct: <http://purl.org/dc/terms/> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
 
 # ============================================================================
 # Cascade Protocol -- Core Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.7 (2026-08-27)
+# Version: 1.8 (2026-09-08)
 # Validates: cascade:PatientProfile, cascade:Address, cascade:EmergencyContact,
 #            cascade:PharmacyInfo, cascade:AdvanceDirectives, cascade:ProxyAgent,
 #            cascade:ExportManifest, cascade:RecordSummary,
-#            cascade:InteractionScenario, cascade:Attachment, and the values of
+#            cascade:InteractionScenario, cascade:Attachment, the pod owner's
+#            extended profile (/profile/extended.ttl), and the values of
 #            cascade:sourceIdentity, cascade:dataAbsentReason and
 #            cascade:hasAttachment wherever they appear
+#
+# CHANGELOG
+#   1.8 (2026-09-08) -- Added cascade:ExtendedProfileShape for core v3.9: the
+#                       pod owner's name on <#me> in /profile/extended.ttl,
+#                       foaf:givenName / foaf:familyName / foaf:name, each
+#                       xsd:string, sh:maxCount 1, sh:minLength 1, at
+#                       sh:Warning. Open-world (sh:targetSubjectsOf
+#                       cascade:dateOfBirth); presence is not required.
+#   1.7 (2026-08-27) -- Attachment shapes (core v3.7). See the Changelog at the
+#                       foot of this file for every earlier version.
 #
 # Severity levels:
 #   sh:Violation -- Must fix (blocks operations)
@@ -612,6 +624,73 @@ cascade:AdvisoryApplicationActivityShape a sh:NodeShape ;
     ] .
 
 # ============================================================================
+# Shape: Extended Profile -- the pod owner's name (core v3.9)
+# ============================================================================
+# The name of the person a pod belongs to lives on <#me> in
+# /profile/extended.ttl, using FOAF. pod-structure.md section 3.6 is the
+# normative file layout; this shape is what checks the values.
+#
+# WHY sh:targetSubjectsOf cascade:dateOfBirth
+# -------------------------------------------
+# An extended profile carries NO rdf:type of its own. Its subject is the same
+# <#me> WebID that /profile/card.ttl types foaf:Person, and the extended
+# document adds predicates to it without re-typing it, which is the whole point
+# of the Solid extended-profile convention. There is therefore no class to put
+# in sh:targetClass, and cascade:dateOfBirth is the one predicate an extended
+# profile is expected to carry (section 3.6's example leads with it).
+#
+# One consequence, stated rather than discovered: cascade:PatientProfile nodes
+# in /profile/health.ttl ALSO carry cascade:dateOfBirth, so they are ALSO
+# reached by this shape. That is harmless. Every constraint here is
+# optional-with-maxCount, so a patient profile that carries no FOAF name
+# reports nothing, and one that does carry a well-formed name reports nothing
+# either. cascade:PatientProfileShape continues to constrain those nodes
+# through sh:targetClass exactly as before; this shape adds to what reaches
+# them and takes nothing away.
+#
+# WHY sh:Warning
+# --------------
+# The core v3.5 ratchet: a constraint on a fact no producer has yet had the
+# opportunity to write enters at sh:Warning. Nothing here is required at any
+# severity -- absence of a name is not a finding in core v3.9 -- and what is
+# checked is only the form of a name that IS written.
+
+cascade:ExtendedProfileShape a sh:NodeShape ;
+    sh:targetSubjectsOf cascade:dateOfBirth ;
+    rdfs:label "Extended Profile Shape"@en ;
+    rdfs:comment "Constrains the pod owner's name on <#me> in /profile/extended.ttl. The name is PHI and belongs here, NOT in /profile/card.ttl, which is publicly readable and carries only a generic display name (pod-structure.md sections 3.2 and 3.6); /profile/extended.ttl is inside the encrypted pod like every other pod file. An extended profile carries no rdf:type of its own, so this shape targets the subjects of cascade:dateOfBirth; cascade:PatientProfile nodes in /profile/health.ttl carry that property too and are therefore also reached, which is harmless because every constraint here is optional with a maxCount. A name known only as one string goes in foaf:name. foaf:givenName is deliberately maxCount 1 even though FOAF and FHIR allow several: a second given name goes in foaf:name. This is the source of IPS Patient.name -- family from foaf:familyName, given from foaf:givenName, text from foaf:name -- and one of the three must be present for invariant ips-pat-1. See https://hl7.org/fhir/uv/ips/StructureDefinition-Patient-uv-ips.html"@en ;
+
+    sh:property [
+        sh:path foaf:givenName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Given Name"@en ;
+        sh:message "foaf:givenName on the pod owner must be a single non-empty string. The cardinality is a deliberate 1: a second given name goes in foaf:name, which carries the whole name as one string. An empty value is what a form with an untouched field writes."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path foaf:familyName ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Family Name"@en ;
+        sh:message "foaf:familyName on the pod owner must be a single non-empty string. An empty value is what a form with an untouched field writes, and it is not the same fact as having no family name at all."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path foaf:name ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Full Name"@en ;
+        sh:message "foaf:name on the pod owner must be a single non-empty string: the whole name as one string, which is what IPS Patient.name.text carries. A name known only as one string goes here, and so does a second given name. Note that foaf:name in /profile/card.ttl is a different thing, a generic display name shown before the pod is unlocked."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ============================================================================
 # Shape: Source Identity (core v3.5)
 # ============================================================================
 # The ORIGIN axis. See cascade:sourceIdentity in core.ttl for the value form and
@@ -870,6 +949,26 @@ cascade:HasAttachmentEdgeShape a sh:PropertyShape ;
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.8 (2026-09-08)
+# - Added cascade:ExtendedProfileShape for core v3.9's home for the pod owner's
+#   name: foaf:givenName, foaf:familyName and foaf:name on <#me> in
+#   /profile/extended.ttl. Each is xsd:string, sh:maxCount 1, sh:minLength 1,
+#   at sh:Warning per the core v3.5 ratchet. No new Cascade term backs it; FOAF
+#   already defines all three.
+# - sh:targetSubjectsOf cascade:dateOfBirth rather than sh:targetClass, because
+#   an extended profile carries no rdf:type of its own: it adds predicates to
+#   the same <#me> subject that card.ttl types foaf:Person. cascade:PatientProfile
+#   nodes in /profile/health.ttl carry cascade:dateOfBirth too and are therefore
+#   also reached, which changes no verdict because every constraint here is
+#   optional-with-maxCount.
+# - sh:minLength 1 is the constraint that earns its place: the empty string is
+#   what a form with an untouched field writes, and an empty family name is a
+#   different defect from a missing one. Presence is NOT required at any
+#   severity, so a pod written before v3.9 validates unchanged.
+# - givenName is capped at 1 deliberately; a second given name goes in
+#   foaf:name. The three properties are the source of IPS Patient.name (family,
+#   given, text) and invariant ips-pat-1.
 #
 # Version 1.7 (2026-08-27)
 # - Added cascade:AttachmentShape, cascade:AttachmentMediaTypeShape and
