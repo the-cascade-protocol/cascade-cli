@@ -1,8 +1,11 @@
 /**
  * Extract C-CDA section narrative <text> blocks as clinical:ClinicalDocument nodes.
  *
- * P5.1-A: Emits cascade:narrativeText (plain text, markup stripped) and
- * cascade:requiresLLMExtraction (true when section has no <entry> children).
+ * Emits the section text once, as clinical:narrativeText (plain text, markup
+ * stripped), and cascade:requiresLLMExtraction (true when the section has no
+ * <entry> children). Earlier releases wrote the same text under two undeclared
+ * spellings, cascade:narrativeText and clinical:content; neither is written
+ * any more, and readers accept all three through lib/narrative-text.ts.
  */
 
 import { NS } from '../fhir-converter/types.js';
@@ -10,6 +13,7 @@ import { ccdaRecordUri } from './record-identity.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
 import { extractNarrativeText } from './narrative-extractor.js';
+import { NARRATIVE_TEXT_PREDICATE } from '../narrative-text.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -73,17 +77,12 @@ export function extractNarrativeQuads(
     quads.push(makeQuad(subj, namedNode(NS.clinical + 'sourceEHR'), literal(ehr, namedNode(NS.xsd + 'string'))));
   }
 
-  // P5.1-A: emit cascade:narrativeText as plain text (LLM-ready)
+  // The section text, plain (LLM-ready), on the declared predicate only.
   if (narrativeStr.trim()) {
-    quads.push(makeQuad(subj, namedNode(NS.cascade + 'narrativeText'), literal(narrativeStr)));
+    quads.push(makeQuad(subj, namedNode(NARRATIVE_TEXT_PREDICATE), literal(narrativeStr)));
   }
 
-  // Legacy: keep cascade:content for backward compatibility (was clinical:content)
-  if (narrativeStr.trim()) {
-    quads.push(makeQuad(subj, namedNode(NS.clinical + 'content'), literal(narrativeStr)));
-  }
-
-  // P5.1-A: mark narrative-only sections
+  // Mark narrative-only sections
   quads.push(makeQuad(
     subj,
     namedNode(NS.cascade + 'requiresLLMExtraction'),

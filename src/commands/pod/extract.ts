@@ -8,8 +8,8 @@
  * Requires: cascade agent serve (running on localhost:8765)
  *
  * Flow:
- *   1. Read clinical/documents.ttl — find ClinicalDocument nodes where
- *      cascade:requiresLLMExtraction = "true"
+ *   1. Read clinical/documents.ttl and find the ClinicalDocument nodes that carry
+ *      narrative text (clinical:narrativeText, or a legacy spelling)
  *   2. Check cascade-agent is reachable at localhost:8765/health
  *   3. POST each narrative block to /extract
  *   4. Route results by confidence:
@@ -31,6 +31,7 @@ import { getProperties, CASCADE_NAMESPACES } from '../../lib/turtle-parser.js';
 import { resolvePodDir, fileExists } from './helpers.js';
 import { openPod, PodUnreadableError, type PodReader } from '../../lib/pod-read.js';
 import { toJsonText } from '../../lib/json-output.js';
+import { readNarrativeText } from '../../lib/narrative-text.js';
 
 // ── LOINC section code → CDA section string (used by /extract API) ───────────
 
@@ -373,7 +374,6 @@ export function registerExtractSubcommand(pod: Command): void {
       const NS_CASCADE    = CASCADE_NAMESPACES.cascade;
       const NS_CLINICAL   = CASCADE_NAMESPACES.clinical;
       const PRED_REQUIRES  = NS_CASCADE + 'requiresLLMExtraction';
-      const PRED_NARRATIVE = NS_CASCADE + 'narrativeText';
       const PRED_SECTION   = NS_CASCADE + 'sectionCode';
       const TYPE_DOC       = NS_CLINICAL + 'ClinicalDocument';
 
@@ -384,7 +384,8 @@ export function registerExtractSubcommand(pod: Command): void {
         const props = getProperties(parsed.store, subject.uri);
 
         const requiresLLM   = props[PRED_REQUIRES]?.[0];
-        const narrativeText = props[PRED_NARRATIVE]?.[0];
+        // All three narrative spellings read as one value; see lib/narrative-text.ts.
+        const narrativeText = readNarrativeText(props);
         const sectionCode   = props[PRED_SECTION]?.[0] ?? '';
 
         if (!narrativeText?.trim() && requiresLLM !== 'true') continue;

@@ -18,6 +18,8 @@ import {
   EPIC_STATUS_CODES,
 } from '../src/lib/ccda-converter/vendor-normalizer.js';
 import { convertCcda } from '../src/lib/ccda-converter/index.js';
+import { extractNarrativeQuads } from '../src/lib/ccda-converter/narrative.js';
+import { Parser } from 'n3';
 import { conformancePath } from './helpers/conformance.js';
 
 const FIXTURES_DIR = conformancePath('fixtures/ccda');
@@ -197,16 +199,79 @@ describe('P5.1-A: narrative-only section (P4-F fixture)', () => {
 });
 
 // =============================================================================
-// P5.1-A: TTL output contains cascade:narrativeText and cascade:requiresLLMExtraction
+// TTL output: the section narrative is written on the declared predicate
 // =============================================================================
 
-describe('P5.1-A: TTL output includes cascade:narrativeText', () => {
-  it('full-summarization.xml output contains cascade:narrativeText predicate', async () => {
-    const xml = readFixture('full-summarization.xml');
-    const result = await convertCcda(xml, { sourceSystem: 'TestSystem' });
-    expect(result.errors).toHaveLength(0);
-    expect(result.output).toContain('narrativeText');
+const CLINICAL_NARRATIVE_TEXT = 'https://ns.cascadeprotocol.org/clinical/v1#narrativeText';
+/** Undeclared spellings earlier releases wrote. A converter must write neither. */
+const LEGACY_NARRATIVE_SPELLINGS = [
+  'https://ns.cascadeprotocol.org/core/v1#narrativeText',
+  'https://ns.cascadeprotocol.org/clinical/v1#content',
+];
+const SECTION_CODE = 'https://ns.cascadeprotocol.org/core/v1#sectionCode';
+
+/** Per section-narrative subject, how many objects each predicate carries. */
+function narrativeCounts(ttl: string): Map<string, Map<string, number>> {
+  const quads = new Parser().parse(ttl);
+  const sectionSubjects = new Set(
+    quads.filter((q) => q.predicate.value === SECTION_CODE).map((q) => q.subject.value),
+  );
+  const out = new Map<string, Map<string, number>>();
+  for (const s of sectionSubjects) out.set(s, new Map());
+  for (const q of quads) {
+    const counts = out.get(q.subject.value);
+    if (!counts) continue;
+    counts.set(q.predicate.value, (counts.get(q.predicate.value) ?? 0) + 1);
+  }
+  return out;
+}
+
+describe('C-CDA section narrative is written once, on clinical:narrativeText', () => {
+  it('extractNarrativeQuads emits the exact declared IRI once and neither legacy spelling', () => {
+    const quads = extractNarrativeQuads(
+      { paragraph: 'Follow up in two weeks.' },
+      '18776-5',
+      'summarization',
+      'DOC-1',
+      'TestSystem',
+      '2026-01-01T00:00:00.000Z',
+      true,
+    );
+    const predicates = quads.map((q) => q.predicate.value);
+    expect(predicates.filter((p) => p === CLINICAL_NARRATIVE_TEXT)).toHaveLength(1);
+    for (const legacy of LEGACY_NARRATIVE_SPELLINGS) {
+      expect(predicates, `${legacy} must not be written`).not.toContain(legacy);
+    }
+    const text = quads.find((q) => q.predicate.value === CLINICAL_NARRATIVE_TEXT)!.object;
+    expect(text.termType).toBe('Literal');
+    expect(text.value).toBe('Follow up in two weeks.');
   });
+
+  const corpus = fs.readdirSync(FIXTURES_DIR).filter((f) => f.endsWith('.xml')).sort();
+
+  it('the corpus is present', () => {
+    expect(corpus.length).toBeGreaterThan(0);
+  });
+
+  for (const file of corpus) {
+    it(`${file}: every section narrative carries exactly one clinical:narrativeText and no legacy spelling`, async () => {
+      const result = await convertCcda(readFixture(file), { sourceSystem: 'TestSystem' });
+      expect(result.errors).toHaveLength(0);
+      const bySubject = narrativeCounts(result.output);
+      let withText = 0;
+      for (const [subject, counts] of bySubject) {
+        for (const legacy of LEGACY_NARRATIVE_SPELLINGS) {
+          expect(counts.get(legacy) ?? 0, `${subject} carries ${legacy}`).toBe(0);
+        }
+        const n = counts.get(CLINICAL_NARRATIVE_TEXT) ?? 0;
+        expect(n, `${subject} carries ${n} clinical:narrativeText values`).toBeLessThanOrEqual(1);
+        withText += n;
+      }
+      // Every corpus document has at least one section with text, so zero here
+      // means the text went out on some other predicate.
+      expect(withText).toBeGreaterThan(0);
+    });
+  }
 
   it('full-summarization.xml output contains cascade:requiresLLMExtraction predicate', async () => {
     const xml = readFixture('full-summarization.xml');
