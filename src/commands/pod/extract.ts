@@ -30,6 +30,7 @@ import crypto from 'crypto';
 import { getProperties, CASCADE_NAMESPACES } from '../../lib/turtle-parser.js';
 import { resolvePodDir, fileExists } from './helpers.js';
 import { openPod, PodUnreadableError, type PodReader } from '../../lib/pod-read.js';
+import { envWithoutPodSecrets } from '../../lib/passphrase.js';
 import { toJsonText } from '../../lib/json-output.js';
 
 // ── LOINC section code → CDA section string (used by /extract API) ───────────
@@ -459,9 +460,12 @@ export function registerExtractSubcommand(pod: Command): void {
         // Auto-spawn cascade agent serve
         const agentPort = new URL(agentUrl).port || '8765';
         console.log(`  cascade-agent not running — starting automatically (model: ${modelFile})`);
+        // The model server never reads the pod, so it does not inherit the
+        // pod passphrase from this process's environment.
         spawnedAgent = spawn('cascade', ['agent', 'serve', '--port', agentPort], {
           stdio: 'ignore',
           detached: false,
+          env: envWithoutPodSecrets(),
         });
         spawnedAgent.on('error', () => { /* suppress spawn errors — handled by timeout below */ });
 

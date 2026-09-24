@@ -339,6 +339,10 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
         writeResource(path.join(absDir, 'settings', 'publicTypeIndex.ttl'), PUBLIC_TYPE_INDEX_TTL, dek);
         writeResource(path.join(absDir, 'settings', 'privateTypeIndex.ttl'), PRIVATE_TYPE_INDEX_TTL, dek);
         writeResource(path.join(absDir, 'index.ttl'), indexTtl(dirName), dek);
+        // The last use of the pod key: zero it rather than leave it for the
+        // garbage collector.
+        const encrypted = dek !== undefined;
+        dek?.fill(0);
         await fs.writeFile(path.join(absDir, 'README.md'), README_MD);
 
         const filesCreated = [
@@ -353,7 +357,7 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
           'index.ttl',
           'README.md',
         ];
-        if (dek) {
+        if (encrypted) {
           filesCreated.push(MANIFEST_RELATIVE_PATH.split(path.sep).join('/'));
         }
 
@@ -362,7 +366,7 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
             {
               status: 'created',
               directory: absDir,
-              encrypted: Boolean(dek),
+              encrypted: encrypted,
               files: filesCreated,
               message: 'Cascade Pod initialized successfully.',
             },
@@ -370,7 +374,7 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
           );
         } else {
           console.log(`Cascade Pod initialized at: ${absDir}\n`);
-          if (dek) {
+          if (encrypted) {
             console.log('Encryption: enabled (AES-256-GCM, passphrase-wrapped DEK)\n');
           }
           console.log('Created:');

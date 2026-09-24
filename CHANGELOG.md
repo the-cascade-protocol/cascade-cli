@@ -96,6 +96,14 @@ is what migrating it to 1.1 writes. The `by` rule is now documented and pinned:
 an empty `"by"` makes the header malformed, and a non-empty kind this tool does
 not implement is skipped.
 
+**Keys and passphrase bytes are zeroed sooner.** The encoded passphrase bytes
+are zeroed once the KEK is derived; the KEK is the derivation's own output
+rather than a copy; `buildPassphraseManifest` zeroes its KEK; the decrypt step
+zeroes its intermediate plaintext, so an unwrapped key leaves no second copy;
+`pod init --encrypt`, `pod encrypt` and `pod decrypt` zero the pod key when
+they finish. The model server `pod extract` starts no longer inherits
+`CASCADE_POD_PASSPHRASE` or `CASCADE_POD_NEW_PASSPHRASE`.
+
 **`pod reconcile --report <file>` now writes the file on a pod with no
 reconcilable records.** That branch printed its report and returned before the
 write, so the file was never created.

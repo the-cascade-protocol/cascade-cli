@@ -73,6 +73,8 @@ export function registerEncryptSubcommand(pod: Command, program: Command): void 
     .action(async (dirArg: string) => {
       const globalOpts = program.opts() as OutputOptions;
       const podDir = resolvePodDir(dirArg);
+      // The pod key, zeroed on every way out of this command.
+      let dek: Buffer | undefined;
 
       try {
         if (!(await fileExists(path.join(podDir, 'index.ttl')))) {
@@ -112,7 +114,7 @@ export function registerEncryptSubcommand(pod: Command, program: Command): void 
           return;
         }
 
-        const dek = generateDek();
+        dek = generateDek();
         const manifest = buildPassphraseManifest(dek, passphrase);
         writeEncryptionManifest(podDir, manifest);
 
@@ -146,6 +148,8 @@ export function registerEncryptSubcommand(pod: Command, program: Command): void 
         const message = err instanceof Error ? err.message : String(err);
         printError(`Failed to encrypt pod: ${message}`, globalOpts);
         process.exitCode = 1;
+      } finally {
+        dek?.fill(0);
       }
     });
 
@@ -161,6 +165,8 @@ export function registerEncryptSubcommand(pod: Command, program: Command): void 
     .action(async (dirArg: string, options: { force: boolean }) => {
       const globalOpts = program.opts() as OutputOptions;
       const podDir = resolvePodDir(dirArg);
+      // The pod key, zeroed on every way out of this command.
+      let dek: Buffer | undefined;
 
       try {
         if (!isPodEncrypted(podDir)) {
@@ -170,7 +176,6 @@ export function registerEncryptSubcommand(pod: Command, program: Command): void 
         }
 
         const passphrase = await obtainPassphrase();
-        let dek: Buffer;
         try {
           dek = resolveDek(podDir, passphrase);
         } catch (e) {
@@ -275,6 +280,8 @@ export function registerEncryptSubcommand(pod: Command, program: Command): void 
         const message = err instanceof Error ? err.message : String(err);
         printError(`Failed to decrypt pod: ${message}`, globalOpts);
         process.exitCode = 1;
+      } finally {
+        dek?.fill(0);
       }
     });
 }

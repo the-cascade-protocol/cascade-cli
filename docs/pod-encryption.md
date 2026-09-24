@@ -277,6 +277,15 @@ the caller to set `CASCADE_POD_PASSPHRASE` or run interactively.
 from **`CASCADE_POD_NEW_PASSPHRASE`**, else a hidden prompt entered twice that
 must match.
 
+**How long secrets live in memory.** A passphrase is a JavaScript string and
+cannot be zeroed; it lives until the process exits or it is collected. Its
+encoded bytes are zeroed as soon as the KEK is derived. Every KEK is zeroed
+after its one use, the decrypt step leaves no second copy of an unwrapped key,
+and `pod init --encrypt`, `pod encrypt` and `pod decrypt` zero the pod key when
+they finish. Commands that read or import hold the key for the whole command.
+A model server that `pod extract` starts does not inherit the passphrase
+variables. Neither the passphrase nor any key is ever printed or logged.
+
 ### Changing the passphrase
 
 `cascade pod passphrase set <dir>` re-wraps the pod's DEK under a new

@@ -283,11 +283,17 @@ function openCombined(blob: Buffer, key: Buffer): Buffer {
   const ciphertext = blob.subarray(NONCE_LEN, blob.length - TAG_LEN);
   const decipher = createDecipheriv('aes-256-gcm', key, nonce);
   decipher.setAuthTag(tag);
+  // `update` returns the plaintext before the tag is checked. It is copied
+  // into the result and then zeroed, so an unwrapped key, or bytes that fail
+  // authentication, leave no second copy behind.
+  const head = decipher.update(ciphertext);
   try {
-    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return Buffer.concat([head, decipher.final()]);
   } catch {
     // GCM auth failure (wrong key or tampered data).
     throw new PodDecryptError();
+  } finally {
+    head.fill(0);
   }
 }
 
@@ -341,12 +347,22 @@ export function deriveKek(
   salt: Buffer,
   params: { t: number; m: number; p: number },
 ): Buffer {
-  const out = argon2id(
-    new TextEncoder().encode(passphrase),
-    new Uint8Array(salt),
-    { t: params.t, m: params.m, p: params.p, dkLen: KEY_LEN },
-  );
-  return Buffer.from(out);
+  // The passphrase string itself cannot be zeroed (JavaScript strings are
+  // immutable), but its encoded bytes can, so they are. The KEK is returned
+  // as a view of the derivation's output, not a copy, so the caller's
+  // `fill(0)` zeroes the only copy.
+  const secret = new TextEncoder().encode(passphrase);
+  try {
+    const out = argon2id(secret, new Uint8Array(salt), {
+      t: params.t,
+      m: params.m,
+      p: params.p,
+      dkLen: KEY_LEN,
+    });
+    return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
+  } finally {
+    secret.fill(0);
+  }
 }
 
 /** Wrap (encrypt) the DEK with the KEK. Returns base64 combined blob. */
@@ -669,7 +685,12 @@ export function buildPassphraseManifest(
   checkCosts(params.t, params.m, params.p, 'kdfParams');
   const salt = randomBytes(SALT_LEN);
   const kek = deriveKek(passphrase, salt, params);
-  const wrappedDek = wrapDek(dek, kek);
+  let wrappedDek: string;
+  try {
+    wrappedDek = wrapDek(dek, kek);
+  } finally {
+    kek.fill(0);
+  }
   return {
     version: '1.0',
     algorithm: 'aes-256-gcm',
