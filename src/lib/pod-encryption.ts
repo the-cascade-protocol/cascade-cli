@@ -217,13 +217,27 @@ export class PodDecryptError extends Error {
 }
 
 /**
+ * Which way a manifest could not be used.
+ *
+ *  - `malformed`           not valid JSON, breaks a strictness rule, or asks for
+ *                          settings outside {@link MANIFEST_LIMITS}.
+ *  - `version-unsupported` a manifest version this tool does not read.
+ *  - `no-usable-wrap`      parses, and holds no wrap of a kind this tool
+ *                          implements, so there is nothing a passphrase can open.
+ */
+export type EncryptionManifestErrorKind = 'malformed' | 'version-unsupported' | 'no-usable-wrap';
+
+/**
  * `settings/encryption.json` is malformed, or is a version this tool does not
  * read. Never a statement about the passphrase: nothing was tried.
  */
 export class EncryptionManifestError extends Error {
-  constructor(message: string) {
+  readonly kind: EncryptionManifestErrorKind;
+
+  constructor(message: string, kind: EncryptionManifestErrorKind = 'malformed') {
     super(message);
     this.name = 'EncryptionManifestError';
+    this.kind = kind;
   }
 }
 
@@ -442,6 +456,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
   if (!(READABLE_MANIFEST_VERSIONS as readonly string[]).includes(version)) {
     throw new EncryptionManifestError(
       `Unsupported encryption manifest version "${version}": this pod was written by a newer tool`,
+      'version-unsupported',
     );
   }
   if (raw.algorithm !== 'aes-256-gcm') throw malformed('algorithm must be "aes-256-gcm"');
@@ -580,10 +595,9 @@ export function unlockManifest(
   manifest: NormalizedEncryptionManifest,
   passphrase: string,
 ): UnlockedManifest {
-  let tried = 0;
+  assertHasUsableWrap(manifest);
   for (const [wrapIndex, wrap] of manifest.wraps.entries()) {
     if (wrap.kind !== 'passphrase') continue;
-    tried += 1;
     const kek = deriveKek(passphrase, Buffer.from(wrap.kdfParams.salt, 'base64'), wrap.kdfParams);
     try {
       return { dek: unwrapDek(wrap.wrappedDek, kek), wrapIndex };
@@ -593,12 +607,22 @@ export function unlockManifest(
       kek.fill(0);
     }
   }
-  if (tried === 0) {
+  throw new PodDecryptError();
+}
+
+/**
+ * Refuse a manifest that holds no wrap a passphrase could open, so a caller can
+ * say so BEFORE asking for a passphrase it would never use.
+ *
+ * @throws {EncryptionManifestError} with kind `no-usable-wrap`.
+ */
+export function assertHasUsableWrap(manifest: NormalizedEncryptionManifest): void {
+  if (!manifest.wraps.some((w) => w.kind === 'passphrase')) {
     throw new EncryptionManifestError(
       'Cannot open this pod: its encryption manifest holds no wrap this tool implements',
+      'no-usable-wrap',
     );
   }
-  throw new PodDecryptError();
 }
 
 /**

@@ -43,6 +43,19 @@ passphrase wraps. The refusal names the field and not the value. Every manifest
 this tool writes is inside the limits. See the limits table in
 `docs/pod-encryption.md`.
 
+**A malformed or newer encryption header is no longer reported as a wrong
+passphrase.** Opening a sealed pod reported every header problem (bad JSON, a
+strictness rule, a version this tool does not read) with reason
+`passphrase-incorrect`. The header is now parsed before a passphrase is asked
+for, and two reasons are added: `manifest-malformed` (bad JSON, a strictness
+rule, a reader limit, or an unreadable header) and
+`manifest-version-unsupported` (a version, or only wrap kinds, this tool does
+not read). `passphrase-incorrect` now means only that the header parsed and no
+wrap opened. **JSON consumers matching on `reason` may now see the two new
+values**, including for a bad header with no passphrase set, which was
+previously `passphrase-missing`. The exit code is unchanged: all of them are
+exit 2. See the reason table in `docs/exit-codes.md`.
+
 **`pod reconcile --report <file>` now writes the file on a pod with no
 reconcilable records.** That branch printed its report and returned before the
 write, so the file was never created.
