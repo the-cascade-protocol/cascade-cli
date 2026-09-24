@@ -15,7 +15,6 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import {
   verifyDetachedJws,
@@ -23,21 +22,13 @@ import {
   base64UrlFromBytes,
   CAP_JWS_CTY,
 } from '../src/lib/advisory/jws-verifier.js';
+import { ADVISORY_EXAMPLES_DIR } from './helpers/spec.js';
 
-const EXAMPLES_DIR = path.resolve(
-  os.homedir(),
-  'Development/cascadeprotocol.org/drafts/advisory-v1',
-);
-
-// The example advisory patches (*.ldpatch) referenced below live in the
-// cascadeprotocol.org sibling repo (~/Development/cascadeprotocol.org/drafts/
-// advisory-v1). That repo is private and its drafts/ fixtures are not committed,
-// so they cannot be provisioned in CI. Quarantine the fixture-dependent blocks
-// when the files are absent; they still run locally when the sibling is checked
-// out. Re-enable in CI once the fixtures are moved in-repo or provisioned.
-const FIXTURES_AVAILABLE =
-  fs.existsSync(path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch')) &&
-  fs.existsSync(path.join(EXAMPLES_DIR, 'example-cpic-cyp2c19-warfarin.ldpatch'));
+// The CAP example patches (*.ldpatch) are authored in the `spec` repository
+// (ontologies/advisory/v1-draft/examples/) and read from the sibling spec
+// checkout, resolved like the conformance fixtures (tests/helpers/spec.ts).
+// A missing checkout fails the run in preflight rather than skipping here.
+const EXAMPLES_DIR = ADVISORY_EXAMPLES_DIR;
 
 /** Sign `body` with `secretKey` under a given header; returns {header, signature} b64url strings. */
 function signDetached(
@@ -62,7 +53,7 @@ function signDetached(
   return { header: headerB64, signature: sigB64, publicKey };
 }
 
-describe.skipIf(!FIXTURES_AVAILABLE)('CAP detached JWS verifier — happy path', () => {
+describe('CAP detached JWS verifier — happy path', () => {
   it('verifies a valid detached JWS over the BRCA2 reclassification example', () => {
     const body = fs.readFileSync(
       path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch'),

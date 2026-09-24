@@ -11,17 +11,19 @@ Open an issue before starting anything larger than a bug fix, so the approach ca
 
 ## Development setup
 
-**`conformance` must be cloned as a sibling directory**, not inside this one. Several suites read fixtures from it, and CI reproduces that layout exactly.
+**`conformance` and `spec` must be cloned as sibling directories**, not inside this one. Several suites read fixtures from `conformance`, the CAP advisory suites read their example patches from `spec` (`ontologies/advisory/v1-draft/examples/`), and CI reproduces that layout exactly.
 
 ```
 <parent>/
   cascade-cli/
   conformance/
+  spec/
 ```
 
 ```bash
 git clone https://github.com/the-cascade-protocol/cascade-cli.git
 git clone https://github.com/the-cascade-protocol/conformance.git
+git clone https://github.com/the-cascade-protocol/spec.git
 cd cascade-cli
 
 npm ci          # not npm install, and never a symlinked node_modules
@@ -38,6 +40,9 @@ Fixtures are resolved in `tests/helpers/conformance.ts`, in this order:
 3. A sibling of the **main** checkout, when you are working in a git worktree. A
    worktree has no sibling `conformance` of its own, so this is what lets a worktree
    find fixtures you cloned as documented, without symlinking them into place.
+
+`spec` is resolved the same way in `tests/helpers/spec.ts`, with `CASCADE_SPEC_DIR` as
+the override (the same variable `check:shapes-drift` reads).
 
 Two further requirements:
 
@@ -72,7 +77,7 @@ chore(shapes): sync from spec  # shapes-only update from spec
 2. Build, then run the full suite, and confirm the skip count did not move.
 3. Update `CHANGELOG.md` and bump the version in `package.json` (patch for a shapes-only sync, minor for new CLI behavior).
 4. Push and open a PR. `.github/PULL_REQUEST_TEMPLATE.md` fills in with the checklist; keep the items and tick them.
-5. State in the PR body which suites you ran and on what Node version. If you could not run a suite (no `riot`, no sibling `conformance`), say so rather than leaving it implied.
+5. State in the PR body which suites you ran and on what Node version. If you could not run a suite (no `riot`, no sibling `conformance` or `spec`), say so rather than leaving it implied.
 
 ### Adding a new `--from <format>` importer
 
@@ -103,7 +108,7 @@ CASCADE_SPEC_DIR=/path/to/spec npm run check:shapes-drift
 
 It compares `src/shapes/` against a `spec` checkout it walks itself, and CI runs it against `spec` `main` on every pull request, so drift fails the build instead of shipping. Exit 1 means drift; exit 2 means it could not check (no `spec` checkout, or a walk that turned up implausibly little) and is treated as a failure too, because a checker that cannot see `spec` must not report that nothing has moved.
 
-A `spec` clone is optional for the rest of the suite and required for this check. If you do not have one, say so in the PR body and let CI run it.
+The same `spec` clone serves this check and the advisory suites.
 
 If your change needs a new class or property that does not exist yet, it starts in `spec`. Read [`spec/CONTRIBUTING.md`](https://github.com/the-cascade-protocol/spec/blob/main/CONTRIBUTING.md) for the full seven-step propagation sequence; this repository is step 4 of it.
 

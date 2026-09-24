@@ -20,23 +20,15 @@ import {
   base64UrlFromBytes,
   CAP_JWS_CTY,
 } from '../src/lib/advisory/jws-verifier.js';
+import { ADVISORY_EXAMPLES_DIR } from './helpers/spec.js';
 
 const { namedNode, literal, quad } = DataFactory;
 
-const EXAMPLES_DIR = path.resolve(
-  os.homedir(),
-  'Development/cascadeprotocol.org/drafts/advisory-v1',
-);
-
-// The example advisory patches (*.ldpatch) referenced below live in the
-// cascadeprotocol.org sibling repo (~/Development/cascadeprotocol.org/drafts/
-// advisory-v1). That repo is private and its drafts/ fixtures are not committed,
-// so they cannot be provisioned in CI. Quarantine the fixture-dependent blocks
-// when the files are absent; they still run locally when the sibling is checked
-// out. Re-enable in CI once the fixtures are moved in-repo or provisioned.
-const FIXTURES_AVAILABLE =
-  fs.existsSync(path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch')) &&
-  fs.existsSync(path.join(EXAMPLES_DIR, 'example-cpic-cyp2c19-warfarin.ldpatch'));
+// The CAP example patches (*.ldpatch) are authored in the `spec` repository
+// (ontologies/advisory/v1-draft/examples/) and read from the sibling spec
+// checkout, resolved like the conformance fixtures (tests/helpers/spec.ts).
+// A missing checkout fails the run in preflight rather than skipping here.
+const EXAMPLES_DIR = ADVISORY_EXAMPLES_DIR;
 
 const CLI_BIN = path.resolve(__dirname, '..', 'src', 'index.ts');
 const TSX = path.resolve(__dirname, '..', 'node_modules', '.bin', 'tsx');
@@ -72,7 +64,7 @@ describe('cascade advisory --help', () => {
   });
 });
 
-describe.skipIf(!FIXTURES_AVAILABLE)('cascade advisory validate', () => {
+describe('cascade advisory validate', () => {
   it('passes on the BRCA2 reclassification example', () => {
     const target = path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch');
     const { stdout, exitCode } = runCli(['advisory', 'validate', target]);
@@ -98,7 +90,7 @@ describe.skipIf(!FIXTURES_AVAILABLE)('cascade advisory validate', () => {
   });
 });
 
-describe.skipIf(!FIXTURES_AVAILABLE)('cascade advisory dry-run + apply (BRCA2 end-to-end)', () => {
+describe('cascade advisory dry-run + apply (BRCA2 end-to-end)', () => {
   let podDir: string;
 
   beforeEach(() => {

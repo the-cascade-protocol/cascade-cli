@@ -3,9 +3,10 @@
  * suite fail hundreds of times for reasons that have nothing to do with the
  * code under test.
  *
- * The suite has three prerequisites beyond `npm ci`: a current `dist/`, a
- * `conformance` fixture checkout, and Apache Jena's `riot` on PATH. CI
- * satisfies all three as separate workflow steps, so CI never sees what a
+ * The suite has four prerequisites beyond `npm ci`: a current `dist/`, a
+ * `conformance` fixture checkout, a `spec` checkout carrying the CAP advisory
+ * example patches, and Apache Jena's `riot` on PATH. CI satisfies all four as
+ * separate workflow steps, so CI never sees what a
  * fresh clone sees. Without this check that state reads as a broken repo:
  * ~313 failures across 65 files, none of which name a prerequisite.
  *
@@ -25,6 +26,12 @@ import {
   REPO_ROOT,
   conformanceAvailable,
 } from '../helpers/conformance.js';
+import {
+  ADVISORY_EXAMPLES_DIR,
+  ADVISORY_EXAMPLE_FILES,
+  SPEC_CANDIDATES,
+  SPEC_ROOT,
+} from '../helpers/spec.js';
 
 interface MissingPrerequisite {
   what: string;
@@ -63,6 +70,37 @@ function checkConformance(): MissingPrerequisite | undefined {
   };
 }
 
+function checkSpec(): MissingPrerequisite | undefined {
+  const absent = ADVISORY_EXAMPLE_FILES.filter(
+    (f) => !fs.existsSync(path.join(ADVISORY_EXAMPLES_DIR, f)),
+  );
+  if (absent.length === 0) return undefined;
+  const parent = path.dirname(SPEC_CANDIDATES[0]);
+  const found = fs.existsSync(SPEC_ROOT);
+  const detail = found
+    ? [
+        `Found a spec checkout at ${SPEC_ROOT}, but it lacks:`,
+        ...absent.map((f) => `  ontologies/advisory/v1-draft/examples/${f}`),
+        'The CAP advisory suites read these example patches.',
+        'Fix: update that checkout (git pull on main),',
+        '  or set CASCADE_SPEC_DIR to a checkout that has them.',
+      ]
+    : [
+        'Searched:',
+        ...(process.env.CASCADE_SPEC_DIR
+          ? [`  CASCADE_SPEC_DIR=${SPEC_ROOT}`]
+          : SPEC_CANDIDATES.map((c) => `  ${c}`)),
+        'The CAP advisory suites read example patches from it.',
+        'Fix: clone it beside this repository:',
+        `  git clone https://github.com/the-cascade-protocol/spec.git ${path.join(parent, 'spec')}`,
+        'Or: set CASCADE_SPEC_DIR to an existing checkout.',
+      ];
+  const what = found
+    ? 'the `spec` checkout lacks the CAP advisory example patches'
+    : 'the `spec` checkout was not found';
+  return { what, detail };
+}
+
 function checkRiot(): MissingPrerequisite | undefined {
   const probe = spawnSync('riot', ['--version'], { stdio: 'ignore' });
   if (!probe.error) return undefined;
@@ -78,7 +116,7 @@ function checkRiot(): MissingPrerequisite | undefined {
 }
 
 export function setup(): void {
-  const missing = [checkBuild(), checkConformance(), checkRiot()].filter(
+  const missing = [checkBuild(), checkConformance(), checkSpec(), checkRiot()].filter(
     (m): m is MissingPrerequisite => m !== undefined,
   );
   if (missing.length === 0) return;

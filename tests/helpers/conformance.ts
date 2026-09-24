@@ -33,7 +33,7 @@ export const REPO_ROOT = path.resolve(HELPERS_DIR, '../..');
  * Root of the main checkout when `root` is a git worktree, else undefined.
  * A worktree's `.git` is a file holding `gitdir: <main>/.git/worktrees/<name>`.
  */
-function mainCheckoutOf(root: string): string | undefined {
+export function mainCheckoutOf(root: string): string | undefined {
   const dotGit = path.join(root, '.git');
   let pointer: string;
   try {
