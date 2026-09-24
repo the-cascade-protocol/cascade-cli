@@ -89,6 +89,13 @@ rewrites: a new temporary file (create-new), fsync, rename, fsync of the
 directory. A temporary header left in `settings/` by a killed earlier write is
 removed by the next header write.
 
+**A 1.0 encryption header reads with the labels its migration writes.** The
+normalized reading of a 1.0 header gave every wrap `label: null`; its first
+passphrase wrap now reads as `"primary"` and every other wrap as `null`, which
+is what migrating it to 1.1 writes. The `by` rule is now documented and pinned:
+an empty `"by"` makes the header malformed, and a non-empty kind this tool does
+not implement is skipped.
+
 **`pod reconcile --report <file>` now writes the file on a pod with no
 reconcilable records.** That branch printed its report and returned before the
 write, so the file was never created.

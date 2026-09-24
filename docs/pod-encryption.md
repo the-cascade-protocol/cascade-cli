@@ -152,8 +152,9 @@ Rules:
    created.
 5. `wraps` is never empty.
 6. `by` is `"passphrase"` or `"device-keychain"` (reserved, not implemented).
-   Readers skip wraps they do not implement; a manifest with no wrap the
-   reader implements cannot be opened.
+   Readers skip a wrap whose non-empty `by` they do not implement; a missing,
+   non-string or empty (`""`) `by` makes the whole manifest malformed. A
+   manifest with no wrap the reader implements cannot be opened.
 7. A wrap's public identifier is its `kdfParams.salt`. In 1.0 the single
    top-level salt plays this role, so reading a 1.0 pod leaves its identifier
    unchanged, and a re-wrapped pod has a new one.
@@ -165,7 +166,9 @@ Rules:
 10. Migration 1.0 to 1.1 (done in memory by the writing command): the top-level
     `kdf` and `kdfParams` move into the single `passphrase` wrap, its `label`
     becomes `"primary"` and its `createdAt` becomes `null`; any other wrap is
-    carried over with `label: null` and `createdAt: null`.
+    carried over with `label: null` and `createdAt: null`. Reading a 1.0
+    manifest without migrating it gives the same labels: the first
+    `passphrase` wrap reads as `"primary"`, every other wrap as `null`.
 
 In the CLI, `src/lib/pod-encryption.ts` is the only code that reads the
 manifest's key material. It reads both versions into one normalized shape (a

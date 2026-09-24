@@ -549,6 +549,8 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
   }
   if (raw.wraps.length > MANIFEST_LIMITS.maxWraps) throw outsideLimits('wraps');
   const rawWraps: unknown[] = raw.wraps;
+  // Every wrap needs a non-empty string `by`: an empty one is malformed, not a
+  // kind to skip. A non-empty kind this tool does not implement is skipped.
   for (const [i, w] of rawWraps.entries()) {
     if (!isPlainObject(w) || typeof w.by !== 'string' || w.by.length === 0) {
       throw malformed(`wrap ${i} has no "by"`);
@@ -561,6 +563,11 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
 
   if (version === '1.0') {
     const kdfParams = checkKdf(raw.kdf, raw.kdfParams, 'top-level');
+    // A 1.0 wrap has no label on disk. The first passphrase wrap reads as
+    // "primary" and every other wrap as null: exactly the labels
+    // {@link migrateManifest} writes, so a 1.0 header reads the same before
+    // and after it is migrated.
+    const firstPassphrase = objWraps.findIndex((w) => w.by === 'passphrase');
     const wraps: NormalizedWrap[] = objWraps.map((w, i) => {
       if (w.by !== 'passphrase') {
         return { kind: 'unimplemented', by: w.by, label: null, createdAt: null };
@@ -569,7 +576,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
       return {
         kind: 'passphrase',
         by: 'passphrase',
-        label: null,
+        label: i === firstPassphrase ? 'primary' : null,
         createdAt: null,
         kdf: 'argon2id',
         kdfParams: { ...kdfParams },

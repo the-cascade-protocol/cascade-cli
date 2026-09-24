@@ -66,7 +66,7 @@ function tempLeftovers(pod: string): string[] {
 }
 
 describe('readEncryptionManifest: 1.0 normalizes to per-wrap KDF params', () => {
-  it('copies the top-level params into the passphrase wrap, label and createdAt null', () => {
+  it('copies the top-level params into the passphrase wrap, label "primary" and createdAt null', () => {
     const pod = mkPod();
     const v10 = buildPassphraseManifest(generateDek(), 'pw-a', FAST_KDF);
     writeEncryptionManifest(pod, v10);
@@ -76,7 +76,7 @@ describe('readEncryptionManifest: 1.0 normalizes to per-wrap KDF params', () => 
     const w = n.wraps[0];
     if (w.kind !== 'passphrase') throw new Error('expected passphrase wrap');
     expect(w.kdfParams).toEqual(v10.kdfParams);
-    expect(w.label).toBeNull();
+    expect(w.label).toBe('primary');
     expect(w.createdAt).toBeNull();
     // The wrap's public identifier is the salt, unchanged by reading.
     expect(w.kdfParams.salt).toBe(v10.kdfParams.salt);
