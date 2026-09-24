@@ -56,6 +56,16 @@ values**, including for a bad header with no passphrase set, which was
 previously `passphrase-missing`. The exit code is unchanged: all of them are
 exit 2. See the reason table in `docs/exit-codes.md`.
 
+**`pod encrypt`, `pod decrypt` and `pod doctor --write` rewrites survive a
+power cut.** Their per-file atomic write renamed a temporary file over the
+target without an fsync, so after a power cut the rename could be on disk
+before the data, leaving the target empty or partial with the old bytes gone.
+The write now fsyncs the temporary file, renames, then fsyncs the directory,
+using the same directory fsync as `pod passphrase set`. Measured cost on macOS
+(where Node's fsync is a full flush): about 8 ms per file, about 0.12 s per
+encrypt or decrypt pass on a 20-file pod. `pod import` does not use this write
+and is unchanged.
+
 **`pod reconcile --report <file>` now writes the file on a pod with no
 reconcilable records.** That branch printed its report and returned before the
 write, so the file was never created.

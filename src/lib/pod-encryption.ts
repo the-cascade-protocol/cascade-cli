@@ -760,7 +760,11 @@ export interface RewrapResult {
   replacedWrapIndex: number;
 }
 
-function fsyncDirectory(dir: string): void {
+/**
+ * fsync a directory, so a rename inside it survives a power cut. The one
+ * helper for this: the manifest re-wrap and every atomic resource write use it.
+ */
+export function fsyncDirectory(dir: string): void {
   let fd: number | undefined;
   try {
     fd = fs.openSync(dir, 'r');
