@@ -120,9 +120,12 @@ describe('manifest I/O and resolveDek', () => {
     const read = readEncryptionManifest(dir);
     expect(read).not.toBeNull();
     expect(read!.algorithm).toBe('aes-256-gcm');
-    expect(read!.kdf).toBe('argon2id');
-    expect(read!.wraps[0].by).toBe('passphrase');
-    expect(read!.kdfParams.t).toBe(FAST_KDF.t);
+    expect(read!.version).toBe('1.0');
+    const wrap = read!.wraps[0];
+    expect(wrap.by).toBe('passphrase');
+    if (wrap.kind !== 'passphrase') throw new Error('expected a passphrase wrap');
+    expect(wrap.kdf).toBe('argon2id');
+    expect(wrap.kdfParams.t).toBe(FAST_KDF.t);
   });
 
   it('resolveDek recovers the same DEK with the right passphrase', () => {
