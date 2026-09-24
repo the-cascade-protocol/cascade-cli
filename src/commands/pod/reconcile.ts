@@ -1083,34 +1083,38 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
         }
 
         if (inputs.length === 0) {
+          const emptyReport = {
+            podDir,
+            ranAt: new Date().toISOString(),
+            applied: false,
+            filesRead,
+            filesUnreadable: unreadable,
+            recordsBefore: 0,
+            recordsAfter: 0,
+            summary: {
+              exactDuplicatesRemoved: 0,
+              nearDuplicatesMerged: 0,
+              conflictsResolved: 0,
+              conflictsUnresolved: 0,
+              identityCollisionsSplit: 0,
+              tier0MergesApplied: 0,
+            },
+            groups: [],
+            tier0Merges: [],
+            // Nothing was read, so nothing can have merged and no row of
+            // the queue can have changed meaning. It is still reported,
+            // because "your queue has 8 items" is true and useful on a pod
+            // that holds no reconcilable records at all.
+            pendingConflicts: emptyDisposition(existingConflicts.length),
+            filesWritten: [],
+          };
+          // `--report` is honoured here too. A caller that asked for the report
+          // file and got none cannot tell "empty pod" from "the run failed".
+          if (options.report) {
+            await fs.writeFile(options.report, toJsonText(emptyReport), 'utf-8');
+          }
           printResult(
-            globalOpts.json
-              ? {
-                  podDir,
-                  ranAt: new Date().toISOString(),
-                  applied: false,
-                  filesRead,
-                  filesUnreadable: unreadable,
-                  recordsBefore: 0,
-                  recordsAfter: 0,
-                  summary: {
-                    exactDuplicatesRemoved: 0,
-                    nearDuplicatesMerged: 0,
-                    conflictsResolved: 0,
-                    conflictsUnresolved: 0,
-                    identityCollisionsSplit: 0,
-                    tier0MergesApplied: 0,
-                  },
-                  groups: [],
-                  tier0Merges: [],
-                  // Nothing was read, so nothing can have merged and no row of
-                  // the queue can have changed meaning. It is still reported,
-                  // because "your queue has 8 items" is true and useful on a pod
-                  // that holds no reconcilable records at all.
-                  pendingConflicts: emptyDisposition(existingConflicts.length),
-                  filesWritten: [],
-                }
-              : `\nNo reconcilable records found in ${podDir}.\n`,
+            globalOpts.json ? emptyReport : `\nNo reconcilable records found in ${podDir}.\n`,
             globalOpts,
           );
           return;

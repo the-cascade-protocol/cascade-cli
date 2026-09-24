@@ -3,6 +3,8 @@
  *
  * Resolution order:
  *   1. `CASCADE_POD_PASSPHRASE` environment variable (non-interactive / CI).
+ *      For `pod passphrase set`, the replacement passphrase comes from
+ *      `CASCADE_POD_NEW_PASSPHRASE` the same way.
  *   2. Hidden interactive prompt on a TTY (input echoing suppressed).
  *
  * We deliberately do NOT accept a plaintext `--passphrase` argv value: it would
@@ -112,4 +114,29 @@ export async function obtainNewPassphrase(): Promise<string> {
   return first;
 }
 
-export { ENV_VAR as PASSPHRASE_ENV_VAR };
+const NEW_ENV_VAR = 'CASCADE_POD_NEW_PASSPHRASE';
+
+/**
+ * Obtain the REPLACEMENT passphrase for `pod passphrase set`:
+ * `CASCADE_POD_NEW_PASSPHRASE` first, then a hidden prompt entered twice that
+ * must match. Never argv. Throws when non-interactive and the env var is unset,
+ * when the two entries differ, or when the entry is empty.
+ */
+export async function obtainReplacementPassphrase(): Promise<string> {
+  const fromEnv = process.env[NEW_ENV_VAR];
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  if (!process.stdin.isTTY) {
+    throw new Error(`No new passphrase available. Set ${NEW_ENV_VAR} or run interactively.`);
+  }
+  const first = await promptHidden('New pod passphrase: ');
+  if (first.length === 0) {
+    throw new Error('The new passphrase cannot be empty.');
+  }
+  const second = await promptHidden('Confirm new pod passphrase: ');
+  if (first !== second) {
+    throw new Error('The new passphrases did not match.');
+  }
+  return first;
+}
+
+export { ENV_VAR as PASSPHRASE_ENV_VAR, NEW_ENV_VAR as NEW_PASSPHRASE_ENV_VAR };

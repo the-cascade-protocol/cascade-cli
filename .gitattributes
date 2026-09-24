@@ -1,0 +1,2 @@
+# Encrypted pod fixtures are byte-exact AES-GCM blobs: never convert line endings.
+tests/fixtures/pod-encryption-v1.1/pod/** binary
