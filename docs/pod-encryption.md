@@ -172,6 +172,39 @@ manifest's key material. It reads both versions into one normalized shape (a
 list of wraps, each passphrase wrap with its own KDF parameters), and a source
 test fails if `kdfParams` or `wrappedDek` is read anywhere else.
 
+### Reader limits
+
+The manifest is plaintext, so anyone who can write to the pod directory can
+edit its KDF parameters, and a reader derives a key from whatever it finds
+there. Without a bound, one edited number makes every open allocate gigabytes
+or run for hours before the passphrase is even checked. Readers therefore
+enforce these limits when the manifest is **parsed** (1.0 and 1.1 alike),
+before any key derivation runs:
+
+| Field | Accepted | Why |
+|---|---|---|
+| `kdfParams.m` (KiB) | `8 * p` to 262144 (256 MiB) | writers use 65536 (64 MiB); 4x headroom |
+| `kdfParams.t` | 1 to 10 | writers use 3 |
+| `kdfParams.p` | 1 to 8 | writers use 1 |
+| `kdfParams.salt` | canonical padded base64 of exactly 16 bytes | every writer uses 16 |
+| `wrappedDek` | canonical padded base64 of exactly 60 bytes (12 nonce + 32 key + 16 tag) | a 256-bit data key |
+| passphrase wraps per manifest | at most 8 | bounds try-each-wrap |
+| `kdf` | exactly `"argon2id"` | the only KDF implemented |
+
+A value outside these limits anywhere in the manifest refuses the whole
+manifest, even when an earlier wrap would have opened. The refusal names the
+field and never echoes the value:
+
+```
+The pod's encryption header asks for settings outside this tool's limits (field: wraps[0].kdfParams.m).
+```
+
+Every writer stays inside the limits (`t=3, m=65536, p=1`, 16-byte salts,
+60-byte wraps), and a test pins that. The worst case the limits allow is one
+wrap at `m=262144, t=10, p=8`: about 6.3 seconds and 370 MiB of resident memory
+for the pure-JS Argon2id on an Apple M5, so up to about 50 seconds for a hostile
+manifest with eight such wraps. That is bounded, which is the point.
+
 ### Multi-wrap design
 
 `wraps` is an **array** so the same DEK can be unlocked by different key holders.

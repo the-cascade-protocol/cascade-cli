@@ -31,6 +31,18 @@ write 1.0. See `docs/pod-encryption.md`.
 
 ### Fixed
 
+**The encryption manifest's KDF parameters are bounded before any key is
+derived.** `settings/encryption.json` is plaintext, and its Argon2id parameters
+were used as found, so one edited number made every open allocate gigabytes or
+run for hours before the passphrase was checked. The parser (1.0 and 1.1) now
+refuses a manifest outright when any passphrase wrap asks for `m` above 262144
+KiB or below `8 * p`, `t` outside 1 to 10, `p` outside 1 to 8, a salt that is
+not canonical base64 of exactly 16 bytes, a `wrappedDek` that is not canonical
+base64 of exactly 60 bytes, a `kdf` other than `argon2id`, or more than 8
+passphrase wraps. The refusal names the field and not the value. Every manifest
+this tool writes is inside the limits. See the limits table in
+`docs/pod-encryption.md`.
+
 **`pod reconcile --report <file>` now writes the file on a pod with no
 reconcilable records.** That branch printed its report and returned before the
 write, so the file was never created.

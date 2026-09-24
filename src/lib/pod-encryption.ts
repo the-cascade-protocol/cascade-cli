@@ -176,6 +176,38 @@ export const MANIFEST_RELATIVE_PATH = path.join('settings', 'encryption.json');
 /** The manifest versions this tool reads. Anything else was written by a newer tool. */
 export const READABLE_MANIFEST_VERSIONS = ['1.0', '1.1'] as const;
 
+/**
+ * Reader limits for `settings/encryption.json`, checked when the manifest is
+ * PARSED, before any key derivation runs.
+ *
+ * The manifest is plaintext and anyone who can write to the pod directory can
+ * edit it, so its KDF parameters are attacker-chosen input. Without a bound, one
+ * edited number makes every open allocate gigabytes or spin for hours before
+ * the passphrase is even checked. Every writer emits t=3, m=65536, p=1, a
+ * 16-byte salt and a 60-byte wrap; the bounds leave headroom above that and
+ * nothing more. Every reader of this manifest must enforce the same numbers.
+ *
+ * `m` is in KiB and must also be at least `8 * p` (the Argon2 minimum).
+ */
+export const MANIFEST_LIMITS = {
+  /** Argon2id memory cost ceiling, KiB (256 MiB). */
+  mMax: 262144,
+  tMin: 1,
+  tMax: 10,
+  pMin: 1,
+  pMax: 8,
+  /** Exact decoded salt length, bytes. */
+  saltBytes: 16,
+  /** Exact decoded wrapped-DEK length, bytes: nonce(12) + key(32) + tag(16). */
+  wrappedDekBytes: NONCE_LEN + KEY_LEN + TAG_LEN,
+  /** Most passphrase wraps one manifest may hold (bounds try-each-wrap). */
+  maxPassphraseWraps: 8,
+} as const;
+
+/** The refusal sentence for a manifest outside {@link MANIFEST_LIMITS}. */
+export const OUTSIDE_LIMITS_MESSAGE =
+  "The pod's encryption header asks for settings outside this tool's limits.";
+
 /** Clean, user-facing error for any GCM authentication failure. */
 export class PodDecryptError extends Error {
   constructor(message = 'incorrect passphrase or corrupt key') {
@@ -328,6 +360,14 @@ function malformed(detail: string): EncryptionManifestError {
   return new EncryptionManifestError(`Malformed ${MANIFEST_RELATIVE_PATH.split(path.sep).join('/')}: ${detail}`);
 }
 
+/**
+ * A manifest value outside {@link MANIFEST_LIMITS}. Names the field and never
+ * the value: the value is attacker-chosen and can be arbitrarily long.
+ */
+function outsideLimits(field: string): EncryptionManifestError {
+  return new EncryptionManifestError(`${OUTSIDE_LIMITS_MESSAGE.slice(0, -1)} (field: ${field}).`);
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -336,17 +376,40 @@ function isPositiveInt(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v > 0;
 }
 
+/**
+ * Decoded length of canonical, padded, standard base64, or `null` when the
+ * text is not that. `Buffer.from(s, 'base64')` skips characters it does not
+ * know, so a length check alone would accept text no other reader decodes the
+ * same way; the round-trip comparison rules that out.
+ */
+function canonicalBase64Length(s: string): number | null {
+  const bytes = Buffer.from(s, 'base64');
+  return bytes.toString('base64') === s ? bytes.length : null;
+}
+
 function checkKdf(kdf: unknown, kdfParams: unknown, where: string): KdfParams {
-  if (kdf !== 'argon2id') throw malformed(`${where} kdf must be "argon2id"`);
+  if (kdf !== 'argon2id') throw outsideLimits(`${where}.kdf`);
   if (!isPlainObject(kdfParams)) throw malformed(`${where} kdfParams is missing`);
   const { salt, t, m, p } = kdfParams;
-  if (typeof salt !== 'string' || salt.length === 0 || Buffer.from(salt, 'base64').length === 0) {
-    throw malformed(`${where} kdfParams.salt is not base64`);
+  if (typeof salt !== 'string') throw malformed(`${where} kdfParams.salt is not base64`);
+  if (canonicalBase64Length(salt) !== MANIFEST_LIMITS.saltBytes) {
+    throw outsideLimits(`${where}.kdfParams.salt`);
   }
   if (!isPositiveInt(t) || !isPositiveInt(m) || !isPositiveInt(p)) {
     throw malformed(`${where} kdfParams t, m and p must be positive integers`);
   }
+  if (t < MANIFEST_LIMITS.tMin || t > MANIFEST_LIMITS.tMax) throw outsideLimits(`${where}.kdfParams.t`);
+  if (p < MANIFEST_LIMITS.pMin || p > MANIFEST_LIMITS.pMax) throw outsideLimits(`${where}.kdfParams.p`);
+  if (m < 8 * p || m > MANIFEST_LIMITS.mMax) throw outsideLimits(`${where}.kdfParams.m`);
   return { salt, t, m, p };
+}
+
+function checkWrappedDek(wrappedDek: unknown, where: string): string {
+  if (typeof wrappedDek !== 'string') throw malformed(`${where} has no wrappedDek`);
+  if (canonicalBase64Length(wrappedDek) !== MANIFEST_LIMITS.wrappedDekBytes) {
+    throw outsideLimits(`${where}.wrappedDek`);
+  }
+  return wrappedDek;
 }
 
 function checkNullableString(v: unknown, what: string): string | null {
@@ -392,6 +455,9 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
     }
   }
   const objWraps = rawWraps as Array<Record<string, unknown> & { by: string }>;
+  if (objWraps.filter((w) => w.by === 'passphrase').length > MANIFEST_LIMITS.maxPassphraseWraps) {
+    throw outsideLimits('wraps');
+  }
 
   if (version === '1.0') {
     const kdfParams = checkKdf(raw.kdf, raw.kdfParams, 'top-level');
@@ -399,7 +465,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
       if (w.by !== 'passphrase') {
         return { kind: 'unimplemented', by: w.by, label: null, createdAt: null };
       }
-      if (typeof w.wrappedDek !== 'string') throw malformed(`wrap ${i} has no wrappedDek`);
+      const wrappedDek = checkWrappedDek(w.wrappedDek, `wraps[${i}]`);
       return {
         kind: 'passphrase',
         by: 'passphrase',
@@ -407,7 +473,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
         createdAt: null,
         kdf: 'argon2id',
         kdfParams: { ...kdfParams },
-        wrappedDek: w.wrappedDek,
+        wrappedDek,
       };
     });
     return {
@@ -426,8 +492,8 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
     if (w.by !== 'passphrase') {
       return { kind: 'unimplemented', by: w.by, label, createdAt };
     }
-    const kdfParams = checkKdf(w.kdf, w.kdfParams, `wrap ${i}`);
-    if (typeof w.wrappedDek !== 'string') throw malformed(`wrap ${i} has no wrappedDek`);
+    const kdfParams = checkKdf(w.kdf, w.kdfParams, `wraps[${i}]`);
+    const wrappedDek = checkWrappedDek(w.wrappedDek, `wraps[${i}]`);
     return {
       kind: 'passphrase',
       by: 'passphrase',
@@ -435,7 +501,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
       createdAt,
       kdf: 'argon2id',
       kdfParams,
-      wrappedDek: w.wrappedDek,
+      wrappedDek,
     };
   });
   return {
@@ -627,8 +693,8 @@ export function serializeEncryptionManifestV11(manifest: EncryptionManifestV11):
         ...extra,
       };
     }
-    const params = checkKdf(kdf, kdfParams, `wrap ${i}`);
-    if (typeof wrappedDek !== 'string') throw malformed(`wrap ${i} has no wrappedDek`);
+    const params = checkKdf(kdf, kdfParams, `wraps[${i}]`);
+    checkWrappedDek(wrappedDek, `wraps[${i}]`);
     if (seenSalts.has(params.salt)) throw malformed(`wrap ${i} reuses another wrap's salt`);
     seenSalts.add(params.salt);
     return {
