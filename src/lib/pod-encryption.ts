@@ -427,14 +427,76 @@ function checkCosts(t: unknown, m: unknown, p: unknown, where: string): void {
   if (m < 8 * p || m > MANIFEST_LIMITS.mMax) throw outsideLimits(`${where}.m`);
 }
 
+/** The refusal for a header path that holds anything but a regular file. */
+function notRegularFile(): EncryptionManifestError {
+  return malformed('not a regular file');
+}
+
 /**
- * Read the manifest's text, refusing a file over
- * {@link MANIFEST_LIMITS.maxHeaderBytes} from its size alone, before a byte
- * of it is read.
+ * Open flags for the header: read-only, never blocking on open (a FIFO with no
+ * writer would otherwise hang the reader at `open`), and never following a
+ * symbolic link in the last component. Flags a platform lacks are simply left
+ * out; the `fstat` check below still refuses what they would have.
+ */
+const HEADER_OPEN_FLAGS =
+  fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0) | (fs.constants.O_NOFOLLOW ?? 0);
+
+/**
+ * Is anything at all at the manifest path? `lstat`, not `stat`: a symbolic
+ * link, dangling or not, counts as present, so it is refused as a header rather
+ * than silently read as "this pod is not encrypted".
+ */
+function manifestPresent(file: string): boolean {
+  try {
+    fs.lstatSync(file);
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw e;
+  }
+}
+
+/**
+ * Read the manifest's text. The header must be a REGULAR file reached without
+ * a symbolic link, and at most {@link MANIFEST_LIMITS.maxHeaderBytes} bytes are
+ * ever read from it.
+ *
+ * The kind is judged with `fstat` on the handle that is then read, not with a
+ * `stat` of the path, because a path's size says nothing useful about a device
+ * (size 0, endless bytes) or a FIFO (size 0, blocks until a writer appears).
+ * The read is bounded whatever the handle reports, so even a file that grows
+ * while it is read cannot make this allocate more than the limit plus one byte.
  */
 function readManifestText(file: string): string {
-  if (fs.statSync(file).size > MANIFEST_LIMITS.maxHeaderBytes) throw outsideLimits('header size');
-  return fs.readFileSync(file, 'utf-8');
+  // The containing directory must not be a link either: a link there would
+  // lead the read out of the pod as surely as a link at the header itself.
+  if (fs.lstatSync(path.dirname(file)).isSymbolicLink()) throw notRegularFile();
+  let fd: number;
+  try {
+    fd = fs.openSync(file, HEADER_OPEN_FLAGS);
+  } catch (e) {
+    // ELOOP (EMLINK on some BSDs): the last component is a symbolic link.
+    // EISDIR: platforms that refuse to open a directory for reading.
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP' || code === 'EMLINK' || code === 'EISDIR') throw notRegularFile();
+    throw e;
+  }
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) throw notRegularFile();
+    if (st.size > MANIFEST_LIMITS.maxHeaderBytes) throw outsideLimits('header size');
+    const buf = Buffer.alloc(MANIFEST_LIMITS.maxHeaderBytes + 1);
+    let filled = 0;
+    while (filled < buf.length) {
+      const n = fs.readSync(fd, buf, filled, buf.length - filled, null);
+      if (n === 0) break;
+      filled += n;
+    }
+    if (filled > MANIFEST_LIMITS.maxHeaderBytes) throw outsideLimits('header size');
+    return buf.toString('utf-8', 0, filled);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 function checkWrappedDek(wrappedDek: unknown, where: string): string {
@@ -556,7 +618,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
  */
 export function readEncryptionManifest(podDir: string): NormalizedEncryptionManifest | null {
   const p = manifestPath(podDir);
-  if (!fs.existsSync(p)) return null;
+  if (!manifestPresent(p)) return null;
   return parseEncryptionManifest(readManifestText(p)).normalized;
 }
 
@@ -571,9 +633,12 @@ export function writeEncryptionManifest(podDir: string, manifest: EncryptionMani
   fs.writeFileSync(p, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
 }
 
-/** A pod is encrypted iff it has an encryption manifest. */
+/**
+ * A pod is encrypted iff anything is at its manifest path. A symbolic link or
+ * other non-regular file there still counts, and is then refused when read.
+ */
 export function isPodEncrypted(podDir: string): boolean {
-  return fs.existsSync(manifestPath(podDir));
+  return manifestPresent(manifestPath(podDir));
 }
 
 // ─── Manifest construction & DEK resolution ───────────────────────────────────
@@ -837,7 +902,7 @@ export function rewrapPassphrase(
   options: RewrapOptions = {},
 ): RewrapResult {
   const target = manifestPath(podDir);
-  if (!fs.existsSync(target)) {
+  if (!manifestPresent(target)) {
     throw new Error(`Pod is not encrypted (no ${MANIFEST_RELATIVE_PATH}): ${podDir}`);
   }
   if (newPassphrase.length === 0) throw new Error('The new passphrase cannot be empty.');

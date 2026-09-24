@@ -35,8 +35,7 @@ write 1.0. See `docs/pod-encryption.md`.
 derived.** `settings/encryption.json` is plaintext, and its Argon2id parameters
 were used as found, so one edited number made every open allocate gigabytes or
 run for hours before the passphrase was checked. The reader (1.0 and 1.1) now
-refuses a manifest outright when the file is over 65536 bytes (checked from its
-size, before it is read), when it holds more than 16 wraps or more than 6
+refuses a manifest outright when the file is over 65536 bytes, when it holds more than 16 wraps or more than 6
 passphrase wraps, or when any passphrase wrap asks for `m` above 131072 KiB or
 below `8 * p`, `t` outside 1 to 6, `p` outside 1 to 4, a salt that is not
 canonical base64 of exactly 16 bytes, a `wrappedDek` that is not canonical
@@ -67,6 +66,19 @@ using the same directory fsync as `pod passphrase set`. Measured cost on macOS
 (where Node's fsync is a full flush): about 8 ms per file, about 0.12 s per
 encrypt or decrypt pass on a 20-file pod. `pod import` does not use this write
 and is unchanged.
+
+**The encryption header must be a regular file, and is read with a bound.**
+The header's size guard trusted the size of the path, which a device (size 0,
+endless bytes) or a FIFO (size 0, blocks until a writer appears) defeats, so a
+link to `/dev/zero` at `settings/encryption.json` read without bound and a FIFO
+there hung every command. The header is now opened without blocking and
+without following a symbolic link, its kind is checked on the open handle, and
+anything but a regular file (a symbolic link, dangling or not, a FIFO, a
+device, a directory, a socket, or a `settings` directory that is a link) is
+refused as a malformed header (`manifest-malformed`). At most 65537 bytes are
+ever read, whatever the handle reports. A dangling link at the header path now
+marks the pod as encrypted and is refused, where it was read as "not
+encrypted".
 
 **`pod reconcile --report <file>` now writes the file on a pod with no
 reconcilable records.** That branch printed its report and returned before the

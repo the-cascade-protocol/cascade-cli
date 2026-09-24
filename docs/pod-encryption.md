@@ -183,7 +183,7 @@ before any key derivation runs:
 
 | Field | Accepted | Why |
 |---|---|---|
-| header file size | at most 65536 bytes, checked before the file is read | a real header is under 1 KiB |
+| header file size | at most 65536 bytes; never more than 65537 bytes are read | a real header is under 1 KiB |
 | `kdfParams.m` (KiB) | `8 * p` to 131072 (128 MiB) | writers use 65536 (64 MiB); 2x headroom |
 | `kdfParams.t` | 1 to 6 | writers use 3 |
 | `kdfParams.p` | 1 to 4 | writers use 1 |
@@ -208,6 +208,26 @@ worst case the limits allow is six passphrase wraps at `m=131072, t=6, p=4`:
 about 1.7 seconds per wrap and 10.2 seconds for all six with the pure-JS
 Argon2id on an Apple M5, at about 305 MiB of resident memory. That is bounded,
 which is the point.
+
+### The header file itself
+
+`settings/encryption.json` must be a **regular file**, reached without a
+symbolic link. The reader opens it without following a link in its last
+component and without blocking (so a FIFO cannot hang the open), then checks
+the kind with `fstat` on the open handle, and refuses anything else: a
+symbolic link (dangling or not), a FIFO, a device such as `/dev/zero`, a
+directory, a socket. A `settings` directory that is itself a symbolic link is
+refused the same way. The read is bounded to 65537 bytes whatever the handle
+reports, because a device or a FIFO reports size 0.
+
+These are ordinary malformed-header refusals (`reason: "manifest-malformed"`):
+
+```
+Malformed settings/encryption.json: not a regular file
+```
+
+Anything at the header path counts as the pod being encrypted, a dangling
+link included, so a link there is refused rather than read as "not encrypted".
 
 ### Multi-wrap design
 
