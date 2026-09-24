@@ -251,6 +251,12 @@ Each entry is identified by its `by` discriminator:
 | `cascade pod passphrase set <dir>` | Change the passphrase by re-wrapping the DEK. See [Changing the passphrase](#changing-the-passphrase). |
 | `cascade pod import` / `pod query` / `validate` | Encryption-aware: if the pod is encrypted, resolve the DEK and route every resource read/write through the decrypt/encrypt helpers. Plaintext pods are unchanged. |
 
+Every write of `settings/encryption.json` is atomic and durable, including the
+1.0 manifest `pod init --encrypt` and `pod encrypt` write: a new temporary file
+(created, never reused) in `settings/`, fsync, rename over the manifest, fsync
+of the directory. A crash mid-write leaves either the old state or the whole new
+manifest, never a truncated one.
+
 ### Passphrase handling
 
 The passphrase is **never** taken as a command-line argument (that would leak it
@@ -287,6 +293,8 @@ written, and the DEK never touches disk.
    the directory fsynced. Any failure before the rename removes the temporary
    file and leaves the manifest byte-identical. No backup of the old manifest
    is kept inside the pod, since it would keep the old passphrase working.
+   A temporary manifest left in `settings/` by an earlier run that was killed
+   is removed before the new one is written.
 
 Refusals leave the manifest byte-identical: the pod is not encrypted (exit 1);
 the new passphrase is empty or the same as the current one (exit 1); the

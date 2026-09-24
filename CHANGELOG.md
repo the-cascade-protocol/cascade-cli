@@ -80,6 +80,15 @@ ever read, whatever the handle reports. A dangling link at the header path now
 marks the pod as encrypted and is refused, where it was read as "not
 encrypted".
 
+**Every write of the encryption header is atomic and durable.** `pod init
+--encrypt` and `pod encrypt` wrote `settings/encryption.json` with a plain
+write, so a crash mid-write could leave a truncated header over a pod that was
+still plaintext, which every command then refused as malformed. The header is
+now written through the same helper as `pod passphrase set` and the resource
+rewrites: a new temporary file (create-new), fsync, rename, fsync of the
+directory. A temporary header left in `settings/` by a killed earlier write is
+removed by the next header write.
+
 **`pod reconcile --report <file>` now writes the file on a pod with no
 reconcilable records.** That branch printed its report and returned before the
 write, so the file was never created.

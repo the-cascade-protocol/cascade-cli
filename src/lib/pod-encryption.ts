@@ -624,13 +624,15 @@ export function readEncryptionManifest(podDir: string): NormalizedEncryptionMani
 
 /**
  * Write a version 1.0 `settings/encryption.json` (the manifest `pod init
- * --encrypt` and `pod encrypt` produce). A 1.1 manifest is only ever written by
+ * --encrypt` and `pod encrypt` produce), atomically: a crash mid-write leaves
+ * either no manifest or a whole one, never a truncated one over a pod that is
+ * still plaintext. A 1.1 manifest is only ever written by
  * {@link rewrapPassphrase}, atomically and verified.
  */
 export function writeEncryptionManifest(podDir: string, manifest: EncryptionManifest): void {
   const p = manifestPath(podDir);
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+  writeManifestFile(p, Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf-8'));
 }
 
 /**
@@ -855,7 +857,7 @@ export interface RewrapResult {
 
 /**
  * fsync a directory, so a rename inside it survives a power cut. The one
- * helper for this: the manifest re-wrap and every atomic resource write use it.
+ * helper for this: {@link atomicWriteFile} uses it after every rename.
  */
 export function fsyncDirectory(dir: string): void {
   let fd: number | undefined;
@@ -872,6 +874,81 @@ export function fsyncDirectory(dir: string): void {
   }
 }
 
+/** Options for {@link atomicWriteFile}. */
+export interface AtomicWriteOptions {
+  /** Permission bits for the new file. Defaults to the process default. */
+  mode?: number;
+  /** Writes the bytes into the open temporary file. Defaults to a full write. */
+  write?: (fd: number, bytes: Buffer) => void;
+  /**
+   * Runs after the temporary file is written, fsynced and closed, and before
+   * the rename. Throwing abandons the write: the temporary file is removed and
+   * the target is left as it was.
+   */
+  beforeRename?: (tempPath: string) => void;
+}
+
+/**
+ * Write a file so it is never observed half-written, and so the new bytes
+ * survive a power cut once this returns. The one helper for this: every
+ * atomic write in the tool goes through it.
+ *
+ * The steps, in this order: create a NEW temporary file in the target's
+ * directory (create-new, so it never opens a file or link already at that
+ * name, and the same directory, so the rename cannot cross a filesystem),
+ * write it, fsync it, close it, rename it over the target, fsync the
+ * directory. Without the first fsync the rename can reach the disk before the
+ * data, and a power cut leaves the target empty or partial; without the second
+ * the rename itself can be lost. Any failure before the rename removes the
+ * temporary file.
+ */
+export function atomicWriteFile(absPath: string, bytes: Buffer, options: AtomicWriteOptions = {}): void {
+  const dir = path.dirname(absPath);
+  const tmp = path.join(dir, `.${path.basename(absPath)}.${randomBytes(6).toString('hex')}.tmp`);
+  let renamed = false;
+  try {
+    const fd = options.mode === undefined ? fs.openSync(tmp, 'wx') : fs.openSync(tmp, 'wx', options.mode);
+    try {
+      (options.write ?? ((f: number, b: Buffer) => fs.writeFileSync(f, b)))(fd, bytes);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    options.beforeRename?.(tmp);
+    fs.renameSync(tmp, absPath);
+    renamed = true;
+    fsyncDirectory(dir);
+  } finally {
+    if (!renamed) {
+      try {
+        fs.rmSync(tmp, { force: true });
+      } catch {
+        /* best effort: the error that got us here is the one to report */
+      }
+    }
+  }
+}
+
+/**
+ * The temporary names {@link atomicWriteFile} gives the manifest. Only ever
+ * matched inside the manifest's own directory.
+ */
+const MANIFEST_TEMP_NAME = /^\.encryption\.json\.[0-9a-f]{12}\.tmp$/;
+
+/**
+ * Write the manifest atomically, first removing any temporary manifest a
+ * killed earlier write left behind. Such a file never became the manifest,
+ * but it can hold a wrap of the key, so it is deleted rather than left beside
+ * the real one.
+ */
+function writeManifestFile(target: string, bytes: Buffer, options: AtomicWriteOptions = {}): void {
+  const dir = path.dirname(target);
+  for (const name of fs.readdirSync(dir)) {
+    if (MANIFEST_TEMP_NAME.test(name)) fs.rmSync(path.join(dir, name), { force: true });
+  }
+  atomicWriteFile(target, bytes, options);
+}
+
 /**
  * Re-wrap the pod DEK under a new passphrase. The ONLY writer of manifest 1.1.
  *
@@ -885,7 +962,8 @@ export function fsyncDirectory(dir: string): void {
  * the bytes READ BACK and opened with the new passphrase to the same DEK, then
  * a rename over the manifest and an fsync of the directory. Any failure before
  * the rename removes the temporary file and leaves the manifest byte-identical.
- * No copy of the old manifest is kept, since an old manifest inside the pod
+ * A temporary manifest left by an earlier write that was killed is removed
+ * first. No copy of the old manifest is kept, since an old manifest inside the pod
  * would keep the old passphrase working.
  *
  * The DEK never touches disk and no resource file is read or written.
@@ -939,44 +1017,30 @@ export function rewrapPassphrase(
     kek.fill(0);
 
     const bytes = Buffer.from(serializeEncryptionManifestV11(next), 'utf-8');
-    const dir = path.dirname(target);
-    const tmp = path.join(dir, `.${path.basename(target)}.${randomBytes(6).toString('hex')}.tmp`);
-    const mode = fs.statSync(target).mode & 0o777;
-    let renamed = false;
-    try {
-      const fd = fs.openSync(tmp, 'wx', mode);
-      try {
-        (options.writeTemp ?? ((f, b) => fs.writeSync(f, b, 0, b.length, 0)))(fd, bytes);
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-
+    writeManifestFile(target, bytes, {
+      mode: fs.statSync(target).mode & 0o777,
+      write: options.writeTemp,
       // Read back what is ON DISK, not what was meant to be written, and prove
-      // the new passphrase opens it to the same DEK. The rename below is the
-      // point of no return for the old passphrase.
-      let same: boolean;
-      try {
-        const onDisk = parseEncryptionManifest(readManifestText(tmp));
-        const check = unlockManifest(onDisk.normalized, newPassphrase);
-        same = check.dek.equals(dek);
-        check.dek.fill(0);
-      } catch (e) {
-        throw new Error(
-          `The new manifest did not open with the new passphrase when read back ` +
-            `(${e instanceof Error ? e.message : String(e)}). Nothing was changed.`,
-        );
-      }
-      if (!same) {
-        throw new Error('The new manifest opened to a different key when read back. Nothing was changed.');
-      }
-
-      fs.renameSync(tmp, target);
-      renamed = true;
-      fsyncDirectory(dir);
-    } finally {
-      if (!renamed) fs.rmSync(tmp, { force: true });
-    }
+      // the new passphrase opens it to the same DEK. The rename that follows is
+      // the point of no return for the old passphrase.
+      beforeRename: (tmp) => {
+        let same: boolean;
+        try {
+          const onDisk = parseEncryptionManifest(readManifestText(tmp));
+          const check = unlockManifest(onDisk.normalized, newPassphrase);
+          same = check.dek.equals(dek);
+          check.dek.fill(0);
+        } catch (e) {
+          throw new Error(
+            `The new manifest did not open with the new passphrase when read back ` +
+              `(${e instanceof Error ? e.message : String(e)}). Nothing was changed.`,
+          );
+        }
+        if (!same) {
+          throw new Error('The new manifest opened to a different key when read back. Nothing was changed.');
+        }
+      },
+    });
 
     return {
       manifestVersion: '1.1',
