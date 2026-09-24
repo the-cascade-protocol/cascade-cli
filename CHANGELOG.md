@@ -9,6 +9,32 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+**`cascade pod passphrase set <pod-dir>`: change an encrypted pod's passphrase.**
+Re-wraps the pod's data key under a new passphrase in one atomic write of
+`settings/encryption.json`; no resource file is read or written. The current
+passphrase comes from `CASCADE_POD_PASSPHRASE` or a hidden prompt, the new one
+from `CASCADE_POD_NEW_PASSPHRASE` or a hidden prompt entered twice; neither is
+accepted on the command line or printed. The current passphrase must open a wrap
+before anything is written, the new manifest is read back and proven to open to
+the same key before it replaces the old one, and every refusal leaves the
+manifest byte-identical. A copy of the pod made before the change still opens
+with the old passphrase.
+
+**Encryption manifest version 1.1.** KDF parameters move into each passphrase
+wrap, and each wrap gains a `label` and a `createdAt`. Every command now reads
+both 1.0 and 1.1 through one normalized reader, and refuses a manifest version
+it does not know as written by a newer tool. Only `pod passphrase set` writes
+1.1 (migrating 1.0 in memory); `pod init --encrypt` and `pod encrypt` still
+write 1.0. See `docs/pod-encryption.md`.
+
+### Fixed
+
+**`pod reconcile --report <file>` now writes the file on a pod with no
+reconcilable records.** That branch printed its report and returned before the
+write, so the file was never created.
+
 ### Changed
 
 **Shapes synced to spec d819bc2: core v3.9, health v2.9, clinical v1.19 (0.21.1).**

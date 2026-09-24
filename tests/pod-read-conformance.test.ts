@@ -368,6 +368,10 @@ const VERBS: Record<string, VerbSpec> = {
   init: { category: 'lifecycle', why: 'creates a pod; there is nothing to read yet' },
   encrypt: { category: 'lifecycle', why: 're-keys the pod; the passphrase is its subject, not its input' },
   decrypt: { category: 'lifecycle', why: 're-keys the pod; covered by the encrypt/decrypt round-trip tests' },
+  passphrase: {
+    category: 'lifecycle',
+    why: 're-wraps the pod key and reads no resource; covered by pod-passphrase-set.test.ts',
+  },
   import: { category: 'write', why: 'writes records; DEK-aware through the shared resolution' },
   profile: { category: 'write', why: 'writes profile/card.ttl; DEK-aware through the shared resolution' },
   resolve: { category: 'write', why: 'records a resolution decision; its conflict-store read is pinned by its own tests' },

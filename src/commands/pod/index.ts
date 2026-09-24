@@ -10,6 +10,7 @@
  *   info <pod-dir>      Show pod metadata and statistics
  *   doctor <pod-dir>    Diagnose a damaged pod, and repair it with --write
  *   reconcile <pod-dir> Report (and with --apply, merge) duplicates the pod already holds
+ *   passphrase set <pod-dir>  Change an encrypted pod's passphrase (re-wraps its key)
  *
  * This module delegates to focused subcommand modules:
  *   - init.ts    Pod initialization with templates
@@ -29,6 +30,7 @@ import { registerConflictsCommand } from './conflicts.js';
 import { registerResolveCommand } from './resolve.js';
 import { registerExtractSubcommand } from './extract.js';
 import { registerEncryptSubcommand } from './encrypt.js';
+import { registerPassphraseSubcommand } from './passphrase.js';
 import { registerAmendSubcommand } from './amend.js';
 import { registerAnnotateSubcommand } from './annotate.js';
 import { registerAddRecordSubcommand } from './add-record.js';
@@ -50,6 +52,7 @@ export function registerPodCommand(program: Command): void {
   registerResolveCommand(pod, program);
   registerExtractSubcommand(pod);
   registerEncryptSubcommand(pod, program);
+  registerPassphraseSubcommand(pod, program);
   registerAmendSubcommand(pod, program);
   registerAnnotateSubcommand(pod, program);
   registerAddRecordSubcommand(pod, program);

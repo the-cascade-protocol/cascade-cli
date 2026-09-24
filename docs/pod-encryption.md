@@ -112,6 +112,66 @@ KEK even if the defaults change.
 The `wrappedDek` is itself a combined AES-256-GCM blob (the DEK encrypted under
 the KEK), base64-encoded.
 
+The schema above is **version 1.0**. `pod init --encrypt` and `pod encrypt`
+write it.
+
+### Version 1.1
+
+`pod passphrase set` writes **version 1.1**, which moves the KDF parameters
+into each passphrase wrap (one salt cannot serve two secrets) and gives each
+wrap a `label` and a `createdAt`:
+
+```json
+{
+  "version": "1.1",
+  "algorithm": "aes-256-gcm",
+  "wraps": [
+    {
+      "by": "passphrase",
+      "label": "primary",
+      "createdAt": "2026-09-23T17:04:11.123Z",
+      "kdf": "argon2id",
+      "kdfParams": { "salt": "<base64 of 16 random bytes>", "t": 3, "m": 65536, "p": 1 },
+      "wrappedDek": "<base64 of nonce(12) || ciphertext(32) || tag(16)>"
+    }
+  ]
+}
+```
+
+Rules:
+
+1. No top-level `kdf` or `kdfParams` in 1.1. A 1.1 manifest that carries
+   either is malformed: readers refuse it, writers never produce it.
+2. Every `passphrase` wrap carries its own `kdf` (`"argon2id"`) and
+   `kdfParams`. Salts are 16 random bytes, fresh per wrap, and unique across
+   the wraps of one manifest.
+3. `label` is a string or `null`. Neutral words only (`"primary"`): the
+   manifest is plaintext and travels with the folder.
+4. `createdAt` is an ISO 8601 UTC timestamp with milliseconds, or `null` for a
+   wrap migrated from 1.0 whose age is unknown. It is set once when the wrap is
+   created.
+5. `wraps` is never empty.
+6. `by` is `"passphrase"` or `"device-keychain"` (reserved, not implemented).
+   Readers skip wraps they do not implement; a manifest with no wrap the
+   reader implements cannot be opened.
+7. A wrap's public identifier is its `kdfParams.salt`. In 1.0 the single
+   top-level salt plays this role, so reading a 1.0 pod leaves its identifier
+   unchanged, and a re-wrapped pod has a new one.
+8. Readers accept `"1.0"` and `"1.1"`. Any other version is refused with a
+   message that the pod was written by a newer tool.
+9. To open: try each `passphrase` wrap in manifest order with its own KDF
+   parameters; the first whose GCM tag verifies yields the DEK. All wraps
+   resolve the same DEK.
+10. Migration 1.0 to 1.1 (done in memory by the writing command): the top-level
+    `kdf` and `kdfParams` move into the single `passphrase` wrap, its `label`
+    becomes `"primary"` and its `createdAt` becomes `null`; any other wrap is
+    carried over with `label: null` and `createdAt: null`.
+
+In the CLI, `src/lib/pod-encryption.ts` is the only code that reads the
+manifest's key material. It reads both versions into one normalized shape (a
+list of wraps, each passphrase wrap with its own KDF parameters), and a source
+test fails if `kdfParams` or `wrappedDek` is read anywhere else.
+
 ### Multi-wrap design
 
 `wraps` is an **array** so the same DEK can be unlocked by different key holders.
@@ -131,6 +191,7 @@ Each entry is identified by its `by` discriminator:
 | `cascade pod init <dir> --encrypt` | Generate a DEK, derive the KEK from the passphrase, write the manifest, then write all template resources **encrypted**. |
 | `cascade pod encrypt <dir>` | Migrate an existing **plaintext** pod to encrypted in place. Guards if already encrypted. |
 | `cascade pod decrypt <dir>` | Reverse: decrypt every resource back to plaintext and remove the manifest. |
+| `cascade pod passphrase set <dir>` | Change the passphrase by re-wrapping the DEK. See [Changing the passphrase](#changing-the-passphrase). |
 | `cascade pod import` / `pod query` / `validate` | Encryption-aware: if the pod is encrypted, resolve the DEK and route every resource read/write through the decrypt/encrypt helpers. Plaintext pods are unchanged. |
 
 ### Passphrase handling
@@ -146,6 +207,44 @@ If a pod is encrypted and no passphrase is available (no env var,
 non-interactive), encryption-aware commands fail with a clean error instructing
 the caller to set `CASCADE_POD_PASSPHRASE` or run interactively.
 
+`pod passphrase set` takes the current passphrase the same way, and the new one
+from **`CASCADE_POD_NEW_PASSPHRASE`**, else a hidden prompt entered twice that
+must match.
+
+### Changing the passphrase
+
+`cascade pod passphrase set <dir>` re-wraps the pod's DEK under a new
+passphrase. Every resource is sealed under the DEK, not the passphrase, so the
+change is one write of `settings/encryption.json`; no resource file is read or
+written, and the DEK never touches disk.
+
+1. The current passphrase must open a wrap. If it does not, the command refuses
+   before asking for the new one.
+2. The manifest is migrated to 1.1 in memory if needed. The wrap that opened is
+   replaced by a new passphrase wrap (fresh 16-byte salt, default KDF
+   parameters, `createdAt` now, `label` kept or `"primary"`). Every other wrap
+   is kept as it is.
+3. The new manifest is written to a temporary file in `settings/` and fsynced,
+   those bytes are read back and opened with the new passphrase to the same
+   DEK, and only then is the file renamed over `settings/encryption.json` and
+   the directory fsynced. Any failure before the rename removes the temporary
+   file and leaves the manifest byte-identical. No backup of the old manifest
+   is kept inside the pod, since it would keep the old passphrase working.
+
+Refusals leave the manifest byte-identical: the pod is not encrypted (exit 1);
+the new passphrase is empty or the same as the current one (exit 1); the
+current passphrase opens no wrap, or the manifest is malformed or from a newer
+tool (exit 2).
+
+A copy of the pod made before the change still opens with the old passphrase:
+the copy carries its own manifest. Output is one line of text, or with `--json`:
+
+```json
+{ "podDir": "/path/to/pod", "manifestVersion": "1.1", "wrapCount": 1, "createdAt": "2026-09-23T17:04:11.123Z" }
+```
+
+No passphrase, salt or key is ever printed.
+
 ## Known limitations (v1)
 
 - `cascade pod conflicts` / `cascade pod resolve` read and write
@@ -155,5 +254,6 @@ the caller to set `CASCADE_POD_PASSPHRASE` or run interactively.
   which the conflicts/resolve commands cannot read them until they are wired the
   same way as import/query/validate. A freshly initialized + imported pod only
   creates these files when reconciliation conflicts occur.
-- Key rotation (change passphrase / add a wrap) is not yet exposed as a command,
-  though the manifest format already supports it.
+- Changing the passphrase is `pod passphrase set`. Adding a second wrap, and
+  re-keying (a new DEK, which re-encrypts every resource), are not yet exposed
+  as commands.
