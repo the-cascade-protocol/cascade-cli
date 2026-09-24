@@ -9,10 +9,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      # cascade-cli goes in a subdirectory so the conformance fixtures repo can
+      # cascade-cli goes in a subdirectory so the conformance and spec repos can
       # sit next to it. The C-CDA and genomics test suites read fixtures from a
-      # sibling checkout via `../../conformance` (matching the local dev layout),
-      # so both repos must live side by side inside the workspace.
+      # sibling `conformance` checkout, and the CAP advisory suites read their
+      # example patches from a sibling `spec` checkout (matching the local dev
+      # layout), so all three repos must live side by side inside the workspace.
       - name: Checkout cascade-cli
         uses: actions/checkout@v4
         with:
@@ -23,6 +24,15 @@ jobs:
         with:
           repository: the-cascade-protocol/conformance
           path: conformance
+
+      # The CAP advisory suites read ontologies/advisory/v1-draft/examples/*.ldpatch
+      # from here (tests/helpers/spec.ts). Default branch, like the
+      # vendored-shapes job below.
+      - name: Checkout spec
+        uses: actions/checkout@v4
+        with:
+          repository: the-cascade-protocol/spec
+          path: spec
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -67,15 +77,14 @@ jobs:
           set -o pipefail
           npm test 2>&1 | tee "${RUNNER_TEMP}/test-output.txt"
 
-      # Green is not the same as complete. This suite runs 1854 tests with zero
-      # skips locally; on a runner a subset is guarded by describe.skipIf and
+      # Green is not the same as complete. A test guarded by describe.skipIf
       # vanishes rather than fails, so a passing run can hide an entire suite
       # that stopped executing.
       #
-      # The 24 that remain are the CAP advisory suites, whose two *.ldpatch
-      # example files are not committed to any repository and so cannot be
-      # provisioned here. The reference-pod half (40) is closed: the pod now
-      # lives in conformance, which this workflow already checks out.
+      # The expected count is zero. The last 24 were the CAP advisory suites,
+      # whose two *.ldpatch example files were committed to no repository; they
+      # now live in spec, which this workflow checks out. The reference-pod
+      # half (40) closed earlier: the pod lives in conformance.
       #
       # This is a ratchet, not a tolerance. It fails in BOTH directions: growth
       # means something stopped running, and a decrease means the gap closed and
@@ -83,7 +92,7 @@ jobs:
       # decay into a rubber stamp.
       - name: Fail if the skip count moved
         env:
-          EXPECTED_SKIPPED_TESTS: '24'
+          EXPECTED_SKIPPED_TESTS: '0'
         run: |
           set -euo pipefail
           # vitest colorizes, so the summary line starts with an ANSI escape, not

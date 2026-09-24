@@ -14,28 +14,19 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { Store, DataFactory } from 'n3';
 import { parseCap } from '../src/lib/advisory/ldpatch-parser.js';
 import { evaluateSelector } from '../src/lib/advisory/selector.js';
 import { applyCap } from '../src/lib/advisory/applier.js';
+import { ADVISORY_EXAMPLES_DIR } from './helpers/spec.js';
 
 const { namedNode, literal, quad } = DataFactory;
 
-const EXAMPLES_DIR = path.resolve(
-  os.homedir(),
-  'Development/cascadeprotocol.org/drafts/advisory-v1',
-);
-
-// The example advisory patches (*.ldpatch) referenced below live in the
-// cascadeprotocol.org sibling repo (~/Development/cascadeprotocol.org/drafts/
-// advisory-v1). That repo is private and its drafts/ fixtures are not committed,
-// so they cannot be provisioned in CI. Quarantine the fixture-dependent blocks
-// when the files are absent; they still run locally when the sibling is checked
-// out. Re-enable in CI once the fixtures are moved in-repo or provisioned.
-const FIXTURES_AVAILABLE =
-  fs.existsSync(path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch')) &&
-  fs.existsSync(path.join(EXAMPLES_DIR, 'example-cpic-cyp2c19-warfarin.ldpatch'));
+// The CAP example patches (*.ldpatch) are authored in the `spec` repository
+// (ontologies/advisory/v1-draft/examples/) and read from the sibling spec
+// checkout, resolved like the conformance fixtures (tests/helpers/spec.ts).
+// A missing checkout fails the run in preflight rather than skipping here.
+const EXAMPLES_DIR = ADVISORY_EXAMPLES_DIR;
 
 const CA_ID = 'https://ns.cascadeprotocol.org/genomics/v1#caId';
 const HGNC_ID = 'https://ns.cascadeprotocol.org/genomics/v1#hgncId';
@@ -51,7 +42,7 @@ const ADVISORY_APPLICATION_ACTIVITY =
 const APPLIED_TRIPLES_COUNT =
   'https://ns.cascadeprotocol.org/core/v1#appliedTriplesCount';
 
-describe.skipIf(!FIXTURES_AVAILABLE)('CAP applier — happy path', () => {
+describe('CAP applier — happy path', () => {
   it('applies the BRCA2 reclassification advisory and creates one activity per match', () => {
     const src = fs.readFileSync(
       path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch'),
@@ -161,7 +152,7 @@ describe.skipIf(!FIXTURES_AVAILABLE)('CAP applier — happy path', () => {
   });
 });
 
-describe.skipIf(!FIXTURES_AVAILABLE)('CAP applier — multiple bindings', () => {
+describe('CAP applier — multiple bindings', () => {
   it('creates one activity per binding when the selector matches multiple records', () => {
     const src = fs.readFileSync(
       path.join(EXAMPLES_DIR, 'example-cpic-cyp2c19-warfarin.ldpatch'),
@@ -253,7 +244,7 @@ Add {
   });
 });
 
-describe.skipIf(!FIXTURES_AVAILABLE)('CAP applier — generated-by linkage', () => {
+describe('CAP applier — generated-by linkage', () => {
   it('adds prov:wasGeneratedBy from new root subjects to the activity', () => {
     const src = fs.readFileSync(
       path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch'),
@@ -301,7 +292,7 @@ describe.skipIf(!FIXTURES_AVAILABLE)('CAP applier — generated-by linkage', () 
   });
 });
 
-describe.skipIf(!FIXTURES_AVAILABLE)('CAP applier — empty bindings', () => {
+describe('CAP applier — empty bindings', () => {
   it('makes no changes when there are zero bindings', () => {
     const src = fs.readFileSync(
       path.join(EXAMPLES_DIR, 'example-brca2-reclassification.ldpatch'),
