@@ -402,5 +402,27 @@ describe('rewrapPassphrase', () => {
       );
       expect(resolveDek(pod, 'pw-old').equals(dek)).toBe(true);
     });
+
+    it('the bytes read back open with the new passphrase, but to a DIFFERENT key', () => {
+      const { pod, dek } = encryptedPod();
+      // A writer that re-wraps a different key under the new passphrase's own
+      // KEK: the read-back unwrap succeeds, so only the key comparison can
+      // catch it. Renaming this over the manifest would lose the pod's key.
+      const otherKey = generateDek();
+      const substituting = (fd: number, bytes: Buffer): void => {
+        const m = JSON.parse(bytes.toString('utf-8')) as EncryptionManifestV11;
+        const w = m.wraps[0];
+        const kek = deriveKek('pw-new', Buffer.from(w.kdfParams!.salt, 'base64'), w.kdfParams!);
+        w.wrappedDek = wrapDek(otherKey, kek);
+        const out = Buffer.from(serializeEncryptionManifestV11(m));
+        fs.writeSync(fd, out, 0, out.length, 0);
+      };
+      expectRefused(
+        pod,
+        () => rewrapPassphrase(pod, 'pw-old', 'pw-new', { kdf: FAST_KDF, writeTemp: substituting }),
+        /opened to a different key when read back/,
+      );
+      expect(resolveDek(pod, 'pw-old').equals(dek)).toBe(true);
+    });
   });
 });
