@@ -190,18 +190,22 @@ export const READABLE_MANIFEST_VERSIONS = ['1.0', '1.1'] as const;
  * `m` is in KiB and must also be at least `8 * p` (the Argon2 minimum).
  */
 export const MANIFEST_LIMITS = {
-  /** Argon2id memory cost ceiling, KiB (256 MiB). */
-  mMax: 262144,
+  /** Argon2id memory cost ceiling, KiB (128 MiB). */
+  mMax: 131072,
   tMin: 1,
-  tMax: 10,
+  tMax: 6,
   pMin: 1,
-  pMax: 8,
+  pMax: 4,
   /** Exact decoded salt length, bytes. */
   saltBytes: 16,
   /** Exact decoded wrapped-DEK length, bytes: nonce(12) + key(32) + tag(16). */
   wrappedDekBytes: NONCE_LEN + KEY_LEN + TAG_LEN,
   /** Most passphrase wraps one manifest may hold (bounds try-each-wrap). */
-  maxPassphraseWraps: 8,
+  maxPassphraseWraps: 6,
+  /** Most wraps of any kind one manifest may hold. */
+  maxWraps: 16,
+  /** Largest manifest file, bytes. Checked before the file is read or parsed. */
+  maxHeaderBytes: 65536,
 } as const;
 
 /** The refusal sentence for a manifest outside {@link MANIFEST_LIMITS}. */
@@ -409,13 +413,28 @@ function checkKdf(kdf: unknown, kdfParams: unknown, where: string): KdfParams {
   if (canonicalBase64Length(salt) !== MANIFEST_LIMITS.saltBytes) {
     throw outsideLimits(`${where}.kdfParams.salt`);
   }
+  checkCosts(t, m, p, `${where}.kdfParams`);
+  return { salt, t: t as number, m: m as number, p: p as number };
+}
+
+/** Argon2id cost parameters inside {@link MANIFEST_LIMITS}, or a refusal naming the field. */
+function checkCosts(t: unknown, m: unknown, p: unknown, where: string): void {
   if (!isPositiveInt(t) || !isPositiveInt(m) || !isPositiveInt(p)) {
-    throw malformed(`${where} kdfParams t, m and p must be positive integers`);
+    throw malformed(`${where} t, m and p must be positive integers`);
   }
-  if (t < MANIFEST_LIMITS.tMin || t > MANIFEST_LIMITS.tMax) throw outsideLimits(`${where}.kdfParams.t`);
-  if (p < MANIFEST_LIMITS.pMin || p > MANIFEST_LIMITS.pMax) throw outsideLimits(`${where}.kdfParams.p`);
-  if (m < 8 * p || m > MANIFEST_LIMITS.mMax) throw outsideLimits(`${where}.kdfParams.m`);
-  return { salt, t, m, p };
+  if (t < MANIFEST_LIMITS.tMin || t > MANIFEST_LIMITS.tMax) throw outsideLimits(`${where}.t`);
+  if (p < MANIFEST_LIMITS.pMin || p > MANIFEST_LIMITS.pMax) throw outsideLimits(`${where}.p`);
+  if (m < 8 * p || m > MANIFEST_LIMITS.mMax) throw outsideLimits(`${where}.m`);
+}
+
+/**
+ * Read the manifest's text, refusing a file over
+ * {@link MANIFEST_LIMITS.maxHeaderBytes} from its size alone, before a byte
+ * of it is read.
+ */
+function readManifestText(file: string): string {
+  if (fs.statSync(file).size > MANIFEST_LIMITS.maxHeaderBytes) throw outsideLimits('header size');
+  return fs.readFileSync(file, 'utf-8');
 }
 
 function checkWrappedDek(wrappedDek: unknown, where: string): string {
@@ -443,6 +462,9 @@ function checkNullableString(v: unknown, what: string): string | null {
  * @throws {EncryptionManifestError} on any of the above, or invalid JSON.
  */
 export function parseEncryptionManifest(text: string): ParsedEncryptionManifest {
+  if (Buffer.byteLength(text, 'utf-8') > MANIFEST_LIMITS.maxHeaderBytes) {
+    throw outsideLimits('header size');
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -463,6 +485,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
   if (!Array.isArray(raw.wraps) || raw.wraps.length === 0) {
     throw malformed('wraps must be a non-empty list');
   }
+  if (raw.wraps.length > MANIFEST_LIMITS.maxWraps) throw outsideLimits('wraps');
   const rawWraps: unknown[] = raw.wraps;
   for (const [i, w] of rawWraps.entries()) {
     if (!isPlainObject(w) || typeof w.by !== 'string' || w.by.length === 0) {
@@ -471,7 +494,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
   }
   const objWraps = rawWraps as Array<Record<string, unknown> & { by: string }>;
   if (objWraps.filter((w) => w.by === 'passphrase').length > MANIFEST_LIMITS.maxPassphraseWraps) {
-    throw outsideLimits('wraps');
+    throw outsideLimits('wraps (passphrase)');
   }
 
   if (version === '1.0') {
@@ -534,7 +557,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
 export function readEncryptionManifest(podDir: string): NormalizedEncryptionManifest | null {
   const p = manifestPath(podDir);
   if (!fs.existsSync(p)) return null;
-  return parseEncryptionManifest(fs.readFileSync(p, 'utf-8')).normalized;
+  return parseEncryptionManifest(readManifestText(p)).normalized;
 }
 
 /**
@@ -559,12 +582,17 @@ export function isPodEncrypted(podDir: string): boolean {
  * Build a fresh version 1.0 encryption manifest for a new DEK protected by a
  * passphrase. Generates a random salt and wraps the DEK with a freshly derived
  * KEK.
+ *
+ * @throws {EncryptionManifestError} if `params` is outside
+ *   {@link MANIFEST_LIMITS}: it never writes a manifest a reader would refuse.
  */
 export function buildPassphraseManifest(
   dek: Buffer,
   passphrase: string,
   params: { t: number; m: number; p: number } = DEFAULT_KDF,
 ): EncryptionManifest {
+  // Never write a manifest a reader would refuse.
+  checkCosts(params.t, params.m, params.p, 'kdfParams');
   const salt = randomBytes(SALT_LEN);
   const kek = deriveKek(passphrase, salt, params);
   const wrappedDek = wrapDek(dek, kek);
@@ -817,7 +845,7 @@ export function rewrapPassphrase(
     throw new Error('The new passphrase is the same as the current one: nothing to change.');
   }
 
-  const parsed = parseEncryptionManifest(fs.readFileSync(target, 'utf-8'));
+  const parsed = parseEncryptionManifest(readManifestText(target));
   const { dek, wrapIndex } = unlockManifest(parsed.normalized, currentPassphrase);
   try {
     const next: EncryptionManifestV11 =
@@ -864,7 +892,7 @@ export function rewrapPassphrase(
       // point of no return for the old passphrase.
       let same: boolean;
       try {
-        const onDisk = parseEncryptionManifest(fs.readFileSync(tmp, 'utf-8'));
+        const onDisk = parseEncryptionManifest(readManifestText(tmp));
         const check = unlockManifest(onDisk.normalized, newPassphrase);
         same = check.dek.equals(dek);
         check.dek.fill(0);

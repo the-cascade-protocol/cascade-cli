@@ -103,7 +103,7 @@ function header(version: '1.0' | '1.1', mutate: Mutation = () => {}): Record<str
 function mkPod(h: unknown): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cascade-limits-'));
   fs.mkdirSync(path.join(dir, 'settings'));
-  fs.writeFileSync(path.join(dir, 'settings', 'encryption.json'), JSON.stringify(h, null, 2) + '\n');
+  fs.writeFileSync(path.join(dir, 'settings', 'encryption.json'), serialized(h));
   return dir;
 }
 
@@ -122,6 +122,32 @@ function withPassphraseWraps(n: number): Mutation {
   };
 }
 
+/** One passphrase wrap plus `n` wraps of a kind this tool does not implement. */
+function withOtherWraps(n: number): Mutation {
+  return (h) => {
+    const wraps = h.wraps as Array<Record<string, unknown>>;
+    for (let i = 0; i < n; i += 1) wraps.push({ by: 'device-keychain', label: null, createdAt: null });
+  };
+}
+
+/**
+ * Pad the header (serialized by {@link mkPod} and {@link serialized}) to exactly
+ * `bytes` bytes with an ignored top-level key. The key is removed and re-added
+ * so the padding is sized against the final serialization.
+ */
+function padToBytes(bytes: number): Mutation {
+  return (h) => {
+    h.padding = '';
+    const base = Buffer.byteLength(serialized(h), 'utf-8');
+    h.padding = 'x'.repeat(bytes - base);
+  };
+}
+
+/** The exact text a header is written as. */
+function serialized(h: unknown): string {
+  return JSON.stringify(h, null, 2) + '\n';
+}
+
 interface Case {
   name: string;
   field: string;
@@ -131,26 +157,26 @@ interface Case {
 
 const CASES: Case[] = [
   {
-    name: 'kdfParams.m ceiling (262144 / 262145 KiB)',
+    name: 'kdfParams.m ceiling (131072 / 131073 KiB)',
     field: 'kdfParams.m',
-    inside: (_h, p) => void (p.m = 262144),
-    outside: (_h, p) => void (p.m = 262145),
+    inside: (_h, p) => void (p.m = 131072),
+    outside: (_h, p) => void (p.m = 131073),
   },
   {
-    name: 'kdfParams.t (10 / 11)',
+    name: 'kdfParams.t (6 / 7)',
     field: 'kdfParams.t',
-    inside: (_h, p) => void (p.t = 10),
-    outside: (_h, p) => void (p.t = 11),
+    inside: (_h, p) => void (p.t = 6),
+    outside: (_h, p) => void (p.t = 7),
   },
   {
-    name: 'kdfParams.p (8 / 9)',
+    name: 'kdfParams.p (4 / 5)',
     field: 'kdfParams.p',
     inside: (_h, p) => {
-      p.p = 8;
+      p.p = 4;
       p.m = 128;
     },
     outside: (_h, p) => {
-      p.p = 9;
+      p.p = 5;
       p.m = 128;
     },
   },
@@ -191,10 +217,22 @@ const CASES: Case[] = [
     outside: (_h, _p, w) => void (w.wrappedDek = b64Bytes(61)),
   },
   {
-    name: 'passphrase wraps per header (8 / 9)',
-    field: 'wraps',
-    inside: withPassphraseWraps(8),
-    outside: withPassphraseWraps(9),
+    name: 'passphrase wraps per header (6 / 7)',
+    field: 'wraps (passphrase)',
+    inside: withPassphraseWraps(6),
+    outside: withPassphraseWraps(7),
+  },
+  {
+    name: 'wraps of any kind per header (16 / 17)',
+    field: 'field: wraps)',
+    inside: withOtherWraps(15),
+    outside: withOtherWraps(16),
+  },
+  {
+    name: 'header size (65536 / 65537 bytes)',
+    field: 'header size',
+    inside: padToBytes(65536),
+    outside: padToBytes(65537),
   },
   {
     name: 'kdf other than argon2id',
@@ -214,14 +252,16 @@ beforeEach(() => {
 describe('MANIFEST_LIMITS', () => {
   it('holds the pinned numbers', () => {
     expect(MANIFEST_LIMITS).toEqual({
-      mMax: 262144,
+      mMax: 131072,
       tMin: 1,
-      tMax: 10,
+      tMax: 6,
       pMin: 1,
-      pMax: 8,
+      pMax: 4,
       saltBytes: 16,
       wrappedDekBytes: 60,
-      maxPassphraseWraps: 8,
+      maxPassphraseWraps: 6,
+      maxWraps: 16,
+      maxHeaderBytes: 65536,
     });
   });
 });
@@ -230,7 +270,7 @@ for (const version of ['1.0', '1.1'] as const) {
   describe(`manifest ${version}: every limit, just inside and just outside`, () => {
     for (const c of CASES) {
       it(`${c.name}: inside parses`, () => {
-        expect(() => parseEncryptionManifest(JSON.stringify(header(version, c.inside)))).not.toThrow();
+        expect(() => parseEncryptionManifest(serialized(header(version, c.inside)))).not.toThrow();
       });
 
       it(`${c.name}: outside is refused at parse, naming the field, before any derivation`, () => {
@@ -252,7 +292,7 @@ for (const version of ['1.0', '1.1'] as const) {
 }
 
 describe('the whole header is refused, even when an earlier wrap would open', () => {
-  it('1.1: wrap 0 opens, wrap 1 asks for t = 11: refused with no derivation', () => {
+  it('1.1: wrap 0 opens, wrap 1 asks for t = 7: refused with no derivation', () => {
     // Sanity: wrap 0 alone does open, and the spy sees that derivation.
     expect(resolveDek(mkPod(header('1.1')), PASSPHRASE).equals(DEK)).toBe(true);
     expect(argonCalls.count).toBe(1);
@@ -260,7 +300,7 @@ describe('the whole header is refused, even when an earlier wrap would open', ()
 
     const bad = JSON.parse(JSON.stringify(WRAP_TEMPLATE)) as Record<string, unknown>;
     (bad.kdfParams as Record<string, unknown>).salt = b64Bytes(16);
-    (bad.kdfParams as Record<string, unknown>).t = 11;
+    (bad.kdfParams as Record<string, unknown>).t = 7;
     const pod = mkPod({ version: '1.1', algorithm: 'aes-256-gcm', wraps: [WRAP_TEMPLATE, bad] });
     expect(() => resolveDek(pod, PASSPHRASE)).toThrow(/field: wraps\[1\]\.kdfParams\.t/);
     expect(argonCalls.count).toBe(0);
@@ -287,6 +327,38 @@ describe('the refusal names the field and not the value', () => {
     const junk = header('1.1', (_h, p) => void (p.salt = `${b64Bytes(16)}!!`));
     expect(() => parseEncryptionManifest(JSON.stringify(junk))).toThrow(/kdfParams\.salt/);
   });
+});
+
+describe('an oversized header is refused from its size, before it is read', () => {
+  it('a 3 GiB (sparse) header is refused by size, not by an attempt to read it', () => {
+    // Node refuses to read a file over 2 GiB into one buffer with its own
+    // error, so seeing the size refusal here proves the file was never read.
+    const pod = mkPod(header('1.1'));
+    fs.truncateSync(path.join(pod, 'settings', 'encryption.json'), 3 * 1024 ** 3);
+    try {
+      expect(() => readEncryptionManifest(pod)).toThrow(/field: header size/);
+      expect(() => resolveDek(pod, PASSPHRASE)).toThrow(/field: header size/);
+      expect(argonCalls.count).toBe(0);
+    } finally {
+      fs.rmSync(pod, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the 1.0 writer refuses parameters a reader would refuse', () => {
+  for (const [name, params, field] of [
+    ['m above the ceiling', { t: 1, m: 131073, p: 1 }, 'kdfParams.m'],
+    ['t above the ceiling', { t: 7, m: 64, p: 1 }, 'kdfParams.t'],
+    ['p above the ceiling', { t: 1, m: 64, p: 5 }, 'kdfParams.p'],
+    ['m below 8 * p', { t: 1, m: 15, p: 2 }, 'kdfParams.m'],
+  ] as const) {
+    it(`buildPassphraseManifest: ${name}`, () => {
+      expect(() => buildPassphraseManifest(DEK, PASSPHRASE, params)).toThrow(
+        new RegExp(`field: ${field.replace('.', '\\.')}`),
+      );
+      expect(argonCalls.count).toBe(0);
+    });
+  }
 });
 
 describe('everything the writers produce passes the reader limits', () => {

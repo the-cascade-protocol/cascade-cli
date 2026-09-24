@@ -183,12 +183,14 @@ before any key derivation runs:
 
 | Field | Accepted | Why |
 |---|---|---|
-| `kdfParams.m` (KiB) | `8 * p` to 262144 (256 MiB) | writers use 65536 (64 MiB); 4x headroom |
-| `kdfParams.t` | 1 to 10 | writers use 3 |
-| `kdfParams.p` | 1 to 8 | writers use 1 |
+| header file size | at most 65536 bytes, checked before the file is read | a real header is under 1 KiB |
+| `kdfParams.m` (KiB) | `8 * p` to 131072 (128 MiB) | writers use 65536 (64 MiB); 2x headroom |
+| `kdfParams.t` | 1 to 6 | writers use 3 |
+| `kdfParams.p` | 1 to 4 | writers use 1 |
 | `kdfParams.salt` | canonical padded base64 of exactly 16 bytes | every writer uses 16 |
 | `wrappedDek` | canonical padded base64 of exactly 60 bytes (12 nonce + 32 key + 16 tag) | a 256-bit data key |
-| passphrase wraps per manifest | at most 8 | bounds try-each-wrap |
+| passphrase wraps per manifest | at most 6 | bounds try-each-wrap |
+| wraps of any kind per manifest | at most 16 | bounds the parse |
 | `kdf` | exactly `"argon2id"` | the only KDF implemented |
 
 A value outside these limits anywhere in the manifest refuses the whole
@@ -200,10 +202,12 @@ The pod's encryption header asks for settings outside this tool's limits (field:
 ```
 
 Every writer stays inside the limits (`t=3, m=65536, p=1`, 16-byte salts,
-60-byte wraps), and a test pins that. The worst case the limits allow is one
-wrap at `m=262144, t=10, p=8`: about 6.3 seconds and 370 MiB of resident memory
-for the pure-JS Argon2id on an Apple M5, so up to about 50 seconds for a hostile
-manifest with eight such wraps. That is bounded, which is the point.
+60-byte wraps), and a test pins that; `buildPassphraseManifest` refuses
+parameters outside them rather than write a manifest a reader would refuse. The
+worst case the limits allow is six passphrase wraps at `m=131072, t=6, p=4`:
+about 1.7 seconds per wrap and 10.2 seconds for all six with the pure-JS
+Argon2id on an Apple M5, at about 305 MiB of resident memory. That is bounded,
+which is the point.
 
 ### Multi-wrap design
 

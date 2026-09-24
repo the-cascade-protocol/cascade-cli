@@ -134,7 +134,7 @@ const SCENARIOS: Scenario[] = [
   },
   {
     name: 'a header outside the limits (m above the ceiling)',
-    manifest: () => mutated((m) => void ((m.kdfParams as Record<string, unknown>).m = 262145)),
+    manifest: () => mutated((m) => void ((m.kdfParams as Record<string, unknown>).m = 131073)),
     passphrase: PASSPHRASE,
     reason: 'manifest-malformed',
     says: /outside this tool's limits \(field: top-level\.kdfParams\.m\)/,
