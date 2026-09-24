@@ -31,6 +31,43 @@ write 1.0. See `docs/pod-encryption.md`.
 
 ### Fixed
 
+**The encryption manifest's KDF parameters are bounded before any key is
+derived.** `settings/encryption.json` is plaintext, and its Argon2id parameters
+were used as found, so one edited number made every open allocate gigabytes or
+run for hours before the passphrase was checked. The reader (1.0 and 1.1) now
+refuses a manifest outright when the file is over 65536 bytes (checked from its
+size, before it is read), when it holds more than 16 wraps or more than 6
+passphrase wraps, or when any passphrase wrap asks for `m` above 131072 KiB or
+below `8 * p`, `t` outside 1 to 6, `p` outside 1 to 4, a salt that is not
+canonical base64 of exactly 16 bytes, a `wrappedDek` that is not canonical
+base64 of exactly 60 bytes, or a `kdf` other than `argon2id`. The refusal names
+the field and not the value. Every manifest this tool writes is inside the
+limits, and `buildPassphraseManifest` now refuses parameters outside them. See the limits table in
+`docs/pod-encryption.md`.
+
+**A malformed or newer encryption header is no longer reported as a wrong
+passphrase.** Opening a sealed pod reported every header problem (bad JSON, a
+strictness rule, a version this tool does not read) with reason
+`passphrase-incorrect`. The header is now parsed before a passphrase is asked
+for, and two reasons are added: `manifest-malformed` (bad JSON, a strictness
+rule, a reader limit, or an unreadable header) and
+`manifest-version-unsupported` (a version, or only wrap kinds, this tool does
+not read). `passphrase-incorrect` now means only that the header parsed and no
+wrap opened. **JSON consumers matching on `reason` may now see the two new
+values**, including for a bad header with no passphrase set, which was
+previously `passphrase-missing`. The exit code is unchanged: all of them are
+exit 2. See the reason table in `docs/exit-codes.md`.
+
+**`pod encrypt`, `pod decrypt` and `pod doctor --write` rewrites survive a
+power cut.** Their per-file atomic write renamed a temporary file over the
+target without an fsync, so after a power cut the rename could be on disk
+before the data, leaving the target empty or partial with the old bytes gone.
+The write now fsyncs the temporary file, renames, then fsyncs the directory,
+using the same directory fsync as `pod passphrase set`. Measured cost on macOS
+(where Node's fsync is a full flush): about 8 ms per file, about 0.12 s per
+encrypt or decrypt pass on a 20-file pod. `pod import` does not use this write
+and is unchanged.
+
 **`pod reconcile --report <file>` now writes the file on a pod with no
 reconcilable records.** That branch printed its report and returned before the
 write, so the file was never created.

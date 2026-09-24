@@ -23,7 +23,12 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { MIN_ENVELOPE_LEN, decryptBytes, MANIFEST_RELATIVE_PATH } from './pod-encryption.js';
+import {
+  MIN_ENVELOPE_LEN,
+  decryptBytes,
+  MANIFEST_RELATIVE_PATH,
+  fsyncDirectory,
+} from './pod-encryption.js';
 
 /**
  * Pod-relative paths that stay PLAINTEXT by design. Three entries, and adding a
@@ -170,26 +175,46 @@ export function classifyResource(absPath: string, dek: Buffer): ResourceState {
 }
 
 /**
- * Write a file so it is never observed half-written: a temp file in the SAME
- * directory (so the rename cannot cross a filesystem boundary) plus a rename.
+ * Write a file so it is never observed half-written, and so the new bytes
+ * survive a power cut once this returns: a temp file in the SAME directory (so
+ * the rename cannot cross a filesystem boundary), fsync of the temp file,
+ * rename over the target, fsync of the directory.
  *
  * `pod encrypt` and `pod decrypt` rewrite every file in the pod in place, and a
  * crash mid-write on a plain `writeFileSync` leaves a truncated resource that
  * neither authenticates nor parses. With this, each file is either fully in the
  * old state or fully in the new one, which is exactly the state the other
  * direction is built to tolerate.
+ *
+ * Both fsyncs are load-bearing, and in this order. Without the first, the
+ * rename can reach the disk before the data does, and a power cut leaves the
+ * target name pointing at an empty or partial file: the old bytes gone and the
+ * new ones never written. Without the second, the rename itself can be lost,
+ * which is harmless for one file but lets `pod encrypt` or `pod decrypt` report
+ * a pass that the disk does not hold.
  */
 export function atomicWriteBytes(absPath: string, bytes: Buffer): void {
   const dir = path.dirname(absPath);
   const tmp = path.join(dir, `.${path.basename(absPath)}.${randomBytes(6).toString('hex')}.tmp`);
+  let renamed = false;
   try {
-    fs.writeFileSync(tmp, bytes);
-    fs.renameSync(tmp, absPath);
-  } catch (err) {
+    const fd = fs.openSync(tmp, 'wx');
     try {
-      fs.rmSync(tmp, { force: true });
-    } catch {
-      /* best effort */
+      fs.writeFileSync(fd, bytes);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmp, absPath);
+    renamed = true;
+    fsyncDirectory(dir);
+  } catch (err) {
+    if (!renamed) {
+      try {
+        fs.rmSync(tmp, { force: true });
+      } catch {
+        /* best effort */
+      }
     }
     throw err;
   }

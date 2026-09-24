@@ -172,6 +172,43 @@ manifest's key material. It reads both versions into one normalized shape (a
 list of wraps, each passphrase wrap with its own KDF parameters), and a source
 test fails if `kdfParams` or `wrappedDek` is read anywhere else.
 
+### Reader limits
+
+The manifest is plaintext, so anyone who can write to the pod directory can
+edit its KDF parameters, and a reader derives a key from whatever it finds
+there. Without a bound, one edited number makes every open allocate gigabytes
+or run for hours before the passphrase is even checked. Readers therefore
+enforce these limits when the manifest is **parsed** (1.0 and 1.1 alike),
+before any key derivation runs:
+
+| Field | Accepted | Why |
+|---|---|---|
+| header file size | at most 65536 bytes, checked before the file is read | a real header is under 1 KiB |
+| `kdfParams.m` (KiB) | `8 * p` to 131072 (128 MiB) | writers use 65536 (64 MiB); 2x headroom |
+| `kdfParams.t` | 1 to 6 | writers use 3 |
+| `kdfParams.p` | 1 to 4 | writers use 1 |
+| `kdfParams.salt` | canonical padded base64 of exactly 16 bytes | every writer uses 16 |
+| `wrappedDek` | canonical padded base64 of exactly 60 bytes (12 nonce + 32 key + 16 tag) | a 256-bit data key |
+| passphrase wraps per manifest | at most 6 | bounds try-each-wrap |
+| wraps of any kind per manifest | at most 16 | bounds the parse |
+| `kdf` | exactly `"argon2id"` | the only KDF implemented |
+
+A value outside these limits anywhere in the manifest refuses the whole
+manifest, even when an earlier wrap would have opened. The refusal names the
+field and never echoes the value:
+
+```
+The pod's encryption header asks for settings outside this tool's limits (field: wraps[0].kdfParams.m).
+```
+
+Every writer stays inside the limits (`t=3, m=65536, p=1`, 16-byte salts,
+60-byte wraps), and a test pins that; `buildPassphraseManifest` refuses
+parameters outside them rather than write a manifest a reader would refuse. The
+worst case the limits allow is six passphrase wraps at `m=131072, t=6, p=4`:
+about 1.7 seconds per wrap and 10.2 seconds for all six with the pure-JS
+Argon2id on an Apple M5, at about 305 MiB of resident memory. That is bounded,
+which is the point.
+
 ### Multi-wrap design
 
 `wraps` is an **array** so the same DEK can be unlocked by different key holders.

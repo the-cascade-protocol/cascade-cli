@@ -56,9 +56,12 @@ import {
 } from './turtle-parser.js';
 import {
   readResource,
-  resolveDek,
-  isPodEncrypted,
+  readEncryptionManifest,
+  assertHasUsableWrap,
+  unlockManifest,
   PodDecryptError,
+  EncryptionManifestError,
+  type NormalizedEncryptionManifest,
 } from './pod-encryption.js';
 import { obtainPassphrase } from './passphrase.js';
 import { looksLikePlaintext } from './pod-resources.js';
@@ -94,8 +97,20 @@ export type PodReadResult<T> =
 export type PodOpenFailure =
   /** The pod is sealed and no passphrase was available (env unset, no TTY). */
   | 'passphrase-missing'
-  /** A passphrase was supplied and did not unwrap the DEK. */
-  | 'passphrase-incorrect';
+  /** The header parsed and a passphrase was supplied; no wrap opened with it. */
+  | 'passphrase-incorrect'
+  /**
+   * `settings/encryption.json` is not valid JSON, breaks a strictness rule,
+   * asks for settings outside this tool's limits, or could not be read at all.
+   * No passphrase was tried.
+   */
+  | 'manifest-malformed'
+  /**
+   * `settings/encryption.json` is a version this tool does not read, or holds
+   * no wrap of a kind it implements: a newer tool wrote it. No passphrase was
+   * tried.
+   */
+  | 'manifest-version-unsupported';
 
 /**
  * The pod is encrypted and this invocation does not hold its key.
@@ -164,9 +179,21 @@ export function decryptFailureReason(absPath: string, err: unknown): string {
 
 /** The prose half of {@link PodUnreadableError}: name the state, plainly. */
 export function describeOpenFailure(reason: PodOpenFailure): string {
-  return reason === 'passphrase-missing'
-    ? 'this pod is encrypted and the passphrase was not provided'
-    : 'this pod is encrypted and the passphrase did not open it';
+  switch (reason) {
+    case 'passphrase-missing':
+      return 'this pod is encrypted and the passphrase was not provided';
+    case 'passphrase-incorrect':
+      return 'this pod is encrypted and the passphrase did not open it';
+    case 'manifest-malformed':
+      return 'this pod is encrypted and its encryption header is malformed, so no passphrase was tried';
+    case 'manifest-version-unsupported':
+      return 'this pod is encrypted with a header this tool does not support, so no passphrase was tried';
+  }
+}
+
+/** The open-failure reason for a manifest this tool could not use. */
+function manifestFailure(e: EncryptionManifestError): PodOpenFailure {
+  return e.kind === 'malformed' ? 'manifest-malformed' : 'manifest-version-unsupported';
 }
 
 // ─── Opening a pod ────────────────────────────────────────────────────────────
@@ -183,7 +210,20 @@ export function describeOpenFailure(reason: PodOpenFailure): string {
  * @throws {PodUnreadableError} when the pod is encrypted and unopenable.
  */
 export async function openPod(podDir: string): Promise<PodReader> {
-  if (!isPodEncrypted(podDir)) return new PodReader(podDir, undefined);
+  // The header is parsed BEFORE a passphrase is asked for, so a header this
+  // tool cannot use is reported as that, and never as a wrong or missing
+  // passphrase: nothing about the passphrase is known when the header is bad.
+  let manifest: NormalizedEncryptionManifest | null;
+  try {
+    manifest = readEncryptionManifest(podDir);
+    if (manifest) assertHasUsableWrap(manifest);
+  } catch (e: unknown) {
+    // A header that exists and cannot be read at all (permissions, a directory
+    // in its place) is unusable in the same way as a malformed one.
+    const reason = e instanceof EncryptionManifestError ? manifestFailure(e) : 'manifest-malformed';
+    throw new PodUnreadableError(podDir, reason, errText(e));
+  }
+  if (!manifest) return new PodReader(podDir, undefined);
 
   let passphrase: string;
   try {
@@ -193,8 +233,11 @@ export async function openPod(podDir: string): Promise<PodReader> {
   }
 
   try {
-    return new PodReader(podDir, resolveDek(podDir, passphrase));
+    return new PodReader(podDir, unlockManifest(manifest, passphrase).dek);
   } catch (e: unknown) {
+    if (e instanceof EncryptionManifestError) {
+      throw new PodUnreadableError(podDir, manifestFailure(e), errText(e));
+    }
     throw new PodUnreadableError(podDir, 'passphrase-incorrect', errText(e));
   }
 }

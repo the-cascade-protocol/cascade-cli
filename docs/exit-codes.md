@@ -11,7 +11,7 @@ same failure matrix, so a change here fails a test rather than a user.
 |---|---|---|
 | `0` | Success. The command did what was asked, and everything it needed to read, it read. | a query that answered; an export that was written |
 | `1` | User or input error, including a choice the caller has to make. | pod directory not found; no query filter given; `--hops` out of range; a genuine "record not found"; an encrypted pod exported without `--allow-encrypted` |
-| `2` | **Could not read what exists.** The pod, or a file inside it, could not be opened, decrypted, or parsed. | no passphrase for a sealed pod; the wrong passphrase; a registered record file that is not valid Turtle; a missing `settings/encryption.json` |
+| `2` | **Could not read what exists.** The pod, or a file inside it, could not be opened, decrypted, or parsed. | no passphrase for a sealed pod; the wrong passphrase; a malformed or newer-version `settings/encryption.json`; a registered record file that is not valid Turtle; a missing `settings/encryption.json` |
 
 ### Why 2 exists, and why it is the important one
 
@@ -90,8 +90,25 @@ consumer can branch on state instead of pattern-matching English.
 | `pod` | string | The pod the command was pointed at, when it had one. |
 | `encrypted` | boolean | Whether the pod carries an encryption manifest. |
 | `readable` | boolean | Whether the command could read what it needed. `false` is the machine-readable form of exit 2. |
-| `reason` | string | Which unreadable state this is: `passphrase-missing`, `passphrase-incorrect`, or `files-unreadable`. |
+| `reason` | string | Which unreadable state this is. See the reason table below. |
 | `files` | string[] | With `files-unreadable`: the pod-relative paths, forward slashes. |
+
+Every `reason` is exit 2. The values:
+
+| `reason` | Meaning |
+|---|---|
+| `passphrase-missing` | The pod is sealed and no passphrase was available (`CASCADE_POD_PASSPHRASE` unset, no TTY). |
+| `passphrase-incorrect` | `settings/encryption.json` parsed, a passphrase was supplied, and no wrap opened with it. |
+| `manifest-malformed` | `settings/encryption.json` is not valid JSON, breaks a strictness rule, asks for settings outside the reader limits (see `docs/pod-encryption.md`), or could not be read at all. No passphrase was tried. |
+| `manifest-version-unsupported` | `settings/encryption.json` is a version this tool does not read, or holds no wrap of a kind it implements: a newer tool wrote it. No passphrase was tried. |
+| `files-unreadable` | The pod opened, and one or more files inside it could not be decrypted, parsed or read. `files` names them. |
+
+The header is judged before a passphrase is asked for, so a pod whose header is
+malformed reports `manifest-malformed` even when no passphrase is set, never
+`passphrase-missing` or `passphrase-incorrect`. Consumers that match on `reason`
+should treat an unknown value as "unreadable" (exit 2 already says so): new
+values are added when a state that was being reported as another one is told
+apart.
 
 `pod info` also states the *positive* case in its success payload
 (`"encrypted": true, "readable": true`), so a consumer never has to infer
