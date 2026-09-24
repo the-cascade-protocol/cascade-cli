@@ -283,11 +283,17 @@ function openCombined(blob: Buffer, key: Buffer): Buffer {
   const ciphertext = blob.subarray(NONCE_LEN, blob.length - TAG_LEN);
   const decipher = createDecipheriv('aes-256-gcm', key, nonce);
   decipher.setAuthTag(tag);
+  // `update` returns the plaintext before the tag is checked. It is copied
+  // into the result and then zeroed, so an unwrapped key, or bytes that fail
+  // authentication, leave no second copy behind.
+  const head = decipher.update(ciphertext);
   try {
-    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return Buffer.concat([head, decipher.final()]);
   } catch {
     // GCM auth failure (wrong key or tampered data).
     throw new PodDecryptError();
+  } finally {
+    head.fill(0);
   }
 }
 
@@ -341,12 +347,22 @@ export function deriveKek(
   salt: Buffer,
   params: { t: number; m: number; p: number },
 ): Buffer {
-  const out = argon2id(
-    new TextEncoder().encode(passphrase),
-    new Uint8Array(salt),
-    { t: params.t, m: params.m, p: params.p, dkLen: KEY_LEN },
-  );
-  return Buffer.from(out);
+  // The passphrase string itself cannot be zeroed (JavaScript strings are
+  // immutable), but its encoded bytes can, so they are. The KEK is returned
+  // as a view of the derivation's output, not a copy, so the caller's
+  // `fill(0)` zeroes the only copy.
+  const secret = new TextEncoder().encode(passphrase);
+  try {
+    const out = argon2id(secret, new Uint8Array(salt), {
+      t: params.t,
+      m: params.m,
+      p: params.p,
+      dkLen: KEY_LEN,
+    });
+    return Buffer.from(out.buffer, out.byteOffset, out.byteLength);
+  } finally {
+    secret.fill(0);
+  }
 }
 
 /** Wrap (encrypt) the DEK with the KEK. Returns base64 combined blob. */
@@ -427,14 +443,76 @@ function checkCosts(t: unknown, m: unknown, p: unknown, where: string): void {
   if (m < 8 * p || m > MANIFEST_LIMITS.mMax) throw outsideLimits(`${where}.m`);
 }
 
+/** The refusal for a header path that holds anything but a regular file. */
+function notRegularFile(): EncryptionManifestError {
+  return malformed('not a regular file');
+}
+
 /**
- * Read the manifest's text, refusing a file over
- * {@link MANIFEST_LIMITS.maxHeaderBytes} from its size alone, before a byte
- * of it is read.
+ * Open flags for the header: read-only, never blocking on open (a FIFO with no
+ * writer would otherwise hang the reader at `open`), and never following a
+ * symbolic link in the last component. Flags a platform lacks are simply left
+ * out; the `fstat` check below still refuses what they would have.
+ */
+const HEADER_OPEN_FLAGS =
+  fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0) | (fs.constants.O_NOFOLLOW ?? 0);
+
+/**
+ * Is anything at all at the manifest path? `lstat`, not `stat`: a symbolic
+ * link, dangling or not, counts as present, so it is refused as a header rather
+ * than silently read as "this pod is not encrypted".
+ */
+function manifestPresent(file: string): boolean {
+  try {
+    fs.lstatSync(file);
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw e;
+  }
+}
+
+/**
+ * Read the manifest's text. The header must be a REGULAR file reached without
+ * a symbolic link, and at most {@link MANIFEST_LIMITS.maxHeaderBytes} bytes are
+ * ever read from it.
+ *
+ * The kind is judged with `fstat` on the handle that is then read, not with a
+ * `stat` of the path, because a path's size says nothing useful about a device
+ * (size 0, endless bytes) or a FIFO (size 0, blocks until a writer appears).
+ * The read is bounded whatever the handle reports, so even a file that grows
+ * while it is read cannot make this allocate more than the limit plus one byte.
  */
 function readManifestText(file: string): string {
-  if (fs.statSync(file).size > MANIFEST_LIMITS.maxHeaderBytes) throw outsideLimits('header size');
-  return fs.readFileSync(file, 'utf-8');
+  // The containing directory must not be a link either: a link there would
+  // lead the read out of the pod as surely as a link at the header itself.
+  if (fs.lstatSync(path.dirname(file)).isSymbolicLink()) throw notRegularFile();
+  let fd: number;
+  try {
+    fd = fs.openSync(file, HEADER_OPEN_FLAGS);
+  } catch (e) {
+    // ELOOP (EMLINK on some BSDs): the last component is a symbolic link.
+    // EISDIR: platforms that refuse to open a directory for reading.
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP' || code === 'EMLINK' || code === 'EISDIR') throw notRegularFile();
+    throw e;
+  }
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) throw notRegularFile();
+    if (st.size > MANIFEST_LIMITS.maxHeaderBytes) throw outsideLimits('header size');
+    const buf = Buffer.alloc(MANIFEST_LIMITS.maxHeaderBytes + 1);
+    let filled = 0;
+    while (filled < buf.length) {
+      const n = fs.readSync(fd, buf, filled, buf.length - filled, null);
+      if (n === 0) break;
+      filled += n;
+    }
+    if (filled > MANIFEST_LIMITS.maxHeaderBytes) throw outsideLimits('header size');
+    return buf.toString('utf-8', 0, filled);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 function checkWrappedDek(wrappedDek: unknown, where: string): string {
@@ -487,6 +565,8 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
   }
   if (raw.wraps.length > MANIFEST_LIMITS.maxWraps) throw outsideLimits('wraps');
   const rawWraps: unknown[] = raw.wraps;
+  // Every wrap needs a non-empty string `by`: an empty one is malformed, not a
+  // kind to skip. A non-empty kind this tool does not implement is skipped.
   for (const [i, w] of rawWraps.entries()) {
     if (!isPlainObject(w) || typeof w.by !== 'string' || w.by.length === 0) {
       throw malformed(`wrap ${i} has no "by"`);
@@ -499,6 +579,11 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
 
   if (version === '1.0') {
     const kdfParams = checkKdf(raw.kdf, raw.kdfParams, 'top-level');
+    // A 1.0 wrap has no label on disk. The first passphrase wrap reads as
+    // "primary" and every other wrap as null: exactly the labels
+    // {@link migrateManifest} writes, so a 1.0 header reads the same before
+    // and after it is migrated.
+    const firstPassphrase = objWraps.findIndex((w) => w.by === 'passphrase');
     const wraps: NormalizedWrap[] = objWraps.map((w, i) => {
       if (w.by !== 'passphrase') {
         return { kind: 'unimplemented', by: w.by, label: null, createdAt: null };
@@ -507,7 +592,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
       return {
         kind: 'passphrase',
         by: 'passphrase',
-        label: null,
+        label: i === firstPassphrase ? 'primary' : null,
         createdAt: null,
         kdf: 'argon2id',
         kdfParams: { ...kdfParams },
@@ -556,24 +641,29 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
  */
 export function readEncryptionManifest(podDir: string): NormalizedEncryptionManifest | null {
   const p = manifestPath(podDir);
-  if (!fs.existsSync(p)) return null;
+  if (!manifestPresent(p)) return null;
   return parseEncryptionManifest(readManifestText(p)).normalized;
 }
 
 /**
  * Write a version 1.0 `settings/encryption.json` (the manifest `pod init
- * --encrypt` and `pod encrypt` produce). A 1.1 manifest is only ever written by
+ * --encrypt` and `pod encrypt` produce), atomically: a crash mid-write leaves
+ * either no manifest or a whole one, never a truncated one over a pod that is
+ * still plaintext. A 1.1 manifest is only ever written by
  * {@link rewrapPassphrase}, atomically and verified.
  */
 export function writeEncryptionManifest(podDir: string, manifest: EncryptionManifest): void {
   const p = manifestPath(podDir);
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+  writeManifestFile(p, Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf-8'));
 }
 
-/** A pod is encrypted iff it has an encryption manifest. */
+/**
+ * A pod is encrypted iff anything is at its manifest path. A symbolic link or
+ * other non-regular file there still counts, and is then refused when read.
+ */
 export function isPodEncrypted(podDir: string): boolean {
-  return fs.existsSync(manifestPath(podDir));
+  return manifestPresent(manifestPath(podDir));
 }
 
 // ─── Manifest construction & DEK resolution ───────────────────────────────────
@@ -595,7 +685,12 @@ export function buildPassphraseManifest(
   checkCosts(params.t, params.m, params.p, 'kdfParams');
   const salt = randomBytes(SALT_LEN);
   const kek = deriveKek(passphrase, salt, params);
-  const wrappedDek = wrapDek(dek, kek);
+  let wrappedDek: string;
+  try {
+    wrappedDek = wrapDek(dek, kek);
+  } finally {
+    kek.fill(0);
+  }
   return {
     version: '1.0',
     algorithm: 'aes-256-gcm',
@@ -790,7 +885,7 @@ export interface RewrapResult {
 
 /**
  * fsync a directory, so a rename inside it survives a power cut. The one
- * helper for this: the manifest re-wrap and every atomic resource write use it.
+ * helper for this: {@link atomicWriteFile} uses it after every rename.
  */
 export function fsyncDirectory(dir: string): void {
   let fd: number | undefined;
@@ -807,6 +902,81 @@ export function fsyncDirectory(dir: string): void {
   }
 }
 
+/** Options for {@link atomicWriteFile}. */
+export interface AtomicWriteOptions {
+  /** Permission bits for the new file. Defaults to the process default. */
+  mode?: number;
+  /** Writes the bytes into the open temporary file. Defaults to a full write. */
+  write?: (fd: number, bytes: Buffer) => void;
+  /**
+   * Runs after the temporary file is written, fsynced and closed, and before
+   * the rename. Throwing abandons the write: the temporary file is removed and
+   * the target is left as it was.
+   */
+  beforeRename?: (tempPath: string) => void;
+}
+
+/**
+ * Write a file so it is never observed half-written, and so the new bytes
+ * survive a power cut once this returns. The one helper for this: every
+ * atomic write in the tool goes through it.
+ *
+ * The steps, in this order: create a NEW temporary file in the target's
+ * directory (create-new, so it never opens a file or link already at that
+ * name, and the same directory, so the rename cannot cross a filesystem),
+ * write it, fsync it, close it, rename it over the target, fsync the
+ * directory. Without the first fsync the rename can reach the disk before the
+ * data, and a power cut leaves the target empty or partial; without the second
+ * the rename itself can be lost. Any failure before the rename removes the
+ * temporary file.
+ */
+export function atomicWriteFile(absPath: string, bytes: Buffer, options: AtomicWriteOptions = {}): void {
+  const dir = path.dirname(absPath);
+  const tmp = path.join(dir, `.${path.basename(absPath)}.${randomBytes(6).toString('hex')}.tmp`);
+  let renamed = false;
+  try {
+    const fd = options.mode === undefined ? fs.openSync(tmp, 'wx') : fs.openSync(tmp, 'wx', options.mode);
+    try {
+      (options.write ?? ((f: number, b: Buffer) => fs.writeFileSync(f, b)))(fd, bytes);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    options.beforeRename?.(tmp);
+    fs.renameSync(tmp, absPath);
+    renamed = true;
+    fsyncDirectory(dir);
+  } finally {
+    if (!renamed) {
+      try {
+        fs.rmSync(tmp, { force: true });
+      } catch {
+        /* best effort: the error that got us here is the one to report */
+      }
+    }
+  }
+}
+
+/**
+ * The temporary names {@link atomicWriteFile} gives the manifest. Only ever
+ * matched inside the manifest's own directory.
+ */
+const MANIFEST_TEMP_NAME = /^\.encryption\.json\.[0-9a-f]{12}\.tmp$/;
+
+/**
+ * Write the manifest atomically, first removing any temporary manifest a
+ * killed earlier write left behind. Such a file never became the manifest,
+ * but it can hold a wrap of the key, so it is deleted rather than left beside
+ * the real one.
+ */
+function writeManifestFile(target: string, bytes: Buffer, options: AtomicWriteOptions = {}): void {
+  const dir = path.dirname(target);
+  for (const name of fs.readdirSync(dir)) {
+    if (MANIFEST_TEMP_NAME.test(name)) fs.rmSync(path.join(dir, name), { force: true });
+  }
+  atomicWriteFile(target, bytes, options);
+}
+
 /**
  * Re-wrap the pod DEK under a new passphrase. The ONLY writer of manifest 1.1.
  *
@@ -820,7 +990,8 @@ export function fsyncDirectory(dir: string): void {
  * the bytes READ BACK and opened with the new passphrase to the same DEK, then
  * a rename over the manifest and an fsync of the directory. Any failure before
  * the rename removes the temporary file and leaves the manifest byte-identical.
- * No copy of the old manifest is kept, since an old manifest inside the pod
+ * A temporary manifest left by an earlier write that was killed is removed
+ * first. No copy of the old manifest is kept, since an old manifest inside the pod
  * would keep the old passphrase working.
  *
  * The DEK never touches disk and no resource file is read or written.
@@ -837,7 +1008,7 @@ export function rewrapPassphrase(
   options: RewrapOptions = {},
 ): RewrapResult {
   const target = manifestPath(podDir);
-  if (!fs.existsSync(target)) {
+  if (!manifestPresent(target)) {
     throw new Error(`Pod is not encrypted (no ${MANIFEST_RELATIVE_PATH}): ${podDir}`);
   }
   if (newPassphrase.length === 0) throw new Error('The new passphrase cannot be empty.');
@@ -874,44 +1045,30 @@ export function rewrapPassphrase(
     kek.fill(0);
 
     const bytes = Buffer.from(serializeEncryptionManifestV11(next), 'utf-8');
-    const dir = path.dirname(target);
-    const tmp = path.join(dir, `.${path.basename(target)}.${randomBytes(6).toString('hex')}.tmp`);
-    const mode = fs.statSync(target).mode & 0o777;
-    let renamed = false;
-    try {
-      const fd = fs.openSync(tmp, 'wx', mode);
-      try {
-        (options.writeTemp ?? ((f, b) => fs.writeSync(f, b, 0, b.length, 0)))(fd, bytes);
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-
+    writeManifestFile(target, bytes, {
+      mode: fs.statSync(target).mode & 0o777,
+      write: options.writeTemp,
       // Read back what is ON DISK, not what was meant to be written, and prove
-      // the new passphrase opens it to the same DEK. The rename below is the
-      // point of no return for the old passphrase.
-      let same: boolean;
-      try {
-        const onDisk = parseEncryptionManifest(readManifestText(tmp));
-        const check = unlockManifest(onDisk.normalized, newPassphrase);
-        same = check.dek.equals(dek);
-        check.dek.fill(0);
-      } catch (e) {
-        throw new Error(
-          `The new manifest did not open with the new passphrase when read back ` +
-            `(${e instanceof Error ? e.message : String(e)}). Nothing was changed.`,
-        );
-      }
-      if (!same) {
-        throw new Error('The new manifest opened to a different key when read back. Nothing was changed.');
-      }
-
-      fs.renameSync(tmp, target);
-      renamed = true;
-      fsyncDirectory(dir);
-    } finally {
-      if (!renamed) fs.rmSync(tmp, { force: true });
-    }
+      // the new passphrase opens it to the same DEK. The rename that follows is
+      // the point of no return for the old passphrase.
+      beforeRename: (tmp) => {
+        let same: boolean;
+        try {
+          const onDisk = parseEncryptionManifest(readManifestText(tmp));
+          const check = unlockManifest(onDisk.normalized, newPassphrase);
+          same = check.dek.equals(dek);
+          check.dek.fill(0);
+        } catch (e) {
+          throw new Error(
+            `The new manifest did not open with the new passphrase when read back ` +
+              `(${e instanceof Error ? e.message : String(e)}). Nothing was changed.`,
+          );
+        }
+        if (!same) {
+          throw new Error('The new manifest opened to a different key when read back. Nothing was changed.');
+        }
+      },
+    });
 
     return {
       manifestVersion: '1.1',

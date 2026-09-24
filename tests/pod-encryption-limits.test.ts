@@ -345,6 +345,31 @@ describe('an oversized header is refused from its size, before it is read', () =
   });
 });
 
+describe('the header size is also checked on the text, in bytes', () => {
+  // parseEncryptionManifest takes text from any caller, not only from the
+  // bounded file read, so it checks the size itself, and in UTF-8 bytes: a
+  // header of multi-byte characters is longer in bytes than in characters.
+  function withLabelOfBytes(targetBytes: number): string {
+    const h = header('1.1');
+    const w = (h.wraps as Array<Record<string, unknown>>)[0];
+    w.label = '';
+    const base = Buffer.byteLength(serialized(h));
+    const euros = Math.floor((targetBytes - base) / 3);
+    w.label = '\u20ac'.repeat(euros) + 'x'.repeat(targetBytes - base - euros * 3);
+    const text = serialized(h);
+    expect(Buffer.byteLength(text)).toBe(targetBytes);
+    return text;
+  }
+
+  it('65536 bytes of text parses; 65537 is refused naming the header size, before derivation', () => {
+    expect(() => parseEncryptionManifest(withLabelOfBytes(65536))).not.toThrow();
+    const over = withLabelOfBytes(65537);
+    expect(over.length).toBeLessThan(65536);
+    expect(() => parseEncryptionManifest(over)).toThrow(/field: header size/);
+    expect(argonCalls.count).toBe(0);
+  });
+});
+
 describe('the 1.0 writer refuses parameters a reader would refuse', () => {
   for (const [name, params, field] of [
     ['m above the ceiling', { t: 1, m: 131073, p: 1 }, 'kdfParams.m'],

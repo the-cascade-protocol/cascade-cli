@@ -35,8 +35,7 @@ write 1.0. See `docs/pod-encryption.md`.
 derived.** `settings/encryption.json` is plaintext, and its Argon2id parameters
 were used as found, so one edited number made every open allocate gigabytes or
 run for hours before the passphrase was checked. The reader (1.0 and 1.1) now
-refuses a manifest outright when the file is over 65536 bytes (checked from its
-size, before it is read), when it holds more than 16 wraps or more than 6
+refuses a manifest outright when the file is over 65536 bytes, when it holds more than 16 wraps or more than 6
 passphrase wraps, or when any passphrase wrap asks for `m` above 131072 KiB or
 below `8 * p`, `t` outside 1 to 6, `p` outside 1 to 4, a salt that is not
 canonical base64 of exactly 16 bytes, a `wrappedDek` that is not canonical
@@ -67,6 +66,43 @@ using the same directory fsync as `pod passphrase set`. Measured cost on macOS
 (where Node's fsync is a full flush): about 8 ms per file, about 0.12 s per
 encrypt or decrypt pass on a 20-file pod. `pod import` does not use this write
 and is unchanged.
+
+**The encryption header must be a regular file, and is read with a bound.**
+The header's size guard trusted the size of the path, which a device (size 0,
+endless bytes) or a FIFO (size 0, blocks until a writer appears) defeats, so a
+link to `/dev/zero` at `settings/encryption.json` read without bound and a FIFO
+there hung every command. The header is now opened without blocking and
+without following a symbolic link, its kind is checked on the open handle, and
+anything but a regular file (a symbolic link, dangling or not, a FIFO, a
+device, a directory, a socket, or a `settings` directory that is a link) is
+refused as a malformed header (`manifest-malformed`). At most 65537 bytes are
+ever read, whatever the handle reports. A dangling link at the header path now
+marks the pod as encrypted and is refused, where it was read as "not
+encrypted".
+
+**Every write of the encryption header is atomic and durable.** `pod init
+--encrypt` and `pod encrypt` wrote `settings/encryption.json` with a plain
+write, so a crash mid-write could leave a truncated header over a pod that was
+still plaintext, which every command then refused as malformed. The header is
+now written through the same helper as `pod passphrase set` and the resource
+rewrites: a new temporary file (create-new), fsync, rename, fsync of the
+directory. A temporary header left in `settings/` by a killed earlier write is
+removed by the next header write.
+
+**A 1.0 encryption header reads with the labels its migration writes.** The
+normalized reading of a 1.0 header gave every wrap `label: null`; its first
+passphrase wrap now reads as `"primary"` and every other wrap as `null`, which
+is what migrating it to 1.1 writes. The `by` rule is now documented and pinned:
+an empty `"by"` makes the header malformed, and a non-empty kind this tool does
+not implement is skipped.
+
+**Keys and passphrase bytes are zeroed sooner.** The encoded passphrase bytes
+are zeroed once the KEK is derived; the KEK is the derivation's own output
+rather than a copy; `buildPassphraseManifest` zeroes its KEK; the decrypt step
+zeroes its intermediate plaintext, so an unwrapped key leaves no second copy;
+`pod init --encrypt`, `pod encrypt` and `pod decrypt` zero the pod key when
+they finish. The model server `pod extract` starts no longer inherits
+`CASCADE_POD_PASSPHRASE` or `CASCADE_POD_NEW_PASSPHRASE`.
 
 **`pod reconcile --report <file>` now writes the file on a pod with no
 reconcilable records.** That branch printed its report and returned before the

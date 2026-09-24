@@ -140,3 +140,16 @@ export async function obtainReplacementPassphrase(): Promise<string> {
 }
 
 export { ENV_VAR as PASSPHRASE_ENV_VAR, NEW_ENV_VAR as NEW_PASSPHRASE_ENV_VAR };
+
+/**
+ * A copy of `env` without the pod passphrase variables, for a child process
+ * that has no business with the pod key (a model server, for instance). An
+ * environment is readable by other processes of the same user for as long as
+ * the process lives, so a long-lived child should not inherit the passphrase.
+ */
+export function envWithoutPodSecrets(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out = { ...env };
+  delete out[ENV_VAR];
+  delete out[NEW_ENV_VAR];
+  return out;
+}

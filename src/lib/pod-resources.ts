@@ -22,12 +22,11 @@
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { randomBytes } from 'node:crypto';
 import {
   MIN_ENVELOPE_LEN,
   decryptBytes,
   MANIFEST_RELATIVE_PATH,
-  fsyncDirectory,
+  atomicWriteFile,
 } from './pod-encryption.js';
 
 /**
@@ -178,7 +177,8 @@ export function classifyResource(absPath: string, dek: Buffer): ResourceState {
  * Write a file so it is never observed half-written, and so the new bytes
  * survive a power cut once this returns: a temp file in the SAME directory (so
  * the rename cannot cross a filesystem boundary), fsync of the temp file,
- * rename over the target, fsync of the directory.
+ * rename over the target, fsync of the directory. The steps live in
+ * {@link atomicWriteFile}, which the encryption manifest's writers share.
  *
  * `pod encrypt` and `pod decrypt` rewrite every file in the pod in place, and a
  * crash mid-write on a plain `writeFileSync` leaves a truncated resource that
@@ -194,28 +194,5 @@ export function classifyResource(absPath: string, dek: Buffer): ResourceState {
  * a pass that the disk does not hold.
  */
 export function atomicWriteBytes(absPath: string, bytes: Buffer): void {
-  const dir = path.dirname(absPath);
-  const tmp = path.join(dir, `.${path.basename(absPath)}.${randomBytes(6).toString('hex')}.tmp`);
-  let renamed = false;
-  try {
-    const fd = fs.openSync(tmp, 'wx');
-    try {
-      fs.writeFileSync(fd, bytes);
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.renameSync(tmp, absPath);
-    renamed = true;
-    fsyncDirectory(dir);
-  } catch (err) {
-    if (!renamed) {
-      try {
-        fs.rmSync(tmp, { force: true });
-      } catch {
-        /* best effort */
-      }
-    }
-    throw err;
-  }
+  atomicWriteFile(absPath, bytes);
 }

@@ -152,8 +152,9 @@ Rules:
    created.
 5. `wraps` is never empty.
 6. `by` is `"passphrase"` or `"device-keychain"` (reserved, not implemented).
-   Readers skip wraps they do not implement; a manifest with no wrap the
-   reader implements cannot be opened.
+   Readers skip a wrap whose non-empty `by` they do not implement; a missing,
+   non-string or empty (`""`) `by` makes the whole manifest malformed. A
+   manifest with no wrap the reader implements cannot be opened.
 7. A wrap's public identifier is its `kdfParams.salt`. In 1.0 the single
    top-level salt plays this role, so reading a 1.0 pod leaves its identifier
    unchanged, and a re-wrapped pod has a new one.
@@ -165,7 +166,9 @@ Rules:
 10. Migration 1.0 to 1.1 (done in memory by the writing command): the top-level
     `kdf` and `kdfParams` move into the single `passphrase` wrap, its `label`
     becomes `"primary"` and its `createdAt` becomes `null`; any other wrap is
-    carried over with `label: null` and `createdAt: null`.
+    carried over with `label: null` and `createdAt: null`. Reading a 1.0
+    manifest without migrating it gives the same labels: the first
+    `passphrase` wrap reads as `"primary"`, every other wrap as `null`.
 
 In the CLI, `src/lib/pod-encryption.ts` is the only code that reads the
 manifest's key material. It reads both versions into one normalized shape (a
@@ -183,7 +186,7 @@ before any key derivation runs:
 
 | Field | Accepted | Why |
 |---|---|---|
-| header file size | at most 65536 bytes, checked before the file is read | a real header is under 1 KiB |
+| header file size | at most 65536 bytes; never more than 65537 bytes are read | a real header is under 1 KiB |
 | `kdfParams.m` (KiB) | `8 * p` to 131072 (128 MiB) | writers use 65536 (64 MiB); 2x headroom |
 | `kdfParams.t` | 1 to 6 | writers use 3 |
 | `kdfParams.p` | 1 to 4 | writers use 1 |
@@ -209,6 +212,26 @@ about 1.7 seconds per wrap and 10.2 seconds for all six with the pure-JS
 Argon2id on an Apple M5, at about 305 MiB of resident memory. That is bounded,
 which is the point.
 
+### The header file itself
+
+`settings/encryption.json` must be a **regular file**, reached without a
+symbolic link. The reader opens it without following a link in its last
+component and without blocking (so a FIFO cannot hang the open), then checks
+the kind with `fstat` on the open handle, and refuses anything else: a
+symbolic link (dangling or not), a FIFO, a device such as `/dev/zero`, a
+directory, a socket. A `settings` directory that is itself a symbolic link is
+refused the same way. The read is bounded to 65537 bytes whatever the handle
+reports, because a device or a FIFO reports size 0.
+
+These are ordinary malformed-header refusals (`reason: "manifest-malformed"`):
+
+```
+Malformed settings/encryption.json: not a regular file
+```
+
+Anything at the header path counts as the pod being encrypted, a dangling
+link included, so a link there is refused rather than read as "not encrypted".
+
 ### Multi-wrap design
 
 `wraps` is an **array** so the same DEK can be unlocked by different key holders.
@@ -231,6 +254,12 @@ Each entry is identified by its `by` discriminator:
 | `cascade pod passphrase set <dir>` | Change the passphrase by re-wrapping the DEK. See [Changing the passphrase](#changing-the-passphrase). |
 | `cascade pod import` / `pod query` / `validate` | Encryption-aware: if the pod is encrypted, resolve the DEK and route every resource read/write through the decrypt/encrypt helpers. Plaintext pods are unchanged. |
 
+Every write of `settings/encryption.json` is atomic and durable, including the
+1.0 manifest `pod init --encrypt` and `pod encrypt` write: a new temporary file
+(created, never reused) in `settings/`, fsync, rename over the manifest, fsync
+of the directory. A crash mid-write leaves either the old state or the whole new
+manifest, never a truncated one.
+
 ### Passphrase handling
 
 The passphrase is **never** taken as a command-line argument (that would leak it
@@ -247,6 +276,15 @@ the caller to set `CASCADE_POD_PASSPHRASE` or run interactively.
 `pod passphrase set` takes the current passphrase the same way, and the new one
 from **`CASCADE_POD_NEW_PASSPHRASE`**, else a hidden prompt entered twice that
 must match.
+
+**How long secrets live in memory.** A passphrase is a JavaScript string and
+cannot be zeroed; it lives until the process exits or it is collected. Its
+encoded bytes are zeroed as soon as the KEK is derived. Every KEK is zeroed
+after its one use, the decrypt step leaves no second copy of an unwrapped key,
+and `pod init --encrypt`, `pod encrypt` and `pod decrypt` zero the pod key when
+they finish. Commands that read or import hold the key for the whole command.
+A model server that `pod extract` starts does not inherit the passphrase
+variables. Neither the passphrase nor any key is ever printed or logged.
 
 ### Changing the passphrase
 
@@ -267,6 +305,8 @@ written, and the DEK never touches disk.
    the directory fsynced. Any failure before the rename removes the temporary
    file and leaves the manifest byte-identical. No backup of the old manifest
    is kept inside the pod, since it would keep the old passphrase working.
+   A temporary manifest left in `settings/` by an earlier run that was killed
+   is removed before the new one is written.
 
 Refusals leave the manifest byte-identical: the pod is not encrypted (exit 1);
 the new passphrase is empty or the same as the current one (exit 1); the
