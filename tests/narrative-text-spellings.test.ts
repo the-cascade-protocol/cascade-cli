@@ -159,6 +159,12 @@ const SCENARIOS: Array<{ name: string; lines: string[]; expectText: string }> = 
     lines: [`cascade:narrativeText "${OTHER}"`, `clinical:content "${OTHER}"`, `clinical:narrativeText "${TEXT}"`],
     expectText: TEXT,
   },
+  // A blank value on the declared spelling does not hide text on a legacy one.
+  {
+    name: 'blank-declared-falls-through',
+    lines: [`clinical:narrativeText ""`, `cascade:narrativeText "${TEXT}"`],
+    expectText: TEXT,
+  },
 ];
 
 describe('pod extract reads every narrative spelling as one block with one queue ID', () => {
