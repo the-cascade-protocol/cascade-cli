@@ -345,13 +345,65 @@ export function missingPrefixHeader(block: string, existingContent: string): str
 }
 
 // ---------------------------------------------------------------------------
-// Build a TypeRegistration block
+// Type index and index.ttl: what is already registered, read by PARSING
 // ---------------------------------------------------------------------------
+//
+// Never by substring on the raw text. The type index `pod init` writes carries a
+// commented example registering `/wellness/heart-rate.ttl`, and `index.ttl` one
+// containing `wellness/heart-rate.ttl`; a substring test took those comments
+// for registrations, so the heart-rate file was never registered anywhere.
 
-function buildTypeRegistration(key: string, info: typeof DATA_TYPES[string]): string {
-  const forClass = shortenForTurtle(info.rdfTypes[0]);
+const SOLID = 'http://www.w3.org/ns/solid/terms#';
+const LDP_CONTAINS = 'http://www.w3.org/ns/ldp#contains';
+/** Base the pod's own documents are parsed against, so pod-relative IRIs compare exactly. */
+const POD_BASE = 'https://pod.invalid/';
+
+function parsePodDocument(content: string, rel: string): Quad[] | undefined {
+  try {
+    return new Parser({ format: 'Turtle', baseIRI: POD_BASE + rel }).parse(content);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Every (class, instance) pair a type index registers, as `class \0 instance`
+ * with the instance resolved to a full IRI, plus every registration subject.
+ * Undefined when the document does not parse.
+ */
+export function typeIndexRegistrations(
+  content: string,
+  indexRel: string,
+): { pairs: Set<string>; subjects: Set<string> } | undefined {
+  const quads = parsePodDocument(content, indexRel);
+  if (!quads) return undefined;
+  const classes = new Map<string, string[]>();
+  const instances = new Map<string, string[]>();
+  const subjects = new Set<string>();
+  for (const q of quads) {
+    subjects.add(q.subject.value);
+    const into = q.predicate.value === SOLID + 'forClass' ? classes : q.predicate.value === SOLID + 'instance' ? instances : undefined;
+    if (!into) continue;
+    const list = into.get(q.subject.value) ?? [];
+    list.push(q.object.value);
+    into.set(q.subject.value, list);
+  }
+  const pairs = new Set<string>();
+  for (const [subject, cs] of classes) {
+    for (const c of cs) for (const i of instances.get(subject) ?? []) pairs.add(`${c}\u0000${i}`);
+  }
+  return { pairs, subjects };
+}
+
+function localNameOf(iri: string): string {
+  const cut = Math.max(iri.lastIndexOf('#'), iri.lastIndexOf('/'));
+  return iri.slice(cut + 1).replace(/[^A-Za-z0-9_-]/g, '') || 'type';
+}
+
+function buildTypeRegistration(fragment: string, classIri: string, info: typeof DATA_TYPES[string]): string {
+  const forClass = shortenForTurtle(classIri);
   const instance = `</${info.directory}/${info.filename}>`;
-  return `\n<#${key}> a solid:TypeRegistration ;\n    solid:forClass ${forClass} ;\n    solid:instance ${instance} .\n`;
+  return `\n<#${fragment}> a solid:TypeRegistration ;\n    solid:forClass ${forClass} ;\n    solid:instance ${instance} .\n`;
 }
 
 // ---------------------------------------------------------------------------
@@ -362,25 +414,59 @@ function typeIndexForInfo(info: typeof DATA_TYPES[string]): 'publicTypeIndex.ttl
   return info.directory === 'clinical' ? 'publicTypeIndex.ttl' : 'privateTypeIndex.ttl';
 }
 
+/**
+ * The classes a type registration is written for. A clinical bucket registers
+ * its data type's primary class. A wellness bucket registers every class the
+ * records handed to it carry, because one file holds several (activity.ttl
+ * holds daily snapshots, workouts and per-device energy readings), and its
+ * data type's first class can be a container class no record carries
+ * (`health:HRVData`), under which a lookup finds nothing.
+ */
+function registrationClasses(info: typeof DATA_TYPES[string], heldClasses: Iterable<string>): string[] {
+  if (info.directory !== 'wellness') return [info.rdfTypes[0]];
+  const held = [...new Set(heldClasses)].sort();
+  return held.length > 0 ? held : [info.rdfTypes[0]];
+}
+
 // ---------------------------------------------------------------------------
 // Append to type index file (string manipulation to preserve comments)
 // ---------------------------------------------------------------------------
 
+/**
+ * Register `info`'s file in a type index for each of `classes` (full IRIs;
+ * default: the data type's primary class) that the index does not already
+ * register it for. True when anything was (or, dry run, would be) appended.
+ * An index that does not parse is left alone.
+ */
 export async function appendTypeRegistration(
   indexPath: string,
   key: string,
   info: typeof DATA_TYPES[string],
   dryRun: boolean,
   dek?: Buffer,
+  classes: readonly string[] = [info.rdfTypes[0]],
 ): Promise<boolean> {
   const content = readResource(indexPath, dek);
+  const indexRel = `settings/${path.basename(indexPath)}`;
+  const registered = typeIndexRegistrations(content, indexRel);
+  if (!registered) return false;
 
-  // Check if already registered (by key name)
-  if (content.includes(`<#${key}>`) || content.includes(`/${info.filename}`)) {
-    return false; // already present
+  const instanceIri = `${POD_BASE}${info.directory}/${info.filename}`;
+  const subjects = new Set(registered.subjects);
+  let block = '';
+  for (const classIri of classes) {
+    if (registered.pairs.has(`${classIri}\u0000${instanceIri}`)) continue;
+    // The data type key is the fragment when it is free (what earlier releases
+    // wrote); a second class for the same file gets the class name appended.
+    let fragment = key;
+    if (subjects.has(`${POD_BASE}${indexRel}#${fragment}`)) {
+      fragment = `${key}-${localNameOf(classIri)}`;
+      for (let n = 2; subjects.has(`${POD_BASE}${indexRel}#${fragment}`); n++) fragment = `${key}-${localNameOf(classIri)}-${n}`;
+    }
+    subjects.add(`${POD_BASE}${indexRel}#${fragment}`);
+    block += buildTypeRegistration(fragment, classIri, info);
   }
-
-  const block = buildTypeRegistration(key, info);
+  if (block === '') return false;
 
   // Declare any prefix the appended block uses that the file does not yet
   // declare (e.g. coverage: for a Claim/ExplanationOfBenefit registration, or
@@ -407,7 +493,10 @@ async function appendIndexContains(
 ): Promise<boolean> {
   const content = readResource(indexPath, dek);
 
-  if (content.includes(relPath)) {
+  const quads = parsePodDocument(content, 'index.ttl');
+  if (!quads) return false; // an index.ttl that does not parse is left alone
+  const target = POD_BASE + relPath;
+  if (quads.some((q) => q.predicate.value === LDP_CONTAINS && q.object.value === target)) {
     return false; // already present
   }
 
@@ -1202,7 +1291,15 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         const indexPath = indexFile === 'publicTypeIndex.ttl' ? publicIndexPath : privateIndexPath;
 
         if (await fileExists(indexPath)) {
-          const appended = await appendTypeRegistration(indexPath, typeKey, info, dryRun, dek);
+          const held: string[] = [];
+          for (const quads of buckets.get(typeKey) ?? []) {
+            if (isStructuralSubNode(quads)) continue;
+            const t = quads.find((q) => q.predicate.value === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type');
+            if (t) held.push(t.object.value);
+          }
+          const appended = await appendTypeRegistration(
+            indexPath, typeKey, info, dryRun, dek, registrationClasses(info, held),
+          );
           if (appended) {
             printVerbose(`  ${dryRun ? '[dry-run] ' : ''}Added type registration for ${typeKey} to ${indexFile}`, globalOpts);
           }
@@ -1375,7 +1472,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             });
             const indexPath = typeIndexForInfo(info) === 'publicTypeIndex.ttl' ? publicIndexPath : privateIndexPath;
             if (await fileExists(indexPath)) {
-              await appendTypeRegistration(indexPath, f.key, info, dryRun, dek);
+              await appendTypeRegistration(indexPath, f.key, info, dryRun, dek, registrationClasses(info, f.classes));
             }
           }
           if (f.created && (await fileExists(indexTtlPath))) {

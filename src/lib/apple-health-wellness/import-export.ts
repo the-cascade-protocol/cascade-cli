@@ -65,6 +65,8 @@ export interface WellnessFileReport {
   recordsNew: number;
   /** True when the file did not exist before this import. */
   created: boolean;
+  /** The classes (full IRIs) of the records this import handed to the file, sorted. */
+  classes: string[];
 }
 
 export interface WellnessImportReport {
@@ -258,7 +260,8 @@ async function writeFile(
     combine: (existing, incoming) => additiveCanonicalMerge(existing, incoming, stats),
   });
   appendAll(collisions, stats.collisions.map((s) => `${rel}: ${s}`));
-  return { key, path: rel, recordsWritten: subjects, recordsNew: stats.added, created };
+  const classes = [...new Set(quads.filter((q) => q.predicate.value === RDF_TYPE).map((q) => q.object.value))].sort(cmpStr);
+  return { key, path: rel, recordsWritten: subjects, recordsNew: stats.added, created, classes };
 }
 
 // ---------------------------------------------------------------------------

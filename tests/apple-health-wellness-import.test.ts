@@ -120,6 +120,34 @@ describe('pod import of an Apple Health export folder: wellness', () => {
     expect(aggregates).toBe(21);
   });
 
+  it('registers every class each wellness file holds in the private type index, and lists each file in index.ttl', () => {
+    const base = 'https://pod.invalid/';
+    const parse = (rel: string): Quad[] =>
+      new Parser({ format: 'Turtle', baseIRI: base + rel }).parse(fs.readFileSync(path.join(podDir, rel), 'utf8'));
+    const SOLID = 'http://www.w3.org/ns/solid/terms#';
+    // A type-index lookup: the instances registered for a class.
+    const index = parse('settings/privateTypeIndex.ttl');
+    const lookup = (cls: string): string[] => {
+      const regs = index.filter((q) => q.predicate.value === SOLID + 'forClass' && q.object.value === cls).map((q) => q.subject.value);
+      return index.filter((q) => q.predicate.value === SOLID + 'instance' && regs.includes(q.subject.value)).map((q) => q.object.value);
+    };
+    const contained = new Set(
+      parse('index.ttl').filter((q) => q.predicate.value === 'http://www.w3.org/ns/ldp#contains').map((q) => q.object.value),
+    );
+    const held: Array<[string, string]> = [];
+    for (const f of ['heart-rate.ttl', 'hrv.ttl', 'body-measurements.ttl', 'activity.ttl', 'devices.ttl']) {
+      const rel = `wellness/${f}`;
+      expect(contained.has(base + rel), rel).toBe(true);
+      const classes = new Set(parse(rel).filter((q) => q.predicate.value === RDF_TYPE).map((q) => q.object.value));
+      for (const c of classes) held.push([c, rel]);
+    }
+    // Every class the files hold, including the four the brief names.
+    expect(new Set(held.map(([c]) => c))).toEqual(
+      new Set([H + 'DailyVitalReading', H + 'DailyActivitySnapshot', H + 'Workout', H + 'Device']),
+    );
+    for (const [cls, rel] of held) expect(lookup(cls), `${cls} -> ${rel}`).toContain(base + rel);
+  });
+
   it('validates with zero violations and zero warnings', () => {
     const out = JSON.parse(cli(['validate', podDir, '--json'])) as Array<{ file: string; valid: boolean; results: unknown[] }>;
     const wellnessFiles = out.filter((r) => r.file.includes(`${path.sep}wellness${path.sep}`));
