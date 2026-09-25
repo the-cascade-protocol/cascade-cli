@@ -1,0 +1,654 @@
+{
+  "$comment": "Enumerated pre-existing undeclared Cascade terms, for tests/emitted-terms-declared.test.ts. This file is a GATE INPUT, not a filter: the test still collects every term. It fails when an undeclared term appears that is not listed here, AND when a listed entry stops matching what the code does (the term became declared, is no longer written, or its emitted roles, write-site count or files changed). So the list can only shrink, and shrinking it is an explicit committed edit.",
+  "$rule": "Each entry is a fix to make: declare the term in the spec vocabulary (then sync the ontology copies in src/shapes), or move the writer to the declared term. Never add an entry to make a new term pass.",
+  "entries": [
+    {
+      "term": "checkup:recommendedActions",
+      "iri": "https://ns.cascadeprotocol.org/checkup/v1#recommendedActions",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/phenopacket-converter/medical-actions.ts"
+      ]
+    },
+    {
+      "term": "clinical:bloodPressureDiastolicUnit",
+      "iri": "https://ns.cascadeprotocol.org/clinical/v1#bloodPressureDiastolicUnit",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 0,
+      "files": []
+    },
+    {
+      "term": "clinical:bloodPressureDiastolicValue",
+      "iri": "https://ns.cascadeprotocol.org/clinical/v1#bloodPressureDiastolicValue",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 0,
+      "files": []
+    },
+    {
+      "term": "clinical:bloodPressureSystolicUnit",
+      "iri": "https://ns.cascadeprotocol.org/clinical/v1#bloodPressureSystolicUnit",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 0,
+      "files": []
+    },
+    {
+      "term": "clinical:bloodPressureSystolicValue",
+      "iri": "https://ns.cascadeprotocol.org/clinical/v1#bloodPressureSystolicValue",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 0,
+      "files": []
+    },
+    {
+      "term": "clinical:content",
+      "iri": "https://ns.cascadeprotocol.org/clinical/v1#content",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/ccda-converter/narrative.ts"
+      ]
+    },
+    {
+      "term": "clinical:contentType",
+      "iri": "https://ns.cascadeprotocol.org/clinical/v1#contentType",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/fhir-converter/converters-clinical.ts"
+      ]
+    },
+    {
+      "term": "clinical:documentTitle",
+      "iri": "https://ns.cascadeprotocol.org/clinical/v1#documentTitle",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/fhir-converter/converters-clinical.ts"
+      ]
+    },
+    {
+      "term": "clinical:documentType",
+      "iri": "https://ns.cascadeprotocol.org/clinical/v1#documentType",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 2,
+      "files": [
+        "src/lib/ccda-converter/narrative.ts",
+        "src/lib/fhir-converter/converters-clinical.ts"
+      ]
+    },
+    {
+      "term": "clinical:documentUrl",
+      "iri": "https://ns.cascadeprotocol.org/clinical/v1#documentUrl",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/fhir-converter/converters-clinical.ts"
+      ]
+    },
+    {
+      "term": "clinical:vitalTypeName",
+      "iri": "https://ns.cascadeprotocol.org/clinical/v1#vitalTypeName",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/fhir-converter/converters-clinical.ts"
+      ]
+    },
+    {
+      "term": "cascade:AuditEntry",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#AuditEntry",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/lib/mcp/audit.ts"
+      ]
+    },
+    {
+      "term": "cascade:aboutPatient",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#aboutPatient",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 3,
+      "files": [
+        "src/lib/phenopacket-converter/biosamples.ts",
+        "src/lib/phenopacket-converter/interpretations.ts",
+        "src/lib/phenopacket-converter/pedigree.ts"
+      ]
+    },
+    {
+      "term": "cascade:affectedStatus",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#affectedStatus",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/phenopacket-converter/pedigree.ts"
+      ]
+    },
+    {
+      "term": "cascade:ageAtCollection",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#ageAtCollection",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/phenopacket-converter/biosamples.ts"
+      ]
+    },
+    {
+      "term": "cascade:ageAtLastEncounter",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#ageAtLastEncounter",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/phenopacket-converter/subject.ts"
+      ]
+    },
+    {
+      "term": "cascade:agentId",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#agentId",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/lib/mcp/audit.ts"
+      ]
+    },
+    {
+      "term": "cascade:confidence",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#confidence",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/lib/mcp/tools.ts"
+      ]
+    },
+    {
+      "term": "cascade:conflictValues",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#conflictValues",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 2,
+      "files": [
+        "src/lib/reconciler.ts"
+      ]
+    },
+    {
+      "term": "cascade:deviceName",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#deviceName",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/ccda-converter/sections/devices.ts"
+      ]
+    },
+    {
+      "term": "cascade:displayName",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#displayName",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 3,
+      "files": [
+        "src/lib/phenopacket-converter/biosamples.ts",
+        "src/lib/phenopacket-converter/interpretations.ts"
+      ]
+    },
+    {
+      "term": "cascade:familyName",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#familyName",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/ccda-converter/sections/patient.ts"
+      ]
+    },
+    {
+      "term": "cascade:givenName",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#givenName",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/ccda-converter/sections/patient.ts"
+      ]
+    },
+    {
+      "term": "cascade:hasRawFile",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#hasRawFile",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 3,
+      "files": [
+        "src/lib/phenopacket-converter/biosamples.ts",
+        "src/lib/phenopacket-converter/index.ts"
+      ]
+    },
+    {
+      "term": "cascade:label",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#label",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/user-resolutions.ts"
+      ]
+    },
+    {
+      "term": "cascade:mergedSources",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#mergedSources",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 2,
+      "files": [
+        "src/lib/reconciler.ts"
+      ]
+    },
+    {
+      "term": "cascade:narrativeText",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#narrativeText",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/ccda-converter/narrative.ts"
+      ]
+    },
+    {
+      "term": "cascade:operation",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#operation",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/lib/mcp/audit.ts"
+      ]
+    },
+    {
+      "term": "cascade:recordType",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#recordType",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/user-resolutions.ts"
+      ]
+    },
+    {
+      "term": "cascade:recordsAccessed",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#recordsAccessed",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/lib/mcp/audit.ts"
+      ]
+    },
+    {
+      "term": "cascade:resolvedAt",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#resolvedAt",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/lib/user-resolutions.ts"
+      ]
+    },
+    {
+      "term": "cascade:sampledTissueId",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#sampledTissueId",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/phenopacket-converter/biosamples.ts"
+      ]
+    },
+    {
+      "term": "cascade:sampledTissueLabel",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#sampledTissueLabel",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/phenopacket-converter/biosamples.ts"
+      ]
+    },
+    {
+      "term": "cascade:sourceA",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#sourceA",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/user-resolutions.ts"
+      ]
+    },
+    {
+      "term": "cascade:sourceB",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#sourceB",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/user-resolutions.ts"
+      ]
+    },
+    {
+      "term": "cascade:sourceFhirId",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#sourceFhirId",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 14,
+      "files": [
+        "src/lib/clinvar-converter/rcv-interpretation.ts",
+        "src/lib/clinvar-converter/scv-submitter-assertion.ts",
+        "src/lib/clinvar-converter/simple-allele.ts",
+        "src/lib/fhir-genomics-converter/diagnostic-report.ts",
+        "src/lib/fhir-genomics-converter/observation-diagnostic-implication.ts",
+        "src/lib/fhir-genomics-converter/observation-genotype.ts",
+        "src/lib/fhir-genomics-converter/observation-haplotype.ts",
+        "src/lib/fhir-genomics-converter/observation-variant.ts",
+        "src/lib/fhir-genomics-converter/service-request.ts",
+        "src/lib/phenopacket-converter/biosamples.ts",
+        "src/lib/phenopacket-converter/interpretations.ts",
+        "src/lib/phenopacket-converter/pedigree.ts",
+        "src/lib/phenopacket-converter/variation-descriptor.ts"
+      ]
+    },
+    {
+      "term": "cascade:speciesLabel",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#speciesLabel",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 2,
+      "files": [
+        "src/lib/phenopacket-converter/biosamples.ts",
+        "src/lib/phenopacket-converter/subject.ts"
+      ]
+    },
+    {
+      "term": "cascade:speciesTaxon",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#speciesTaxon",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 2,
+      "files": [
+        "src/lib/phenopacket-converter/biosamples.ts",
+        "src/lib/phenopacket-converter/subject.ts"
+      ]
+    },
+    {
+      "term": "cascade:survivingRecord",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#survivingRecord",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/user-resolutions.ts"
+      ]
+    },
+    {
+      "term": "cascade:timestamp",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#timestamp",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/lib/mcp/audit.ts"
+      ]
+    },
+    {
+      "term": "cascade:unmappedField",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#unmappedField",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 2,
+      "files": [
+        "src/lib/vcf-converter/multi-sample.ts",
+        "src/lib/vcf-converter/record.ts"
+      ]
+    },
+    {
+      "term": "cascade:valueA",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#valueA",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/user-resolutions.ts"
+      ]
+    },
+    {
+      "term": "cascade:valueB",
+      "iri": "https://ns.cascadeprotocol.org/core/v1#valueB",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/user-resolutions.ts"
+      ]
+    },
+    {
+      "term": "genomics:negatedHpoTerm",
+      "iri": "https://ns.cascadeprotocol.org/genomics/v1#negatedHpoTerm",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/phenopacket-converter/phenotypic-features.ts"
+      ]
+    },
+    {
+      "term": "genomics:testDate",
+      "iri": "https://ns.cascadeprotocol.org/genomics/v1#testDate",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/fhir-genomics-converter/diagnostic-report.ts"
+      ]
+    },
+    {
+      "term": "health:abatementDate",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#abatementDate",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/fhir-converter/converters-clinical.ts"
+      ]
+    },
+    {
+      "term": "health:conditionCategory",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#conditionCategory",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/fhir-converter/converters-clinical.ts"
+      ]
+    },
+    {
+      "term": "health:cptCode",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#cptCode",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/lib/ccda-converter/sections/procedures.ts"
+      ]
+    },
+    {
+      "term": "health:cvxCode",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#cvxCode",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/ccda-converter/sections/immunizations.ts"
+      ]
+    },
+    {
+      "term": "health:doseUnit",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#doseUnit",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/ccda-converter/sections/medications.ts"
+      ]
+    },
+    {
+      "term": "health:effectiveDate",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#effectiveDate",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 2,
+      "files": [
+        "src/lib/ccda-converter/sections/devices.ts",
+        "src/lib/ccda-converter/sections/encounters.ts"
+      ]
+    },
+    {
+      "term": "health:endDate",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#endDate",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 2,
+      "files": [
+        "src/lib/fhir-converter/converters-clinical.ts",
+        "src/lib/mcp/tools.ts"
+      ]
+    },
+    {
+      "term": "health:familyMember",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#familyMember",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/ccda-converter/sections/family-history.ts"
+      ]
+    },
+    {
+      "term": "health:medicationClass",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#medicationClass",
+      "emittedAs": [],
+      "writeSites": 2,
+      "files": [
+        "src/lib/fhir-converter/cascade-to-fhir-clinical.ts",
+        "src/lib/mcp/tools.ts"
+      ]
+    },
+    {
+      "term": "health:medicationName",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#medicationName",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/fhir-converter/converters-clinical.ts"
+      ]
+    },
+    {
+      "term": "health:referenceRangeText",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#referenceRangeText",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/ccda-converter/sections/labs.ts"
+      ]
+    },
+    {
+      "term": "health:snomedSemanticTag",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#snomedSemanticTag",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/fhir-converter/converters-clinical.ts"
+      ]
+    },
+    {
+      "term": "health:startDate",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#startDate",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 5,
+      "files": [
+        "src/lib/ccda-converter/sections/medications.ts",
+        "src/lib/fhir-converter/converters-clinical.ts",
+        "src/lib/mcp/tools.ts"
+      ]
+    },
+    {
+      "term": "health:vitalName",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#vitalName",
+      "emittedAs": [
+        "predicate"
+      ],
+      "writeSites": 1,
+      "files": [
+        "src/lib/ccda-converter/sections/vitals.ts"
+      ]
+    }
+  ]
+}
