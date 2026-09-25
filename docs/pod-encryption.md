@@ -112,14 +112,19 @@ KEK even if the defaults change.
 The `wrappedDek` is itself a combined AES-256-GCM blob (the DEK encrypted under
 the KEK), base64-encoded.
 
-The schema above is **version 1.0**. `pod init --encrypt` and `pod encrypt`
-write it.
+The schema above is **version 1.0**. Earlier versions of this tool wrote it
+from `pod init --encrypt` and `pod encrypt`; no command writes it now, and every
+command still reads it.
 
 ### Version 1.1
 
-`pod passphrase set` writes **version 1.1**, which moves the KDF parameters
-into each passphrase wrap (one salt cannot serve two secrets) and gives each
-wrap a `label` and a `createdAt`:
+Every command that writes the header writes **version 1.1**, which moves the
+KDF parameters into each passphrase wrap (one salt cannot serve two secrets) and
+gives each wrap a `label` and a `createdAt`. `pod init --encrypt` and
+`pod encrypt` write one passphrase wrap with `label: "primary"` and `createdAt`
+set when the pod key is created; `pod passphrase set` migrates a 1.0 header in
+memory and re-wraps; `pod passphrase set --rotate-dek` writes one wrap of a new
+data key:
 
 ```json
 {
@@ -256,7 +261,7 @@ Each entry is identified by its `by` discriminator:
 | `cascade pod import` / `pod query` / `validate` | Encryption-aware: if the pod is encrypted, resolve the DEK and route every resource read/write through the decrypt/encrypt helpers. Plaintext pods are unchanged. |
 
 Every write of `settings/encryption.json` is atomic and durable, including the
-1.0 manifest `pod init --encrypt` and `pod encrypt` write: a new temporary file
+manifest `pod init --encrypt` and `pod encrypt` write: a new temporary file
 (created, never reused) in `settings/`, fsync, rename over the manifest, fsync
 of the directory. A crash mid-write leaves either the old state or the whole new
 manifest, never a truncated one.

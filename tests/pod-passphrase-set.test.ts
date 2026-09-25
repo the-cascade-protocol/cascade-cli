@@ -25,6 +25,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { registerPodCommand } from '../src/commands/pod/index.js';
 import { REWRAP_DONE_MESSAGE } from '../src/commands/pod/passphrase.js';
+import { resolveDek, writeEncryptionManifest, buildPassphraseManifestV10 } from '../src/lib/pod-encryption.js';
 
 const CLI = path.resolve(__dirname, '..', 'dist', 'index.js');
 const PASS_A = 'test-only passphrase alpha';
@@ -165,11 +166,24 @@ async function podWithRecords(): Promise<{ root: string; pod: string }> {
   return { root, pod };
 }
 
+/**
+ * The same pod with its header rewritten as version 1.0 (same key, cheap KDF
+ * settings). New pods are written as 1.1; pods made by earlier versions of this
+ * tool carry 1.0, and the re-wrap must keep migrating them.
+ */
+async function podWithRecordsV10(): Promise<{ root: string; pod: string }> {
+  const made = await podWithRecords();
+  const dek = resolveDek(made.pod, PASS_A);
+  writeEncryptionManifest(made.pod, buildPassphraseManifestV10(dek, PASS_A, { t: 1, m: 64, p: 1 }));
+  dek.fill(0);
+  return made;
+}
+
 // ── in process ────────────────────────────────────────────────────────────────
 
 describe('pod passphrase set (in process)', () => {
   it('re-wraps a 1.0 pod to 1.1; only the manifest changes; --json has exactly four keys', async () => {
-    const { pod } = await podWithRecords();
+    const { pod } = await podWithRecordsV10();
     const before = hashTree(pod, ['settings/encryption.json']);
     const oldManifest = fs.readFileSync(manifestPath(pod), 'utf-8');
     expect(JSON.parse(oldManifest).version).toBe('1.0');
@@ -275,7 +289,7 @@ describe('pod passphrase set (in process)', () => {
     }, TIMEOUT);
 
     it('the manifest is malformed, or from a newer tool', async () => {
-      const { pod } = await podWithRecords();
+      const { pod } = await podWithRecordsV10();
       const good = fs.readFileSync(manifestPath(pod), 'utf-8');
 
       fs.writeFileSync(manifestPath(pod), good.slice(0, 40));

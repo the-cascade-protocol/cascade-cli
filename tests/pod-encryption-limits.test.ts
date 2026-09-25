@@ -33,7 +33,9 @@ import {
   deriveKek,
   wrapDek,
   buildPassphraseManifest,
+  buildPassphraseManifestV10,
   parseEncryptionManifest,
+  serializeEncryptionManifestV11,
   readEncryptionManifest,
   resolveDek,
   rewrapPassphrase,
@@ -79,7 +81,7 @@ function openableWrap(): EncryptionWrapV11 {
 // Wrap values are computed once, at module load, so building a header in a test
 // never calls Argon2id and the spy counts only what the code under test does.
 const WRAP_TEMPLATE = openableWrap();
-const V10_TEMPLATE = buildPassphraseManifest(DEK, PASSPHRASE, FAST_KDF);
+const V10_TEMPLATE = buildPassphraseManifestV10(DEK, PASSPHRASE, FAST_KDF);
 
 type Mutation = (header: Record<string, unknown>, params: Record<string, unknown>, wrap: Record<string, unknown>) => void;
 
@@ -381,6 +383,9 @@ describe('the 1.0 writer refuses parameters a reader would refuse', () => {
       expect(() => buildPassphraseManifest(DEK, PASSPHRASE, params)).toThrow(
         new RegExp(`field: ${field.replace('.', '\\.')}`),
       );
+      expect(() => buildPassphraseManifestV10(DEK, PASSPHRASE, params)).toThrow(
+        new RegExp(`field: ${field.replace('.', '\\.')}`),
+      );
       expect(argonCalls.count).toBe(0);
     });
   }
@@ -389,13 +394,14 @@ describe('the 1.0 writer refuses parameters a reader would refuse', () => {
 describe('everything the writers produce passes the reader limits', () => {
   it('buildPassphraseManifest at the default parameters (pod init --encrypt, pod encrypt)', () => {
     const m = buildPassphraseManifest(generateDek(), PASSPHRASE, DEFAULT_KDF);
-    expect(() => parseEncryptionManifest(JSON.stringify(m))).not.toThrow();
+    expect(m.version).toBe('1.1');
+    expect(() => parseEncryptionManifest(serializeEncryptionManifestV11(m))).not.toThrow();
   }, 30_000);
 
   it('rewrapPassphrase at the default parameters (pod passphrase set), from 1.0 and again from 1.1', () => {
     const pod = fs.mkdtempSync(path.join(os.tmpdir(), 'cascade-limits-writer-'));
     fs.mkdirSync(path.join(pod, 'settings'));
-    writeEncryptionManifest(pod, buildPassphraseManifest(DEK, 'first passphrase', FAST_KDF));
+    writeEncryptionManifest(pod, buildPassphraseManifestV10(DEK, 'first passphrase', FAST_KDF));
     rewrapPassphrase(pod, 'first passphrase', 'second passphrase');
     expect(readEncryptionManifest(pod)!.version).toBe('1.1');
     rewrapPassphrase(pod, 'second passphrase', 'third passphrase');

@@ -238,8 +238,9 @@ describe('pod encrypt: walks the pod, not an allowlist (root BACKLOG 4.25)', () 
     ]);
     expect(rawBytes(egress).toString('utf-8')).toBe('{"outcome":"sent"}\n');
     expect(plainTextContains(path.join(dir, 'README.md'), 'Cascade Protocol Pod')).toBe(true);
-    expect(JSON.parse(rawBytes(path.join(dir, 'settings', 'encryption.json')).toString('utf-8')).kdf)
-      .toBe('argon2id');
+    const header = JSON.parse(rawBytes(path.join(dir, 'settings', 'encryption.json')).toString('utf-8'));
+    expect(header.version).toBe('1.1');
+    expect(header.wraps[0].kdf).toBe('argon2id');
 
     // Not-a-pod-resource entries are untouched.
     expect(rawBytes(path.join(dir, '.DS_Store')).toString('utf-8')).toBe('junk');

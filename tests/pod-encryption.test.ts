@@ -120,7 +120,8 @@ describe('manifest I/O and resolveDek', () => {
     const read = readEncryptionManifest(dir);
     expect(read).not.toBeNull();
     expect(read!.algorithm).toBe('aes-256-gcm');
-    expect(read!.version).toBe('1.0');
+    expect(read!.version).toBe('1.1');
+    expect(read!.wraps).toHaveLength(1);
     const wrap = read!.wraps[0];
     expect(wrap.by).toBe('passphrase');
     if (wrap.kind !== 'passphrase') throw new Error('expected a passphrase wrap');
@@ -148,9 +149,9 @@ describe('manifest I/O and resolveDek', () => {
   it('records the default KDF params in a manifest built without overrides', () => {
     const dek = generateDek();
     const m = buildPassphraseManifest(dek, 'pw'); // default DEFAULT_KDF (slow; just inspect params)
-    expect(m.kdfParams.t).toBe(DEFAULT_KDF.t);
-    expect(m.kdfParams.m).toBe(DEFAULT_KDF.m);
-    expect(m.kdfParams.p).toBe(DEFAULT_KDF.p);
+    expect(m.wraps[0].kdfParams!.t).toBe(DEFAULT_KDF.t);
+    expect(m.wraps[0].kdfParams!.m).toBe(DEFAULT_KDF.m);
+    expect(m.wraps[0].kdfParams!.p).toBe(DEFAULT_KDF.p);
   });
 });
 

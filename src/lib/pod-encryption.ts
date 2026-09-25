@@ -56,9 +56,12 @@ export const MIN_ENVELOPE_LEN = NONCE_LEN + TAG_LEN;
 // version a pod carries. Only this module reads `kdfParams`; a source test
 // enforces that.
 //
-// Which verbs write which version: `pod init --encrypt` and `pod encrypt` write
-// 1.0 ({@link buildPassphraseManifest}). `pod passphrase set` writes 1.1
-// ({@link rewrapPassphrase}), migrating a 1.0 manifest in memory first.
+// Which verbs write which version: every writer writes 1.1. `pod init
+// --encrypt` and `pod encrypt` write one passphrase wrap
+// ({@link buildPassphraseManifest}); `pod passphrase set` re-wraps
+// ({@link rewrapPassphrase}), migrating a 1.0 manifest in memory first; and
+// `pod passphrase set --rotate-dek` writes one wrap of a new data key. No
+// command writes 1.0 any more; it is still read.
 
 export interface KdfParams {
   /** Base64 Argon2id salt. In 1.1 it is also the wrap's public identifier. */
@@ -100,11 +103,6 @@ export interface EncryptionManifestV10 {
   wraps: EncryptionWrap[];
 }
 
-/**
- * The manifest `pod init --encrypt` and `pod encrypt` write. Still 1.0: those
- * verbs keep writing 1.0 until readers of 1.1 are widespread.
- */
-export type EncryptionManifest = EncryptionManifestV10;
 
 /**
  * One wrap of a version 1.1 manifest, as it sits on disk.
@@ -131,6 +129,9 @@ export interface EncryptionManifestV11 {
   algorithm: 'aes-256-gcm';
   wraps: EncryptionWrapV11[];
 }
+
+/** The manifest `pod init --encrypt` and `pod encrypt` write: version 1.1. */
+export type EncryptionManifest = EncryptionManifestV11;
 
 /** A wrap this tool can open: DEK wrapped by an Argon2id passphrase KEK. */
 export interface NormalizedPassphraseWrap {
@@ -677,9 +678,9 @@ export function isPodEncrypted(podDir: string): boolean {
 // ─── Manifest construction & DEK resolution ───────────────────────────────────
 
 /**
- * Build a fresh version 1.0 encryption manifest for a new DEK protected by a
- * passphrase. Generates a random salt and wraps the DEK with a freshly derived
- * KEK.
+ * Build the encryption manifest for a NEW pod key protected by a passphrase:
+ * version 1.1 with one passphrase wrap, `label: "primary"`, `createdAt` now,
+ * a fresh random salt. What `pod init --encrypt` and `pod encrypt` write.
  *
  * @throws {EncryptionManifestError} if `params` is outside
  *   {@link MANIFEST_LIMITS}: it never writes a manifest a reader would refuse.
@@ -688,7 +689,28 @@ export function buildPassphraseManifest(
   dek: Buffer,
   passphrase: string,
   params: { t: number; m: number; p: number } = DEFAULT_KDF,
+  options: { now?: () => Date } = {},
 ): EncryptionManifest {
+  return buildPassphraseManifestV11(dek, passphrase, {
+    kdf: params,
+    label: 'primary',
+    ...(options.now ? { now: options.now } : {}),
+  });
+}
+
+/**
+ * Build a version 1.0 manifest: one top-level salt and KDF parameters, one
+ * passphrase wrap. No command writes 1.0 any more. It is kept so the 1.0
+ * reader, and the 1.0 to 1.1 migration, are tested against exactly the bytes
+ * earlier versions of this tool wrote.
+ *
+ * @throws {EncryptionManifestError} if `params` is outside {@link MANIFEST_LIMITS}.
+ */
+export function buildPassphraseManifestV10(
+  dek: Buffer,
+  passphrase: string,
+  params: { t: number; m: number; p: number } = DEFAULT_KDF,
+): EncryptionManifestV10 {
   // Never write a manifest a reader would refuse.
   checkCosts(params.t, params.m, params.p, 'kdfParams');
   const salt = randomBytes(SALT_LEN);
@@ -1042,7 +1064,7 @@ function writeManifestFile(target: string, bytes: Buffer, options: AtomicWriteOp
 }
 
 /**
- * Re-wrap the pod DEK under a new passphrase. The ONLY writer of manifest 1.1.
+ * Re-wrap the pod DEK under a new passphrase. Writes manifest 1.1.
  *
  * The current passphrase must open a wrap: that is the check that stops this
  * from replacing a key the caller cannot prove they hold. The wrap it opened is
