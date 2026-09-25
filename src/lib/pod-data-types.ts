@@ -326,18 +326,35 @@ const DAILY_VITAL_READING = CASCADE_NAMESPACES.health + 'DailyVitalReading';
 const LOINC_CODE_PREDICATE = CASCADE_NAMESPACES.cascade + 'loincCode';
 
 /**
- * THE router: which registered data file a subject belongs in.
+ * Whether the records of a data type go through the reconciler.
  *
- * Every verb that files or re-files records (`pod import`, `pod reconcile`)
- * asks this one function, so a record is always rewritten into the file it was
- * written to. Routing by the first `rdf:type`, with one refinement: a
- * `health:DailyVitalReading` is filed by its `cascade:loincCode` where a data
- * type claims that code ({@link DataTypeInfo.readingLoincCodes}). A subject no
- * registered type claims goes to the FHIR passthrough bucket.
+ * The reconciler matches clinical records (conditions, medications, labs and
+ * the rest) across sources. The `wellness/` buckets hold device data and daily
+ * aggregates it has no matcher for, and a pod with a year of wellness data holds
+ * hundreds of thousands of quads there. Loading them into every clinical import
+ * and every `pod reconcile` only to carry them through untouched costs minutes
+ * and risks nothing but a rewrite of files that must not change. So they stay
+ * out of the reconciler's reads, and a write that lands a record in one of them
+ * is ADDITIVE (the file keeps what it holds) rather than a replacement.
  */
-export function dataTypeKeyForSubject(
+export function isReconciledDataType(info: DataTypeInfo): boolean {
+  return info.directory === 'clinical';
+}
+
+/**
+ * THE router: which registered data file a subject belongs in, or undefined
+ * when no registered data type claims it.
+ *
+ * Every verb that files or re-files records (`pod import`, `pod reconcile` and
+ * its undo, `pod add-record`) asks this one function, so a record is always
+ * rewritten into the file it was written to. Routing by the first `rdf:type`,
+ * with one refinement: a `health:DailyVitalReading` is filed by its
+ * `cascade:loincCode` where a data type claims that code
+ * ({@link DataTypeInfo.readingLoincCodes}).
+ */
+export function registeredDataTypeKeyForSubject(
   quads: ReadonlyArray<{ predicate: { value: string }; object: { value: string } }>,
-): string {
+): string | undefined {
   const typeIri = quads.find((q) => q.predicate.value === RDF_TYPE_IRI)?.object.value ?? '';
   if (typeIri === DAILY_VITAL_READING) {
     const code = quads.find((q) => q.predicate.value === LOINC_CODE_PREDICATE)?.object.value;
@@ -351,5 +368,16 @@ export function dataTypeKeyForSubject(
     if (info.isFhirPassthroughBucket) continue;
     if (info.rdfTypes.includes(typeIri)) return key;
   }
-  return 'fhir-passthrough';
+  return undefined;
+}
+
+/**
+ * {@link registeredDataTypeKeyForSubject}, with the FHIR passthrough bucket for
+ * a subject no registered type claims: the routing `pod import` and
+ * `pod reconcile` file records by.
+ */
+export function dataTypeKeyForSubject(
+  quads: ReadonlyArray<{ predicate: { value: string }; object: { value: string } }>,
+): string {
+  return registeredDataTypeKeyForSubject(quads) ?? 'fhir-passthrough';
 }

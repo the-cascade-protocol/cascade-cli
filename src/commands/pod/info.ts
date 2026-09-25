@@ -277,13 +277,10 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
 
           // Determine record description
           let recordDesc: string;
-          // For time-series data (vital signs, heart rate, etc.), show as "X days" if applicable
-          const isTimeSeries = ['vital-signs', 'heart-rate', 'blood-pressure', 'activity', 'sleep'].some(
-            (ts) => typeInfo.filename.includes(ts.replace('-', '-')),
-          );
-          if (isTimeSeries && recordCount >= 28) {
-            recordDesc = `${recordCount} days`;
-          } else if (recordCount === 1) {
+          // Always records. A wellness file holds several records per day (one
+          // per source, device, metric and statistic), so a count of them is not
+          // a count of days, and labelling it one overstated coverage.
+          if (recordCount === 1) {
             recordDesc = '1 record';
           } else {
             recordDesc = `${recordCount} records`;

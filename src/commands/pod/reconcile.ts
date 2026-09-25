@@ -60,7 +60,11 @@ import { printResult, printError, printVerbose, type OutputOptions } from '../..
 import { toJsonText } from '../../lib/json-output.js';
 import { runReconciliation, type ReconcilerInput, type Tier0Merge } from '../../lib/reconciler.js';
 import { DATA_TYPES, resolvePodDir } from './helpers.js';
-import { dataTypeKeyForSubject } from '../../lib/pod-data-types.js';
+import {
+  dataTypeKeyForSubject,
+  isReconciledDataType,
+  registeredDataTypeKeyForSubject,
+} from '../../lib/pod-data-types.js';
 import { openPod, PodReadLedger, tidyReason, type PodReader } from '../../lib/pod-read.js';
 import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket-write.js';
 import {
@@ -414,7 +418,11 @@ async function readPodBuckets(
   const unreadable: string[] = [];
   const ledger = new PodReadLedger();
 
-  for (const { rel } of registeredBuckets()) {
+  for (const { key, rel } of registeredBuckets()) {
+    // Wellness buckets are not reconciled (`isReconciledDataType`), so they are
+    // not read: a year of daily aggregates is hundreds of thousands of quads the
+    // matcher would only carry through, and the write below never replaces them.
+    if (!isReconciledDataType(DATA_TYPES[key])) continue;
     const abs = path.join(reader.podDir, ...rel.split('/'));
     if (!fsSync.existsSync(abs)) continue;
     ledger.attempt();
@@ -598,13 +606,17 @@ function journalledTypeIri(
   return properties[RDF_TYPE]?.[0]?.value;
 }
 
-/** The registered bucket a type IRI belongs in, pod-relative. */
-function bucketForType(typeIri: string): string | undefined {
-  for (const info of Object.values(DATA_TYPES)) {
-    if (info.isFhirPassthroughBucket) continue;
-    if (info.rdfTypes.includes(typeIri)) return `${info.directory}/${info.filename}`;
-  }
-  return undefined;
+/**
+ * The registered bucket a journalled record belongs in, pod-relative, by the
+ * same router `pod import` and `--apply` file records with, so a restored
+ * record goes back to the file it was taken from (a daily vital reading is
+ * filed by its LOINC code, not only its class).
+ */
+function bucketForRecord(quads: Quad[]): string | undefined {
+  const key = registeredDataTypeKeyForSubject(quads);
+  if (key === undefined) return undefined;
+  const info = DATA_TYPES[key];
+  return `${info.directory}/${info.filename}`;
 }
 
 function renderUndoReport(report: ReconcileUndoReport): string {
@@ -956,7 +968,8 @@ async function runUndo(
           reason = `the journalled record ${d.uri} states no rdf:type, so nothing can route it to a bucket.`;
           break;
         }
-        const rel = bucketForType(typeIri);
+        const restored = quadsFromJournal(d.uri, d.properties);
+        const rel = bucketForRecord(restored);
         if (!rel) {
           reason = `no registered bucket holds <${typeIri}>, which is the type of ${d.uri}.`;
           break;
@@ -969,7 +982,7 @@ async function runUndo(
           break;
         }
         bucket = rel;
-        appendAll(quads, quadsFromJournal(d.uri, d.properties));
+        appendAll(quads, restored);
       }
 
       if (reason) {
@@ -1365,8 +1378,19 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
             const quads = (buckets.get(key) ?? []).flat();
             const target = path.join(podDir, ...rel.split('/'));
             if (quads.length === 0 && !fsSync.existsSync(target)) continue;
+            // A bucket the reconciler did not read (wellness) is never replaced:
+            // what the merge routed there is ADDED to what it holds.
+            const info = DATA_TYPES[key];
+            const combine = isReconciledDataType(info)
+              ? (_existing: Quad[], incoming: Quad[]) => incoming
+              : (existing: Quad[], incoming: Quad[]) => {
+                  const held = new Set(existing.map((q) => q.subject.value));
+                  const out = existing.slice();
+                  for (const q of incoming) if (!held.has(q.subject.value)) out.push(q);
+                  return out;
+                };
             try {
-              await mergeIntoBucket(target, quads, dek, { combine: (_existing, incoming) => incoming });
+              await mergeIntoBucket(target, quads, dek, { combine });
               report.filesWritten.push(rel);
             } catch (e: unknown) {
               printError(

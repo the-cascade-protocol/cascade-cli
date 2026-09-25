@@ -39,7 +39,7 @@ import {
   type LiteralLiftSummary,
 } from '../../lib/literal-lifting.js';
 import { detectSource, type FileSourceMeta, type CompletenessCheck } from '../../lib/source-adapters/registry.js';
-import { dataTypeKeyForSubject } from '../../lib/pod-data-types.js';
+import { dataTypeKeyForSubject, isReconciledDataType } from '../../lib/pod-data-types.js';
 import {
   importAppleHealthWellness,
   type WellnessImportReport,
@@ -211,8 +211,12 @@ async function loadExistingPodData(
   podDir: string,
   dek?: Buffer,
 ): Promise<{ inputs: ReconcilerInput[]; unreadable: string[] }> {
-  // Pod data directories that contain reconcilable records
-  const DATA_DIRS = ['clinical', 'wellness'];
+  // Pod data directories that contain reconcilable records. `wellness/` is not
+  // one (see `isReconciledDataType`): its buckets hold device data and daily
+  // aggregates the reconciler has no matcher for, hundreds of thousands of
+  // quads in a real pod, and a bucket there that receives records from this
+  // import is merged additively in Step 7 rather than replaced.
+  const DATA_DIRS = ['clinical'];
   const inputs: ReconcilerInput[] = [];
   const unreadable: string[] = [];
 
@@ -1114,10 +1118,12 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         // existing bucket that does not parse is a refusal rather than a
         // silently emptied Map.
         try {
-          if (useCrossBatchReplace) {
+          if (useCrossBatchReplace && isReconciledDataType(info)) {
             // Cross-batch reconciliation: the reconciler output already
             // represents the complete merged state (existing + new, deduped),
-            // so the file's contents are REPLACED, not appended to.
+            // so the file's contents are REPLACED, not appended to. Only for a
+            // bucket the reconciler read: a wellness bucket was never loaded,
+            // so replacing it would drop everything it holds.
             const priorSubjects = new Set<string>();
             await mergeIntoBucket(targetFile, allNewQuads, dek, {
               dryRun,
