@@ -26,7 +26,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   resolveDek,
-  buildPassphraseManifest,
+  buildPassphraseManifestV10,
   writeEncryptionManifest,
 } from '../src/lib/pod-encryption.js';
 
@@ -90,7 +90,7 @@ beforeAll(() => {
   expect(init.exitCode, init.stderr).toBe(0);
   // Same key, cheap KDF parameters: every scenario below derives at most once.
   const dek = resolveDek(sealedPod, PASSPHRASE);
-  writeEncryptionManifest(sealedPod, buildPassphraseManifest(dek, PASSPHRASE, { t: 1, m: 64, p: 1 }));
+  writeEncryptionManifest(sealedPod, buildPassphraseManifestV10(dek, PASSPHRASE, { t: 1, m: 64, p: 1 }));
   goodManifest = JSON.parse(fs.readFileSync(path.join(sealedPod, 'settings', 'encryption.json'), 'utf-8'));
 }, TIMEOUT_MS);
 

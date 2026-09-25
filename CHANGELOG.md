@@ -9,6 +9,38 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+**`cascade pod passphrase set <pod-dir> --rotate-dek`: a new data key, and
+every sealed file re-encrypted under it.** A re-wrap changes only which
+passphrase opens the data key; anyone who opened the pod before could have kept
+the key itself. With `--rotate-dek` the pod gets a new data key and a 1.1 header
+with exactly one wrap, for the new passphrase; other wraps are dropped. Both
+passphrases come from `CASCADE_POD_PASSPHRASE` and `CASCADE_POD_NEW_PASSPHRASE`
+only (a missing one is exit 1, `passphrase-missing`, nothing touched). A
+re-encrypted copy is built beside the pod, verified with the new passphrase
+file by file against the original's plaintext hashes, and swapped in with two
+renames in the parent directory; on any failure the pod is left as it was. If
+the process is killed part way, the next run of the command or
+`cascade pod doctor --write` finishes or undoes it; at every point exactly one
+of the two passphrases opens the pod. Symbolic links and special files inside
+the pod are refused. `--json` prints `podDir`, `manifestVersion`, `wrapCount`,
+`createdAt`, `dataKeyRotated` and `resources` (files re-encrypted). See
+`docs/pod-encryption.md`.
+
+**`cascade pod doctor` finds an interrupted re-key.** It reports the folders an
+interrupted `--rotate-dek` left beside the pod (dry run, exit 1) and rolls back
+or completes it with `--write`, without a passphrase.
+
+### Changed
+
+**New encrypted pods get a version 1.1 header.** `pod init --encrypt` and
+`pod encrypt` now write `settings/encryption.json` as version 1.1 with one
+passphrase wrap (`label: "primary"`, `createdAt` set when the pod key is
+created) instead of 1.0. Version 1.0 headers are still read, and still migrated
+by `pod passphrase set`. A reader that only understands 1.0 cannot open a pod
+created by this version.
+
 ## [0.22.0] - 2026-09-25
 
 The first npm release since 0.20.4. The 0.21.0 and 0.21.1 versions were never tagged or
@@ -101,9 +133,9 @@ with the old passphrase.
 **Encryption manifest version 1.1.** KDF parameters move into each passphrase
 wrap, and each wrap gains a `label` and a `createdAt`. Every command now reads
 both 1.0 and 1.1 through one normalized reader, and refuses a manifest version
-it does not know as written by a newer tool. Only `pod passphrase set` writes
-1.1 (migrating 1.0 in memory); `pod init --encrypt` and `pod encrypt` still
-write 1.0. See `docs/pod-encryption.md`.
+it does not know as written by a newer tool. Every command that writes the
+header writes 1.1; `pod passphrase set` migrates 1.0 in memory. See
+`docs/pod-encryption.md`.
 
 ### Fixed
 

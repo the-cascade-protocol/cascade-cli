@@ -16,6 +16,7 @@ import {
   deriveKek,
   wrapDek,
   buildPassphraseManifest,
+  buildPassphraseManifestV10,
   writeEncryptionManifest,
   readEncryptionManifest,
   parseEncryptionManifest,
@@ -68,7 +69,7 @@ function tempLeftovers(pod: string): string[] {
 describe('readEncryptionManifest: 1.0 normalizes to per-wrap KDF params', () => {
   it('copies the top-level params into the passphrase wrap, label "primary" and createdAt null', () => {
     const pod = mkPod();
-    const v10 = buildPassphraseManifest(generateDek(), 'pw-a', FAST_KDF);
+    const v10 = buildPassphraseManifestV10(generateDek(), 'pw-a', FAST_KDF);
     writeEncryptionManifest(pod, v10);
     const n = readEncryptionManifest(pod)!;
     expect(n.version).toBe('1.0');
@@ -82,10 +83,23 @@ describe('readEncryptionManifest: 1.0 normalizes to per-wrap KDF params', () => 
     expect(w.kdfParams.salt).toBe(v10.kdfParams.salt);
   });
 
-  it('keeps writing 1.0 from buildPassphraseManifest', () => {
-    const m = buildPassphraseManifest(generateDek(), 'pw', FAST_KDF);
+  it('buildPassphraseManifestV10 still produces the 1.0 layout the reader is tested against', () => {
+    const m = buildPassphraseManifestV10(generateDek(), 'pw', FAST_KDF);
     expect(m.version).toBe('1.0');
     expect(Object.keys(m)).toEqual(['version', 'algorithm', 'kdf', 'kdfParams', 'wraps']);
+  });
+
+  it('buildPassphraseManifest (what new pods get) writes 1.1: one passphrase wrap, "primary", createdAt now', () => {
+    const dek = generateDek();
+    const m = buildPassphraseManifest(dek, 'pw', FAST_KDF, { now: () => FIXED_NOW });
+    expect(m.version).toBe('1.1');
+    expect(Object.keys(m)).toEqual(['version', 'algorithm', 'wraps']);
+    expect(m.wraps).toHaveLength(1);
+    expect(Object.keys(m.wraps[0])).toEqual(['by', 'label', 'createdAt', 'kdf', 'kdfParams', 'wrappedDek']);
+    expect(m.wraps[0]).toMatchObject({ by: 'passphrase', label: 'primary', createdAt: FIXED_NOW.toISOString(), kdf: 'argon2id' });
+    // Serializable as written, and it opens to the same key.
+    const n = parseEncryptionManifest(serializeEncryptionManifestV11(m)).normalized;
+    expect(unlockManifest(n, 'pw').dek.equals(dek)).toBe(true);
   });
 });
 
@@ -118,7 +132,7 @@ describe('parseEncryptionManifest: strictness', () => {
     expect(() => parseEncryptionManifest(JSON.stringify({ ...good11, wraps: [] }))).toThrow(
       /non-empty/,
     );
-    const v10 = buildPassphraseManifest(dek, 'pw', FAST_KDF);
+    const v10 = buildPassphraseManifestV10(dek, 'pw', FAST_KDF);
     expect(() => parseEncryptionManifest(JSON.stringify({ ...v10, wraps: [] }))).toThrow(/non-empty/);
   });
 
@@ -196,7 +210,7 @@ describe('unlockManifest / resolveDek across several wraps', () => {
 
 describe('migrateManifest (1.0 to 1.1, in memory)', () => {
   it('moves the KDF into the passphrase wrap, labels it primary, createdAt null', () => {
-    const v10 = buildPassphraseManifest(generateDek(), 'pw', FAST_KDF);
+    const v10 = buildPassphraseManifestV10(generateDek(), 'pw', FAST_KDF);
     const before = JSON.stringify(v10);
     const v11 = migrateManifest(v10);
     expect(JSON.stringify(v10)).toBe(before); // pure
@@ -213,7 +227,7 @@ describe('migrateManifest (1.0 to 1.1, in memory)', () => {
   });
 
   it('carries any other wrap over with label null and createdAt null', () => {
-    const v10 = buildPassphraseManifest(generateDek(), 'pw', FAST_KDF);
+    const v10 = buildPassphraseManifestV10(generateDek(), 'pw', FAST_KDF);
     const withOther = {
       ...v10,
       wraps: [...v10.wraps, { by: 'device-keychain', wrappedDek: 'AAAA' }],
@@ -228,7 +242,7 @@ describe('migrateManifest (1.0 to 1.1, in memory)', () => {
   });
 
   it('refuses a 1.0 manifest whose passphrase wraps share its one salt', () => {
-    const v10 = buildPassphraseManifest(generateDek(), 'pw', FAST_KDF);
+    const v10 = buildPassphraseManifestV10(generateDek(), 'pw', FAST_KDF);
     const two = { ...v10, wraps: [v10.wraps[0], v10.wraps[0]] };
     expect(() => migrateManifest(two)).toThrow(/2 passphrase wraps/);
   });
@@ -284,7 +298,7 @@ describe('rewrapPassphrase', () => {
   function encryptedPod(passphrase = 'pw-old'): { pod: string; dek: Buffer } {
     const pod = mkPod();
     const dek = generateDek();
-    writeEncryptionManifest(pod, buildPassphraseManifest(dek, passphrase, FAST_KDF));
+    writeEncryptionManifest(pod, buildPassphraseManifestV10(dek, passphrase, FAST_KDF));
     return { pod, dek };
   }
 

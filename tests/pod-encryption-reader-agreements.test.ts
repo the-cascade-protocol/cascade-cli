@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   generateDek,
-  buildPassphraseManifest,
+  buildPassphraseManifestV10,
   parseEncryptionManifest,
   unlockManifest,
   migrateManifest,
@@ -25,7 +25,7 @@ import {
 const FAST_KDF = { t: 1, m: 64, p: 1 };
 const PASSPHRASE = 'reader-agreements-passphrase';
 const DEK = generateDek();
-const V10 = buildPassphraseManifest(DEK, PASSPHRASE, FAST_KDF);
+const V10 = buildPassphraseManifestV10(DEK, PASSPHRASE, FAST_KDF);
 const V11 = migrateManifest(V10);
 
 function v10With(wraps: Array<Record<string, unknown>>): string {

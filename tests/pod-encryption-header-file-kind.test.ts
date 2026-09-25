@@ -41,7 +41,7 @@ vi.mock('node:fs', async (importOriginal) => {
 import * as fs from 'node:fs';
 import {
   generateDek,
-  buildPassphraseManifest,
+  buildPassphraseManifestV10,
   writeEncryptionManifest,
   readEncryptionManifest,
   isPodEncrypted,
@@ -66,7 +66,7 @@ beforeAll(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'cascade-header-kind-'));
   const probe = path.join(root, 'probe');
   fs.mkdirSync(probe);
-  writeEncryptionManifest(probe, buildPassphraseManifest(generateDek(), PASSPHRASE, FAST_KDF));
+  writeEncryptionManifest(probe, buildPassphraseManifestV10(generateDek(), PASSPHRASE, FAST_KDF));
   goodHeader = fs.readFileSync(path.join(probe, 'settings', 'encryption.json'), 'utf-8');
 });
 

@@ -59,7 +59,7 @@ codes without bending them:
 | Code | For `pod doctor` |
 |---|---|
 | `0` | Nothing is wrong, or (under `--write`) everything found was repaired. |
-| `1` | Damage remains: a dry run that found something, or a file doctor read and will not repair. Also "there is no pod at that path". |
+| `1` | Damage remains: a dry run that found something, or a file doctor read and will not repair. Also "there is no pod at that path". A dry run that finds an interrupted `pod passphrase set --rotate-dek` beside the pod is `1`; `--write` finishes it and exits `0` (see `docs/pod-encryption.md`). |
 | `2` | Something could not be **read**: the pod would not open, a resource did not decrypt, or a `.ttl` holds bytes that are not text. |
 
 `2` outranks `1` when both apply. A file doctor could not open was never
@@ -93,7 +93,9 @@ consumer can branch on state instead of pattern-matching English.
 | `reason` | string | Which unreadable state this is. See the reason table below. |
 | `files` | string[] | With `files-unreadable`: the pod-relative paths, forward slashes. |
 
-Every `reason` is exit 2. The values:
+Every `reason` is exit 2, with one exception: `pod passphrase set --rotate-dek`
+takes both passphrases from the environment only and reports a missing one as
+`passphrase-missing` at exit 1 (a caller error, nothing touched). The values:
 
 | `reason` | Meaning |
 |---|---|

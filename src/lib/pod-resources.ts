@@ -192,7 +192,10 @@ export function classifyResource(absPath: string, dek: Buffer): ResourceState {
  * new ones never written. Without the second, the rename itself can be lost,
  * which is harmless for one file but lets `pod encrypt` or `pod decrypt` report
  * a pass that the disk does not hold.
+ *
+ * `mode` sets the new file's permission bits (the process umask still
+ * applies, so it can only narrow them); without it the process default is used.
  */
-export function atomicWriteBytes(absPath: string, bytes: Buffer): void {
-  atomicWriteFile(absPath, bytes);
+export function atomicWriteBytes(absPath: string, bytes: Buffer, mode?: number): void {
+  atomicWriteFile(absPath, bytes, mode === undefined ? {} : { mode });
 }
