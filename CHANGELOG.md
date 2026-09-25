@@ -9,6 +9,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-25
+
+The first npm release since 0.20.4. The 0.21.0 and 0.21.1 versions were never tagged or
+published, so everything listed below, including the entries marked 0.21.1, ships in 0.22.0.
+
 ### Changed
 
 **An import that does not reconcile states its `--source-system`.** One file
