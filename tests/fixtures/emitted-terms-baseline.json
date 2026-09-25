@@ -538,6 +538,15 @@
       ]
     },
     {
+      "term": "health:dose",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#dose",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/commands/pod/helpers.ts"
+      ]
+    },
+    {
       "term": "health:doseUnit",
       "iri": "https://ns.cascadeprotocol.org/health/v1#doseUnit",
       "emittedAs": [
@@ -554,8 +563,9 @@
       "emittedAs": [
         "predicate"
       ],
-      "writeSites": 2,
+      "writeSites": 3,
       "files": [
+        "src/commands/pod/helpers.ts",
         "src/lib/ccda-converter/sections/devices.ts",
         "src/lib/ccda-converter/sections/encounters.ts"
       ]
@@ -584,11 +594,30 @@
       ]
     },
     {
+      "term": "health:frequency",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#frequency",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/commands/pod/helpers.ts"
+      ]
+    },
+    {
+      "term": "health:isActive",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#isActive",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/commands/pod/helpers.ts"
+      ]
+    },
+    {
       "term": "health:medicationClass",
       "iri": "https://ns.cascadeprotocol.org/health/v1#medicationClass",
       "emittedAs": [],
-      "writeSites": 2,
+      "writeSites": 3,
       "files": [
+        "src/commands/pod/helpers.ts",
         "src/lib/fhir-converter/cascade-to-fhir-clinical.ts",
         "src/lib/mcp/tools.ts"
       ]
@@ -605,6 +634,15 @@
       ]
     },
     {
+      "term": "health:prescriber",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#prescriber",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/commands/pod/helpers.ts"
+      ]
+    },
+    {
       "term": "health:referenceRangeText",
       "iri": "https://ns.cascadeprotocol.org/health/v1#referenceRangeText",
       "emittedAs": [
@@ -613,6 +651,15 @@
       "writeSites": 1,
       "files": [
         "src/lib/ccda-converter/sections/labs.ts"
+      ]
+    },
+    {
+      "term": "health:rxNormCode",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#rxNormCode",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/commands/pod/helpers.ts"
       ]
     },
     {
@@ -632,11 +679,21 @@
       "emittedAs": [
         "predicate"
       ],
-      "writeSites": 5,
+      "writeSites": 6,
       "files": [
+        "src/commands/pod/helpers.ts",
         "src/lib/ccda-converter/sections/medications.ts",
         "src/lib/fhir-converter/converters-clinical.ts",
         "src/lib/mcp/tools.ts"
+      ]
+    },
+    {
+      "term": "health:vaccineDate",
+      "iri": "https://ns.cascadeprotocol.org/health/v1#vaccineDate",
+      "emittedAs": [],
+      "writeSites": 1,
+      "files": [
+        "src/commands/pod/helpers.ts"
       ]
     },
     {

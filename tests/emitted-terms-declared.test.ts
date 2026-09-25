@@ -23,7 +23,16 @@
  *     should report, not excuse. Such a hit is labelled distinctly.
  *   - The static half cannot tell a predicate from a class, so there a term is
  *     declared when any ontology declares it as a property, class, individual
- *     or concept.
+ *     or concept. (It is kind-blind: a class name written as a predicate, or
+ *     an individual written as an rdf:type object, passes it; only the
+ *     dynamic half checks the kind.)
+ *
+ * WHAT IS CHECKED. Every IRI on a host whose name contains "cascade", either
+ * scheme, whatever its shape. A hyphenated local name, `http://` for
+ * `https://`, or a misspelled namespace path or host can never match a
+ * declaration, so it fails unless listed; it is never dropped as "not a
+ * term". A host misspelled so that it no longer contains "cascade" is not
+ * seen.
  *
  * TWO HALVES.
  *   1. Dynamic. Every registered importer that writes Turtle runs over every
@@ -94,11 +103,31 @@ const PROPERTY_KINDS = new Set([
 const CLASS_KINDS = new Set([OWL + 'Class', RDFS + 'Class']);
 const VALUE_KINDS = new Set([OWL + 'NamedIndividual', SKOS + 'Concept']);
 
-/** A term IRI: namespace plus a local name. The namespace alone does not match. */
+/**
+ * A well-formed term IRI: namespace plus a local name. It is the only shape a
+ * vocabulary declares, and it is used for display and for the namespace
+ * tables. It is NOT the filter for what gets checked; see isCascadeCandidate.
+ */
 const TERM_IRI = /^https:\/\/ns\.cascadeprotocol\.org\/([a-z][a-z0-9-]*)\/v(\d+)#([A-Za-z_][A-Za-z0-9_]*)$/;
-const TERM_IRI_IN_TEXT = /https:\/\/ns\.cascadeprotocol\.org\/[a-z][a-z0-9-]*\/v\d+#[A-Za-z_][A-Za-z0-9_]*/g;
 const NAMESPACE_IRI = /^https:\/\/ns\.cascadeprotocol\.org\/[a-z][a-z0-9-]*\/v\d+#$/;
-const LOCAL_NAME_PREFIX = /^[A-Za-z_][A-Za-z0-9_]*/;
+/**
+ * Any IRI on a host whose name contains "cascade", either scheme. Every
+ * predicate and rdf:type object matching this is checked, whatever its shape:
+ * a hyphenated local name, `http://` for `https://`, a misspelled namespace
+ * path or host. None of those can match a declaration, so each one fails
+ * unless listed, instead of being dropped as "not a term".
+ */
+const CASCADE_HOST_IRI = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*cascade/i;
+/** The same, inside literal text, requiring a non-empty `#` fragment (a term, not a page or a namespace). */
+const CASCADE_TERM_IN_TEXT = /[a-z][a-z0-9+.-]*:\/\/[^/?#\s"'`<>]*cascade[^\s"'`<>{}|\\^]*#[^\s"'`<>{}|\\^]+/gi;
+/** Characters that cannot occur in an IRI; the first one ends it. */
+const IRI_END = /[\s<>"'`{}|\\^]/;
+/** A Turtle PN_LOCAL, loosely: letters, digits, `_`, `-`, `.` (a trailing `.` is punctuation). */
+const PN_LOCAL = '[A-Za-z_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_-])?';
+
+function isCascadeCandidate(iri: string): boolean {
+  return CASCADE_HOST_IRI.test(iri) && !NAMESPACE_IRI.test(iri);
+}
 
 const SHAPES_DIR = path.join(REPO_ROOT, 'src', 'shapes');
 const SRC_DIR = path.join(REPO_ROOT, 'src');
@@ -168,7 +197,7 @@ function loadDeclarations(): Declarations {
     });
     for (const q of quads) {
       if (q.predicate.value !== RDF_TYPE || q.subject.termType !== 'NamedNode') continue;
-      if (!TERM_IRI.test(q.subject.value)) continue;
+      if (!isCascadeCandidate(q.subject.value)) continue;
       let set = kinds.get(q.subject.value);
       if (!set) kinds.set(q.subject.value, (set = new Set()));
       set.add(q.object.value);
@@ -209,7 +238,7 @@ interface DynamicResult {
 }
 
 function record(emitted: Map<string, Emission>, iri: string, role: Role, witness: string): void {
-  if (!TERM_IRI.test(iri)) return;
+  if (!isCascadeCandidate(iri)) return;
   let e = emitted.get(iri);
   if (!e) emitted.set(iri, (e = { roles: new Set(), witness: new Map() }));
   e.roles.add(role);
@@ -384,9 +413,14 @@ async function runDynamic(): Promise<DynamicResult> {
  *   A. `<ns> + '<local>'`, where `<ns>` resolves to a Cascade namespace string:
  *      a constant (`GENOMICS_NS`), a member of a namespace table (`NS.clinical`,
  *      `CASCADE_NAMESPACES.health`, `NS_ALL.genomics`), or a local alias of
- *      either. A parenthesised `cond ? 'A' : 'B'` on the right yields both.
- *   B. Template literals `${<ns>}<local>...`.
- *   C. A full term IRI anywhere in string or template text
+ *      either. The whole `+` chain is folded: string literals after the
+ *      namespace are joined up to the first character an IRI cannot hold, so
+ *      `NS.x + 'a' + 'b'` is one IRI and `NS.x + 'a' + y` is dynamic. A
+ *      parenthesised `cond ? 'A' : 'B'` on the right yields both.
+ *   B. Template literals `${<ns>}<local>...`, the local name running to the
+ *      first character an IRI cannot hold.
+ *   C. A full Cascade-host IRI with a `#` fragment anywhere in string or
+ *      template text, any scheme and any shape
  *      (`'https://ns.cascadeprotocol.org/core/v1#mergedFrom'`, `<...>` inside
  *      a Turtle template).
  *   D. A prefixed name (`cascade:foo`) inside a string or template literal
@@ -401,11 +435,13 @@ async function runDynamic(): Promise<DynamicResult> {
  * Write or read. Each site is classified by walking up from the IRI to the
  * enclosing statement and taking the nearest decisive context:
  *   - read: an operand of ===, !==, ==, != or `in`; a computed index
- *     (`props[iri]`); an argument or receiver of a lookup call (READ_CALLEES:
+ *     (`props[iri]`) that is not an assignment target; an argument or receiver of a lookup call (READ_CALLEES:
  *     has, get, getFirst, getProp, includes, equals, getQuads, ...); a
  *     `case` label.
  *   - write: an argument of a quad or triple builder (WRITE_CALLEES: quad,
- *     tripleStr, tripleRef, addQuad, ...), or text inside a Turtle template.
+ *     tripleStr, tripleRef, addQuad, ...); text inside a Turtle template; a
+ *     computed index that is assigned to (`obj[iri] = v`, `+=`, `??=`, `++`,
+ *     `delete`).
  *   - a site bound to a name takes the classification of that name's uses
  *     inside the scope that declares it (block, loop or file): write if any
  *     use writes, read if every use reads. Bindings are `const X = <iri>`
@@ -415,6 +451,14 @@ async function runDynamic(): Promise<DynamicResult> {
  *     dangerous case on purpose, so a new idiom errs toward a visible failure.
  *
  * Limits, stated so a green run is not over-read:
+ *   - An IRI built inside a helper function from its parameters (`iri(ns,
+ *     local)`, a `term('foo')` wrapper) is invisible here; only the dynamic
+ *     half sees it, and only on a path a fixture reaches.
+ *   - Turtle templates are read with the vocabulary prefix labels (`cascade:`,
+ *     `clinical:`, ...) or the labels a template declares itself. A template
+ *     that uses another label for a Cascade namespace, declared elsewhere, is
+ *     not read.
+ *   - Kind-blind, as above: only declared-or-not is checked here.
  *   - Dynamic local names (`NS.clinical + compInfo.type + 'Value'`, `NS.fhir +
  *     resourceType`) cannot be resolved statically. They are counted and
  *     reported, and only the dynamic half checks them.
@@ -424,9 +468,12 @@ async function runDynamic(): Promise<DynamicResult> {
  *     loop elsewhere reads as "write" (the default), and one handed to a
  *     helper the lists do not know is also "write". A read helper not in
  *     READ_CALLEES therefore produces a false write, which the baseline shows
- *     as an extra write site. That inflates a count; it never hides a writer.
- *   - Scoping is by enclosing block, not full symbol resolution, and an
- *     exported table used only by other files is classified "write".
+ *     as an extra write site, and so does `out[iri] = v` into a display
+ *     table. That inflates a count; it never hides a writer.
+ *   - Scoping is by enclosing block, not full symbol resolution. An exported
+ *     binding (`export const X = ...` or `export { X }`) always counts as a
+ *     write: its uses in other files are not followed, so local reads cannot
+ *     prove it is read-only.
  *   - Prefixed names in plain prose strings (help text, error messages) are
  *     not scanned unless the string is exactly one prefixed name.
  */
@@ -648,6 +695,34 @@ function forOfBinding(stmt: ts.ForOfStatement): string | undefined {
   return undefined;
 }
 
+function isAssignmentTarget(n: ts.Node): boolean {
+  let target: ts.Node = n;
+  let p = n.parent;
+  while (p && ts.isParenthesizedExpression(p)) {
+    target = p;
+    p = p.parent;
+  }
+  if (!p) return false;
+  if (ts.isBinaryExpression(p) && p.left === target) {
+    const k = p.operatorToken.kind;
+    return k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment;
+  }
+  if (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) {
+    return p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken;
+  }
+  return ts.isDeleteExpression(p);
+}
+
+/** True when a variable declaration is exported (`export const X = ...`). */
+function isExportedDeclaration(decl: ts.VariableDeclaration): boolean {
+  const stmt = decl.parent?.parent;
+  return (
+    !!stmt &&
+    ts.isVariableStatement(stmt) &&
+    !!ts.getModifiers(stmt)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+  );
+}
+
 /**
  * Walk up from `node` and return the nearest decisive context, or the name of
  * the const it is bound to, or undefined when nothing decides.
@@ -657,7 +732,11 @@ function contextOf(node: ts.Node): Context {
   let cur: ts.Node | undefined = node.parent;
   while (cur) {
     if (ts.isBinaryExpression(cur) && COMPARISON.has(cur.operatorToken.kind)) return 'read';
-    if (ts.isElementAccessExpression(cur) && cur.argumentExpression === child) return 'read';
+    if (ts.isElementAccessExpression(cur) && cur.argumentExpression === child) {
+      // `obj[iri] = v` (and `+=`, `??=`, `++`, `delete`) puts the IRI into a
+      // structure; only a plain lookup `obj[iri]` is a read.
+      return isAssignmentTarget(cur) ? 'write' : 'read';
+    }
     if (ts.isCaseClause(cur) && cur.expression === child) return 'read';
     if (ts.isCallExpression(cur) || ts.isNewExpression(cur)) {
       const name = calleeName(cur);
@@ -669,6 +748,9 @@ function contextOf(node: ts.Node): Context {
       if (READ_CALLEES.has(cur.name.text) && cur.parent && ts.isCallExpression(cur.parent)) return 'read';
     }
     if (ts.isVariableDeclaration(cur) && ts.isIdentifier(cur.name)) {
+      // An exported binding is used by other files this scan does not
+      // follow, so its local uses cannot prove it is only read.
+      if (isExportedDeclaration(cur)) return 'write';
       return { boundTo: cur.name.text, scope: scopeOf(cur) };
     }
     if (ts.isParameter(cur) && cur.initializer === child && ts.isIdentifier(cur.name)) {
@@ -706,6 +788,11 @@ function classifyBinding(scope: ts.Node, name: string, depth: number): Access | 
   let sawRead = false;
   let sawUnknown = false;
   const visit = (n: ts.Node): void => {
+    // `export { name }` / `export { name as other }`: exported, so written
+    // for all this scan can tell.
+    if (ts.isExportSpecifier(n) && (n.propertyName ?? n.name).text === name && !n.parent.parent.moduleSpecifier) {
+      sawWrite = true;
+    }
     if (ts.isIdentifier(n) && n.text === name) {
       const p = n.parent;
       const isDeclName = p && ts.isVariableDeclaration(p) && p.name === n;
@@ -740,8 +827,8 @@ function classify(node: ts.Node, inTurtleTemplate: boolean): Access {
 }
 
 const PREFIX_DECL = /@prefix\s+([A-Za-z][A-Za-z0-9_-]*)\s*:\s*<(https:\/\/ns\.cascadeprotocol\.org\/[^>]+)>/g;
-const EXACT_PREFIXED_NAME = /^([A-Za-z][A-Za-z0-9_-]*):([A-Za-z_][A-Za-z0-9_]*)$/;
-const ANY_PREFIXED_NAME = /(?<![A-Za-z0-9_<#/:-])([A-Za-z][A-Za-z0-9_-]*):([A-Za-z_][A-Za-z0-9_]*)/g;
+const EXACT_PREFIXED_NAME = new RegExp(`^([A-Za-z][A-Za-z0-9_-]*):(${PN_LOCAL})$`);
+const ANY_PREFIXED_NAME = new RegExp(`(?<![A-Za-z0-9_<#/:-])([A-Za-z][A-Za-z0-9_-]*):(${PN_LOCAL})`, 'g');
 /**
  * Starts like a Turtle predicate-object line: an optional `;`, an optional
  * `<s> a`, a prefixed name, then something that can follow a term in Turtle
@@ -751,7 +838,7 @@ const ANY_PREFIXED_NAME = /(?<![A-Za-z0-9_<#/:-])([A-Za-z][A-Za-z0-9_-]*):([A-Za
  * last test, since a bare English word cannot follow a term.
  */
 const TURTLE_LINE_START =
-  /^(?:[;,]\s*)?(?:<[^>]*>\s+(?:a\s+)?)?([A-Za-z][A-Za-z0-9_-]*):[A-Za-z_][A-Za-z0-9_]*(?:\s+(?:["<([;.,]|[A-Za-z][A-Za-z0-9_-]*:|[-+]?\d|true\b|false\b)|\s*$)/;
+  /^(?:[;,]\s*)?(?:<[^>]*>\s+(?:a\s+)?)?([A-Za-z][A-Za-z0-9_-]*):[A-Za-z_][A-Za-z0-9_.-]*(?:\s+(?:["<([;.,]|[A-Za-z][A-Za-z0-9_-]*:|[-+]?\d|true\b|false\b)|\s*$)/;
 
 function isTurtleLine(text: string, prefixes: Map<string, string>): boolean {
   const t = text.trim();
@@ -768,6 +855,15 @@ function literalText(node: ts.Node): string | undefined {
   return undefined;
 }
 
+function isPlus(n: ts.Node | undefined): n is ts.BinaryExpression {
+  return !!n && ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken;
+}
+
+/** Operands of a left-associated `+` chain, in source order. */
+function flattenPlus(n: ts.Expression): ts.Expression[] {
+  return isPlus(n) ? [...flattenPlus(n.left), n.right] : [n];
+}
+
 function scanSource(
   sf: ts.SourceFile,
   tables: NsTables,
@@ -778,31 +874,45 @@ function scanSource(
   const file = path.relative(REPO_ROOT, sf.fileName);
   const lineOf = (n: ts.Node): number => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
   const add = (iri: string, n: ts.Node, idiom: StaticSite['idiom'], turtle = false): void => {
-    if (!TERM_IRI.test(iri)) return;
+    if (!isCascadeCandidate(iri)) return;
     out.sites.push({ iri, file, line: lineOf(n), access: classify(n, turtle), idiom });
   };
 
   const visit = (node: ts.Node): void => {
-    // A. <ns> + '<local>'
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-      const ns = resolveNs(node.left, tables, global);
-      if (ns) {
-        const right = unwrap(node.right);
-        const lit = stringValue(right);
-        if (lit !== undefined) {
-          const local = LOCAL_NAME_PREFIX.exec(lit)?.[0];
-          if (local && local === lit) add(ns + local, node, 'A');
-          else out.dynamicSites.push(`${file}:${lineOf(node)}`);
-        } else if (ts.isConditionalExpression(right)) {
-          const a = stringValue(right.whenTrue);
-          const b = stringValue(right.whenFalse);
+    // A. <ns> + '<local>', folded over the whole `+` chain so that
+    // `NS.x + 'a' + 'b'` is one IRI and `NS.x + 'a' + y` is a dynamic one.
+    if (isPlus(node) && !(isPlus(node.parent) && (node.parent as ts.BinaryExpression).left === node)) {
+      const ops = flattenPlus(node);
+      ops.forEach((op, i) => {
+        const ns = resolveNs(op, tables, global);
+        if (!ns) return;
+        const rest = ops.slice(i + 1);
+        if (rest.length === 0) return;
+        const first = unwrap(rest[0]);
+        if (ts.isConditionalExpression(first) && rest.length === 1) {
+          const a = stringValue(first.whenTrue);
+          const b = stringValue(first.whenFalse);
           if (a !== undefined) add(ns + a, node, 'A');
           if (b !== undefined) add(ns + b, node, 'A');
           if (a === undefined || b === undefined) out.dynamicSites.push(`${file}:${lineOf(node)}`);
-        } else {
-          out.dynamicSites.push(`${file}:${lineOf(node)}`);
+          return;
         }
-      }
+        let local = '';
+        let complete = true;
+        for (const r of rest) {
+          const lit = stringValue(r);
+          if (lit === undefined) {
+            complete = false;
+            break;
+          }
+          local += lit;
+          if (IRI_END.test(local)) break;
+        }
+        const end = local.search(IRI_END);
+        if (end !== -1) add(ns + local.slice(0, end), node, 'A');
+        else if (complete && local) add(ns + local, node, 'A');
+        else out.dynamicSites.push(`${file}:${lineOf(node)}`);
+      });
     }
 
     // B. `${ns}<local>`
@@ -810,8 +920,14 @@ function scanSource(
       node.templateSpans.forEach((span) => {
         const ns = resolveNs(span.expression, tables, global);
         if (!ns) return;
-        const local = LOCAL_NAME_PREFIX.exec(span.literal.text)?.[0];
-        if (local) add(ns + local, node, 'B');
+        // The IRI runs to the first character an IRI cannot hold. When the
+        // literal ends first and another substitution follows, the local name
+        // is built at run time.
+        const text = span.literal.text;
+        const end = text.search(IRI_END);
+        const isLast = span === node.templateSpans[node.templateSpans.length - 1];
+        if (end > 0) add(ns + text.slice(0, end), node, 'B');
+        else if (end === -1 && isLast && text) add(ns + text, node, 'B');
         else out.dynamicSites.push(`${file}:${lineOf(node)}`);
       });
     }
@@ -822,12 +938,12 @@ function scanSource(
       const declared = new Map<string, string>();
       for (const m of text.matchAll(PREFIX_DECL)) declared.set(m[1], m[2]);
       const isTurtle = declared.size > 0;
-      for (const m of text.matchAll(TERM_IRI_IN_TEXT)) add(m[0], node, 'C', isTurtle);
+      for (const m of text.matchAll(CASCADE_TERM_IN_TEXT)) add(m[0], node, 'C', isTurtle);
       if (isTurtle) {
         // Prefixed names only after the prefix block, and only for prefixes
         // this very template declares.
         for (const [prefix, ns] of declared) {
-          const re = new RegExp(`(?<![A-Za-z0-9_<#/-])${prefix}:([A-Za-z_][A-Za-z0-9_]*)`, 'g');
+          const re = new RegExp(`(?<![A-Za-z0-9_<#/-])${prefix}:(${PN_LOCAL})`, 'g');
           for (const m of text.matchAll(re)) add(ns + m[1], node, 'D', true);
         }
       } else if (isTurtleLine(text, prefixes)) {
@@ -1096,6 +1212,28 @@ describe('emitted Cascade terms are declared by a vocabulary', () => {
     expect(readOnly.size).toBeGreaterThanOrEqual(0);
   });
 
+  it('the dynamic collector keeps every Cascade-host IRI, term-shaped or not', () => {
+    const ttl = [
+      '<urn:s> <https://ns.cascadeprotocol.org/core/v1#gate-hyphen> "x" ;',
+      '  <http://ns.cascadeprotocol.org/core/v1#plantedHttp> "x" ;',
+      '  <https://ns.cascadeprotocl.org/core/v1#plantedHostTypo> "x" ;',
+      '  <https://ns.cascadeprotocol.org/cor/v1#plantedPathTypo> "x" ;',
+      '  a <https://ns.cascadeprotocol.org/core/v1#Planted-Class> ;',
+      '  <http://example.org/notCascade> "x" .',
+    ].join('\n');
+    const emitted = new Map<string, Emission>();
+    collectQuads(emitted, new Parser().parse(ttl), 'planted');
+    expect([...emitted.keys()].sort()).toEqual([
+      'http://ns.cascadeprotocol.org/core/v1#plantedHttp',
+      'https://ns.cascadeprotocl.org/core/v1#plantedHostTypo',
+      'https://ns.cascadeprotocol.org/cor/v1#plantedPathTypo',
+      'https://ns.cascadeprotocol.org/core/v1#Planted-Class',
+      'https://ns.cascadeprotocol.org/core/v1#gate-hyphen',
+    ]);
+    // None of them can match a declaration, so each would fail unless listed.
+    for (const iri of emitted.keys()) expect(declaredAsAnything(decl, iri)).toBe(false);
+  });
+
   it('the static scanner recognises each idiom and classifies write versus read', () => {
     // Pins the heuristic itself, so a regression in the scanner cannot turn
     // the static half into a silent pass.
@@ -1119,6 +1257,20 @@ describe('emitted Cascade terms are declared by a vocabulary', () => {
       "lines.push(`<${s}> a clinical:PlantedM ;`); lines.push(`    clinical:plantedN \"${v}\" .`);",
       "warn(`no clinical:plantedO here, just prose`);",
       "gap('clinical:plantedP not in v1; preserved as unmapped.');",
+      // Non-term-shaped and near-miss IRIs are checked, never dropped.
+      "quads.push(tripleStr(s, NS.clinical + 'planted-hyphen', v));",
+      "const BAD = 'http://ns.cascadeprotocol.org/clinical/v1#plantedHttp'; quads.push(tripleRef(s, BAD, o));",
+      "const T2 = `@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#> .\\n<a> clinical:planted-turtle 1 .`;",
+      "lines.push('<' + NS.clinical + 'plantedAngle> .');",
+      "quads.push(tripleStr(s, NS.clinical + 'plantedChain' + 'Tail', v));",
+      // An element-access assignment target is a write; a plain lookup is a read.
+      "gateObj[NS.clinical + 'plantedIdxWrite'] = 'x';",
+      "gateObj[NS.clinical + 'plantedIdxCompound'] ??= 'x';",
+      "const got = gateObj[NS.clinical + 'plantedIdxRead'];",
+      // An exported binding is a write whatever its local uses; a local one is not.
+      "export const PLANTED_EXPORTED = NS.clinical + 'plantedExported'; if (p === PLANTED_EXPORTED) {}",
+      "const PLANTED_ALIASED = NS.clinical + 'plantedAliased'; if (p === PLANTED_ALIASED) {} export { PLANTED_ALIASED };",
+      "const PLANTED_LOCAL = NS.clinical + 'plantedLocal'; if (p === PLANTED_LOCAL) {}",
     ].join('\n');
     const sf = ts.createSourceFile(path.join(SRC_DIR, 'planted.ts'), src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
     const { perFile, global } = collectNsTables([sf]);
@@ -1137,11 +1289,24 @@ describe('emitted Cascade terms are declared by a vocabulary', () => {
       'clinical:PlantedH': 'write',
       'clinical:PlantedI': 'write',
       'clinical:plantedJ': 'read',
-      'clinical:plantedK': 'read',
+      // `out[k] = props[k]` puts k into a structure: a write by rule, even
+      // though here it is a display table. The conservative direction.
+      'clinical:plantedK': 'write',
       // Unknown use (an exported table): counted as a write on purpose.
       'clinical:plantedL': 'write',
       'clinical:PlantedM': 'write',
       'clinical:plantedN': 'write',
+      'https://ns.cascadeprotocol.org/clinical/v1#planted-hyphen': 'write',
+      'http://ns.cascadeprotocol.org/clinical/v1#plantedHttp': 'write',
+      'https://ns.cascadeprotocol.org/clinical/v1#planted-turtle': 'write',
+      'clinical:plantedAngle': 'write',
+      'clinical:plantedChainTail': 'write',
+      'clinical:plantedIdxWrite': 'write',
+      'clinical:plantedIdxCompound': 'write',
+      'clinical:plantedIdxRead': 'read',
+      'clinical:plantedExported': 'write',
+      'clinical:plantedAliased': 'write',
+      'clinical:plantedLocal': 'read',
     });
     expect(out.dynamicSites).toHaveLength(1);
   });
