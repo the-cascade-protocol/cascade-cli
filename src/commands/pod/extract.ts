@@ -768,7 +768,7 @@ const TTL_PREFIXES = `@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#>
  * node is emitted per extraction call and linked via prov:wasGeneratedBy, keeping
  * provenance and entity data properly separated.
  */
-function buildAIExtractedTurtle(
+export function buildAIExtractedTurtle(
   accepted: Array<{ block: NarrativeBlock; entity: ExtractedEntity; result: ExtractionResult }>,
   existingContent: string,
 ): string {
@@ -814,7 +814,7 @@ function buildAIExtractedTurtle(
  * Uses cascade:AIDiscardedExtraction so these records can be queried
  * and audited separately from accepted extractions.
  */
-function buildDiscardedTurtle(
+export function buildDiscardedTurtle(
   discarded: Array<{ block: NarrativeBlock; entity: ExtractedEntity }>,
   existingContent: string,
 ): string {

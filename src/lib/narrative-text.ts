@@ -23,7 +23,7 @@ export const NARRATIVE_TEXT_PREDICATE = NS.clinical + 'narrativeText';
  * Every spelling a reader accepts, highest precedence first. The two legacy
  * entries are read-only: nothing may write them.
  */
-export const NARRATIVE_TEXT_READ_PREDICATES: readonly string[] = [
+const NARRATIVE_TEXT_READ_PREDICATES: readonly string[] = [
   NARRATIVE_TEXT_PREDICATE,
   NS.cascade + 'narrativeText',
   NS.clinical + 'content',
