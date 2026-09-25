@@ -184,8 +184,73 @@
 #   sh:Warning per the core v3.5 ratchet, so no pod, fixture or expected output
 #   changes. evidence.ttl and genomics.shapes.ttl, deliberately held back from
 #   three previous syncs, produced no diff this time and were not touched.
-core=3.9
-health=2.9
+#
+# 2026-09-24 — core 3.9→3.10, health 2.9→2.11 (two releases)
+#   Wellness and fitness records, measured before modelled. Synced from spec
+#   1c3e33b (d819bc2..1c3e33b) with scripts/sync-shapes-from-spec.sh; only
+#   core.ttl, core.shapes.ttl, health.ttl and health.shapes.ttl changed —
+#   clinical, coverage, checkup, pots and all four drafts produced no diff.
+#   spec PR the-cascade-protocol/spec#68 (branch feat/health-v2-10); tags
+#   vocab/health-v2.10, vocab/core-v3.10.
+#   - core v3.10 adds two properties, neither wellness-specific so neither
+#     lives in health: cascade:statistic (which descriptive statistic of the
+#     underlying samples a value is — average/sum/minimum/maximum/median/
+#     standardDeviation/variance/count adopted from IEEE 1752.1
+#     descriptive_statistic, plus baseline/lowerBound/upperBound ruled
+#     2026-09-24 from the Google Health export, where one daily row carries
+#     several statistics of one window) and cascade:dayZone (the pod owner's
+#     home IANA time zone on <#me> in /profile/extended.ttl, owner-only; the
+#     zone a day is cut in when readings are aggregated, set once from
+#     HKTimeZone / the Google profile zone / the importing machine and changed
+#     only on a permanent move, never for travel). core.shapes.ttl v1.9 adds
+#     cascade:StatisticShape and cascade:DayZoneShape, both open-world
+#     (sh:targetSubjectsOf) and both sh:Warning.
+#   - health v2.10 adds two new session classes (health:Workout,
+#     health:SleepSession) and health:Device, plus the interval
+#     (health:periodStart/periodEnd, restated with no rdfs:domain so they
+#     already reach the daily snapshot classes) and health:timeZone /
+#     health:utcOffset for the zone a record's local date belongs to. Device
+#     identity (health:device + six attributes) is a normalized name and
+#     hardware model, never the raw device string Apple/Google emit. Workout
+#     adds activityType/workoutRoute/durationMinutes/distanceMeters/
+#     averageHeartRate/maximumHeartRate/indoor; the route is an optional
+#     cascade:Attachment. SleepSession adds algorithmVersion/sleepScore plus
+#     seven per-stage minute totals mapped to AASM stage names, and a night
+#     may hold two sessions from one source distinguished by
+#     algorithmVersion. health:sourceRecordId's domain widens to the two
+#     session classes and a new health:sourceIdSpace names the id space
+#     (healthkit/google-health/fitbit) an id belongs to. Every reading class
+#     and both session classes become rdfs:subClassOf sosa:Observation
+#     (health:Device is rdfs:subClassOf sosa:Platform); health:device is
+#     deliberately NOT aligned to sosa:madeBySensor because that SSN property
+#     is cardinality-1 and would let a reasoner infer owl:sameAs across two
+#     devices on one aggregate. DEPRECATED: health:sleepQuality (owl:deprecated
+#     true, not removed) and its four SleepQuality individuals — an
+#     unstandardized enum neither measured export ever populates.
+#     health.shapes.ttl v1.8 adds health:AggregateReadingShape (soft
+#     interval/statistic/zone/device checks on the three existing daily
+#     classes, all sh:Warning since existing pods carry none of it),
+#     health:WorkoutShape / health:SleepSessionShape / health:DeviceShape (the
+#     load-bearing facts at sh:Violation, since no pod written before v2.10
+#     can contain these classes), health:SessionSoftShape (the soft session
+#     facts, sh:Warning), and health:SleepQualitySpellingShape
+#     (sh:targetSubjectsOf health:sleepQuality, maxCount 0, sh:Warning).
+#   Reference: spec/decisions/2026-09-19-wellness-reading-identity.md
+#   (D-WELLNESS-1) records why the shapes are settled before the aggregator
+#   (cascade-cli, a later round) writes its first pod. The aggregator itself
+#   is explicitly NOT in this release, nor is a layer-2 wellness reconciler.
+#   Every new finding is at sh:Warning except the four brand-new session/
+#   device shapes' own load-bearing facts (no existing pod can regress), so no
+#   existing pod, fixture or expected output changes.
+#   - health v2.11 (2026-09-25, spec PR the-cascade-protocol/spec#70, merge
+#     735bb57): comment hygiene only. Internal tracker references (root
+#     backlog numbers, bracketed proposal tags) removed from health.ttl and
+#     health.shapes.ttl comments; no term, range, shape or context change.
+#     This sync also carried the same cleanup in src/shapes/workbench.ttl
+#     (draft, unrowed below per D-PATH). Re-synced because health 2.10's
+#     bundled shapes comments tripped tests/no-internal-references.test.ts.
+core=3.10
+health=2.11
 clinical=1.19
 coverage=1.6
 checkup=3.3

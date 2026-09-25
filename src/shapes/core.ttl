@@ -19,8 +19,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-09-08"^^xsd:date ;
-    owl:versionInfo "3.9" ;
+    dct:modified "2026-09-24"^^xsd:date ;
+    owl:versionInfo "3.10" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -310,6 +310,21 @@ cascade:dateOfBirth a owl:DatatypeProperty ;
     rdfs:comment "Patient date of birth for age calculation and screening eligibility. FHIR-aligned: fhir:Patient.birthDate."@en ;
     rdfs:domain cascade:PatientProfile ;
     rdfs:range xsd:date .
+
+cascade:dayZone a owl:DatatypeProperty ;
+    rdfs:label "Day Zone"@en ;
+    rdfs:comment """The pod owner's home time zone, as an IANA time zone name (for example "America/Los_Angeles"): the zone in which a day is cut when readings are aggregated into daily records. Lives on <#me> in /profile/extended.ttl, beside cascade:dateOfBirth. Owner-only, because a home zone hints at where a person lives, so it does not belong on the public card.ttl.
+
+WHY A POD SETTING. Wellness exports do not carry a stable day: the Apple Health export renders every timestamp in the exporting device's current zone and carries no per-sample offset, so a day read from the file changes when the next export is made in another zone. A day cut in a zone the pod states once is deterministic across exports and machines, and agrees with the source app for anyone who lives where the setting says.
+
+DEFAULT, set by the first import and recorded in that import's log with which rule applied: the majority HKTimeZone value in an Apple Health export where one is present; else the timezone field of the Google Health profile (Profile.csv or user_profile.csv); else the importing machine's zone.
+
+CHANGED ONLY ON A PERMANENT MOVE. Travel does not change it, which is also how the Health app behaves. A change applies to new aggregation only: every aggregate records the zone it was cut in (health:timeZone in the health vocabulary), so a later change never re-mints history.
+
+No rdfs:domain is declared: the extended profile's subject carries no rdf:type of its own (see cascade:ExtendedProfileShape)."""@en ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso <https://www.iana.org/time-zones> ;
+    owl:versionInfo "Added in core v3.10" .
 
 cascade:genderIdentity a owl:DatatypeProperty ;
     rdfs:label "Gender Identity"@en ;
@@ -850,6 +865,41 @@ WHAT THIS IS NOT. It is not an interpretation, and it is not a substitute for on
 
 # ============================================================================
 # Changelog
+#
+# Version 3.10 (2026-09-24)
+# - Added cascade:statistic (owl:DatatypeProperty, range xsd:string): which
+#   descriptive statistic of the underlying samples a record's value is. Eleven
+#   values. The first eight are adopted from IEEE 1752.1 descriptive_statistic
+#   (https://w3id.org/ieee/ieee-1752-schema/descriptive-statistic.json),
+#   respelled in camelCase; "baseline", "lowerBound" and "upperBound" were
+#   ruled on 2026-09-24 after the Google Health export was measured, because
+#   one of its daily rows carries several statistics of one window and a
+#   separate range record would split that row three ways.
+# - WHY CORE AND NOT HEALTH. Ruled 2026-09-23: saying which statistic a value
+#   is is not wellness-specific. It is part of a daily aggregate's identity
+#   (D-WELLNESS-1 Q1), since a mean and a maximum over the same samples are two
+#   records, and until now it lived only in each property's comment.
+# - Added cascade:dayZone (owl:DatatypeProperty, range xsd:string): the pod
+#   owner's home IANA time zone, on <#me> in /profile/extended.ttl beside
+#   cascade:dateOfBirth, owner-only because a home zone hints at where a person
+#   lives. It is the zone a day is cut in when readings are aggregated. Measured
+#   reason: the Apple Health export renders every timestamp in the exporting
+#   device's current zone with no per-sample offset (10.2 million samples, all
+#   -0700), so a day read from the export is not stable across exports. Default
+#   chain, recorded in the import log: HKTimeZone where present, else the
+#   Google profile timezone, else the importing machine's zone. Changed only on
+#   a permanent move, never for travel. Each aggregate records the zone it was
+#   cut in (health:timeZone), so a later change never re-mints history.
+#   Documented in pod-structure.md section 3.6.
+# - SHACL (core.shapes.ttl 1.8 to 1.9): cascade:StatisticShape and
+#   cascade:DayZoneShape, both open-world (sh:targetSubjectsOf), both at
+#   sh:Warning. They evaluate only nodes that carry the new predicates. The
+#   requirement that every health aggregate CARRY a statistic is on the health
+#   shapes (health.shapes.ttl 1.8), also at sh:Warning, per the v3.5 ratchet.
+# - JSON-LD: statistic and dayZone in contexts/v1/core.jsonld and mirrored in
+#   the merged contexts/v1/cascade.jsonld, both "@type": "xsd:string".
+# - COMPATIBILITY. Purely additive. No term is removed, renamed or deprecated,
+#   and nothing that validated under v3.9 stops validating.
 #
 # Version 3.9 (2026-09-08)
 # - THE POD OWNER'S NAME GETS A DECLARED HOME, AND IT IS NOT A NEW TERM. No
@@ -1777,6 +1827,21 @@ cascade:loincCode a owl:ObjectProperty ;
     rdfs:comment "LOINC reference for an observation, as an IRI."@en ;
     rdfs:seeAlso <http://loinc.org/> ;
     owl:versionInfo "Added in core v3.4" .
+
+cascade:statistic a owl:DatatypeProperty ;
+    rdfs:label "Statistic"@en ;
+    rdfs:comment """Which descriptive statistic of the underlying samples a record's value is. One of: "average", "sum", "minimum", "maximum", "median", "standardDeviation", "variance", "count", "baseline", "lowerBound", "upperBound".
+
+ADOPTED, NOT INVENTED. The first eight are the first eight values of IEEE 1752.1's descriptive_statistic (IEEE Std 1752.1-2021, https://w3id.org/ieee/ieee-1752-schema/descriptive-statistic.json: "average", "count", "maximum", "median", "minimum", "standard deviation", "sum", "variance"), respelled in camelCase so that every value is a single token. IEEE's percentile, quartile and quintile values are not adopted in this release because no measured source supplies one.
+
+THREE ADDITIONS, ruled 2026-09-24 from the Google Health export, where one daily row carries several statistics of the same window: "baseline" (a reference value the source computed for the person, such as Google's baseline SpO2), and "lowerBound" and "upperBound" (the source's bounds for the window, which read as an interval estimate rather than as the minimum and maximum of the samples, so they are not "minimum" and "maximum"). Each is a descriptive statistic of the same window; one such row becomes one record per statistic, not a separate range record.
+
+WHY IT IS STATED. A mean and a maximum over the same samples are two different records, so the statistic is part of a daily aggregate's identity (D-WELLNESS-1 Q1), and a reader cannot compare two pods' "daily heart rate" without knowing which statistic each wrote. Until core v3.10 it was buried in each property's rdfs:comment. Absent means the value is a single measurement, as IEEE 1752.1 defines it. cascade:sampleCount (v3.4) is unchanged and complements it.
+
+Not wellness-specific, hence core: any Cascade record whose value summarizes samples carries it."""@en ;
+    rdfs:range xsd:string ;
+    rdfs:seeAlso <https://w3id.org/ieee/ieee-1752-schema/descriptive-statistic.json> ;
+    owl:versionInfo "Added in core v3.10" .
 
 # ============================================================================
 # Attachments (v3.7)

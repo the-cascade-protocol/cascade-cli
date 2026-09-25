@@ -8,16 +8,22 @@
 # ============================================================================
 # Cascade Protocol -- Core Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.8 (2026-09-08)
+# Version: 1.9 (2026-09-24)
 # Validates: cascade:PatientProfile, cascade:Address, cascade:EmergencyContact,
 #            cascade:PharmacyInfo, cascade:AdvanceDirectives, cascade:ProxyAgent,
 #            cascade:ExportManifest, cascade:RecordSummary,
 #            cascade:InteractionScenario, cascade:Attachment, the pod owner's
 #            extended profile (/profile/extended.ttl), and the values of
-#            cascade:sourceIdentity, cascade:dataAbsentReason and
-#            cascade:hasAttachment wherever they appear
+#            cascade:sourceIdentity, cascade:dataAbsentReason,
+#            cascade:hasAttachment, cascade:statistic and cascade:dayZone
+#            wherever they appear
 #
 # CHANGELOG
+#   1.9 (2026-09-24) -- Added cascade:StatisticShape and cascade:DayZoneShape
+#                       for core v3.10. Both open-world (sh:targetSubjectsOf),
+#                       both at sh:Warning: the statistic is one of eleven
+#                       values, the day zone an IANA zone name, each at most
+#                       once. Presence is required by neither.
 #   1.8 (2026-09-08) -- Added cascade:ExtendedProfileShape for core v3.9: the
 #                       pod owner's name on <#me> in /profile/extended.ttl,
 #                       foaf:givenName / foaf:familyName / foaf:name, each
@@ -947,8 +953,72 @@ cascade:HasAttachmentEdgeShape a sh:PropertyShape ;
     sh:name "Has Attachment Edge"@en .
 
 # ============================================================================
+# Shapes: Statistic and Day Zone (core v3.10)
+# ============================================================================
+# Both open-world, exactly like SourceIdentityShape: sh:targetSubjectsOf, so
+# they constrain the VALUE wherever the predicate appears and never require its
+# presence. No pod written before v3.10 carries either predicate, so every such
+# pod validates unchanged.
+#
+# Both at sh:Warning. That is stricter than it needs to be for a brand-new
+# predicate (see the DataAbsentReasonShape note above), and it is chosen
+# anyway: the requirement that a health aggregate CARRY a statistic enters at
+# sh:Warning on the health shapes, and a value form checked more harshly than
+# the presence it qualifies would reject a record for writing the fact
+# imperfectly while accepting one that omits it.
+#
+# THE PRESENCE REQUIREMENT IS NOT HERE. It lives on the health aggregate shapes
+# (health.shapes.ttl 1.8, health:AggregateReadingShape), because only those
+# classes are aggregates by definition; a core shape cannot say which records
+# summarize samples.
+#
+# The day zone pattern accepts an IANA zone name ("America/Los_Angeles",
+# "America/Argentina/Buenos_Aires", "Etc/GMT+7", "UTC") and rejects a numeric
+# offset ("-07:00", "+00:00"): an offset says where the clock stood at one
+# instant, not which zone a later day belongs to, and the Google Health export
+# supplies only offsets on its sessions, which is exactly the value a careless
+# importer would write here.
+
+cascade:StatisticShape a sh:NodeShape ;
+    sh:targetSubjectsOf cascade:statistic ;
+    rdfs:label "Statistic Shape"@en ;
+    rdfs:comment "Constrains the value of cascade:statistic on any record that carries it. Open-world: absence is not a finding here."@en ;
+
+    sh:property [
+        sh:path cascade:statistic ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("average" "sum" "minimum" "maximum" "median" "standardDeviation"
+               "variance" "count" "baseline" "lowerBound" "upperBound") ;
+        sh:name "Statistic"@en ;
+        sh:message "cascade:statistic must be a single value from: average, sum, minimum, maximum, median, standardDeviation, variance, count (IEEE 1752.1 descriptive_statistic, camelCased), baseline, lowerBound, upperBound. One record carries one statistic; a source row with several statistics becomes several records."@en ;
+        sh:severity sh:Warning
+    ] .
+
+cascade:DayZoneShape a sh:NodeShape ;
+    sh:targetSubjectsOf cascade:dayZone ;
+    rdfs:label "Day Zone Shape"@en ;
+    rdfs:comment "Constrains the pod owner's home time zone on <#me> in /profile/extended.ttl wherever it is written. Open-world: absence is not a finding."@en ;
+
+    sh:property [
+        sh:path cascade:dayZone ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$" ;
+        sh:name "Day Zone"@en ;
+        sh:message "cascade:dayZone must be a single IANA time zone name such as 'America/Los_Angeles'. A numeric UTC offset is not a zone: it cannot say which zone a later day belongs to."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.9 (2026-09-24)
+# - Added cascade:StatisticShape and cascade:DayZoneShape for core v3.10's
+#   cascade:statistic and cascade:dayZone. Open-world (sh:targetSubjectsOf) and
+#   at sh:Warning; the presence requirement for the statistic is on the health
+#   aggregate shapes (health.shapes.ttl 1.8), not here.
 #
 # Version 1.8 (2026-09-08)
 # - Added cascade:ExtendedProfileShape for core v3.9's home for the pod owner's

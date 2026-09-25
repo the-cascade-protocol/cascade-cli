@@ -34,8 +34,7 @@
 #       together with the app work that emits them.
 #   v1-draft.0.5 (2026-07-15)
 #     - ADDED the notes / flags / follow-ups substrate as W3C WEB ANNOTATIONS
-#       ([NOTES-ANNOTATION-VOCAB]; proposal 2026-07-13-notes-as-web-annotations
-#       in the Workbench vocab-proposals). Caregiver notes, "needs research"
+#       (from a proposal in the Workbench vocab-proposals tracker). Caregiver notes, "needs research"
 #       flags, and follow-ups are ONE artifact — an oa:Annotation over one or
 #       more graph nodes — distinguished by oa:motivatedBy (oa:commenting /
 #       oa:questioning / workbench:followUp). Layer-1 reuse, nothing
@@ -299,7 +298,7 @@ workbench:pinNote a owl:DatatypeProperty ; rdfs:label "pin note"@en ;
 # ============================================================================
 # Notes, research flags, and follow-ups — the W3C Web Annotation substrate
 # ----------------------------------------------------------------------------
-# Added in workbench v1-draft.0.5 ([NOTES-ANNOTATION-VOCAB]). Caregiver notes
+# Added in workbench v1-draft.0.5 (tracked separately). Caregiver notes
 # ("more tired than usual"), "needs research" flags on claims, and follow-ups
 # ("recheck TSH in 3 months") are ONE artifact: an oa:Annotation over one or
 # more graph nodes, distinguished by oa:motivatedBy. This section deliberately
