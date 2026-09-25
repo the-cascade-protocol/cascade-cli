@@ -1,6 +1,6 @@
 {
   "name": "@the-cascade-protocol/cli",
-  "version": "0.21.1",
+  "version": "0.22.0",
   "description": "Cascade Protocol CLI - Validate, convert, and manage health data",
   "bin": {
     "cascade": "dist/index.js"
@@ -17,6 +17,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:shapes-drift": "node scripts/check-shapes-drift.mjs",
+    "sync:knowledge": "node scripts/sync-knowledge-from-cascade-knowledge.mjs",
+    "check:knowledge-drift": "node scripts/check-knowledge-drift.mjs",
     "lint": "eslint src/",
     "format": "prettier --write \"src/**/*.ts\"",
     "prepublishOnly": "npm run build"
