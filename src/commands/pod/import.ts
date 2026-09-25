@@ -30,7 +30,7 @@ import {
   buildResourceRefsFromQuads,
   RECORD_EDGE_PREDICATES,
 } from '../../lib/fhir-converter/reference-resolution.js';
-import { runReconciliation, type ReconcilerInput } from '../../lib/reconciler.js';
+import { runReconciliation, stampSourceSystem, type ReconcilerInput } from '../../lib/reconciler.js';
 import {
   liftTrappedLiterals,
   emptyLiftSummary,
@@ -230,7 +230,7 @@ async function loadExistingPodData(
         // cross-batch path on. `systemName` cannot carry it: it is only the
         // DEFAULT source system for records that state none, and every record
         // the pod holds states one.
-        inputs.push({ content, systemName: 'existing-pod', existingPod: true });
+        inputs.push({ content, systemName: 'existing-pod', existingPod: true, labelIsPlaceholder: true });
       } catch {
         unreadable.push(`${dir}/${file}`);
       }
@@ -874,7 +874,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           existingConflicts,
           raisedConflicts,
           mergedTurtle,
-          new Set(userResolutions.keys()),
+          // Only what this reconciliation actually answered; see `pod reconcile`.
+          new Set(reconcileResult.report.userResolutions.answered.map((a) => a.conflictId)),
         );
         pendingDisposition = disposition;
 
@@ -922,7 +923,14 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           }
         }
       } else {
-        mergedTurtle = allInputs.map(i => i.content).join('\n\n');
+        // No reconciliation, so nothing states the ingestion label on the
+        // records. Stated here, or the next reconciling import reads them back
+        // under a placeholder.
+        const stamped: string[] = [];
+        for (const i of allInputs) {
+          stamped.push(i.existingPod ? i.content : await stampSourceSystem(i.content, i.systemName));
+        }
+        mergedTurtle = stamped.join('\n\n');
       }
 
       // When cross-batch reconciliation ran, the output already represents the

@@ -136,6 +136,9 @@ export function registerResolveCommand(podProgram: Command, program: Command): v
         resolution,
         keptRecordUri,
         discardedRecordUris,
+        // Every choice, `both` included: the answer is about THESE records, and
+        // a later record under the same conflict key is a question it never saw.
+        candidateRecordUris: [...conflict.candidateRecordUris],
         userNote: options.note,
         actorIri: options.by,
       }, dek);

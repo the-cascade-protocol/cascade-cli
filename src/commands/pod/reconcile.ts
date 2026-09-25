@@ -171,8 +171,8 @@ export interface PendingConflictDisposition {
    */
   orphaned: number;
   /**
-   * Pre-existing rows retired because the owner has already answered them in
-   * `settings/user-resolutions.ttl`. `pod resolve` removes the row it answers,
+   * Pre-existing rows retired because this run's reconciliation settled them
+   * by an answer in `settings/user-resolutions.ttl`. `pod resolve` removes the row it answers,
    * so this is non-zero only for a row an earlier CLI re-raised after it was
    * answered, which is the defect this count exists to show being repaired.
    */
@@ -447,7 +447,7 @@ async function readPodBuckets(
       continue;
     }
 
-    inputs.push({ content: text.value, systemName: rel });
+    inputs.push({ content: text.value, systemName: rel, labelIsPlaceholder: true });
     filesRead.push(rel);
   }
   return { inputs, filesRead, unreadable, ledger };
@@ -510,9 +510,9 @@ function countRecordsIn(inputs: ReconcilerInput[]): number {
  * else in the pod may reference. A conflict does not become newer by being
  * noticed again.
  *
- * A row the owner has already answered (`answeredIds`, the keys of
- * `settings/user-resolutions.ttl`) never survives, whatever its records are
- * doing: the question is closed, and asking it again is the defect.
+ * A row this run's reconciliation settled by a recorded answer (`answeredIds`,
+ * the ids the reconciler reports as answered, never simply every key in
+ * `settings/user-resolutions.ttl`) does not survive: the question is closed.
  */
 export function disposePendingConflicts(
   existing: readonly PendingConflict[],
@@ -1263,7 +1263,10 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
           existingConflicts,
           raisedConflicts,
           result.turtle,
-          new Set(userResolutions.keys()),
+          // The ids this run's reconciliation actually answered, not every key
+          // in the decision log: a key is shared by every later pairing under
+          // it, and clearing on the key alone would drop a new question.
+          new Set(result.report.userResolutions.answered.map((a) => a.conflictId)),
         );
 
         const groups: ReconcileGroupReport[] = (

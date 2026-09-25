@@ -38,7 +38,10 @@ import {
   type SourceIdentityTier,
 } from './source-identity.js';
 import {
-  findUserResolution,
+  generateConflictId,
+  keepsOneRecord,
+  resolutionAppliesTo,
+  resolutionNamedRecords,
   type ResolutionChoice,
   type UserResolution,
 } from './user-resolutions.js';
@@ -83,7 +86,7 @@ export interface ReconcilerOptions {
    * question from the same records, and an owner's merge existed only if a
    * second, unlinked `pod retract --superseded-by` was written by hand.
    *
-   * What a judgement does to the run is described at {@link judgementForGroup}
+   * What a judgement does to the run is described at {@link judgementsForGroup}
    * (which question it answers) and {@link UserResolutionEffects} (what the run
    * reports so a caller can write the consequence).
    */
@@ -158,6 +161,16 @@ export interface ReconcilerInput {
    * `--reconcile-existing` exists — had never run.
    */
   existingPod?: boolean;
+  /**
+   * True when `systemName` is a label the CALLER made up for where it read the
+   * text (`existing-pod`, a bucket path), not a source anyone stated.
+   *
+   * It still serves as the matching default for a record that states no
+   * `cascade:sourceSystem`, exactly as before. What changes is that it is never
+   * WRITTEN onto such a record: persisting it would turn "read back out of the
+   * pod" into a claim about the record's provenance.
+   */
+  labelIsPlaceholder?: boolean;
 }
 
 /**
@@ -334,6 +347,11 @@ interface ParsedRecord {
    */
   fromExistingPod: boolean;
   /**
+   * True when `sourceSystem` is the input's placeholder label rather than a
+   * value the record states. See {@link ReconcilerInput.labelIsPlaceholder}.
+   */
+  sourceSystemIsPlaceholder?: boolean;
+  /**
    * ORIGIN axis: `cascade:sourceIdentity`, the canonical organization identity.
    * Undefined for a record written before core v3.5 — see {@link sameSourceStatement},
    * which is the only thing that reads it and which falls back safely.
@@ -346,6 +364,7 @@ export async function parseTurtle(
   turtle: string,
   defaultSystem: string,
   fromExistingPod = false,
+  defaultIsPlaceholder = false,
 ): Promise<ParsedRecord[]> {
   return new Promise((resolve, reject) => {
     // Sentinel base: pod content arrives here on its way back to the pod, and a
@@ -376,12 +395,14 @@ export async function parseTurtle(
             }
           }
 
-          const sourceSystem = properties.get(NS.cascade + 'sourceSystem')?.[0]?.value ?? defaultSystem;
+          const stated = properties.get(NS.cascade + 'sourceSystem')?.[0]?.value;
+          const sourceSystem = stated ?? defaultSystem;
           const sourceIdentity = properties.get(SOURCE_IDENTITY_PREDICATE)?.[0]?.value;
           records.push({
             uri,
             type: KNOWN_TYPES[typeTriple.obj.value],
             sourceSystem,
+            ...(stated === undefined && defaultIsPlaceholder ? { sourceSystemIsPlaceholder: true } : {}),
             sourceIdentity,
             fromExistingPod,
             properties,
@@ -2267,8 +2288,33 @@ interface Group {
   conflictSides?: ConflictSide[];
   /** True when every member satisfies the tier-0 predicate. See {@link isTier0Group}. */
   tier0?: boolean;
-  /** The owner's stored answer to this group's question, when there is one. */
-  judgement?: UserResolution;
+  /** What the owner's stored answers say about this group, when any bears on it. */
+  judged?: GroupJudgement;
+  /**
+   * The NEW question a partly-answered group raises: only the pairing no
+   * answer covers, under an id of its own. See {@link judgementsForGroup}.
+   */
+  openQuestion?: {
+    conflictId: string;
+    candidateUris: string[];
+    canonicalUri: string;
+    conflictField?: string;
+    conflictSides?: ConflictSide[];
+  };
+}
+
+/** The stored answers that bear on one group, and whether they settle it. */
+interface GroupJudgement {
+  /** Every answer that names two or more of the group's records, oldest first. */
+  applied: UserResolution[];
+  /** True when every member is named by some applied answer. */
+  covered: boolean;
+  /**
+   * The members no applied keep-one answer chose against. When the group is
+   * not covered, this is the question still open: the records nobody has
+   * answered for, against the records the owner's answers left standing.
+   */
+  standing: string[];
 }
 
 interface Resolution {
@@ -2293,40 +2339,61 @@ interface Resolution {
 }
 
 /**
- * The owner's stored answer to a group's question, if one applies.
+ * What the owner's stored answers say about a group.
  *
- * Looked up the way `pod conflicts` names the question: by conflict id, under
- * this version's spelling and then any earlier one ({@link findUserResolution}).
- * A keep-one answer found by id applies only when the record it kept is in the
- * group, because an answer that names a record the group does not hold is about
- * some other pair and would silently keep neither.
+ * An answer is about the RECORDS it names ({@link resolutionNamedRecords}),
+ * never about its conflict id alone. The id is a match key: every later record
+ * under the same key shares it, and an answer to one pair that matched by id
+ * silenced every future disagreement under that key, including records the
+ * owner never saw.
  *
- * Then by RECORDS, for a keep-one answer that names every member of the group.
- * The conflict id is derived from the match key, and the match key can change
- * between runs for the very same pair: two halves of an identity collision are
- * split onto new IRIs, and the next run matches them, if at all, under an
- * ordinary key. The records the owner named are the part that does not move.
+ * So an answer bears on a group when it names two or more of its members
+ * ({@link resolutionAppliesTo}), and the group is SETTLED only when the answers
+ * that bear on it name every member between them. A group with a member no
+ * answer names is a new question: it is raised, naming only that member
+ * against the records the answers left standing.
  */
-function judgementForGroup(
+function judgementsForGroup(
   resolutions: ReadonlyMap<string, UserResolution> | undefined,
-  recordType: string,
-  matchedOn: string,
   memberUris: readonly string[],
-): UserResolution | undefined {
+): GroupJudgement | undefined {
   if (!resolutions || resolutions.size === 0) return undefined;
   const members = new Set(memberUris);
-  const keepsOne = (r: UserResolution): boolean =>
-    r.resolution === 'kept-source-a' || r.resolution === 'kept-source-b';
+  const applied = [...resolutions.values()]
+    .filter((r) => resolutionAppliesTo(r, members))
+    .sort((a, b) =>
+      a.resolvedAt.getTime() - b.resolvedAt.getTime() || a.uri.localeCompare(b.uri),
+    );
+  if (applied.length === 0) return undefined;
 
-  const byId = findUserResolution(resolutions, recordType, matchedOn);
-  if (byId && (!keepsOne(byId) || members.has(byId.keptRecordUri))) return byId;
-
-  for (const r of [...resolutions.values()].sort((a, b) => a.uri.localeCompare(b.uri))) {
-    if (!keepsOne(r) || !r.keptRecordUri || !members.has(r.keptRecordUri)) continue;
-    const named = new Set([r.keptRecordUri, ...r.discardedRecordUris]);
-    if (memberUris.every((u) => named.has(u))) return r;
+  const named = new Set<string>();
+  const superseded = new Set<string>();
+  for (const r of applied) {
+    for (const u of resolutionNamedRecords(r)) if (members.has(u)) named.add(u);
+    if (keepsOneRecord(r)) {
+      for (const d of r.discardedRecordUris) {
+        if (d !== r.keptRecordUri && members.has(d)) superseded.add(d);
+      }
+    }
   }
-  return undefined;
+  return {
+    applied,
+    covered: memberUris.every((u) => named.has(u)),
+    standing: memberUris.filter((u) => !superseded.has(u)),
+  };
+}
+
+/**
+ * The id of a new pairing raised under a key an earlier answer already used.
+ *
+ * Distinct from that answer's id on purpose: the decision log holds one row per
+ * id, so answering the new question under the old id would overwrite the
+ * owner's first answer. Derived from the key and the pairing's records, so the
+ * same pairing gets the same id on every run.
+ */
+function pairingConflictId(recordType: string, matchedOn: string, uris: readonly string[]): string {
+  const digest = createHash('sha256').update([...uris].sort().join('\n')).digest('hex').slice(0, 12);
+  return `${generateConflictId(recordType, matchedOn)}::pair-${digest}`;
 }
 
 /**
@@ -2340,8 +2407,8 @@ function judgementForGroup(
  * impossible to revisit.
  */
 function resolveByJudgement(g: Group): Resolution {
-  const judgement = g.judgement as UserResolution;
-  const kept = g.records.find((r) => r.uri === judgement.keptRecordUri);
+  const latestKeep = [...(g.judged?.applied ?? [])].reverse().find(keepsOneRecord);
+  const kept = latestKeep ? g.records.find((r) => r.uri === latestKeep.keptRecordUri) : undefined;
   return {
     canonical: kept ?? g.records[0],
     mergedUris: g.records.map((r) => r.uri),
@@ -2657,7 +2724,11 @@ async function serializeGroups(
           : (g.matchType === 'status_conflict' || g.matchType === 'value_conflict') ? 'conflict-resolved'
           : 'merged';
         emit(makeQuad(subj, namedNode(NS.cascade + 'reconciliationStatus'), literal(status)));
-        emit(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(rec.sourceSystem)));
+        // Never a placeholder: a label the caller invented for where it read
+        // the text is not provenance. See ReconcilerInput.labelIsPlaceholder.
+        if (!rec.sourceSystemIsPlaceholder) {
+          emit(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(rec.sourceSystem)));
+        }
 
         if (!res.keepMembers && g.matchType !== 'pass_through' && res.mergedUris.length > 1) {
           for (const srcUri of res.mergedUris) {
@@ -2739,6 +2810,43 @@ function supersessionsFor(
 }
 
 // ---------------------------------------------------------------------------
+// Stating the ingestion label on a path that does not reconcile
+// ---------------------------------------------------------------------------
+
+/**
+ * Add `cascade:sourceSystem "<systemName>"` to every reconcilable record in a
+ * converted document that does not already state one.
+ *
+ * The reconciler states it on every record it writes, so an import that
+ * reconciles persists the label the user gave (`--source-system`). An import
+ * that does NOT reconcile (one file into an empty pod, or `--no-reconcile`)
+ * wrote the converter's text as it was, so its records carried no label at all,
+ * and the next reconciling import read them back under a placeholder instead.
+ * Appended as separate statements, so the converter's own text is untouched.
+ */
+export async function stampSourceSystem(turtle: string, systemName: string): Promise<string> {
+  const base = relBaseFor(turtle);
+  const quads = derelativizeQuads(new Parser({ format: 'Turtle', baseIRI: base }).parse(turtle), base);
+  const typed = new Set<string>();
+  const labelled = new Set<string>();
+  for (const q of quads) {
+    if (q.subject.termType !== 'NamedNode') continue;
+    if (q.predicate.value === NS.rdf + 'type' && KNOWN_TYPES[q.object.value]) typed.add(q.subject.value);
+    if (q.predicate.value === NS.cascade + 'sourceSystem') labelled.add(q.subject.value);
+  }
+  const missing = [...typed].filter((s) => !labelled.has(s)).sort();
+  if (missing.length === 0) return turtle;
+  const extra = await new Promise<string>((resolve, reject) => {
+    const writer = new Writer();
+    for (const s of missing) {
+      writer.addQuad(makeQuad(namedNode(s), namedNode(NS.cascade + 'sourceSystem'), literal(systemName)));
+    }
+    writer.end((err, result) => (err ? reject(err) : resolve(result)));
+  });
+  return `${turtle.replace(/\s*$/, '')}\n\n${extra}`;
+}
+
+// ---------------------------------------------------------------------------
 // Main exported function
 // ---------------------------------------------------------------------------
 
@@ -2775,7 +2883,9 @@ export async function runReconciliation(
 
   for (let i = 0; i < inputs.length; i++) {
     const input = inputs[i];
-    const records = await parseTurtle(input.content, input.systemName, input.existingPod === true);
+    const records = await parseTurtle(
+      input.content, input.systemName, input.existingPod === true, input.labelIsPlaceholder === true,
+    );
     allRecords.push(...records);
     sourceInfo.push({ system: input.systemName, count: records.length });
 
@@ -3140,20 +3250,43 @@ export async function runReconciliation(
   // The owner's judgements, BEFORE resolution: a group the owner has already
   // answered is settled by that answer, not by trust, and is not asked again.
   const userResolutions = options?.userResolutions;
+  const allowCrossProvenanceMerge = options?.allowCrossProvenanceMerge ?? true;
   for (const g of groups) {
     if (g.matchType === 'pass_through') continue;
-    g.judgement = judgementForGroup(
-      userResolutions, g.records[0].type, g.matchedOn, g.records.map((r) => r.uri),
+    g.judged = judgementsForGroup(userResolutions, g.records.map((r) => r.uri));
+    if (!g.judged || g.judged.covered) continue;
+    // Partly answered: a record no answer names has joined a pairing the owner
+    // settled. The new question is that record against what the answers left
+    // standing, classified on its own so the row carries ITS disagreement.
+    const standing = g.records.filter((r) => g.judged!.standing.includes(r.uri));
+    const cls = classifyGroup(standing, labTol, resolver);
+    const preferred = resolveGroup(
+      { ...g, records: standing, matchType: cls.matchType === 'pass_through' ? g.matchType : cls.matchType },
+      trustScores, defaultTrust, allowCrossProvenanceMerge,
     );
+    g.openQuestion = {
+      conflictId: pairingConflictId(g.records[0].type, g.matchedOn, standing.map((r) => r.uri)),
+      candidateUris: standing.map((r) => r.uri),
+      canonicalUri: preferred.canonical.uri,
+      conflictField: cls.conflictField,
+      conflictSides: cls.conflictSides,
+    };
   }
 
   // Resolve
-  const allowCrossProvenanceMerge = options?.allowCrossProvenanceMerge ?? true;
-  const resolutions = groups.map(g =>
-    g.judgement
-      ? resolveByJudgement(g)
-      : resolveGroup(g, trustScores, defaultTrust, allowCrossProvenanceMerge),
-  );
+  const resolutions = groups.map((g): Resolution => {
+    if (g.judged?.covered) return resolveByJudgement(g);
+    if (g.openQuestion) {
+      // A question, so nothing merges: every member stays until it is answered.
+      return {
+        ...resolveByJudgement(g),
+        canonical: g.records.find((r) => r.uri === g.openQuestion!.canonicalUri) ?? g.records[0],
+        strategy: 'flag_unresolved',
+        resolved: false,
+      };
+    }
+    return resolveGroup(g, trustScores, defaultTrust, allowCrossProvenanceMerge);
+  });
 
   // The tier-0 journal: what merged, what it merged away, and enough of the
   // discarded records to put them back.
@@ -3225,18 +3358,24 @@ export async function runReconciliation(
       ...(g.tier0 ? { tier0: true } : {}),
     };
 
-    if (g.judgement) {
+    if (g.judged?.covered) {
       // Answered by the owner. Not a merge, not a conflict settled by trust, and
       // not a question: its own count, so none of the others is inflated.
-      answered.push({
-        conflictId: g.judgement.conflictId,
-        recordType: g.records[0].type,
-        matchedOn: g.matchedOn,
-        resolutionUri: g.judgement.uri,
-        resolution: g.judgement.resolution,
-        candidateUris: g.records.map((r) => r.uri),
-      });
-      Object.assign(t, { userResolution: g.judgement.uri });
+      const memberUris = new Set(g.records.map((r) => r.uri));
+      for (const j of g.judged.applied) {
+        answered.push({
+          conflictId: j.conflictId,
+          recordType: g.records[0].type,
+          matchedOn: g.matchedOn,
+          resolutionUri: j.uri,
+          resolution: j.resolution,
+          candidateUris: [...resolutionNamedRecords(j)].filter((u) => memberUris.has(u)),
+        });
+      }
+      Object.assign(t, { userResolution: g.judged.applied.map((j) => j.uri) });
+    } else if (g.openQuestion) {
+      // The new pairing in a partly-answered group. Always a question.
+      unresolved++;
     } else if (!res.resolved && (g.matchType === 'exact_duplicate' || g.matchType === 'near_duplicate')) {
       // A would-be merge that the cross-provenance guard flagged: count it as an
       // unresolved conflict, not as a silently-applied merge.
@@ -3251,7 +3390,21 @@ export async function runReconciliation(
     }
 
     if (g.matchType !== 'pass_through') transformations.push(t);
-    if (!res.resolved) unresolvedList.push({ ...t, candidateUris: g.records.map(r => r.uri) });
+    if (g.openQuestion) {
+      unresolvedList.push({
+        ...t,
+        conflictId: g.openQuestion.conflictId,
+        canonicalUri: g.openQuestion.canonicalUri,
+        candidateUris: g.openQuestion.candidateUris,
+        conflictField: g.openQuestion.conflictField,
+        conflictSides: g.openQuestion.conflictSides,
+        conflictValues: g.openQuestion.conflictSides
+          ? Object.fromEntries(g.openQuestion.conflictSides.map((s) => [s.origin, s.value]))
+          : undefined,
+      });
+    } else if (!res.resolved) {
+      unresolvedList.push({ ...t, candidateUris: g.records.map(r => r.uri) });
+    }
   }
 
   // An identity collision is a conflict, not a duplicate: the identity layer
@@ -3263,18 +3416,21 @@ export async function runReconciliation(
   // so this reports a question, not a loss.
   for (const c of identityCollisions) {
     const matchedOn = `identity-collision:${c.mintedUri}`;
-    const judgement = judgementForGroup(userResolutions, c.recordType, matchedOn, c.resultingUris);
-    if (judgement) {
+    const judged = judgementsForGroup(userResolutions, c.resultingUris);
+    if (judged?.covered) {
       // The same collision, already answered. The records are split either way;
       // what the answer changes is that the question is not asked again.
-      answered.push({
-        conflictId: judgement.conflictId,
-        recordType: c.recordType,
-        matchedOn,
-        resolutionUri: judgement.uri,
-        resolution: judgement.resolution,
-        candidateUris: [...c.resultingUris],
-      });
+      const resulting = new Set(c.resultingUris);
+      for (const j of judged.applied) {
+        answered.push({
+          conflictId: j.conflictId,
+          recordType: c.recordType,
+          matchedOn,
+          resolutionUri: j.uri,
+          resolution: j.resolution,
+          candidateUris: [...resolutionNamedRecords(j)].filter((u) => resulting.has(u)),
+        });
+      }
       transformations.push({
         type: 'identity_collision',
         recordType: c.recordType,
@@ -3284,11 +3440,13 @@ export async function runReconciliation(
         matchedOn,
         strategy: 'user_resolution',
         resolved: true,
-        userResolution: judgement.uri,
+        userResolution: judged.applied.map((j) => j.uri),
       });
       continue;
     }
     unresolved++;
+    // Partly answered: raise only what is still open, under its own id.
+    const open = judged ? judged.standing : c.resultingUris;
     const entry = {
       type: 'identity_collision',
       recordType: c.recordType,
@@ -3298,7 +3456,8 @@ export async function runReconciliation(
       matchedOn,
       strategy: 'split_unresolved',
       resolved: false,
-      candidateUris: c.resultingUris,
+      candidateUris: open,
+      ...(judged ? { conflictId: pairingConflictId(c.recordType, matchedOn, open) } : {}),
       label: `differs on ${c.differingPredicates.map(shortPredicate).join(', ')}`,
     };
     transformations.push(entry);

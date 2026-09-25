@@ -11,6 +11,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+**An import that does not reconcile states its `--source-system`.** One file
+into an empty pod (or `--no-reconcile`) wrote the converter's records with no
+`cascade:sourceSystem`, so the next reconciling import read them back under the
+placeholder `existing-pod`, and could persist that placeholder as if it were
+provenance. The label is now stated on every such record, and the reconciler
+never writes a placeholder (`existing-pod`, or the bucket path `pod reconcile`
+read a record from) as a record's `cascade:sourceSystem`.
+
+**`pod conflicts` says "Trust-preferred record:"** where it said "Surviving
+record:", since both candidates now stay in the pod. The JSON field is still
+`survivingRecordUri`.
+
 **An unresolved conflict keeps both of its records.** A dose, frequency or
 status disagreement the reconciler declines to settle (and any group the
 opt-in cross-provenance guard flags) used to be written back as ONE record,
@@ -38,6 +50,25 @@ reconciliation (`runReconciliation`'s new `userResolutions` option):
   writes, in `annotations/retractions.ttl`, with `prov:wasDerivedFrom` the
   resolution record and `cascade:autoResolved true`. Both records stay;
 - `--keep both` keeps both records and supersedes neither.
+
+An answer covers the RECORDS it was given about, not every later record under
+the same conflict id (the id is a match key). `pod resolve` now records
+`cascade:candidateRecords` for every choice, `--keep both` included. A group is
+settled only when the answers that bear on it name every one of its records; a
+record no answer names (a third source under the same key) raises a NEW
+conflict, naming only that record against the records the answers left
+standing, under an id of its own (`<key>::pair-<digest>`) so that answering it
+adds a decision rather than replacing the first. An answer whose discarded
+record is not in the pod does not settle the pair it no longer describes.
+
+Resolutions recorded by an earlier CLI carry no candidate records. A keep-one
+answer from then still applies, because its kept and discarded records name the
+pair. A `--keep both` answer from then names no record at all, so its question
+is asked again once; answering it records the candidates.
+
+The decision log holds one row per conflict id: when the same conflict is
+answered twice, the last answer replaces the first, and
+`pod conflicts --resolved` shows only that one.
 
 The overlay's IRI and timestamp are derived from the resolution, so a second
 run writes nothing and a pod rebuilt from the same records plus the same

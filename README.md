@@ -96,6 +96,12 @@ superseded by the one you kept. The overlay is derived from the answer alone, so
 nothing, and the same records plus the same `settings/user-resolutions.ttl` give the same result in
 any pod. `--keep both` keeps both records and supersedes neither.
 
+An answer covers the records it was given about. A later record that matches the same pair (a third
+source reporting the same medication) is a new question: it is raised against the records your
+answers left standing, under an id of its own, and answering it adds a second decision. The decision
+log holds one answer per conflict id, so answering the same conflict twice keeps only the last one,
+and that is the one `pod conflicts --resolved` shows.
+
 Those merges are reversible, with the same report-first gate:
 
 ```bash
