@@ -50,17 +50,6 @@
       "files": []
     },
     {
-      "term": "clinical:content",
-      "iri": "https://ns.cascadeprotocol.org/clinical/v1#content",
-      "emittedAs": [
-        "predicate"
-      ],
-      "writeSites": 1,
-      "files": [
-        "src/lib/ccda-converter/narrative.ts"
-      ]
-    },
-    {
       "term": "clinical:contentType",
       "iri": "https://ns.cascadeprotocol.org/clinical/v1#contentType",
       "emittedAs": [
@@ -277,17 +266,6 @@
       "writeSites": 2,
       "files": [
         "src/lib/reconciler.ts"
-      ]
-    },
-    {
-      "term": "cascade:narrativeText",
-      "iri": "https://ns.cascadeprotocol.org/core/v1#narrativeText",
-      "emittedAs": [
-        "predicate"
-      ],
-      "writeSites": 1,
-      "files": [
-        "src/lib/ccda-converter/narrative.ts"
       ]
     },
     {
