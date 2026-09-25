@@ -23,8 +23,8 @@
     dct:description "Vocabulary for consumer-generated wellness observations from wearable devices and HealthKit. Maps Cascade wellness properties to established SNOMED CT and LOINC codes following the three-layer ontology architecture."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-01-29"^^xsd:date ;
-    dct:modified "2026-09-24"^^xsd:date ;
-    owl:versionInfo "2.10" ;
+    dct:modified "2026-09-25"^^xsd:date ;
+    owl:versionInfo "2.11" ;
     rdfs:comment """Three-layer ontology for wellness data:
         Layer 1 (Established standards): SNOMED CT concept IDs + LOINC observation codes
         Layer 2 (Cascade health vocabulary): health: namespace properties linking to Layer 1
@@ -32,6 +32,8 @@
     rdfs:seeAlso <https://cascadeprotocol.org/docs/health/v1/> .
 
 # Changelog:
+# v2.11 (2026-09-25): Comment hygiene: internal tracker references removed; no
+#     term, range, shape or context change.
 # v2.10 (2026-09-24): Wellness and fitness records, measured before modelled.
 #     Two new session classes, one new device class, the interval and the
 #     statistic on every daily aggregate, and SOSA/SSN and OWL-Time alignment.
@@ -66,7 +68,7 @@
 #        day read from the file is not stable across exports; the interval
 #        makes the cut visible in the data. Google's daily rollups are date
 #        labels written as T00:00:00Z and are never a periodStart: until their
-#        day boundary is measured (root backlog 3.484) they carry cascade:date
+#        day boundary is measured (tracked separately) they carry cascade:date
 #        only, and the resulting Warning is the honest state. A sleep
 #        snapshot's interval is the local day the night ends in.
 #     2. NEW health:timeZone and health:utcOffset. The zone a record's local
@@ -165,7 +167,7 @@
 #        this aggregate came from" and is cited as direction only, since that
 #        edition is a Working Draft. The kickoff also named the aggregation as
 #        sosa:usedProcedure; that is deferred to the aggregator round, which
-#        defines the procedure naming it needs (root backlog 3.492).
+#        defines the procedure naming it needs (tracked separately).
 #     9. health:sourceRecordId's rdfs:domain widens to include the two session
 #        classes, and NEW health:sourceIdSpace names the id space the id
 #        belongs to, from a closed set declared in this file ("healthkit",
@@ -185,7 +187,7 @@
 #        instance-level use to health:Workout (the optional activity code),
 #        as health.shapes.ttl already did on health:ConditionRecordShape. The
 #        declaration is not changed here; the snomedCode spelling decision is
-#        tracked under root backlog 3.473 (T8).
+#        tracked separately (T8).
 #    12. JSON-LD: contexts/v1/health.jsonld gains the three classes and the
 #        datatype terms, and deliberately OMITS the four structured object
 #        properties (health:device, health:workoutRoute, health:workoutHistory,
@@ -194,9 +196,9 @@
 #        disagreement, and that baseline may only shrink; the cure is the
 #        JSON-LD 1.1 type-scoped form (D-CONTEXT-1 C4), which health has not
 #        yet adopted. Until then a JSON-LD writer uses full IRIs for these
-#        four (root backlog 3.487).
+#        four (tracked separately).
 #    10. The "latest reading" convenience properties keep their declared
-#        meaning (root backlog 3.472). health:bodyMass is owl:DatatypeProperty
+#        meaning (a follow-up is filed). health:bodyMass is owl:DatatypeProperty
 #        with range xsd:double, and "body mass is 91.2" is what the name reads
 #        as; the serialization examples that used the same name to point at a
 #        whole reading object are corrected (serialization/index.md v2.3). The
@@ -764,7 +766,7 @@ health:HealthProfile a owl:Class ;
 
 health:DailyVitalReading a owl:Class ;
     rdfs:label "Daily Vital Reading"@en ;
-    rdfs:comment "A single period's aggregated vital sign reading with value, unit, date, and sample count. Used in 90-day and 30-day history containers. From health v2.10 an aggregate states the UTC interval it covers (health:periodStart, health:periodEnd), the statistic its value is (cascade:statistic), and the zone its day was cut in (health:timeZone); cascade:date is the display date in that zone. A mean and a maximum over the same samples are two records, not one. A Google daily rollup carries cascade:date only and no interval: its day boundary is not yet measured (root backlog 3.484), so writing one would fabricate it, and the Warning health:AggregateReadingShape then reports is the honest state, not a defect."@en ;
+    rdfs:comment "A single period's aggregated vital sign reading with value, unit, date, and sample count. Used in 90-day and 30-day history containers. From health v2.10 an aggregate states the UTC interval it covers (health:periodStart, health:periodEnd), the statistic its value is (cascade:statistic), and the zone its day was cut in (health:timeZone); cascade:date is the display date in that zone. A mean and a maximum over the same samples are two records, not one. A Google daily rollup carries cascade:date only and no interval: its day boundary is not yet measured (tracked separately), so writing one would fabricate it, and the Warning health:AggregateReadingShape then reports is the honest state, not a defect."@en ;
     rdfs:subClassOf fhir:Observation ;
     rdfs:subClassOf sosa:Observation .
 

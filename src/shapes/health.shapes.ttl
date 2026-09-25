@@ -9,7 +9,7 @@
 # ============================================================================
 # Cascade Protocol — Health & Wellness Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.8 (2026-09-24)
+# Version: 1.9 (2026-09-25)
 # Validates: health:SelfReport, health:VO2MaxStatistics, health:HRVStatistics,
 #            health:BPStatistics, health:MetricTrend, health:ActivitySnapshot,
 #            health:SleepSnapshot, health:HealthProfile,
@@ -26,9 +26,11 @@
 # - sh:Warning = Should address (important for completeness) - e.g., missing period
 # - sh:Info = Nice to have (suggested enrichment) - e.g., optional context fields
 #
-# Validates against: health.ttl v2.10 (2026-09-24), core.ttl v3.10
+# Validates against: health.ttl v2.11 (2026-09-25), core.ttl v3.10
 #
 # CHANGELOG
+# v1.9 (2026-09-25): Comment hygiene: internal tracker references removed; no
+#     shape, target or constraint change.
 # v1.8 (2026-09-24): Wellness and fitness records (health v2.10, core v3.10).
 #     Seven new node shapes. Nothing that validated under v1.7 stops
 #     validating: every new finding on a class that existed in health v2.9 is
@@ -2066,7 +2068,7 @@ health:AggregateReadingShape a sh:NodeShape ;
     sh:targetClass health:DailyActivitySnapshot ;
     sh:targetClass health:DailySleepSnapshot ;
     rdfs:label "Aggregate Reading Shape"@en ;
-    rdfs:comment "Soft constraints (sh:Warning only) that health v2.10 adds to every daily aggregate: the UTC interval it covers, the statistic its value is, the zone its day was cut in, and the device that produced it. Warning because these classes existed in v2.9 and existing pods carry none of these facts. A Google daily rollup carries cascade:date only, because its day boundary is not yet measured (root backlog 3.484): the Warning this shape reports on it is the honest state, not a defect, and must not be silenced by a fabricated interval. Kept apart from the v1.2 daily shapes, which carry sh:Violation constraints, so each shape has one severity story."@en ;
+    rdfs:comment "Soft constraints (sh:Warning only) that health v2.10 adds to every daily aggregate: the UTC interval it covers, the statistic its value is, the zone its day was cut in, and the device that produced it. Warning because these classes existed in v2.9 and existing pods carry none of these facts. A Google daily rollup carries cascade:date only, because its day boundary is not yet measured (tracked separately): the Warning this shape reports on it is the honest state, not a defect, and must not be silenced by a fabricated interval. Kept apart from the v1.2 daily shapes, which carry sh:Violation constraints, so each shape has one severity story."@en ;
 
     sh:property [
         sh:path health:periodStart ;

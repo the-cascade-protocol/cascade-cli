@@ -185,7 +185,7 @@
 #   changes. evidence.ttl and genomics.shapes.ttl, deliberately held back from
 #   three previous syncs, produced no diff this time and were not touched.
 #
-# 2026-09-24 — core 3.9→3.10, health 2.9→2.10
+# 2026-09-24 — core 3.9→3.10, health 2.9→2.11 (two releases)
 #   Wellness and fitness records, measured before modelled. Synced from spec
 #   1c3e33b (d819bc2..1c3e33b) with scripts/sync-shapes-from-spec.sh; only
 #   core.ttl, core.shapes.ttl, health.ttl and health.shapes.ttl changed —
@@ -242,8 +242,15 @@
 #   Every new finding is at sh:Warning except the four brand-new session/
 #   device shapes' own load-bearing facts (no existing pod can regress), so no
 #   existing pod, fixture or expected output changes.
+#   - health v2.11 (2026-09-25, spec PR the-cascade-protocol/spec#70, merge
+#     735bb57): comment hygiene only. Internal tracker references (root
+#     backlog numbers, bracketed proposal tags) removed from health.ttl and
+#     health.shapes.ttl comments; no term, range, shape or context change.
+#     This sync also carried the same cleanup in src/shapes/workbench.ttl
+#     (draft, unrowed below per D-PATH). Re-synced because health 2.10's
+#     bundled shapes comments tripped tests/no-internal-references.test.ts.
 core=3.10
-health=2.10
+health=2.11
 clinical=1.19
 coverage=1.6
 checkup=3.3
