@@ -19,7 +19,7 @@
  * counted.
  */
 
-import { scanXml, type XmlEvent } from './xml-scanner.js';
+import { detach, detachAll, scanXml, type XmlEvent } from './xml-scanner.js';
 import { parseAppleTimestamp, utcDayNumber } from './time.js';
 import { metricRuleFor } from './rules.js';
 import { stripDeviceAddress } from './device.js';
@@ -122,7 +122,11 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
 
   const countZone = (meta: Record<string, string>): void => {
     const z = meta.HKTimeZone;
-    if (z) result.timeZoneCounts.set(z, (result.timeZoneCounts.get(z) ?? 0) + 1);
+    if (!z) return;
+    const n = result.timeZoneCounts.get(z);
+    // A new key is kept for the whole scan, so it must not pin the text it was cut from.
+    if (n === undefined) result.timeZoneCounts.set(detach(z), 1);
+    else result.timeZoneCounts.set(z, n + 1);
   };
 
   const finishRecord = (r: OpenRecord): void => {
@@ -151,7 +155,13 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
     let idx = seriesIndex.get(k);
     if (idx === undefined) {
       idx = series.length;
-      series.push(key);
+      series.push({
+        type: detach(key.type),
+        sourceName: detach(key.sourceName),
+        sourceVersion: detach(key.sourceVersion),
+        unit: detach(key.unit),
+        device: detach(key.device),
+      });
       seriesIndex.set(k, idx);
     }
     const creation = parseAppleTimestamp(a.creationDate);
@@ -193,18 +203,18 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
           record = { attrs: e.attrs, metadata: {} };
           return;
         case 'Workout':
-          if (parent === 'HealthData') workout = { attrs: e.attrs, metadata: {}, statistics: [] };
+          if (parent === 'HealthData') workout = { attrs: detachAll(e.attrs), metadata: {}, statistics: [] };
           return;
         case 'WorkoutStatistics':
-          if (workout && parent === 'Workout') workout.statistics.push(e.attrs);
+          if (workout && parent === 'Workout') workout.statistics.push(detachAll(e.attrs));
           return;
         case 'MetadataEntry':
           if (e.attrs.key === undefined || e.attrs.value === undefined) return;
           if (record && parent === 'Record') record.metadata[e.attrs.key] = e.attrs.value;
-          else if (workout && parent === 'Workout') workout.metadata[e.attrs.key] = e.attrs.value;
+          else if (workout && parent === 'Workout') workout.metadata[detach(e.attrs.key)] = detach(e.attrs.value);
           return;
         case 'ActivitySummary':
-          if (parent === 'HealthData') result.activitySummaries.push(e.attrs);
+          if (parent === 'HealthData') result.activitySummaries.push(detachAll(e.attrs));
           return;
         default:
           return;

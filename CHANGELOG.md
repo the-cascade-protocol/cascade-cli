@@ -18,9 +18,9 @@ ships in 0.23.0.
 `export.xml`.** Until now an Apple Health export brought in its clinical
 records and none of the watch or phone data, because `export.xml` (4.6 GB in a
 real export) was skipped. It is now read by a streaming aggregator in one pass
-with bounded memory (a generated 3.85 GB, 10-million-sample export imports in
-about a minute with the heap capped at 192 MB), and written as daily wellness
-records under health v2.11:
+(a real 4.6 GB export, 5.9 million aggregated samples over 4,378 closed days,
+imports in about a minute with a peak RSS under 0.9 GB, and completes with the
+heap capped at 384 MB), and written as daily wellness records under health v2.11:
 
 - **Computed daily aggregates**, one record per (source, device, metric,
   statistic, closed day), for steps, heart rate (minimum, average, maximum),
@@ -38,11 +38,22 @@ records under health v2.11:
   `HKTimeZone` in the export, else the importing machine's zone, and the import
   report says which rule applied.
 - **Samples are retained before anything is derived from them.** Each closed
-  day's samples are kept as one compact JSON file (packed columns per series),
-  content-addressed under `attachments/sha-256/`, described in
-  `wellness/samples/samples.ttl` (provisional location). Every computed aggregate
-  points at its day's file with `prov:wasDerivedFrom` and at the rule and its
+  day's samples are kept as one compact JSON pack (packed columns per series),
+  content-addressed under `attachments/sha-256/` and written as soon as the day
+  is computed. Inside it, samples are filed by aggregate group (type, source,
+  device) under the group's sample digest. `wellness/samples/samples.ttl`
+  (provisional location) describes each pack, the groups it holds
+  (`dct:hasPart`), and a node per group named from its sample digest. Every
+  computed aggregate points at its GROUP with `prov:wasDerivedFrom` (never at
+  the day's pack, which changes whenever any series of the day does, so one
+  aggregate name always carries the same triples) and at the rule and its
   version with `prov:wasGeneratedBy`.
+- **The report counts what it passes over**: records the export lists more than
+  once with identical content (`duplicateRecords`, written once), names that
+  arrive with different content (`collisions`, never merged), and every
+  `<Record>` type this release does not read (`unreadRecordTypes`, per type).
+- **Each wellness file is registered in the private type index under every class
+  its records carry**, and listed in `index.ttl`.
 - **Names follow D-WELLNESS-1**: an aggregate is named by the digest seed over
   the pod subject, id space, device, metric, statistic, UTC interval and a
   digest of its samples; a source record carrying its own id is named from it.
@@ -60,7 +71,25 @@ and `activity.ttl` per the pod structure, and devices in `wellness/devices.ttl`
 reconcile rewrites each record into the file it was written to.
 
 Not yet built: sleep sessions, blood pressure readings, basal energy, VO2 max.
-Verification against real exports is still owed.
+
+### Fixed
+
+- **`pod import` and `pod reconcile` no longer crash on a pod holding a large
+  bucket.** Appending with `push(...items)` threw `RangeError: Maximum call
+  stack size exceeded` once one file held more than about 200,000 quads (one
+  year of daily heart rate does). Every such append in `src/` is now a loop, and
+  a test keeps the spread form out.
+- **Wellness buckets are no longer loaded into the reconciler.** It has no
+  matcher for them; a clinical import or `pod reconcile` now leaves them unread,
+  and a write that routes a record into one is additive, never a replacement.
+- **The type index and `index.ttl` are read by parsing.** A substring check
+  matched the commented example in the file `pod init` writes, so
+  `wellness/heart-rate.ttl` was never registered.
+- `pod reconcile`'s undo and `pod add-record` file records through the same
+  router as `pod import`; `pod info` counts wellness records as records, not
+  days; a time zone alias (`US/Pacific`) counts as the zone it names when the
+  day zone is chosen; Ctrl-C during a wellness import removes its encrypted
+  scratch directory, and the next import sweeps any left by a killed one.
 
 **`cascade pod passphrase set <pod-dir> --rotate-dek`: a new data key, and
 every sealed file re-encrypted under it.** A re-wrap changes only which

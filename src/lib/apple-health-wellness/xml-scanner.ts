@@ -211,3 +211,24 @@ export function fileTextChunks(filePath: string): AsyncIterable<string> {
 export async function* stringChunks(text: string, size = 7): AsyncIterable<string> {
   for (let i = 0; i < text.length; i += size) yield text.slice(i, i + size);
 }
+
+/**
+ * A copy of `s` that shares no memory with the text it was cut from.
+ *
+ * V8 represents `buf.slice(a, b)` (and a regex capture) as a view onto the
+ * parent string, so one short attribute value kept past its tag pins the whole
+ * buffer it came from: a megabyte or more of export text. Every string the
+ * scan KEEPS (a workout, an ActivitySummary, a series key, a time zone name)
+ * goes through this, or the retained attributes of a real export pin hundreds
+ * of megabytes of text that has long been scanned.
+ */
+export function detach(s: string): string {
+  return Buffer.from(s, 'utf8').toString('utf8');
+}
+
+/** {@link detach} over an attribute map, keys and values. */
+export function detachAll(attrs: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of Object.keys(attrs)) out[detach(k)] = detach(attrs[k]);
+  return out;
+}

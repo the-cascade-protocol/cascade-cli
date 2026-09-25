@@ -23,6 +23,7 @@
  */
 
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { Quad } from 'n3';
 import { mergeIntoBucket } from '../bucket-write.js';
@@ -100,7 +101,7 @@ export interface WellnessImportReport {
   /**
    * Names that arrived with content different from what the pod (or this same
    * export) already gave them. The pod keeps what it had; within one export,
-   * the version whose canonical triples sort first is kept.
+   * the version whose canonical-triple digest sorts first is kept.
    */
   collisions: string[];
   warnings: string[];
@@ -257,10 +258,13 @@ function additiveCanonicalMerge(
   return out;
 }
 
-/** One record's triples and the canonical string they compare by. */
+/**
+ * One record and a digest of its canonical triples, which is what two records
+ * under one name are compared by. The triples themselves are rebuilt per file
+ * at write time rather than held for every record at once.
+ */
 interface PreparedRecord {
   record: WellnessRecord;
-  quads: Quad[];
   canonical: string;
 }
 
@@ -268,7 +272,7 @@ interface PreparedRecord {
  * Resolve records the export yielded under one name. Identical content is a
  * duplicate (an export can list the same workout twice): kept once and
  * counted. Different content is a collision: reported, and the version whose
- * canonical triples sort first is kept, so the outcome does not depend on the
+ * canonical-triple digest sorts first is kept, so the outcome does not depend on the
  * order the export listed them in. Never a union of the two.
  */
 function dedupeRecords(records: WellnessRecord[]): {
@@ -280,11 +284,12 @@ function dedupeRecords(records: WellnessRecord[]): {
   const duplicates: Record<string, number> = {};
   const collided = new Set<string>();
   for (const record of records) {
-    const quads = recordQuads(record);
-    const canonical = quads.map(quadKey).sort(cmpStr).join('\u0001');
+    const canonical = createHash('sha256')
+      .update(recordQuads(record).map(quadKey).sort(cmpStr).join('\u0001'))
+      .digest('hex');
     const prior = byIri.get(record.iri);
     if (!prior) {
-      byIri.set(record.iri, { record, quads, canonical });
+      byIri.set(record.iri, { record, canonical });
       continue;
     }
     if (prior.canonical === canonical) {
@@ -292,7 +297,7 @@ function dedupeRecords(records: WellnessRecord[]): {
       continue;
     }
     collided.add(record.iri);
-    if (canonical < prior.canonical) byIri.set(record.iri, { record, quads, canonical });
+    if (canonical < prior.canonical) byIri.set(record.iri, { record, canonical });
   }
   return { unique: [...byIri.values()], duplicates, collisions: [...collided].sort(cmpStr) };
 }
@@ -418,7 +423,7 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
       const records = byFile.get(key)!;
       const rel = `${info.directory}/${info.filename}`;
       const quads: Quad[] = [];
-      for (const r of records) appendAll(quads, r.quads);
+      for (const r of records) appendAll(quads, recordQuads(r.record));
       files.push(await writeFile(podDir, rel, key, quads, records.length, dek, dryRun, collisions));
     }
 
