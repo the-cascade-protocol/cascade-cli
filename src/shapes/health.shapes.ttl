@@ -9,7 +9,7 @@
 # ============================================================================
 # Cascade Protocol — Health & Wellness Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.7 (2026-09-06)
+# Version: 1.8 (2026-09-24)
 # Validates: health:SelfReport, health:VO2MaxStatistics, health:HRVStatistics,
 #            health:BPStatistics, health:MetricTrend, health:ActivitySnapshot,
 #            health:SleepSnapshot, health:HealthProfile,
@@ -18,16 +18,56 @@
 #            health:AllergyRecord, health:ImmunizationRecord,
 #            health:FamilyHistoryRecord,
 #            health:DailyVitalReading, health:DailyActivitySnapshot,
-#            health:DailySleepSnapshot
+#            health:DailySleepSnapshot, health:Workout, health:SleepSession,
+#            health:Device
 #
 # SEVERITY LEVELS:
 # - sh:Violation = Must fix (data invalid without) - e.g., missing required stats
 # - sh:Warning = Should address (important for completeness) - e.g., missing period
 # - sh:Info = Nice to have (suggested enrichment) - e.g., optional context fields
 #
-# Validates against: health.ttl v2.9 (2026-09-05)
+# Validates against: health.ttl v2.10 (2026-09-24), core.ttl v3.10
 #
 # CHANGELOG
+# v1.8 (2026-09-24): Wellness and fitness records (health v2.10, core v3.10).
+#     Seven new node shapes. Nothing that validated under v1.7 stops
+#     validating: every new finding on a class that existed in health v2.9 is
+#     at sh:Warning, per the core v3.5 ratchet.
+#
+#     1. NEW health:AggregateReadingShape, sh:targetClass on each of
+#        health:DailyVitalReading, health:DailyActivitySnapshot and
+#        health:DailySleepSnapshot (named explicitly, validation/index.md S1).
+#        At sh:Warning: the UTC interval (health:periodStart and
+#        health:periodEnd, each present once, written as a Z instant), the
+#        statistic (cascade:statistic present), the cut zone (health:timeZone
+#        as an IANA name) and the device link (health:device by IRI). These
+#        classes existed in v2.9 and existing pods carry none of this, so
+#        presence is a Warning and never a Violation. It is a SEPARATE shape
+#        from the three v1.2 daily shapes on purpose: those carry sh:Violation
+#        constraints, and keeping the soft ones on a shape that reaches the
+#        same classes by sh:targetClass keeps each shape's severity unambiguous
+#        and keeps S5 true should anything ever reference the v1.2 shapes by
+#        sh:node.
+#     2. NEW health:WorkoutShape, health:SleepSessionShape and
+#        health:DeviceShape, for the three classes health v2.10 adds. The facts
+#        a record is meaningless without, and malformed values of the new
+#        properties, are sh:Violation: no pod written before v2.10 can contain
+#        these classes, so there is no existing data to be lenient toward (the
+#        core v3.7 AttachmentShape precedent). Soft facts (the zone and offset
+#        forms, the closed set of health:sourceIdSpace, the UTC form of the
+#        interval) are sh:Warning, on the separate health:SessionSoftShape,
+#        so that every shape carries one severity story.
+#     3. NEW health:SleepQualitySpellingShape, sh:targetSubjectsOf
+#        health:sleepQuality, sh:maxCount 0 at sh:Warning. health:sleepQuality
+#        is deprecated in v2.10 and existing data carrying it still validates;
+#        the warning is the migration signal. Modelled on
+#        health:ConditionSpellingShape (v1.7). The v1.2 value constraint on
+#        health:DailySleepSnapshotShape is unchanged.
+#     4. No shape references another by sh:node in this release, and no
+#        sh:class is used: an edge to a device or an attachment is checked as an
+#        IRI only, because pods partition records into per-type files and a
+#        validator reading one file cannot see the target's type.
+#
 # v1.7 (2026-09-06): Declare the condition abatement date and the condition
 #     category on health:ConditionRecordShape, and warn on the undefined
 #     health: spellings. Shapes-only, additive, and every new finding is at
@@ -2001,4 +2041,472 @@ health:DailySleepSnapshotShape a sh:NodeShape ;
         sh:name "Sleep Quality"@en ;
         sh:message "Sleep quality must be one of health:Excellent, health:Good, health:Fair, health:Poor"@en ;
         sh:severity sh:Violation
+    ] .
+
+# ============================================================================
+# Wellness and Fitness Shapes (v1.8, health v2.10)
+# ============================================================================
+#
+# SEVERITY, STATED ONCE FOR THE SECTION. Classes that existed in health v2.9
+# (the three daily aggregates) gain Warning-only constraints, because existing
+# pods carry none of the new facts and the core v3.5 ratchet forbids rejecting
+# them. Classes new in v2.10 (health:Workout, health:SleepSession,
+# health:Device) take sh:Violation for what a record is meaningless without and
+# for malformed values, because no earlier pod can contain them; their soft
+# facts sit on health:SessionSoftShape at sh:Warning. No shape here is the
+# target of an sh:node reference, and none may become one while it carries a
+# Warning (validation/index.md S5).
+
+# ----------------------------------------------------------------------------
+# The interval, the statistic, the zone and the device on every daily aggregate
+# ----------------------------------------------------------------------------
+
+health:AggregateReadingShape a sh:NodeShape ;
+    sh:targetClass health:DailyVitalReading ;
+    sh:targetClass health:DailyActivitySnapshot ;
+    sh:targetClass health:DailySleepSnapshot ;
+    rdfs:label "Aggregate Reading Shape"@en ;
+    rdfs:comment "Soft constraints (sh:Warning only) that health v2.10 adds to every daily aggregate: the UTC interval it covers, the statistic its value is, the zone its day was cut in, and the device that produced it. Warning because these classes existed in v2.9 and existing pods carry none of these facts. A Google daily rollup carries cascade:date only, because its day boundary is not yet measured (root backlog 3.484): the Warning this shape reports on it is the honest state, not a defect, and must not be silenced by a fabricated interval. Kept apart from the v1.2 daily shapes, which carry sh:Violation constraints, so each shape has one severity story."@en ;
+
+    sh:property [
+        sh:path health:periodStart ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:dateTime ;
+        sh:name "Period Start"@en ;
+        sh:message "A daily aggregate should state the start of the UTC interval it covers, once, as an xsd:dateTime (health v2.10). cascade:date is a display date; the interval is the identity-bearing cut of the day (D-WELLNESS-1 Q2)."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:periodEnd ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:dateTime ;
+        sh:name "Period End"@en ;
+        sh:message "A daily aggregate should state the (exclusive) end of the UTC interval it covers, once, as an xsd:dateTime (health v2.10)."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:periodStart ;
+        sh:pattern "(Z|\\+00:00)$" ;
+        sh:name "Period Start (UTC)"@en ;
+        sh:message "health:periodStart should be written as a UTC instant ending in Z; the day is cut in the zone named by health:timeZone and then expressed in UTC."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:periodEnd ;
+        sh:pattern "(Z|\\+00:00)$" ;
+        sh:name "Period End (UTC)"@en ;
+        sh:message "health:periodEnd should be written as a UTC instant ending in Z."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path cascade:statistic ;
+        sh:minCount 1 ;
+        sh:name "Statistic"@en ;
+        sh:message "A daily aggregate should say which statistic of its samples its value is (cascade:statistic, core v3.10): a mean and a maximum over the same samples are two records. The value form is checked by cascade:StatisticShape."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:timeZone ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$" ;
+        sh:name "Time Zone"@en ;
+        sh:message "health:timeZone on an aggregate is the single IANA zone name its day was cut in (for example 'America/Los_Angeles'), not a numeric offset."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:device ;
+        sh:nodeKind sh:IRI ;
+        sh:name "Device"@en ;
+        sh:message "health:device should reference a health:Device by IRI, so the reading and the device can live in different files."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ----------------------------------------------------------------------------
+# Workout
+# ----------------------------------------------------------------------------
+
+health:WorkoutShape a sh:NodeShape ;
+    sh:targetClass health:Workout ;
+    rdfs:label "Workout Shape"@en ;
+    rdfs:comment "Validation constraints for one exercise session (health v2.10). Requires the activity type and the interval, and rejects malformed values of the new properties. The route is optional: Fitbit supplies none."@en ;
+
+    sh:property [
+        sh:path health:activityType ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:pattern "^(healthkit|google-health|fitbit):.+$" ;
+        sh:name "Activity Type"@en ;
+        sh:message "A workout must carry exactly one health:activityType: the source's own identifier under one of the source namespaces this release declares (healthkit, google-health, fitbit), for example 'healthkit:HKWorkoutActivityTypeCycling', 'google-health:Outdoor Walk' or 'fitbit:90013'."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:periodStart ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Period Start"@en ;
+        sh:message "A workout must carry exactly one health:periodStart as an xsd:dateTime."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:periodEnd ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Period End"@en ;
+        sh:message "A workout must carry exactly one health:periodEnd as an xsd:dateTime."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:snomedCode ;
+        sh:nodeKind sh:IRI ;
+        sh:name "SNOMED CT Code"@en ;
+        sh:message "health:snomedCode on a workout is an optional SNOMED CT IRI beside the source's activity type, never a replacement for it."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:durationMinutes ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Duration (minutes)"@en ;
+        sh:message "health:durationMinutes must be a single non-negative xsd:decimal."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:distanceMeters ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Distance (meters)"@en ;
+        sh:message "health:distanceMeters must be a single non-negative xsd:decimal."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:activeEnergyKcal ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Active Energy (kcal)"@en ;
+        sh:message "health:activeEnergyKcal on a workout must be a single non-negative xsd:decimal."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:averageHeartRate ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 300 ;
+        sh:name "Average Heart Rate"@en ;
+        sh:message "health:averageHeartRate must be a single xsd:decimal between 0 and 300 beats per minute."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:maximumHeartRate ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 300 ;
+        sh:name "Maximum Heart Rate"@en ;
+        sh:message "health:maximumHeartRate must be a single xsd:decimal between 0 and 300 beats per minute."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:indoor ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:name "Indoor"@en ;
+        sh:message "health:indoor must be a single xsd:boolean."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:workoutRoute ;
+        sh:nodeKind sh:IRI ;
+        sh:name "Workout Route"@en ;
+        sh:message "health:workoutRoute must reference a cascade:Attachment by IRI (the route file is content-addressed and never parsed into triples)."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:device ;
+        sh:nodeKind sh:IRI ;
+        sh:name "Device"@en ;
+        sh:message "health:device must reference a health:Device by IRI."@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ----------------------------------------------------------------------------
+# Sleep session
+# ----------------------------------------------------------------------------
+
+health:SleepSessionShape a sh:NodeShape ;
+    sh:targetClass health:SleepSession ;
+    rdfs:label "Sleep Session Shape"@en ;
+    rdfs:comment "Validation constraints for one sleep episode as one source recorded it (health v2.10). Requires the interval; every stage total and the source-supplied score is single-valued and in range. Two sessions for one night from two algorithm versions are two records and are not a finding."@en ;
+
+    sh:property [
+        sh:path health:periodStart ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Period Start"@en ;
+        sh:message "A sleep session must carry exactly one health:periodStart as an xsd:dateTime."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:periodEnd ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Period End"@en ;
+        sh:message "A sleep session must carry exactly one health:periodEnd as an xsd:dateTime."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:algorithmVersion ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Algorithm Version"@en ;
+        sh:message "health:algorithmVersion must be a single string, verbatim from the source (for example 'sleep_session_v2')."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:sleepScore ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:maxInclusive 100 ;
+        sh:name "Sleep Score"@en ;
+        sh:message "health:sleepScore must be a single source-supplied xsd:decimal between 0 and 100. A negative sub-score sentinel from the source is absent, not a score."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:inBedMinutes ;
+        sh:datatype xsd:decimal ; sh:maxCount 1 ; sh:minInclusive 0 ;
+        sh:name "In Bed (minutes)"@en ;
+        sh:message "health:inBedMinutes must be a single non-negative xsd:decimal."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:awakeMinutes ;
+        sh:datatype xsd:decimal ; sh:maxCount 1 ; sh:minInclusive 0 ;
+        sh:name "Awake (minutes)"@en ;
+        sh:message "health:awakeMinutes must be a single non-negative xsd:decimal."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:lightSleepMinutes ;
+        sh:datatype xsd:decimal ; sh:maxCount 1 ; sh:minInclusive 0 ;
+        sh:name "Light Sleep (minutes)"@en ;
+        sh:message "health:lightSleepMinutes must be a single non-negative xsd:decimal."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:deepSleepMinutes ;
+        sh:datatype xsd:decimal ; sh:maxCount 1 ; sh:minInclusive 0 ;
+        sh:name "Deep Sleep (minutes)"@en ;
+        sh:message "health:deepSleepMinutes must be a single non-negative xsd:decimal."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:remSleepMinutes ;
+        sh:datatype xsd:decimal ; sh:maxCount 1 ; sh:minInclusive 0 ;
+        sh:name "REM Sleep (minutes)"@en ;
+        sh:message "health:remSleepMinutes must be a single non-negative xsd:decimal."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:restlessMinutes ;
+        sh:datatype xsd:decimal ; sh:maxCount 1 ; sh:minInclusive 0 ;
+        sh:name "Restless (minutes)"@en ;
+        sh:message "health:restlessMinutes must be a single non-negative xsd:decimal."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:asleepUnspecifiedMinutes ;
+        sh:datatype xsd:decimal ; sh:maxCount 1 ; sh:minInclusive 0 ;
+        sh:name "Asleep, Unspecified (minutes)"@en ;
+        sh:message "health:asleepUnspecifiedMinutes must be a single non-negative xsd:decimal."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:device ;
+        sh:nodeKind sh:IRI ;
+        sh:name "Device"@en ;
+        sh:message "health:device must reference a health:Device by IRI."@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ----------------------------------------------------------------------------
+# Session soft constraints (Workout and SleepSession), sh:Warning only
+# ----------------------------------------------------------------------------
+
+health:SessionSoftShape a sh:NodeShape ;
+    sh:targetClass health:Workout ;
+    sh:targetClass health:SleepSession ;
+    rdfs:label "Session Soft Shape"@en ;
+    rdfs:comment "Soft constraints (sh:Warning only) shared by the two session classes: the form of the zone and offset, the source identifier as a plain string, the closed set of id spaces, and the UTC form of the interval. Warning because each is a form a writer can get slightly wrong without making the record unusable."@en ;
+
+    sh:property [
+        sh:path health:timeZone ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$" ;
+        sh:name "Time Zone"@en ;
+        sh:message "health:timeZone on a session is the single IANA zone name the source recorded (for example Apple's HKTimeZone). A numeric offset goes in health:utcOffset."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:utcOffset ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:pattern "^[+-](0[0-9]|1[0-4]):[0-5][0-9]$" ;
+        sh:name "UTC Offset"@en ;
+        sh:message "health:utcOffset should be a single offset normalized to +HH:MM or -HH:MM (Google writes '-7:0' and '-07:00' for one offset). A Fitbit '+00:00' placeholder is not written at all."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:sourceRecordId ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Source Record Identifier"@en ;
+        sh:message "health:sourceRecordId on a session is the source's id verbatim, as a single string (ids above 2^53 are routine), with no prefix: the id space goes in health:sourceIdSpace."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:sourceIdSpace ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("healthkit" "google-health" "fitbit") ;
+        sh:name "Source Id Space"@en ;
+        sh:message "health:sourceIdSpace must be one of the id spaces this release declares: healthkit, google-health, fitbit."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:periodStart ;
+        sh:pattern "(Z|\\+00:00)$" ;
+        sh:name "Period Start (UTC)"@en ;
+        sh:message "health:periodStart should be written as a UTC instant ending in Z; the session's local zone is carried separately."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:periodEnd ;
+        sh:pattern "(Z|\\+00:00)$" ;
+        sh:name "Period End (UTC)"@en ;
+        sh:message "health:periodEnd should be written as a UTC instant ending in Z."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ----------------------------------------------------------------------------
+# Device
+# ----------------------------------------------------------------------------
+
+health:DeviceShape a sh:NodeShape ;
+    sh:targetClass health:Device ;
+    rdfs:label "Device Shape"@en ;
+    rdfs:comment "Validation constraints for a device record (health v2.10). Requires the normalized name, the one identity input every source supplies. Manufacturer and software version are repeatable, because a writer that only adds records each spelling and version it has seen."@en ;
+
+    sh:property [
+        sh:path health:deviceName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minLength 1 ;
+        sh:name "Device Name"@en ;
+        sh:message "A device must carry exactly one non-empty health:deviceName, normalized (for Google, a leading 'Google ' removed)."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:deviceModel ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Device Model"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:hardwareVersion ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Hardware Version"@en ;
+        sh:message "health:hardwareVersion is identity-bearing and must be a single string."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:deviceManufacturer ;
+        sh:datatype xsd:string ;
+        sh:name "Device Manufacturer"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:softwareVersion ;
+        sh:datatype xsd:string ;
+        sh:name "Software Version"@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path health:serialNumber ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Serial Number"@en ;
+        sh:severity sh:Violation
+    ] .
+
+# ----------------------------------------------------------------------------
+# Deprecated spelling: health:sleepQuality
+# ----------------------------------------------------------------------------
+# Targets the SUBJECTS OF the deprecated predicate, so it fires exactly once per
+# record that carries it and never on one that does not (the
+# health:ConditionSpellingShape pattern). sh:Warning: the property is
+# deprecated, not removed, and existing data still validates.
+
+health:SleepQualitySpellingShape a sh:NodeShape ;
+    sh:targetSubjectsOf health:sleepQuality ;
+    rdfs:label "Sleep Quality Spelling Shape"@en ;
+    sh:property [
+        sh:path health:sleepQuality ;
+        sh:maxCount 0 ;
+        sh:name "Sleep Quality (deprecated)"@en ;
+        sh:message "health:sleepQuality is deprecated in health v2.10: a home-grown Excellent/Good/Fair/Poor enum with no standard behind it. Stop writing it. A score a source supplies is health:sleepScore on a health:SleepSession."@en ;
+        sh:severity sh:Warning
     ] .
