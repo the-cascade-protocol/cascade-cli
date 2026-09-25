@@ -109,6 +109,11 @@ beforeAll(() => {
   // Two disagreeing doses of one drug raise a conflict; resolving it writes
   // settings/user-resolutions.ttl. A SECOND disagreement afterwards leaves
   // settings/pending-conflicts.ttl populated too, so both files carry a row.
+  //
+  // The answer is `both`, not a keep-one, so the one thing this file is about
+  // stays the only thing in play: a keep-one answer is carried out by the next
+  // reconciliation as a retraction overlay, which is a separate subject with
+  // its own treatment and not part of what "bookkeeping" means here.
   for (const f of [levoA, levoB]) {
     expect(cli(['pod', 'import', podDir, f, '--reconcile-existing']).status).toBe(0);
   }
@@ -116,7 +121,7 @@ beforeAll(() => {
   const rows = JSON.parse(conflicts.out) as Array<{ conflictId: string }>;
   expect(rows.length, `expected one levothyroxine conflict:\n${conflicts.out}`).toBe(1);
   expect(
-    cli(['pod', 'resolve', podDir, '--conflict', rows[0].conflictId, '--keep', 'source-a']).status,
+    cli(['pod', 'resolve', podDir, '--conflict', rows[0].conflictId, '--keep', 'both']).status,
   ).toBe(0);
   for (const f of [sertA, sertB]) {
     expect(cli(['pod', 'import', podDir, f, '--reconcile-existing']).status).toBe(0);
@@ -151,7 +156,14 @@ describe('pod query --all: paperwork is not a record', () => {
     expect(types).not.toContain('core:PendingConflict');
     expect(types).not.toContain('core:UserResolution');
     // The medications are still all there: this excludes bookkeeping, not files.
-    expect(types).toEqual(['clinical:Medication', 'clinical:Medication']);
+    // Four, because a conflict keeps both of its records: the answered
+    // levothyroxine pair and the unanswered sertraline pair.
+    expect(types).toEqual([
+      'clinical:Medication',
+      'clinical:Medication',
+      'clinical:Medication',
+      'clinical:Medication',
+    ]);
   });
 
   it('leaves no empty bucket behind where the bookkeeping used to be counted', () => {

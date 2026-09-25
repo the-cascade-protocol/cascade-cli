@@ -9,6 +9,77 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+**An import that does not reconcile states its `--source-system`.** One file
+into an empty pod (or `--no-reconcile`) wrote the converter's records with no
+`cascade:sourceSystem`, so the next reconciling import read them back under the
+placeholder `existing-pod`, and could persist that placeholder as if it were
+provenance. The label is now stated on every such record, and the reconciler
+never writes a placeholder (`existing-pod`, or the bucket path `pod reconcile`
+read a record from) as a record's `cascade:sourceSystem`.
+
+**`pod conflicts` says "Trust-preferred record:"** where it said "Surviving
+record:", since both candidates now stay in the pod. The JSON field is still
+`survivingRecordUri`.
+
+**An unresolved conflict keeps both of its records.** A dose, frequency or
+status disagreement the reconciler declines to settle (and any group the
+opt-in cross-provenance guard flags) used to be written back as ONE record,
+the trust winner, with the other folded into it: the losing side's record left
+the pod before anyone had answered the question, and survived only as a string
+on the queue row. Both records now stay, each marked
+`cascade:reconciliationStatus "unresolved-conflict"`, with no `cascade:mergedFrom`
+between them, until the conflict is answered. Pods with unanswered conflicts
+hold more records than before (the pathology corpus's medication-chain scenario
+goes from 5 medications to 9), and the conflict row is unchanged.
+
+### Fixed
+
+**A recorded conflict resolution is now carried out.** `pod resolve` wrote the
+owner's decision to `settings/user-resolutions.ttl` and nothing read it back,
+so the next `pod reconcile` or `pod import` asked the same question again and a
+"keep this one" answer only took effect through a separate, unlinked
+`pod retract --superseded-by`. Recorded resolutions are now an input to every
+reconciliation (`runReconciliation`'s new `userResolutions` option):
+
+- an answered conflict is never raised again, and a row an earlier run
+  re-queued is cleared (`pendingConflicts.clearedByResolution`);
+- `--keep source-a` / `--keep source-b` is carried out as the same
+  `workbench:Retraction` + `workbench:supersededBy` overlay `pod retract`
+  writes, in `annotations/retractions.ttl`, with `prov:wasDerivedFrom` the
+  resolution record and `cascade:autoResolved true`. Both records stay;
+- `--keep both` keeps both records and supersedes neither.
+
+An answer covers the RECORDS it was given about, not every later record under
+the same conflict id (the id is a match key). `pod resolve` now records
+`cascade:candidateRecords` for every choice, `--keep both` included. A group is
+settled only when the answers that bear on it name every one of its records; a
+record no answer names (a third source under the same key) raises a NEW
+conflict, naming only that record against the records the answers left
+standing, under an id of its own (`<key>::pair-<digest>`) so that answering it
+adds a decision rather than replacing the first. An answer whose discarded
+record is not in the pod does not settle the pair it no longer describes.
+
+Resolutions recorded by an earlier CLI carry no candidate records. A keep-one
+answer from then still applies, because its kept and discarded records name the
+pair. A `--keep both` answer from then names no record at all, so its question
+is asked again once; answering it records the candidates.
+
+The decision log holds one row per conflict id: when the same conflict is
+answered twice, the last answer replaces the first, and
+`pod conflicts --resolved` shows only that one.
+
+The overlay's IRI and timestamp are derived from the resolution, so a second
+run writes nothing and a pod rebuilt from the same records plus the same
+`user-resolutions.ttl` gets the identical overlay. `pod reconcile --json` and
+`pod import --json` report a `userResolutions` block (answered conflicts,
+supersessions, overlays written). `pod resolve` says that the decision takes
+effect at the next reconcile, and its `--json` result names the command
+(`appliedBy`). A resolutions file that exists and cannot be read stops
+`pod reconcile` and `pod import` at exit 2, as the conflict queue does.
+`pod retract` is unchanged.
+
 ### Added
 
 **`cascade pod passphrase set <pod-dir>`: change an encrypted pod's passphrase.**

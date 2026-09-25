@@ -6,6 +6,14 @@
  * Saves the decision to settings/user-resolutions.ttl and removes the
  * resolved conflict from settings/pending-conflicts.ttl.
  *
+ * RECORDING IS NOT APPLYING. This verb changes no record. The decision is an
+ * input to reconciliation, and it is the next reconciliation (`pod reconcile
+ * --apply`, or the one every `pod import` runs) that carries it out: a
+ * keep-one answer becomes a `workbench:Retraction` superseding the other
+ * record, and every answered conflict stays out of the queue for good. One
+ * place applies decisions, so a pod rebuilt from the same records and the same
+ * `user-resolutions.ttl` comes out the same.
+ *
  * `--by` attributes the decision (`prov:wasAttributedTo`), mirroring
  * `pod annotate --by`. It is optional: the log recorded WHEN a conflict was
  * answered and never by whom, which is unattributable on a pod more than one
@@ -35,7 +43,9 @@ import { assertWritableIri } from '../../lib/bucket-write.js';
 export function registerResolveCommand(podProgram: Command, program: Command): void {
   podProgram
     .command('resolve')
-    .description('Record a conflict resolution decision in the pod')
+    .description(
+      'Record a conflict resolution decision in the pod (carried out by the next pod reconcile --apply)',
+    )
     .argument('<pod-dir>', 'Path to the Cascade Pod directory')
     .requiredOption('--conflict <id>', 'Conflict ID to resolve (from cascade pod conflicts)')
     .requiredOption('--keep <choice>', 'Which source to keep: source-a, source-b, both')
@@ -126,6 +136,9 @@ export function registerResolveCommand(podProgram: Command, program: Command): v
         resolution,
         keptRecordUri,
         discardedRecordUris,
+        // Every choice, `both` included: the answer is about THESE records, and
+        // a later record under the same conflict key is a question it never saw.
+        candidateRecordUris: [...conflict.candidateRecordUris],
         userNote: options.note,
         actorIri: options.by,
       }, dek);
@@ -134,10 +147,15 @@ export function registerResolveCommand(podProgram: Command, program: Command): v
       const remaining = pending.filter(c => c.conflictId !== options.conflict);
       await writePendingConflicts(podDir, remaining, dek);
 
+      const applyCommand = shellCommand('cascade', 'pod', 'reconcile', podDirArg, '--apply');
+
       if (globalOpts.json) {
         printResult(
           {
             resolved: true,
+            // Recorded, not yet carried out. Named so a caller does not have to
+            // know that the two are different steps.
+            appliedBy: applyCommand,
             conflictId: options.conflict,
             keep: options.keep,
             resolution,
@@ -153,6 +171,7 @@ export function registerResolveCommand(podProgram: Command, program: Command): v
         );
       } else {
         console.log(`Resolution saved: ${options.conflict} -> keep-${options.keep}`);
+        console.log(`It takes effect the next time the pod is reconciled: ${applyCommand}`);
         if (remaining.length > 0) {
           console.log(`${remaining.length} conflict${remaining.length > 1 ? 's' : ''} still pending`);
         } else {

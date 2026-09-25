@@ -38,6 +38,14 @@ import {
   sourceLabel,
   type SourceIdentityTier,
 } from './source-identity.js';
+import {
+  generateConflictId,
+  keepsOneRecord,
+  resolutionAppliesTo,
+  resolutionNamedRecords,
+  type ResolutionChoice,
+  type UserResolution,
+} from './user-resolutions.js';
 
 // Re-export so existing consumers of the reconciler's normalizeMedName keep
 // working. The canonical definition now lives in ./medication-normalize.ts
@@ -68,6 +76,72 @@ export interface ReconcilerOptions {
    * stance that never silently merges across provenance.
    */
   allowCrossProvenanceMerge?: boolean;
+  /**
+   * The owner's recorded answers to earlier conflicts
+   * (`settings/user-resolutions.ttl`, keyed by conflict id), consumed as an
+   * INPUT to this run rather than read back for display.
+   *
+   * A judgement is a record in its own right, and the reconciled result is a
+   * function of the records AND the judgements. Without this, `pod resolve`
+   * wrote a decision nothing ever read: the next run re-derived the same
+   * question from the same records, and an owner's merge existed only if a
+   * second, unlinked `pod retract --superseded-by` was written by hand.
+   *
+   * What a judgement does to the run is described at {@link judgementsForGroup}
+   * (which question it answers) and {@link UserResolutionEffects} (what the run
+   * reports so a caller can write the consequence).
+   */
+  userResolutions?: ReadonlyMap<string, UserResolution>;
+}
+
+/**
+ * A conflict this run did NOT raise because the owner already answered it.
+ */
+export interface AnsweredConflict {
+  /** The id the judgement is stored under. May be an earlier CLI's spelling. */
+  conflictId: string;
+  recordType: string;
+  matchedOn: string;
+  /** The `cascade:UserResolution` subject that answered it. */
+  resolutionUri: string;
+  resolution: ResolutionChoice;
+  /** The records the question was about, all of which stay in the pod. */
+  candidateUris: string[];
+}
+
+/**
+ * One record the owner's judgement supersedes, and by what.
+ *
+ * The reconciler never writes it. It is handed back so the caller can write it
+ * through the same append-only `workbench:Retraction` overlay that
+ * `pod retract --superseded-by` writes, carrying a link to the judgement. Both
+ * records stay in the pod; the retraction is what makes one of them stand for
+ * the other.
+ */
+export interface Supersession {
+  /** The `cascade:UserResolution` subject whose consequence this is. */
+  resolutionUri: string;
+  conflictId: string;
+  /** The record the owner chose against. */
+  supersededRecordUri: string;
+  /** The record the owner kept. */
+  keptRecordUri: string;
+  /** Who made the judgement, when the judgement says. */
+  actorIri?: string;
+  /** When the judgement was made, ISO 8601. */
+  resolvedAt: string;
+}
+
+/** Everything the owner's judgements did to one run. */
+export interface UserResolutionEffects {
+  /** Conflicts the run would have raised and did not, because they were answered. */
+  answered: AnsweredConflict[];
+  /**
+   * Every supersession the judgements imply over the records this run emits,
+   * sorted. Deterministic in the judgements and the records alone, so a caller
+   * that writes them idempotently makes the run repeatable.
+   */
+  supersessions: Supersession[];
 }
 
 export interface ReconcilerInput {
@@ -88,6 +162,16 @@ export interface ReconcilerInput {
    * `--reconcile-existing` exists — had never run.
    */
   existingPod?: boolean;
+  /**
+   * True when `systemName` is a label the CALLER made up for where it read the
+   * text (`existing-pod`, a bucket path), not a source anyone stated.
+   *
+   * It still serves as the matching default for a record that states no
+   * `cascade:sourceSystem`, exactly as before. What changes is that it is never
+   * WRITTEN onto such a record: persisting it would turn "read back out of the
+   * pod" into a claim about the record's provenance.
+   */
+  labelIsPlaceholder?: boolean;
 }
 
 /**
@@ -183,9 +267,17 @@ export interface ReconcilerResult {
        * a fresh single import. Excludes lineage predicates (dangling by design).
        */
       edgeObjectsRewritten: number;
+      /**
+       * Conflicts answered by a stored owner judgement instead of being raised.
+       * Disjoint from `conflictsResolved` (answered by trust) and
+       * `conflictsUnresolved` (still a question).
+       */
+      userResolutionsApplied: number;
     };
     transformations: object[];
     unresolvedConflicts: object[];
+    /** What the owner's recorded judgements did to this run. */
+    userResolutions: UserResolutionEffects;
     /**
      * Every tier-0 merge this run applied, itemized. Empty on a run that applied
      * none, which is the ordinary case.
@@ -256,6 +348,11 @@ interface ParsedRecord {
    */
   fromExistingPod: boolean;
   /**
+   * True when `sourceSystem` is the input's placeholder label rather than a
+   * value the record states. See {@link ReconcilerInput.labelIsPlaceholder}.
+   */
+  sourceSystemIsPlaceholder?: boolean;
+  /**
    * ORIGIN axis: `cascade:sourceIdentity`, the canonical organization identity.
    * Undefined for a record written before core v3.5 — see {@link sameSourceStatement},
    * which is the only thing that reads it and which falls back safely.
@@ -268,6 +365,7 @@ export async function parseTurtle(
   turtle: string,
   defaultSystem: string,
   fromExistingPod = false,
+  defaultIsPlaceholder = false,
 ): Promise<ParsedRecord[]> {
   return new Promise((resolve, reject) => {
     // Sentinel base: pod content arrives here on its way back to the pod, and a
@@ -298,12 +396,14 @@ export async function parseTurtle(
             }
           }
 
-          const sourceSystem = properties.get(NS.cascade + 'sourceSystem')?.[0]?.value ?? defaultSystem;
+          const stated = properties.get(NS.cascade + 'sourceSystem')?.[0]?.value;
+          const sourceSystem = stated ?? defaultSystem;
           const sourceIdentity = properties.get(SOURCE_IDENTITY_PREDICATE)?.[0]?.value;
           records.push({
             uri,
             type: KNOWN_TYPES[typeTriple.obj.value],
             sourceSystem,
+            ...(stated === undefined && defaultIsPlaceholder ? { sourceSystemIsPlaceholder: true } : {}),
             sourceIdentity,
             fromExistingPod,
             properties,
@@ -2197,6 +2297,33 @@ interface Group {
   conflictSides?: ConflictSide[];
   /** True when every member satisfies the tier-0 predicate. See {@link isTier0Group}. */
   tier0?: boolean;
+  /** What the owner's stored answers say about this group, when any bears on it. */
+  judged?: GroupJudgement;
+  /**
+   * The NEW question a partly-answered group raises: only the pairing no
+   * answer covers, under an id of its own. See {@link judgementsForGroup}.
+   */
+  openQuestion?: {
+    conflictId: string;
+    candidateUris: string[];
+    canonicalUri: string;
+    conflictField?: string;
+    conflictSides?: ConflictSide[];
+  };
+}
+
+/** The stored answers that bear on one group, and whether they settle it. */
+interface GroupJudgement {
+  /** Every answer that names two or more of the group's records, oldest first. */
+  applied: UserResolution[];
+  /** True when every member is named by some applied answer. */
+  covered: boolean;
+  /**
+   * The members no applied keep-one answer chose against. When the group is
+   * not covered, this is the question still open: the records nobody has
+   * answered for, against the records the owner's answers left standing.
+   */
+  standing: string[];
 }
 
 interface Resolution {
@@ -2205,6 +2332,100 @@ interface Resolution {
   mergedSystems: string[];
   strategy: string;
   resolved: boolean;
+  /**
+   * True when EVERY member is written back as its own record rather than only
+   * the canonical one.
+   *
+   * Two cases, and they are the same statement: nobody has decided these
+   * records are one thing. An unresolved conflict is a question the tool
+   * declined to answer, so absorbing the loser into the survivor answered it
+   * anyway, by trust, and destroyed the losing side's record in the process:
+   * the owner could then only ever choose the side the tool had already kept.
+   * A group the owner answered is settled by a supersession the caller writes
+   * as an overlay, which needs both records to still be there.
+   */
+  keepMembers?: boolean;
+}
+
+/**
+ * What the owner's stored answers say about a group.
+ *
+ * An answer is about the RECORDS it names ({@link resolutionNamedRecords}),
+ * never about its conflict id alone. The id is a match key: every later record
+ * under the same key shares it, and an answer to one pair that matched by id
+ * silenced every future disagreement under that key, including records the
+ * owner never saw.
+ *
+ * So an answer bears on a group when it names two or more of its members
+ * ({@link resolutionAppliesTo}), and the group is SETTLED only when the answers
+ * that bear on it name every member between them. A group with a member no
+ * answer names is a new question: it is raised, naming only that member
+ * against the records the answers left standing.
+ */
+function judgementsForGroup(
+  resolutions: ReadonlyMap<string, UserResolution> | undefined,
+  memberUris: readonly string[],
+): GroupJudgement | undefined {
+  if (!resolutions || resolutions.size === 0) return undefined;
+  const members = new Set(memberUris);
+  const applied = [...resolutions.values()]
+    .filter((r) => resolutionAppliesTo(r, members))
+    .sort((a, b) =>
+      a.resolvedAt.getTime() - b.resolvedAt.getTime() || a.uri.localeCompare(b.uri),
+    );
+  if (applied.length === 0) return undefined;
+
+  const named = new Set<string>();
+  const superseded = new Set<string>();
+  for (const r of applied) {
+    for (const u of resolutionNamedRecords(r)) if (members.has(u)) named.add(u);
+    if (keepsOneRecord(r)) {
+      for (const d of r.discardedRecordUris) {
+        if (d !== r.keptRecordUri && members.has(d)) superseded.add(d);
+      }
+    }
+  }
+  return {
+    applied,
+    covered: memberUris.every((u) => named.has(u)),
+    standing: memberUris.filter((u) => !superseded.has(u)),
+  };
+}
+
+/**
+ * The id of a new pairing raised under a key an earlier answer already used.
+ *
+ * Distinct from that answer's id on purpose: the decision log holds one row per
+ * id, so answering the new question under the old id would overwrite the
+ * owner's first answer. Derived from the key and the pairing's records, so the
+ * same pairing gets the same id on every run.
+ */
+function pairingConflictId(recordType: string, matchedOn: string, uris: readonly string[]): string {
+  const digest = createHash('sha256').update([...uris].sort().join('\n')).digest('hex').slice(0, 12);
+  return `${generateConflictId(recordType, matchedOn)}::pair-${digest}`;
+}
+
+/**
+ * Settle a group by the owner's judgement.
+ *
+ * Every member is kept, whichever way the owner decided. `kept-both` means
+ * exactly that. A keep-one answer is carried out by a SUPERSESSION the caller
+ * writes, the same overlay `pod retract --superseded-by` writes, rather than by
+ * absorbing the other record here: the record the owner chose against is still
+ * a thing a source said, and folding it away would make the owner's answer
+ * impossible to revisit.
+ */
+function resolveByJudgement(g: Group): Resolution {
+  const latestKeep = [...(g.judged?.applied ?? [])].reverse().find(keepsOneRecord);
+  const kept = latestKeep ? g.records.find((r) => r.uri === latestKeep.keptRecordUri) : undefined;
+  return {
+    canonical: kept ?? g.records[0],
+    mergedUris: g.records.map((r) => r.uri),
+    mergedSystems: g.records.map((r) => r.sourceSystem),
+    strategy: 'user_resolution',
+    resolved: true,
+    keepMembers: true,
+  };
 }
 
 function completeness(r: ParsedRecord): number {
@@ -2328,6 +2549,8 @@ function resolveGroup(
     mergedSystems: g.records.map(r => r.sourceSystem),
     strategy,
     resolved,
+    // An unanswered question keeps both of its records. See Resolution.keepMembers.
+    keepMembers: !resolved,
   };
 }
 
@@ -2373,6 +2596,9 @@ export function buildDiscardedToCanonical(
 ): Map<string, string> {
   const map = new Map<string, string>();
   for (let i = 0; i < groups.length; i++) {
+    // Nothing was discarded: every member is still its own record, so an edge
+    // that names one of them already points at a real subject.
+    if (resolutions[i].keepMembers) continue;
     const canonicalUri = resolutions[i].canonical.uri;
     for (const r of groups[i].records) {
       if (r.uri !== canonicalUri) map.set(r.uri, canonicalUri);
@@ -2472,64 +2698,161 @@ async function serializeGroups(
     for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
       const res = resolutions[i];
-      const subj = namedNode(res.canonical.uri);
+      // Every member when nobody has decided they are one record (see
+      // Resolution.keepMembers); otherwise the one record the merge produced.
+      const written = res.keepMembers ? g.records : [res.canonical];
+      for (const rec of written) {
+        const subj = namedNode(rec.uri);
 
-      // Lineage this record already carried, so a re-emission below cannot
-      // duplicate it (the pod's own copy arrives as a parsed property).
-      const emittedLineage = new Set<string>();
+        // Lineage this record already carried, so a re-emission below cannot
+        // duplicate it (the pod's own copy arrives as a parsed property).
+        const emittedLineage = new Set<string>();
 
-      for (const [pred, vals] of res.canonical.properties) {
-        // Re-derived below for every record; a carried-over copy would double it.
-        if (RECONCILER_DERIVED_PREDICATES.has(pred)) continue;
-        for (const val of vals) {
-          // What the source term ACTUALLY was, when we recorded it. The
-          // string-shape guess is only the fallback for values this reconciler
-          // derived itself rather than parsed.
-          const isIri = val.isIri ?? (val.value.startsWith('http') || val.value.startsWith('urn:'));
-          const obj = isIri
-            ? namedNode(rewriteEdgeIri(pred, val.value))
-            : val.datatype
-              ? literal(val.value, namedNode(val.datatype))
-              : literal(val.value);
-          if (LINEAGE_PREDICATES.has(pred)) emittedLineage.add(`${pred}|${obj.value}`);
-          emit(makeQuad(subj, namedNode(pred), obj));
-        }
-      }
-
-      // Reconciliation status
-      const status = !res.resolved ? 'unresolved-conflict'
-        : g.matchType === 'pass_through' ? 'canonical'
-        : (g.matchType === 'status_conflict' || g.matchType === 'value_conflict') ? 'conflict-resolved'
-        : 'merged';
-      emit(makeQuad(subj, namedNode(NS.cascade + 'reconciliationStatus'), literal(status)));
-      emit(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(res.canonical.sourceSystem)));
-
-      if (g.matchType !== 'pass_through' && res.mergedUris.length > 1) {
-        for (const srcUri of res.mergedUris) {
-          for (const pred of [NS.cascade + 'mergedFrom', NS.prov + 'wasDerivedFrom']) {
-            // Already carried on the record from an earlier run's merge: state it
-            // once, not once per re-import.
-            if (emittedLineage.has(`${pred}|${srcUri}`)) continue;
-            emittedLineage.add(`${pred}|${srcUri}`);
-            emit(makeQuad(subj, namedNode(pred), namedNode(srcUri)));
+        for (const [pred, vals] of rec.properties) {
+          // Re-derived below for every record; a carried-over copy would double it.
+          if (RECONCILER_DERIVED_PREDICATES.has(pred)) continue;
+          for (const val of vals) {
+            // What the source term ACTUALLY was, when we recorded it. The
+            // string-shape guess is only the fallback for values this reconciler
+            // derived itself rather than parsed.
+            const isIri = val.isIri ?? (val.value.startsWith('http') || val.value.startsWith('urn:'));
+            const obj = isIri
+              ? namedNode(rewriteEdgeIri(pred, val.value))
+              : val.datatype
+                ? literal(val.value, namedNode(val.datatype))
+                : literal(val.value);
+            if (LINEAGE_PREDICATES.has(pred)) emittedLineage.add(`${pred}|${obj.value}`);
+            emit(makeQuad(subj, namedNode(pred), obj));
           }
         }
-        emit(makeQuad(subj, namedNode(NS.cascade + 'mergedSources'), literal(res.mergedSystems.join(', '))));
-        emit(makeQuad(subj, namedNode(NS.cascade + 'conflictResolution'), literal(res.strategy)));
-        if (g.conflictField) emit(makeQuad(subj, namedNode(NS.cascade + 'conflictField'), literal(g.conflictField)));
-        if (g.conflictSides && g.conflictSides.length > 0) {
-          // Rendered from the ORDERED sides, so the clause count always equals
-          // the side count. Building this string from a map keyed on the sides'
-          // labels is what dropped one side's value whenever the two labels
-          // matched, which on a pod-internal run was every time.
-          const valDesc = g.conflictSides.map((s) => `${s.origin}: "${s.value}"`).join(' vs ');
-          emit(makeQuad(subj, namedNode(NS.cascade + 'conflictValues'), literal(valDesc)));
+
+        // Reconciliation status
+        const status = !res.resolved ? 'unresolved-conflict'
+          : res.strategy === 'user_resolution' ? 'conflict-resolved'
+          : g.matchType === 'pass_through' ? 'canonical'
+          : (g.matchType === 'status_conflict' || g.matchType === 'value_conflict') ? 'conflict-resolved'
+          : 'merged';
+        emit(makeQuad(subj, namedNode(NS.cascade + 'reconciliationStatus'), literal(status)));
+        // Never a placeholder: a label the caller invented for where it read
+        // the text is not provenance. See ReconcilerInput.labelIsPlaceholder.
+        if (!rec.sourceSystemIsPlaceholder) {
+          emit(makeQuad(subj, namedNode(NS.cascade + 'sourceSystem'), literal(rec.sourceSystem)));
+        }
+
+        if (!res.keepMembers && g.matchType !== 'pass_through' && res.mergedUris.length > 1) {
+          for (const srcUri of res.mergedUris) {
+            for (const pred of [NS.cascade + 'mergedFrom', NS.prov + 'wasDerivedFrom']) {
+              // Already carried on the record from an earlier run's merge: state it
+              // once, not once per re-import.
+              if (emittedLineage.has(`${pred}|${srcUri}`)) continue;
+              emittedLineage.add(`${pred}|${srcUri}`);
+              emit(makeQuad(subj, namedNode(pred), namedNode(srcUri)));
+            }
+          }
+          emit(makeQuad(subj, namedNode(NS.cascade + 'mergedSources'), literal(res.mergedSystems.join(', '))));
+          emit(makeQuad(subj, namedNode(NS.cascade + 'conflictResolution'), literal(res.strategy)));
+          if (g.conflictField) emit(makeQuad(subj, namedNode(NS.cascade + 'conflictField'), literal(g.conflictField)));
+          if (g.conflictSides && g.conflictSides.length > 0) {
+            // Rendered from the ORDERED sides, so the clause count always equals
+            // the side count. Building this string from a map keyed on the sides'
+            // labels is what dropped one side's value whenever the two labels
+            // matched, which on a pod-internal run was every time.
+            const valDesc = g.conflictSides.map((s) => `${s.origin}: "${s.value}"`).join(' vs ');
+            emit(makeQuad(subj, namedNode(NS.cascade + 'conflictValues'), literal(valDesc)));
+          }
         }
       }
     }
 
     writer.end((err, result) => err ? reject(err) : resolve({ turtle: result, edgeObjectsRewritten }));
   });
+}
+
+// ---------------------------------------------------------------------------
+// Supersessions: what the owner's keep-one answers mean for this run's records
+// ---------------------------------------------------------------------------
+
+/**
+ * Every supersession the stored judgements imply over the records this run
+ * WRITES.
+ *
+ * Deliberately not limited to the groups this run formed. A judgement is an
+ * input to every run, and the pair it names may no longer match under any key
+ * (two halves of an identity collision sit on split IRIs the next run has no
+ * reason to group), yet the owner's answer about them stands. So the rule is
+ * stated over records, not over matches: when the record a keep-one answer kept
+ * and a record it chose against are both in the output, the second is
+ * superseded by the first.
+ *
+ * Sorted by judgement and then by record, so the list is a function of the
+ * judgements and the records alone and two runs over the same inputs agree.
+ */
+function supersessionsFor(
+  userResolutions: ReadonlyMap<string, UserResolution> | undefined,
+  groups: readonly Group[],
+  resolutions: readonly Resolution[],
+): Supersession[] {
+  if (!userResolutions || userResolutions.size === 0) return [];
+  const written = new Set<string>();
+  for (let i = 0; i < groups.length; i++) {
+    if (resolutions[i].keepMembers) for (const r of groups[i].records) written.add(r.uri);
+    else written.add(resolutions[i].canonical.uri);
+  }
+
+  const out: Supersession[] = [];
+  for (const r of [...userResolutions.values()].sort((a, b) => a.uri.localeCompare(b.uri))) {
+    if (r.resolution !== 'kept-source-a' && r.resolution !== 'kept-source-b') continue;
+    if (!r.keptRecordUri || !written.has(r.keptRecordUri)) continue;
+    for (const superseded of [...new Set(r.discardedRecordUris)].sort()) {
+      if (superseded === r.keptRecordUri || !written.has(superseded)) continue;
+      out.push({
+        resolutionUri: r.uri,
+        conflictId: r.conflictId,
+        supersededRecordUri: superseded,
+        keptRecordUri: r.keptRecordUri,
+        ...(r.actorIri ? { actorIri: r.actorIri } : {}),
+        resolvedAt: r.resolvedAt.toISOString(),
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Stating the ingestion label on a path that does not reconcile
+// ---------------------------------------------------------------------------
+
+/**
+ * Add `cascade:sourceSystem "<systemName>"` to every reconcilable record in a
+ * converted document that does not already state one.
+ *
+ * The reconciler states it on every record it writes, so an import that
+ * reconciles persists the label the user gave (`--source-system`). An import
+ * that does NOT reconcile (one file into an empty pod, or `--no-reconcile`)
+ * wrote the converter's text as it was, so its records carried no label at all,
+ * and the next reconciling import read them back under a placeholder instead.
+ * Appended as separate statements, so the converter's own text is untouched.
+ */
+export async function stampSourceSystem(turtle: string, systemName: string): Promise<string> {
+  const base = relBaseFor(turtle);
+  const quads = derelativizeQuads(new Parser({ format: 'Turtle', baseIRI: base }).parse(turtle), base);
+  const typed = new Set<string>();
+  const labelled = new Set<string>();
+  for (const q of quads) {
+    if (q.subject.termType !== 'NamedNode') continue;
+    if (q.predicate.value === NS.rdf + 'type' && KNOWN_TYPES[q.object.value]) typed.add(q.subject.value);
+    if (q.predicate.value === NS.cascade + 'sourceSystem') labelled.add(q.subject.value);
+  }
+  const missing = [...typed].filter((s) => !labelled.has(s)).sort();
+  if (missing.length === 0) return turtle;
+  const extra = await new Promise<string>((resolve, reject) => {
+    const writer = new Writer();
+    for (const s of missing) {
+      writer.addQuad(makeQuad(namedNode(s), namedNode(NS.cascade + 'sourceSystem'), literal(systemName)));
+    }
+    writer.end((err, result) => (err ? reject(err) : resolve(result)));
+  });
+  return `${turtle.replace(/\s*$/, '')}\n\n${extra}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2569,7 +2892,9 @@ export async function runReconciliation(
 
   for (let i = 0; i < inputs.length; i++) {
     const input = inputs[i];
-    const records = await parseTurtle(input.content, input.systemName, input.existingPod === true);
+    const records = await parseTurtle(
+      input.content, input.systemName, input.existingPod === true, input.labelIsPlaceholder === true,
+    );
     allRecords.push(...records);
     sourceInfo.push({ system: input.systemName, count: records.length });
 
@@ -2931,9 +3256,46 @@ export async function runReconciliation(
     g.tier0 = isTier0Group(g.records, fingerprintOf);
   }
 
-  // Resolve
+  // The owner's judgements, BEFORE resolution: a group the owner has already
+  // answered is settled by that answer, not by trust, and is not asked again.
+  const userResolutions = options?.userResolutions;
   const allowCrossProvenanceMerge = options?.allowCrossProvenanceMerge ?? true;
-  const resolutions = groups.map(g => resolveGroup(g, trustScores, defaultTrust, allowCrossProvenanceMerge));
+  for (const g of groups) {
+    if (g.matchType === 'pass_through') continue;
+    g.judged = judgementsForGroup(userResolutions, g.records.map((r) => r.uri));
+    if (!g.judged || g.judged.covered) continue;
+    // Partly answered: a record no answer names has joined a pairing the owner
+    // settled. The new question is that record against what the answers left
+    // standing, classified on its own so the row carries ITS disagreement.
+    const standing = g.records.filter((r) => g.judged!.standing.includes(r.uri));
+    const cls = classifyGroup(standing, labTol, resolver);
+    const preferred = resolveGroup(
+      { ...g, records: standing, matchType: cls.matchType === 'pass_through' ? g.matchType : cls.matchType },
+      trustScores, defaultTrust, allowCrossProvenanceMerge,
+    );
+    g.openQuestion = {
+      conflictId: pairingConflictId(g.records[0].type, g.matchedOn, standing.map((r) => r.uri)),
+      candidateUris: standing.map((r) => r.uri),
+      canonicalUri: preferred.canonical.uri,
+      conflictField: cls.conflictField,
+      conflictSides: cls.conflictSides,
+    };
+  }
+
+  // Resolve
+  const resolutions = groups.map((g): Resolution => {
+    if (g.judged?.covered) return resolveByJudgement(g);
+    if (g.openQuestion) {
+      // A question, so nothing merges: every member stays until it is answered.
+      return {
+        ...resolveByJudgement(g),
+        canonical: g.records.find((r) => r.uri === g.openQuestion!.canonicalUri) ?? g.records[0],
+        strategy: 'flag_unresolved',
+        resolved: false,
+      };
+    }
+    return resolveGroup(g, trustScores, defaultTrust, allowCrossProvenanceMerge);
+  });
 
   // The tier-0 journal: what merged, what it merged away, and enough of the
   // discarded records to put them back.
@@ -2952,7 +3314,7 @@ export async function runReconciliation(
   const tier0Merges: Tier0Merge[] = [];
   for (let i = 0; i < groups.length; i++) {
     const g = groups[i];
-    if (!g.tier0 || !resolutions[i].resolved || g.records.length < 2) continue;
+    if (!g.tier0 || !resolutions[i].resolved || resolutions[i].keepMembers || g.records.length < 2) continue;
     tier0Merges.push(describeTier0Merge(g, resolutions[i]));
   }
 
@@ -2969,6 +3331,7 @@ export async function runReconciliation(
   let exactDups = 0, nearDups = 0, resolved = 0, unresolved = 0;
   const transformations: object[] = [];
   const unresolvedList: object[] = [];
+  const answered: AnsweredConflict[] = [];
 
   for (let i = 0; i < groups.length; i++) {
     const g = groups[i];
@@ -3004,7 +3367,25 @@ export async function runReconciliation(
       ...(g.tier0 ? { tier0: true } : {}),
     };
 
-    if (!res.resolved && (g.matchType === 'exact_duplicate' || g.matchType === 'near_duplicate')) {
+    if (g.judged?.covered) {
+      // Answered by the owner. Not a merge, not a conflict settled by trust, and
+      // not a question: its own count, so none of the others is inflated.
+      const memberUris = new Set(g.records.map((r) => r.uri));
+      for (const j of g.judged.applied) {
+        answered.push({
+          conflictId: j.conflictId,
+          recordType: g.records[0].type,
+          matchedOn: g.matchedOn,
+          resolutionUri: j.uri,
+          resolution: j.resolution,
+          candidateUris: [...resolutionNamedRecords(j)].filter((u) => memberUris.has(u)),
+        });
+      }
+      Object.assign(t, { userResolution: g.judged.applied.map((j) => j.uri) });
+    } else if (g.openQuestion) {
+      // The new pairing in a partly-answered group. Always a question.
+      unresolved++;
+    } else if (!res.resolved && (g.matchType === 'exact_duplicate' || g.matchType === 'near_duplicate')) {
       // A would-be merge that the cross-provenance guard flagged: count it as an
       // unresolved conflict, not as a silently-applied merge.
       unresolved++;
@@ -3018,7 +3399,21 @@ export async function runReconciliation(
     }
 
     if (g.matchType !== 'pass_through') transformations.push(t);
-    if (!res.resolved) unresolvedList.push({ ...t, candidateUris: g.records.map(r => r.uri) });
+    if (g.openQuestion) {
+      unresolvedList.push({
+        ...t,
+        conflictId: g.openQuestion.conflictId,
+        canonicalUri: g.openQuestion.canonicalUri,
+        candidateUris: g.openQuestion.candidateUris,
+        conflictField: g.openQuestion.conflictField,
+        conflictSides: g.openQuestion.conflictSides,
+        conflictValues: g.openQuestion.conflictSides
+          ? Object.fromEntries(g.openQuestion.conflictSides.map((s) => [s.origin, s.value]))
+          : undefined,
+      });
+    } else if (!res.resolved) {
+      unresolvedList.push({ ...t, candidateUris: g.records.map(r => r.uri) });
+    }
   }
 
   // An identity collision is a conflict, not a duplicate: the identity layer
@@ -3029,22 +3424,56 @@ export async function runReconciliation(
   // channel nobody is watching. The records themselves have already been split,
   // so this reports a question, not a loss.
   for (const c of identityCollisions) {
+    const matchedOn = `identity-collision:${c.mintedUri}`;
+    const judged = judgementsForGroup(userResolutions, c.resultingUris);
+    if (judged?.covered) {
+      // The same collision, already answered. The records are split either way;
+      // what the answer changes is that the question is not asked again.
+      const resulting = new Set(c.resultingUris);
+      for (const j of judged.applied) {
+        answered.push({
+          conflictId: j.conflictId,
+          recordType: c.recordType,
+          matchedOn,
+          resolutionUri: j.uri,
+          resolution: j.resolution,
+          candidateUris: [...resolutionNamedRecords(j)].filter((u) => resulting.has(u)),
+        });
+      }
+      transformations.push({
+        type: 'identity_collision',
+        recordType: c.recordType,
+        canonicalUri: c.mintedUri,
+        sources: c.sourceSystems,
+        origins: c.origins,
+        matchedOn,
+        strategy: 'user_resolution',
+        resolved: true,
+        userResolution: judged.applied.map((j) => j.uri),
+      });
+      continue;
+    }
     unresolved++;
+    // Partly answered: raise only what is still open, under its own id.
+    const open = judged ? judged.standing : c.resultingUris;
     const entry = {
       type: 'identity_collision',
       recordType: c.recordType,
       canonicalUri: c.mintedUri,
       sources: c.sourceSystems,
       origins: c.origins,
-      matchedOn: `identity-collision:${c.mintedUri}`,
+      matchedOn,
       strategy: 'split_unresolved',
       resolved: false,
-      candidateUris: c.resultingUris,
+      candidateUris: open,
+      ...(judged ? { conflictId: pairingConflictId(c.recordType, matchedOn, open) } : {}),
       label: `differs on ${c.differingPredicates.map(shortPredicate).join(', ')}`,
     };
     transformations.push(entry);
     unresolvedList.push(entry);
   }
+
+  const supersessions = supersessionsFor(userResolutions, groups, resolutions);
 
   return {
     turtle,
@@ -3062,9 +3491,11 @@ export async function runReconciliation(
         tier0MergesApplied: tier0Merges.length,
         passthroughSubjects: passthroughSubjectKeys.size,
         edgeObjectsRewritten,
+        userResolutionsApplied: answered.length,
       },
       transformations,
       unresolvedConflicts: unresolvedList,
+      userResolutions: { answered, supersessions },
       tier0Merges,
     },
   };

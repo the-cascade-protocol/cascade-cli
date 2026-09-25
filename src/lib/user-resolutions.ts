@@ -105,6 +105,17 @@ export interface UserResolution {
   resolution: ResolutionChoice;
   keptRecordUri: string;
   discardedRecordUris: string[];
+  /**
+   * Every record the question was about (`cascade:candidateRecords`), whatever
+   * the answer, `kept-both` included.
+   *
+   * The conflict id is a MATCH KEY (`recordType::matchedOn`), not a record set:
+   * a third source arriving under the same key is a new question the owner has
+   * never seen. So an answer applies to exactly the records it names, and this
+   * is the list that names them. Absent on a resolution written before it
+   * existed; see {@link resolutionNamedRecords} for how those are read.
+   */
+  candidateRecordUris?: string[];
   userNote?: string;
   /**
    * WHO made this decision (`prov:wasAttributedTo`), when they said so.
@@ -187,6 +198,13 @@ export interface PendingConflict {
 export interface RaisedConflict {
   recordType: string;
   matchedOn: string;
+  /**
+   * An id the reconciler chose instead of the one `matchedOn` derives. Set only
+   * for a NEW pairing under a key an earlier answer already used, so answering
+   * it records a second resolution rather than overwriting the first (the
+   * decision log holds one row per id).
+   */
+  conflictId?: string;
   /** The record that survives the run, when one of the candidates does. */
   canonicalUri?: string;
   candidateUris?: string[];
@@ -215,7 +233,7 @@ export function pendingConflictFromRaised(
   const sides = c.conflictSides ?? [];
   return {
     uri: `urn:uuid:conflict-${randomUUID()}`,
-    conflictId: generateConflictId(c.recordType, c.matchedOn),
+    conflictId: c.conflictId ?? generateConflictId(c.recordType, c.matchedOn),
     recordType: c.recordType,
     detectedAt,
     candidateRecordUris: c.candidateUris ?? [],
@@ -306,8 +324,45 @@ export function legacyConflictIds(recordType: string, matchedOn: string): string
  * so a pod converges on the new spelling as its conflicts are answered, while an
  * answer given before this change is still found.
  */
+/** A keep-one answer: `kept-source-a` or `kept-source-b`. */
+export function keepsOneRecord(r: UserResolution): boolean {
+  return r.resolution === 'kept-source-a' || r.resolution === 'kept-source-b';
+}
+
+/**
+ * The records an answer is ABOUT: its candidates, plus the kept and discarded
+ * records it names.
+ *
+ * For a resolution written before `candidateRecords` existed, this is the kept
+ * and discarded records alone, which is enough for a keep-one answer. A legacy
+ * `kept-both` names no record at all, so it applies to nothing and its question
+ * is asked again: guessing which records it meant is how an answer to one pair
+ * silenced every later pair under the same key.
+ */
+export function resolutionNamedRecords(r: UserResolution): Set<string> {
+  const out = new Set<string>();
+  for (const u of r.candidateRecordUris ?? []) if (u) out.add(u);
+  if (r.keptRecordUri) out.add(r.keptRecordUri);
+  for (const u of r.discardedRecordUris) if (u) out.add(u);
+  return out;
+}
+
+/**
+ * Does this answer bear on a group holding these records?
+ *
+ * Only when it names at least two of them (one record is not a question), and,
+ * for a keep-one answer, the record it kept is among them. It may cover only
+ * PART of the group; the reconciler decides what that means.
+ */
+export function resolutionAppliesTo(r: UserResolution, members: ReadonlySet<string>): boolean {
+  if (keepsOneRecord(r) && (!r.keptRecordUri || !members.has(r.keptRecordUri))) return false;
+  let named = 0;
+  for (const u of resolutionNamedRecords(r)) if (members.has(u)) named++;
+  return named >= 2;
+}
+
 export function findUserResolution(
-  resolutions: Map<string, UserResolution>,
+  resolutions: ReadonlyMap<string, UserResolution>,
   recordType: string,
   matchedOn: string,
 ): UserResolution | undefined {
@@ -342,6 +397,7 @@ export async function loadUserResolutions(
     const parser = new Parser({ format: 'Turtle' });
     const bySubject = new Map<string, Map<string, string>>();
     const discardedBySubject = new Map<string, string[]>();
+    const candidatesBySubject = new Map<string, string[]>();
 
     parser.parse(content, (error, quad) => {
       if (error) {
@@ -373,6 +429,9 @@ export async function loadUserResolutions(
             resolution: resolution ?? 'kept-source-a',
             keptRecordUri,
             discardedRecordUris: discardedBySubject.get(uri) ?? [],
+            ...(candidatesBySubject.has(uri)
+              ? { candidateRecordUris: candidatesBySubject.get(uri) as string[] }
+              : {}),
             userNote: props.get(NS.cascade + 'userNote'),
             actorIri: props.get(NS.prov + 'wasAttributedTo'),
           });
@@ -385,6 +444,11 @@ export async function loadUserResolutions(
         const arr = discardedBySubject.get(quad.subject.value) ?? [];
         arr.push(quad.object.value);
         discardedBySubject.set(quad.subject.value, arr);
+      }
+      if (quad.predicate.value === NS.cascade + 'candidateRecords') {
+        const arr = candidatesBySubject.get(quad.subject.value) ?? [];
+        arr.push(quad.object.value);
+        candidatesBySubject.set(quad.subject.value, arr);
       }
 
       if (!bySubject.has(quad.subject.value)) bySubject.set(quad.subject.value, new Map());
@@ -438,6 +502,9 @@ async function writeUserResolutions(
       }
       for (const discarded of res.discardedRecordUris) {
         writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'discardedRecords'), namedNode(discarded)));
+      }
+      for (const candidate of res.candidateRecordUris ?? []) {
+        writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'candidateRecords'), namedNode(candidate)));
       }
       if (res.userNote) {
         writer.addQuad(makeQuad(subj, namedNode(NS.cascade + 'userNote'), literal(res.userNote)));

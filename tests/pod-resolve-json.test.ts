@@ -86,6 +86,9 @@ describe('pod resolve --json', () => {
       discardedRecordUris: ['urn:uuid:cond-htn-b'],
       remainingConflicts: 0,
     });
+    // Recording is not applying, and the result says which command applies it.
+    expect(result.appliedBy).toContain('pod reconcile');
+    expect(result.appliedBy).toContain('--apply');
 
     // The conflict is gone from the pending list.
     const remaining = await loadPendingConflicts(podDir);

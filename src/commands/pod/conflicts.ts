@@ -95,7 +95,10 @@ export function registerConflictsCommand(podProgram: Command, program: Command):
           // find nothing.
           if (c.sourceA) console.log(`   Source A: ${c.sourceA}${c.valueA !== undefined ? ` — "${c.valueA}"` : ''}`);
           if (c.sourceB) console.log(`   Source B: ${c.sourceB}${c.valueB !== undefined ? ` — "${c.valueB}"` : ''}`);
-          if (c.survivingRecordUri) console.log(`   Surviving record: ${c.survivingRecordUri}`);
+          // Both candidates stay in the pod until the conflict is answered; this
+          // is the one the trust ranking prefers. The field keeps its name
+          // (`survivingRecordUri`) because callers match on it.
+          if (c.survivingRecordUri) console.log(`   Trust-preferred record: ${c.survivingRecordUri}`);
           console.log(`   Conflict ID: ${c.conflictId}`);
           console.log(`   Detected: ${c.detectedAt.toISOString()}`);
           console.log(

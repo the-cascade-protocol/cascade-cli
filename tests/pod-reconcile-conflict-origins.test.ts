@@ -141,18 +141,24 @@ describe('a raised conflict names the two ORIGINS, not the batch they share', ()
     expect([row.sourceA, row.sourceB].sort()).toEqual(['Meridian', 'Stonebridge']);
   });
 
-  it('carries BOTH sides values into the reconciled record, not one', async () => {
+  it('keeps BOTH sides values, in the pod and on the row, not one', async () => {
     // The collapse: a map keyed by the shared batch label holds one entry, and
-    // the losing side's value is the one that is silently dropped.
+    // the losing side's value is the one that is silently dropped. An
+    // unanswered conflict now keeps both of its records, so each value stays on
+    // its own record; the row carries both as well.
     const podDir = await makePod();
     medsPod(podDir);
     await runCli(['pod', 'reconcile', podDir, '--apply']);
 
     const meds = fs.readFileSync(path.join(podDir, 'clinical', 'medications.ttl'), 'utf-8');
-    expect(meds).toContain('conflictValues');
+    expect(meds).toContain('<urn:uuid:med-meridian>');
+    expect(meds).toContain('<urn:uuid:med-stonebridge>');
     expect(meds).toContain('50 mcg');
     expect(meds).toContain('75 mcg');
     expect(meds).not.toContain('one-batch: ');
+
+    const [row] = await loadPendingConflicts(podDir);
+    expect([row.valueA, row.valueB].sort()).toEqual(['50 mcg', '75 mcg']);
   });
 
   it('reports the origin axis alongside the ingestion axis', async () => {
