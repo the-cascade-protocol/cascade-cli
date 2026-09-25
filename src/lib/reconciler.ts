@@ -30,6 +30,7 @@ import {
 import { normalizeMedName, normalizeDose, normalizeFrequency, type DrugNameNormalizer } from './medication-normalize.js';
 import { medicationCodeKeys, sharedMedicationCodeKey, extractCodeValue } from './code-keys.js';
 import { cascadeTerminologyResolver } from './terminology.js';
+import { classifyMedicationStatus } from './medication-status.js';
 import { relBase, relBaseFor, derelativizeQuads } from './bucket-write.js';
 import {
   SOURCE_IDENTITY_PREDICATE,
@@ -1314,20 +1315,21 @@ function dateOnly(dt: string): string { return dt.split('T')[0] ?? dt; }
 // ---------------------------------------------------------------------------
 
 /**
- * FHIR/Cascade medication status values that mean the medication is NOT active.
- * Everything else (including `active`, `on-hold`, `draft`, `unknown`, or an
- * absent status) is treated as active. Used for the status-split so an active
- * record and a discontinued record of the same drug never collapse silently.
+ * Whether a medication's status says it has ENDED, for the status split below.
+ *
+ * The status -> lifecycle answer lives in the shared table
+ * ({@link classifyMedicationStatus}), never in a list here. The split asks one
+ * narrower question of it: does one side SAY the medication ended (class
+ * `stopped`, or a repudiated `entered-in-error` record) while the other does
+ * not? An `unknown` side (no status, `on-hold`, `draft`, anything unmatched) is
+ * not a statement that the medication is being taken, but it is not a statement
+ * that it ended either, so an active record and a status-less record of the
+ * same drug still merge, and a stopped record never collapses silently into
+ * either.
  */
-const INACTIVE_MED_STATUSES = new Set([
-  'stopped', 'discontinued', 'inactive', 'cancelled', 'canceled',
-  'completed', 'entered-in-error',
-]);
-
-/** Coarse active/inactive classification of a medication's status string. */
-function medicationActivity(status: string | undefined): 'active' | 'inactive' {
-  if (!status) return 'active';
-  return INACTIVE_MED_STATUSES.has(status.toLowerCase().trim()) ? 'inactive' : 'active';
+function medicationEnded(status: string | undefined): boolean {
+  const { lifecycle } = classifyMedicationStatus(status);
+  return lifecycle === 'stopped' || lifecycle === 'entered-in-error';
 }
 
 /**
@@ -1924,9 +1926,9 @@ function classifyGroup(
     // the same drug is a clinically significant divergence, never a silent
     // merge. (Reference: Checkup SimplifiedImportProcessor splits active vs
     // stopped before dedup.)
-    const actA = medicationActivity(getProp(a, NS.clinical + 'status'));
-    const actB = medicationActivity(getProp(b, NS.clinical + 'status'));
-    if (actA !== actB) {
+    const endedA = medicationEnded(getProp(a, NS.clinical + 'status'));
+    const endedB = medicationEnded(getProp(b, NS.clinical + 'status'));
+    if (endedA !== endedB) {
       return {
         matchType: 'status_conflict',
         conflictField: 'clinical:status',

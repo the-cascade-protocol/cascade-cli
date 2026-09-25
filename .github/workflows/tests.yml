@@ -167,3 +167,33 @@ jobs:
       - name: Check vendored shapes against spec
         working-directory: cascade-cli
         run: node scripts/check-shapes-drift.mjs --spec ../spec
+
+  # The medication status lifecycle table is authored in cascade-knowledge and
+  # vendored here (src/knowledge/medication-status.snapshot.json). Same shape as
+  # vendored-shapes above: default branch on purpose, and a red here means
+  # "cascade-knowledge moved and this repository has not re-synced". The checker
+  # has no dependencies, so nothing is installed.
+  vendored-knowledge:
+    name: Vendored knowledge tables match cascade-knowledge
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout cascade-cli
+        uses: actions/checkout@v4
+        with:
+          path: cascade-cli
+
+      - name: Checkout cascade-knowledge
+        uses: actions/checkout@v4
+        with:
+          repository: the-cascade-protocol/cascade-knowledge
+          path: cascade-knowledge
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Exit 2 (cannot check) is as fatal as exit 1 (drift).
+      - name: Check vendored knowledge against cascade-knowledge
+        working-directory: cascade-cli
+        run: node scripts/check-knowledge-drift.mjs --knowledge ../cascade-knowledge

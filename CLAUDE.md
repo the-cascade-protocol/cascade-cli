@@ -8,6 +8,7 @@ Package: `@the-cascade-protocol/cli`
 ## Key Architecture
 
 - `src/shapes/` — Embedded SHACL shape files (copied from `spec/`). **Do not edit these manually.**
+- `src/knowledge/medication-status.snapshot.json` — the medication status lifecycle table, vendored verbatim from `cascade-knowledge` by `scripts/sync-knowledge-from-cascade-knowledge.mjs` and drift-checked by `npm run check:knowledge-drift`. **Do not edit it manually.** `src/lib/medication-status.ts` is the only reader; no other module may keep a medication status list.
 - `src/commands/` — CLI command implementations
 - `src/lib/import-types.ts` — Shared `FormatImporter`, `ImportContext`, `ImportResult`, `VocabularyGap` interfaces. Source of truth for the importer contract.
 - `src/lib/import-registry.ts` — Registry of all `--from <format>` importers. **To add a new format, append one entry here — do not edit `src/commands/convert.ts`.**

@@ -110,6 +110,31 @@ write, so the file was never created.
 
 ### Changed
 
+**Medication status is classified by one shared table, not a hand-written set (0.22.0).**
+Whether a medication is still being taken now comes from `cascade-knowledge`'s
+`medication-status-lifecycle` and `medication-status-synonym` families, vendored
+verbatim in `src/knowledge/medication-status.snapshot.json` and read by one
+classifier, `src/lib/medication-status.ts` (every FHIR R4 MedicationRequest and
+MedicationStatement status code to active, stopped, unknown or entered-in-error,
+plus legacy spellings and free text). `scripts/sync-knowledge-from-cascade-knowledge.mjs`
+re-syncs it; `npm run check:knowledge-drift` (and a new `vendored-knowledge` CI
+job) fails when it drifts. The reconciler's status split now asks the table
+whether each side says the medication ENDED (stopped or entered-in-error):
+
+- `not-taken` (any case or punctuation) now counts as ended. Before, it was read
+  as active, so a `not-taken` record merged silently with an `active` one; it is
+  now a status conflict.
+- Statuses that only the synonym table recognizes now count as ended: `dc`,
+  `dcd`, `d/c`, `stop`, `off`, and any status containing `discontinu`,
+  `no longer`, `not taking`, `ceased`, `cancel`, `finished`, `past`, `former`,
+  `prior`, `previously` or `inactive`.
+- Case and punctuation variants of the old set (`Entered in error`,
+  `NOT_TAKEN`) now match; before, only a lower-case, trimmed exact string did.
+- An absent status is now classified `unknown`, not `active`. The split outcome
+  does not change: an absent side still conflicts with a stopped side and still
+  merges with an active one, because the split fires only when one side says the
+  medication ended and the other does not.
+
 **Shapes synced to spec d819bc2: core v3.9, health v2.9, clinical v1.19 (0.21.1).**
 A catch-up sync of three releases spec published between 2026-09-05 and 2026-09-08,
 which this repo never pulled; the vendored-shapes CI gate had been red since the
