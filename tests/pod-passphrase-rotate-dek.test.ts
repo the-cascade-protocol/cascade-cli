@@ -321,6 +321,41 @@ describe('rotateDataKey (in process)', () => {
     }
   });
 
+  it('a staged file validly sealed under the NEW key but holding another file\'s plaintext fails verification', () => {
+    // GCM alone cannot catch this: the bytes authenticate under the new key.
+    // Only the per-file plaintext hash comparison does.
+    const { root, pod } = libPod();
+    const before = hashTree(root);
+    let medications: Buffer | undefined;
+    let swapped = false;
+    let err: unknown;
+    try {
+      rotateDataKey(pod, PASS_A, PASS_B, {
+        kdf: FAST_KDF,
+        writeStaged: (abs, bytes, mode) => {
+          const rel = abs.split(path.sep).join('/');
+          if (rel.endsWith('/clinical/medications.ttl')) medications = bytes;
+          // index.ttl is written after clinical/medications.ttl (sorted walk):
+          // put the medications file's new-key ciphertext at index.ttl's path.
+          if (rel.endsWith('/index.ttl') && medications) {
+            swapped = true;
+            atomicWriteBytes(abs, medications, mode);
+          } else {
+            atomicWriteBytes(abs, bytes, mode);
+          }
+        },
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(swapped).toBe(true);
+    expect(err).toBeInstanceOf(RotateDekError);
+    expect((err as Error).message).toMatch(/index\.ttl does not decrypt to the original/);
+    expect(hashTree(root)).toEqual(before);
+    expect(leftovers(root)).toEqual([]);
+    expect(resolveDek(pod, PASS_A)).toBeInstanceOf(Buffer);
+  });
+
   it('a pod written to while the copy was built is not swapped', () => {
     const { root, pod } = libPod();
     let err: unknown;
