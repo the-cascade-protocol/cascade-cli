@@ -646,16 +646,24 @@ export function readEncryptionManifest(podDir: string): NormalizedEncryptionMani
 }
 
 /**
- * Write a version 1.0 `settings/encryption.json` (the manifest `pod init
- * --encrypt` and `pod encrypt` produce), atomically: a crash mid-write leaves
- * either no manifest or a whole one, never a truncated one over a pod that is
- * still plaintext. A 1.1 manifest is only ever written by
- * {@link rewrapPassphrase}, atomically and verified.
+ * Write `settings/encryption.json` atomically: a crash mid-write leaves either
+ * no manifest or a whole one, never a truncated one over a pod that is still
+ * plaintext. A 1.1 manifest goes through {@link serializeEncryptionManifestV11},
+ * so it is refused rather than written when a reader would refuse it.
+ * `mode` sets the file's permission bits (default: the process default).
  */
-export function writeEncryptionManifest(podDir: string, manifest: EncryptionManifest): void {
+export function writeEncryptionManifest(
+  podDir: string,
+  manifest: EncryptionManifestV10 | EncryptionManifestV11,
+  options: { mode?: number } = {},
+): void {
   const p = manifestPath(podDir);
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  writeManifestFile(p, Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf-8'));
+  const text =
+    manifest.version === '1.1'
+      ? serializeEncryptionManifestV11(manifest)
+      : JSON.stringify(manifest, null, 2) + '\n';
+  writeManifestFile(p, Buffer.from(text, 'utf-8'), options.mode === undefined ? {} : { mode: options.mode });
 }
 
 /**
@@ -697,6 +705,54 @@ export function buildPassphraseManifest(
     kdf: 'argon2id',
     kdfParams: { salt: salt.toString('base64'), t: params.t, m: params.m, p: params.p },
     wraps: [{ by: 'passphrase', wrappedDek }],
+  };
+}
+
+/** Options for {@link buildPassphraseManifestV11}. */
+export interface BuildManifestV11Options {
+  /** KDF parameters for the wrap. Defaults to {@link DEFAULT_KDF}. */
+  kdf?: { t: number; m: number; p: number };
+  /** The wrap's label. Defaults to `"primary"`. */
+  label?: string;
+  /** Clock for the wrap's `createdAt`. */
+  now?: () => Date;
+}
+
+/**
+ * Build a version 1.1 manifest holding exactly ONE passphrase wrap of `dek`:
+ * fresh 16-byte salt, `createdAt` now, `label` as given or `"primary"`.
+ *
+ * @throws {EncryptionManifestError} if the KDF parameters are outside
+ *   {@link MANIFEST_LIMITS}: it never builds a manifest a reader would refuse.
+ */
+export function buildPassphraseManifestV11(
+  dek: Buffer,
+  passphrase: string,
+  options: BuildManifestV11Options = {},
+): EncryptionManifestV11 {
+  const params = options.kdf ?? DEFAULT_KDF;
+  checkCosts(params.t, params.m, params.p, 'kdfParams');
+  const salt = randomBytes(SALT_LEN);
+  const kek = deriveKek(passphrase, salt, params);
+  let wrappedDek: string;
+  try {
+    wrappedDek = wrapDek(dek, kek);
+  } finally {
+    kek.fill(0);
+  }
+  return {
+    version: '1.1',
+    algorithm: 'aes-256-gcm',
+    wraps: [
+      {
+        by: 'passphrase',
+        label: options.label ?? 'primary',
+        createdAt: (options.now ?? (() => new Date()))().toISOString(),
+        kdf: 'argon2id',
+        kdfParams: { salt: salt.toString('base64'), t: params.t, m: params.m, p: params.p },
+        wrappedDek,
+      },
+    ],
   };
 }
 
@@ -962,6 +1018,14 @@ export function atomicWriteFile(absPath: string, bytes: Buffer, options: AtomicW
  * matched inside the manifest's own directory.
  */
 const MANIFEST_TEMP_NAME = /^\.encryption\.json\.[0-9a-f]{12}\.tmp$/;
+
+/**
+ * Is `name` (a bare file name inside `settings/`) a temporary manifest that a
+ * killed write left behind? Such a file never became the manifest.
+ */
+export function isManifestTempName(name: string): boolean {
+  return MANIFEST_TEMP_NAME.test(name);
+}
 
 /**
  * Write the manifest atomically, first removing any temporary manifest a

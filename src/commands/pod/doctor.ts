@@ -15,6 +15,11 @@
  *
  * DRY RUN IS THE DEFAULT. `--write` is required to modify anything.
  *
+ * It also finishes an interrupted `pod passphrase set --rotate-dek`: the
+ * folders that run leaves beside the pod are found before the pod is looked
+ * for (the pod itself can be moved aside), reported on a dry run, and rolled
+ * back or completed with `--write`. The rules are in `lib/pod-rekey.ts`.
+ *
  * Exit codes, on the read layer's contract:
  *   0 — nothing wrong, or everything found was repaired
  *   1 — damage remains: a dry run that found something, or a refusal. Also the
@@ -38,6 +43,12 @@ import {
 import { resolvePodDir, fileExists } from './helpers.js';
 import { shellCommand } from '../../lib/shell-quote.js';
 import { openPod, PodUnreadableError, type PodReader } from '../../lib/pod-read.js';
+import {
+  planRekeyRecovery,
+  recoverInterruptedRekey,
+  RotateDekError,
+  type RekeyRecoveryStep,
+} from '../../lib/pod-rekey.js';
 import {
   runPodDoctor,
   doctorExitCode,
@@ -63,6 +74,11 @@ export function registerDoctorSubcommand(pod: Command, program: Command): void {
     .action(async (podDirArg: string, options: { write: boolean }) => {
       const globalOpts = program.opts() as OutputOptions;
       const podDir = resolvePodDir(podDirArg);
+
+      // An interrupted `pod passphrase set --rotate-dek` can leave the pod
+      // moved aside, so this is checked before the pod is looked for. It is
+      // handled on its own: finish it, then run doctor again for the rest.
+      if (handleInterruptedRekey(podDir, options.write, globalOpts)) return;
 
       if (!(await fileExists(path.join(podDir, 'index.ttl')))) {
         printError(`Pod not found at ${podDir} (no index.ttl).`, globalOpts);
@@ -117,6 +133,59 @@ export function registerDoctorSubcommand(pod: Command, program: Command): void {
 
       process.exitCode = doctorExitCode(report);
     });
+}
+
+const REKEY_STEP_TEXT: Record<RekeyRecoveryStep['action'], string> = {
+  'delete-staging': 'an unfinished re-encrypted copy; the pod is as it was. Delete the copy.',
+  'roll-back': 'the pod moved aside mid re-key; the old passphrase still opens it. Move it back and delete the copy.',
+  complete: 'the re-key finished; the new passphrase opens the pod. Delete the old copy, which still opens with the old passphrase.',
+};
+
+/**
+ * Report, and with `--write` finish, an interrupted re-key beside the pod.
+ * Returns true when there was one (or its state was unclear), so the caller
+ * stops there. Exit codes: 1 for a dry run that found one or a state doctor
+ * will not resolve, 0 once `--write` has finished it.
+ */
+function handleInterruptedRekey(podDir: string, write: boolean, globalOpts: OutputOptions): boolean {
+  let steps: RekeyRecoveryStep[];
+  try {
+    steps = write ? recoverInterruptedRekey(podDir) : planRekeyRecovery(podDir);
+  } catch (e: unknown) {
+    if (!(e instanceof RotateDekError)) throw e;
+    printError(e.message, globalOpts);
+    process.exitCode = 1;
+    return true;
+  }
+  if (steps.length === 0) return false;
+
+  const report = {
+    pod: podDir,
+    mode: write ? 'write' : 'dry-run',
+    interruptedRekey: steps.map((s) => ({
+      action: s.action,
+      status: write ? 'repaired' : 'repairable',
+      staging: s.staging,
+      old: s.old,
+    })),
+  };
+  if (globalOpts.json) {
+    printResult(report, globalOpts);
+  } else {
+    console.log(`Pod: ${podDir}`);
+    console.log(`Found an interrupted re-key (pod passphrase set --rotate-dek):`);
+    for (const s of steps) {
+      console.log(`  ${write ? 'FIXED' : 'FIX  '} ${REKEY_STEP_TEXT[s.action]}`);
+      for (const p of [s.old, s.staging]) if (p) console.log(`        ${p}`);
+    }
+    console.log(
+      write
+        ? 'Done. Run doctor again to check the pod itself.'
+        : `Re-run with --write to apply: ${shellCommand('cascade', 'pod', 'doctor', podDir, '--write')}`,
+    );
+  }
+  process.exitCode = write ? 0 : 1;
+  return true;
 }
 
 /** The human-readable report. Says what was found, what was done, and what is left. */

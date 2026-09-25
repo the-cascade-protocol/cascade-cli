@@ -22,11 +22,24 @@
  * Exit codes follow docs/exit-codes.md: 1 for a caller error (not encrypted,
  * empty or unchanged passphrase, entries that did not match), 2 when the pod's
  * key could not be opened (wrong current passphrase, unreadable manifest).
+ *
+ * With `--rotate-dek` the command RE-KEYS instead: a new data key, every sealed
+ * file re-encrypted under it, and a header with one wrap for the new
+ * passphrase. The engine and its crash-recovery rules are in
+ * `lib/pod-rekey.ts`. Both passphrases come only from the environment (no
+ * prompt), and every error carries a `reason` from the documented vocabulary
+ * where one applies.
  */
 
 import type { Command } from 'commander';
 import * as fs from 'node:fs';
-import { printResult, printError, type OutputOptions } from '../../lib/output.js';
+import {
+  printResult,
+  printError,
+  printErrorDetail,
+  printWarning,
+  type OutputOptions,
+} from '../../lib/output.js';
 import { resolvePodDir } from './helpers.js';
 import {
   isPodEncrypted,
@@ -38,11 +51,43 @@ import {
   type NormalizedEncryptionManifest,
   type RewrapResult,
 } from '../../lib/pod-encryption.js';
-import { obtainPassphrase, obtainReplacementPassphrase } from '../../lib/passphrase.js';
+import {
+  obtainPassphrase,
+  obtainReplacementPassphrase,
+  PASSPHRASE_ENV_VAR,
+  NEW_PASSPHRASE_ENV_VAR,
+} from '../../lib/passphrase.js';
+import {
+  rotateDataKey,
+  recoverInterruptedRekey,
+  RotateDekError,
+  type RekeyRecoveryStep,
+  type RotateDekResult,
+} from '../../lib/pod-rekey.js';
 
 export const REWRAP_DONE_MESSAGE =
   'Re-wrapped. The new passphrase opens this pod; the old one no longer does. ' +
   'A copy of this pod made before now still opens with the old passphrase.';
+
+export const REKEY_DONE_MESSAGE =
+  'Re-keyed. Every file is now sealed under a new data key, and only the new passphrase opens this pod. ' +
+  'A copy of this pod made before now still opens with the old passphrase.';
+
+/** One line per finished step of an interrupted re-key, for a warning. */
+export function describeRekeyRecovery(steps: RekeyRecoveryStep[]): string {
+  return steps
+    .map((s) => {
+      switch (s.action) {
+        case 'delete-staging':
+          return `Removed an unfinished re-encrypted copy left by an interrupted re-key (${s.staging}).`;
+        case 'roll-back':
+          return `An interrupted re-key had moved the pod aside; it was moved back unchanged (from ${s.old}).`;
+        case 'complete':
+          return `An interrupted re-key had already put the new key in place; removed the old copy (${s.old}).`;
+      }
+    })
+    .join('\n');
+}
 
 export function registerPassphraseSubcommand(pod: Command, program: Command): void {
   const passphrase = pod
@@ -56,6 +101,11 @@ export function registerPassphraseSubcommand(pod: Command, program: Command): vo
         'A copy of the pod made before the change still opens with the old passphrase.',
     )
     .argument('<pod-dir>', 'Path to the encrypted Cascade Pod directory')
+    .option(
+      '--rotate-dek',
+      'Also replace the data key: re-encrypt every file under a new key and keep only the new passphrase',
+      false,
+    )
     .addHelpText(
       'after',
       `
@@ -64,11 +114,26 @@ The new passphrase is read from CASCADE_POD_NEW_PASSPHRASE, else a hidden prompt
 entered twice. Neither is accepted as an argument.
 
 Only settings/encryption.json is rewritten (as manifest version 1.1); no resource
-file is read or written.`,
+file is read or written.
+
+With --rotate-dek the pod gets a NEW data key. Whoever opened the pod before
+may have kept the old data key, and a re-wrap alone does not stop that key
+working; a re-key does. Both passphrases must be set in the environment (there
+is no prompt). A re-encrypted copy of the pod is built beside it
+(.<name>.rekey-<hex>), verified with the new passphrase, and swapped in with two
+renames; the header then holds one wrap, for the new passphrase, and every other
+wrap is dropped. On any failure the pod is left as it was. If the command is
+killed part way, running it again (or \`cascade pod doctor --write\`) finishes or
+undoes the interrupted run. A copy of the pod made before the change still
+opens with the old passphrase.`,
     )
-    .action(async (dirArg: string) => {
+    .action(async (dirArg: string, cmdOpts: { rotateDek?: boolean }) => {
       const globalOpts = program.opts() as OutputOptions;
       const podDir = resolvePodDir(dirArg);
+      if (cmdOpts.rotateDek) {
+        runRotateDek(podDir, globalOpts);
+        return;
+      }
       const refuse = (message: string, code: 1 | 2, unchangedNote = true): void => {
         printError(unchangedNote ? `${message} Nothing was changed.` : message, globalOpts);
         process.exitCode = code;
@@ -164,4 +229,121 @@ file is read or written.`,
         process.exitCode = 1;
       }
     });
+}
+
+/**
+ * `pod passphrase set --rotate-dek`. Secrets from the environment only; see
+ * `lib/pod-rekey.ts` for the steps and the recovery rules.
+ *
+ * Order: both secrets present (else exit 1, `passphrase-missing`, nothing
+ * touched); new differs from current; finish any interrupted re-key; the pod
+ * exists and is encrypted; its header reads (exit 2 with the manifest reasons);
+ * the current passphrase opens it (exit 2, `passphrase-incorrect`); re-key.
+ */
+function runRotateDek(podDir: string, globalOpts: OutputOptions): void {
+  const refuse = (message: string, code: 1 | 2, detail: Record<string, unknown> = {}): void => {
+    printErrorDetail(message, detail, globalOpts);
+    process.exitCode = code;
+  };
+
+  const current = process.env[PASSPHRASE_ENV_VAR] ?? '';
+  const next = process.env[NEW_PASSPHRASE_ENV_VAR] ?? '';
+  if (current.length === 0 || next.length === 0) {
+    const missing = [
+      ...(current.length === 0 ? [PASSPHRASE_ENV_VAR] : []),
+      ...(next.length === 0 ? [NEW_PASSPHRASE_ENV_VAR] : []),
+    ];
+    refuse(
+      `--rotate-dek takes both passphrases from the environment and ${missing.join(' and ')} ` +
+        `${missing.length === 1 ? 'is' : 'are'} not set. Nothing was changed.`,
+      1,
+      { reason: 'passphrase-missing' },
+    );
+    return;
+  }
+  if (next === current) {
+    refuse('The new passphrase is the same as the current one. Nothing was changed.', 1);
+    return;
+  }
+
+  try {
+    const recovered = recoverInterruptedRekey(podDir);
+    if (recovered.length > 0) printWarning(describeRekeyRecovery(recovered), globalOpts);
+
+    if (!fs.existsSync(podDir) || !fs.statSync(podDir).isDirectory()) {
+      refuse(`Pod not found at ${podDir}. Nothing was changed.`, 1);
+      return;
+    }
+    if (!isPodEncrypted(podDir)) {
+      refuse(`Pod is not encrypted: ${podDir}. There is no key to change. Nothing was changed.`, 1);
+      return;
+    }
+
+    let result: RotateDekResult;
+    try {
+      result = rotateDataKey(podDir, current, next);
+    } catch (e) {
+      if (e instanceof EncryptionManifestError) {
+        refuse(`Cannot re-key: ${e.message}. Nothing was changed.`, 2, {
+          reason: e.kind === 'malformed' ? 'manifest-malformed' : 'manifest-version-unsupported',
+        });
+        return;
+      }
+      if (e instanceof PodDecryptError) {
+        refuse(
+          `Cannot re-key: the current passphrase does not open this pod (${e.message}). Nothing was changed.`,
+          2,
+          { reason: 'passphrase-incorrect' },
+        );
+        return;
+      }
+      if (e instanceof RotateDekError) {
+        refuse(e.message, e.exitCode, {
+          ...(e.reason ? { reason: e.reason } : {}),
+          ...(e.files ? { files: e.files } : {}),
+        });
+        return;
+      }
+      throw e;
+    }
+
+    if (result.oldCopyLeft) {
+      printWarning(
+        `The re-key is done and only the new passphrase opens the pod, but the old copy of the pod at ` +
+          `${result.oldCopyLeft} could not be deleted, and it still opens with the old passphrase. ` +
+          `Run \`cascade pod doctor --write\` on the pod to delete it.`,
+        globalOpts,
+      );
+    }
+    if (globalOpts.json) {
+      printResult(
+        {
+          podDir,
+          manifestVersion: result.manifestVersion,
+          wrapCount: result.wrapCount,
+          createdAt: result.createdAt,
+          dataKeyRotated: true,
+          resources: result.resealed,
+        },
+        globalOpts,
+      );
+    } else {
+      console.log(REKEY_DONE_MESSAGE);
+      console.log(`  Re-encrypted: ${result.resealed}`);
+      if (result.copied > 0) {
+        console.log(
+          `  Copied unchanged: ${result.copied} (files that do not open with the pod's key, ` +
+            `${result.plaintextByDesign} of them plaintext by design)`,
+        );
+      }
+    }
+  } catch (err: unknown) {
+    if (err instanceof RotateDekError) {
+      refuse(err.message, err.exitCode);
+      return;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    printError(`Failed to re-key the pod: ${message}`, globalOpts);
+    process.exitCode = 1;
+  }
 }

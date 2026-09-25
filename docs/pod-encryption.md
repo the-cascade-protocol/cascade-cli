@@ -252,6 +252,7 @@ Each entry is identified by its `by` discriminator:
 | `cascade pod encrypt <dir>` | Migrate an existing **plaintext** pod to encrypted in place. Guards if already encrypted. |
 | `cascade pod decrypt <dir>` | Reverse: decrypt every resource back to plaintext and remove the manifest. |
 | `cascade pod passphrase set <dir>` | Change the passphrase by re-wrapping the DEK. See [Changing the passphrase](#changing-the-passphrase). |
+| `cascade pod passphrase set <dir> --rotate-dek` | Change the passphrase AND the DEK: every sealed file is re-encrypted under a new key. See [Re-keying](#re-keying-a-new-data-key). |
 | `cascade pod import` / `pod query` / `validate` | Encryption-aware: if the pod is encrypted, resolve the DEK and route every resource read/write through the decrypt/encrypt helpers. Plaintext pods are unchanged. |
 
 Every write of `settings/encryption.json` is atomic and durable, including the
@@ -322,6 +323,89 @@ the copy carries its own manifest. Output is one line of text, or with `--json`:
 
 No passphrase, salt or key is ever printed.
 
+### Re-keying (a new data key)
+
+A re-wrap changes which passphrase opens the DEK and nothing else, so anyone
+who opened the pod before could have kept the DEK itself and still read every
+file. `cascade pod passphrase set <dir> --rotate-dek` cuts that off: it
+generates a NEW DEK, re-encrypts every sealed file under it, and writes a 1.1
+header with exactly ONE passphrase wrap, for the new passphrase (its `label` kept
+from the wrap the current passphrase opened, else `"primary"`; fresh salt;
+`createdAt` now). Other wraps are not carried over: their holders' secrets are
+not available, and dropping them is the revocation.
+
+Both passphrases come from the environment only, `CASCADE_POD_PASSPHRASE` (the
+current one) and `CASCADE_POD_NEW_PASSPHRASE`. There is no prompt: either one
+missing or empty is exit 1 with `reason: "passphrase-missing"`, and nothing is
+touched.
+
+The pod is never rewritten in place:
+
+1. The current passphrase must open the header (refusals: exit 2 with
+   `passphrase-incorrect`, `manifest-malformed` or
+   `manifest-version-unsupported`; nothing touched). A symbolic link or any
+   entry that is not a regular file or a directory, anywhere in the pod, is
+   refused (exit 1) before anything is written. A file that cannot be read is
+   exit 2, `files-unreadable`, with `files` naming it.
+2. A complete re-encrypted copy is built in a sibling folder,
+   `.<name>.rekey-<12 hex>` in the pod's parent directory (so the final renames
+   stay on one volume). Every file that opens with the current DEK is sealed
+   under the new one; every other file (plaintext by design, or bytes that are
+   not sealed under this pod's key) is copied byte for byte, so its state does
+   not change; a temporary header left by a killed write is not carried over.
+   Every file goes through the same atomic, fsynced write as every other pod
+   write, the header is written last, and every folder is fsynced.
+3. The copy is verified before anything moves: the new passphrase opens its
+   header to the new DEK; it holds exactly the expected files and folders;
+   every re-sealed file decrypts to the same plaintext hash as the original,
+   and every copied file has the same hash. Then the pod is re-scanned, and if
+   anything in it changed while the copy was built the re-key stops. Any
+   failure deletes the copy and exits non-zero with the pod untouched.
+4. The pod is renamed to `.<name>.old-<same hex>`, the copy is renamed to
+   `<name>`, and the parent directory is fsynced. The second rename is the
+   commit point. Then the `.old` folder is deleted. If the second rename fails,
+   the first is undone. If deleting `.old` fails after the commit point, the
+   re-key is still reported as done (the new passphrase is the only one that
+   opens the pod) and a warning names the old copy, which still opens with the
+   old passphrase; `pod doctor --write` deletes it.
+
+Output with `--json` (exit 0), and nothing else on stdout:
+
+```json
+{ "podDir": "/path/to/pod", "manifestVersion": "1.1", "wrapCount": 1, "createdAt": "2026-09-24T17:04:11.123Z", "dataKeyRotated": true, "resources": 42 }
+```
+
+`resources` is the number of files re-encrypted. On any non-zero exit the
+folder at `<dir>` opens with the current passphrase exactly as before, and no
+staging or `.old` folder is left behind, except when the process is killed
+part way (below).
+
+**If the process is killed part way.** The folders left beside the pod say how
+far it got, matched by the shared hex. The next run of the command (before it
+opens the pod), or `cascade pod doctor <dir> --write`, finishes or undoes it and
+prints a warning saying which; `pod doctor` without `--write` reports it and
+changes nothing. None of this needs a passphrase.
+
+| Killed | Folders left | What the next run does | Which passphrase opens the pod |
+|---|---|---|---|
+| while building or verifying the copy | the pod, and `.<name>.rekey-<hex>` | deletes the copy | the **current** one |
+| between the two renames | `.<name>.old-<hex>` and `.<name>.rekey-<hex>`, no pod | renames `.old` back to the pod, then deletes the copy | the **current** one |
+| after the second rename | the pod, and `.<name>.old-<hex>` | deletes `.old` | the **new** one |
+
+At every point exactly one of the two passphrases opens the pod, and nothing is
+lost. A process killed after the commit point but before it printed its result
+has still changed the key; a caller that did not see the result should try the
+new passphrase when the current one is refused. Any other combination of these
+folders (for example a copy with no pod and no `.old`) is never guessed at: the
+command and `pod doctor` refuse with exit 1 and name the folders.
+
+Run it when nothing else is writing to the pod: a write that lands after the
+copy is made is detected and stops the re-key, except in the instant between
+the final re-scan and the first rename.
+
+A copy of the pod made before the change still opens with the old passphrase:
+the copy carries its own header and its own copy of the old DEK.
+
 ## Known limitations (v1)
 
 - `cascade pod conflicts` / `cascade pod resolve` read and write
@@ -331,6 +415,6 @@ No passphrase, salt or key is ever printed.
   which the conflicts/resolve commands cannot read them until they are wired the
   same way as import/query/validate. A freshly initialized + imported pod only
   creates these files when reconciliation conflicts occur.
-- Changing the passphrase is `pod passphrase set`. Adding a second wrap, and
-  re-keying (a new DEK, which re-encrypts every resource), are not yet exposed
-  as commands.
+- Changing the passphrase is `pod passphrase set`, and re-keying is
+  `pod passphrase set --rotate-dek`. Adding a second wrap is not yet exposed as
+  a command.
