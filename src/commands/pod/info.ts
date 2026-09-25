@@ -210,6 +210,15 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
           for (const rdfType of typeInfo.rdfTypes) {
             recordCount += getSubjectsByType(result.store, rdfType).length;
           }
+          // Daily vital readings filed here by their LOINC code (the wellness
+          // rules route, e.g. active energy into activity.ttl) are this file's
+          // records too, though their class is not one of its rdfTypes.
+          if (typeInfo.readingLoincCodes?.length) {
+            for (const s of getSubjectsByType(result.store, CASCADE_NAMESPACES.health + 'DailyVitalReading')) {
+              const codes = getProperties(result.store, s)[CASCADE_NAMESPACES.cascade + 'loincCode'] ?? [];
+              if (codes.some((c) => typeInfo.readingLoincCodes!.includes(c))) recordCount++;
+            }
+          }
 
           // If no records found by type, count all typed subjects
           if (recordCount === 0 && result.subjects.length > 0) {

@@ -60,6 +60,7 @@ import { printResult, printError, printVerbose, type OutputOptions } from '../..
 import { toJsonText } from '../../lib/json-output.js';
 import { runReconciliation, type ReconcilerInput, type Tier0Merge } from '../../lib/reconciler.js';
 import { DATA_TYPES, resolvePodDir } from './helpers.js';
+import { dataTypeKeyForSubject } from '../../lib/pod-data-types.js';
 import { openPod, PodReadLedger, tidyReason, type PodReader } from '../../lib/pod-read.js';
 import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket-write.js';
 import {
@@ -364,12 +365,7 @@ async function parseBySubject(turtle: string): Promise<Map<string, Quad[]>> {
 
 /** Route a subject's rdf:type to the DATA_TYPES bucket that holds it. */
 function routeTypeKey(quads: Quad[]): string {
-  const typeIri = quads.find((q) => q.predicate.value === RDF_TYPE)?.object.value ?? '';
-  for (const [key, info] of Object.entries(DATA_TYPES)) {
-    if (info.isFhirPassthroughBucket) continue;
-    if (info.rdfTypes.includes(typeIri)) return key;
-  }
-  return 'fhir-passthrough';
+  return dataTypeKeyForSubject(quads);
 }
 
 /** Pod-relative path of every REGISTERED record bucket, keyed by DATA_TYPES key. */

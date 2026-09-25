@@ -1,0 +1,17 @@
+{
+  "resourceType": "Condition",
+  "id": "cond-1",
+  "clinicalStatus": {
+    "coding": [
+      { "system": "http://terminology.hl7.org/CodeSystem/condition-clinical", "code": "active" }
+    ]
+  },
+  "code": {
+    "coding": [
+      { "system": "http://snomed.info/sct", "code": "38341003", "display": "Hypertensive disorder" }
+    ],
+    "text": "Hypertension"
+  },
+  "subject": { "reference": "Patient/pat-1" },
+  "recordedDate": "2024-02-15"
+}

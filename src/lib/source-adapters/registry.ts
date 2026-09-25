@@ -34,4 +34,4 @@ export function detectSource(targetPath: string): SourceAdapter | undefined {
   });
 }
 
-export type { SourceAdapter, ExpandedSource, SkippedArtifact, FileSourceMeta, CompletenessCheck } from './types.js';
+export type { SourceAdapter, ExpandedSource, SkippedArtifact, FileSourceMeta, CompletenessCheck, StreamedArtifact } from './types.js';

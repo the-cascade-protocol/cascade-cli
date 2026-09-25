@@ -39,6 +39,11 @@ import {
   type LiteralLiftSummary,
 } from '../../lib/literal-lifting.js';
 import { detectSource, type FileSourceMeta, type CompletenessCheck } from '../../lib/source-adapters/registry.js';
+import { dataTypeKeyForSubject } from '../../lib/pod-data-types.js';
+import {
+  importAppleHealthWellness,
+  type WellnessImportReport,
+} from '../../lib/apple-health-wellness/import-export.js';
 import {
   DATA_TYPES,
   isStructuralSubNode,
@@ -186,6 +191,13 @@ interface ImportReport {
    * count, omitted the empty buckets, and read as a success.
    */
   sectionCensus: SectionCensusEntry[];
+  /**
+   * One entry per Apple Health `export.xml` read by the streaming wellness
+   * aggregator: the day zone and the rule that chose it, what was read,
+   * retained and derived, and every file written. Absent when the import had
+   * no such export.
+   */
+  wellness?: WellnessImportReport[];
   warnings: string[];
   dryRun: boolean;
 }
@@ -281,22 +293,10 @@ async function parseTurtleToQuads(turtle: string): Promise<Map<string, Quad[]>> 
 // Route a subject's rdf:type to a DATA_TYPES key
 // ---------------------------------------------------------------------------
 
+// One router for every verb that files records (`pod-data-types.ts`), so a
+// record this import rewrites lands in the file it was written to.
 function routeTypeKey(quads: Quad[]): string {
-  const rdfTypeIri = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
-  const typeQuad = quads.find(q => q.predicate.value === rdfTypeIri);
-  const typeIri = typeQuad?.object.value ?? '';
-
-  // Exact match first
-  for (const [key, info] of Object.entries(DATA_TYPES)) {
-    if (info.isFhirPassthroughBucket) continue;
-    if (info.rdfTypes.includes(typeIri)) return key;
-  }
-
-  // FHIR passthrough: type starts with http://hl7.org/fhir/
-  if (typeIri.startsWith('http://hl7.org/fhir/')) return 'fhir-passthrough';
-
-  // Unknown type: fallback to fhir-passthrough
-  return 'fhir-passthrough';
+  return dataTypeKeyForSubject(quads);
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +501,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // each file's basename ("MedicationRequest-<id>"), which was the Source
       // facet wall. A plain file argument has no label (falls back to basename).
       const expandedFiles: { path: string; label?: string; source?: FileSourceMeta }[] = [];
+      // Multi-GB artifacts read by a streaming importer after the per-file path
+      // (an Apple Health export.xml, read by the wellness aggregator).
+      const streamedExports: string[] = [];
       const sourceSkips: string[] = [];
       const completeness: CompletenessCheck[] = [];
       for (const arg of files) {
@@ -528,7 +531,10 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           sourceSkips.push(`Skipped ${path.basename(s.path)}: ${s.reason}`);
         }
         if (expanded.completeness) completeness.push(...expanded.completeness);
-        if (expanded.files.length === 0) {
+        for (const st of expanded.streamed ?? []) {
+          if (st.kind === 'apple-health-export-xml') streamedExports.push(st.path);
+        }
+        if (expanded.files.length === 0 && (expanded.streamed ?? []).length === 0) {
           const why = expanded.skipped.length
             ? ` ${expanded.skipped.map((s) => s.reason).join('; ')}`
             : '';
@@ -541,6 +547,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         }
         printVerbose(
           `${expanded.sourceLabel}: importing ${expanded.files.length} file(s)` +
+            ((expanded.streamed ?? []).length ? ` and streaming ${(expanded.streamed ?? []).length}` : '') +
             (expanded.skipped.length ? `, skipping ${expanded.skipped.length}` : ''),
           globalOpts,
         );
@@ -761,7 +768,11 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
 
       // Load existing pod data as an implicit source 0 when --reconcile-existing is set
       let existingInputs: ReconcilerInput[] = [];
-      if (options.reconcileExisting !== false) {
+      // An import whose only input is a streamed wellness export has nothing for
+      // the reconciler to reconcile, so the pod's records are not loaded into it
+      // (loading them would only rewrite every bucket with what it already holds).
+      const wellnessOnly = reconcilerInputs.length === 0 && streamedExports.length > 0;
+      if (options.reconcileExisting !== false && !wellnessOnly) {
         const existing = await loadExistingPodData(podDir, dek);
         existingInputs = existing.inputs;
         for (const rel of existing.unreadable) {
@@ -1309,6 +1320,66 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         }
       }
 
+      // --- Step 9c: Apple Health wellness (streamed export.xml) ---
+      // After the per-file records, so the clinical half of an export is on disk
+      // first. The aggregator writes its own files additively and in canonical
+      // order; the type index and index.ttl are updated here the same way Steps
+      // 8 and 9 do it for the per-file path.
+      const wellnessReports: WellnessImportReport[] = [];
+      for (const exportXml of streamedExports) {
+        printVerbose(`Streaming Apple Health wellness data: ${exportXml}`, globalOpts);
+        let wr: WellnessImportReport;
+        try {
+          wr = await importAppleHealthWellness({ podDir, exportXmlPath: exportXml, dek, dryRun });
+        } catch (e: unknown) {
+          printError(
+            `Wellness import of ${exportXml} failed: ${e instanceof Error ? e.message : String(e)}`,
+            globalOpts,
+          );
+          process.exitCode = 1;
+          continue;
+        }
+        wellnessReports.push(wr);
+        sourceReport.push({
+          file: exportXml,
+          system: 'Apple Health export',
+          resourceCount: wr.recordsRead,
+          warnings: wr.warnings,
+        });
+        allWarnings.push(...wr.warnings.map((w) => `${path.basename(exportXml)}: ${w}`));
+        if (wr.dayZone.rule !== 'pod') {
+          allWarnings.push(
+            `Wellness days are cut in ${wr.dayZone.zone} (${wr.dayZone.rule}); ` +
+              (wr.dayZone.written
+                ? 'recorded as cascade:dayZone in profile/extended.ttl.'
+                : 'not recorded in the pod by this run.'),
+          );
+        }
+        for (const f of wr.files) {
+          const info = DATA_TYPES[f.key];
+          if (info) {
+            typeCounts[f.key] = (typeCounts[f.key] ?? 0) + f.recordsWritten;
+            filesWritten.push({
+              path: path.join(podDir, ...f.path.split('/')),
+              recordsAdded: f.recordsWritten,
+              recordsNew: f.recordsNew,
+              type: f.key,
+            });
+            const indexPath = typeIndexForInfo(info) === 'publicTypeIndex.ttl' ? publicIndexPath : privateIndexPath;
+            if (await fileExists(indexPath)) {
+              await appendTypeRegistration(indexPath, f.key, info, dryRun, dek);
+            }
+          }
+          if (f.created && (await fileExists(indexTtlPath))) {
+            await appendIndexContains(indexTtlPath, f.path, dryRun, dek);
+          }
+          printVerbose(
+            `  ${dryRun ? '[dry-run] ' : ''}${f.created ? 'Created' : 'Updated'} ${f.path} (${f.recordsNew} new of ${f.recordsWritten})`,
+            globalOpts,
+          );
+        }
+      }
+
       // --- Step 10: Summary and report ---
       const totalRecordsImported = Object.values(typeCounts).reduce((a, b) => a + b, 0);
       const recordsNew = filesWritten.reduce((a, f) => a + f.recordsNew, 0);
@@ -1343,6 +1414,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         edgeResolution,
         literalLifting,
         sectionCensus,
+        ...(wellnessReports.length > 0 ? { wellness: wellnessReports } : {}),
         warnings: allWarnings,
         dryRun,
       };
@@ -1436,6 +1508,21 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             ].filter(Boolean).join(', ');
             console.log(`    - clinical:parsedIndicationReference: ${pi.lifted} lifted` +
               (notes ? ` (${notes})` : ''));
+          }
+        }
+        for (const wr of wellnessReports) {
+          console.log(`  Wellness (${path.basename(wr.export)}):`);
+          console.log(`    Day zone:         ${wr.dayZone.zone} (${wr.dayZone.rule})`);
+          console.log(
+            `    Samples:          ${wr.samplesAggregated} aggregated, ${wr.samplesRetained} retained in ` +
+              `${wr.sampleFiles.total} daily sample file(s) (${wr.sampleFiles.new} new)`,
+          );
+          console.log(`    Closed days:      ${wr.closedDays} (${wr.openDaysSkipped} open day(s) left for a later export)`);
+          console.log(
+            `    Source records:   ${wr.activitySummaries.imported} ActivitySummary day(s), ${wr.workouts} workout(s), ${wr.devices} device(s)`,
+          );
+          if (wr.correlationRecordsSkipped > 0) {
+            console.log(`    Skipped:          ${wr.correlationRecordsSkipped} record(s) nested in <Correlation> (each also appears at top level)`);
           }
         }
         if (reconciledEdgeRewrites > 0) {

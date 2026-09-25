@@ -102,7 +102,7 @@ describe('appleHealthAdapter', () => {
     expect(appleHealthAdapter.detect(path.join(appleDir, 'export.xml'))).toBe(false); // a file, not a dir
   });
 
-  it('expands to clinical-records FHIR and skips the device exports', () => {
+  it('expands to clinical-records FHIR, streams export.xml, and skips the rest of the device data', () => {
     const out = appleHealthAdapter.expand(appleDir);
     expect(out.sourceLabel).toBe('Apple Health export');
     expect(out.files.map((f) => path.basename(f)).sort()).toEqual([
@@ -111,9 +111,14 @@ describe('appleHealthAdapter', () => {
     ]);
     // Every imported file lives under clinical-records.
     expect(out.files.every((f) => f.includes(`${path.sep}clinical-records${path.sep}`))).toBe(true);
-    // Both device exports and the workout-routes dir are skipped with reasons.
+    // export.xml is no longer skipped: it is a STREAMED artifact, read by the
+    // wellness aggregator rather than by the whole-file per-file path.
+    expect(out.streamed).toEqual([{ path: path.join(appleDir, 'export.xml'), kind: 'apple-health-export-xml' }]);
+    expect(out.files.some((f) => path.basename(f) === 'export.xml')).toBe(false);
+    // The CDA rendering of the same samples and the workout-routes dir are
+    // skipped, each with a reason.
     const skippedNames = out.skipped.map((s) => path.basename(s.path)).sort();
-    expect(skippedNames).toEqual(['export.xml', 'export_cda.xml', 'workout-routes']);
+    expect(skippedNames).toEqual(['export_cda.xml', 'workout-routes']);
     expect(out.skipped.every((s) => s.reason.length > 0)).toBe(true);
   });
 
@@ -137,8 +142,10 @@ describe('appleHealthAdapter', () => {
     // A clinical file with no wrapper is simply absent (falls back to derivation).
     expect(fs2[observationPath]).toBeUndefined();
 
-    // The device export is still skipped despite being read for its tail block.
-    expect(out.skipped.map((s) => path.basename(s.path))).toContain('export.xml');
+    // Reading its tail block for the wrappers does not change what happens to
+    // export.xml itself: it is streamed, never read whole and never skipped.
+    expect(out.streamed?.map((s) => path.basename(s.path))).toEqual(['export.xml']);
+    expect(out.skipped.map((s) => path.basename(s.path))).not.toContain('export.xml');
   });
 
   it('reports source-label completeness (recovered vs total) for the pre-import plan', () => {

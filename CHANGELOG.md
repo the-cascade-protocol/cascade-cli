@@ -7,9 +7,60 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased]
+## [0.23.0] - 2026-09-25
+
+Everything below, including the entries written before this heading was added,
+ships in 0.23.0.
 
 ### Added
+
+**Apple Health wellness data: `cascade pod import <export folder>` now reads
+`export.xml`.** Until now an Apple Health export brought in its clinical
+records and none of the watch or phone data, because `export.xml` (4.6 GB in a
+real export) was skipped. It is now read by a streaming aggregator in one pass
+with bounded memory (a generated 3.85 GB, 10-million-sample export imports in
+about a minute with the heap capped at 192 MB), and written as daily wellness
+records under health v2.11:
+
+- **Computed daily aggregates**, one record per (source, device, metric,
+  statistic, closed day), for steps, heart rate (minimum, average, maximum),
+  resting heart rate, walking heart rate average, HRV (SDNN), respiratory rate,
+  blood oxygen, body mass and active energy. The metric list, units, codes,
+  statistics and target file are data (`src/data/apple-health-wellness-rules.json`),
+  read by one function. No winner is picked across sources: the watch and the
+  phone counting steps on one day are two records.
+- **Only closed days are aggregated**: a day is written once the export's
+  coverage (its `<ExportDate>`) ends strictly after the day does, so importing
+  the same export twice leaves every file byte-identical.
+- **Days are cut in the pod's `cascade:dayZone`**, never in the offset the
+  export prints (Apple renders every timestamp in the exporting device's current
+  zone). When the pod states no zone, the first import sets it from the majority
+  `HKTimeZone` in the export, else the importing machine's zone, and the import
+  report says which rule applied.
+- **Samples are retained before anything is derived from them.** Each closed
+  day's samples are kept as one compact JSON file (packed columns per series),
+  content-addressed under `attachments/sha-256/`, described in
+  `wellness/samples/samples.ttl` (provisional location). Every computed aggregate
+  points at its day's file with `prov:wasDerivedFrom` and at the rule and its
+  version with `prov:wasGeneratedBy`.
+- **Names follow D-WELLNESS-1**: an aggregate is named by the digest seed over
+  the pod subject, id space, device, metric, statistic, UTC interval and a
+  digest of its samples; a source record carrying its own id is named from it.
+  Both seeds live in `src/lib/identity.ts`. Samples nested in `<Correlation>`
+  are skipped (they also appear at top level), and the per-export memory address
+  in Apple's device string is stripped before anything is digested.
+- **Source records**: Apple's own `<ActivitySummary>` days (named by date; the
+  all-zero pre-1970 sentinel rows are dropped), `<Workout>`s (no routes), and the
+  `health:Device`s the records reference.
+
+Records land in `wellness/heart-rate.ttl`, `hrv.ttl`, `body-measurements.ttl`
+and `activity.ttl` per the pod structure, and devices in `wellness/devices.ttl`
+(provisional). A `health:DailyVitalReading` is filed by its LOINC code, and
+`pod import` and `pod reconcile` now share one router, so a later import or
+reconcile rewrites each record into the file it was written to.
+
+Not yet built: sleep sessions, blood pressure readings, basal energy, VO2 max.
+Verification against real exports is still owed.
 
 **`cascade pod passphrase set <pod-dir> --rotate-dek`: a new data key, and
 every sealed file re-encrypted under it.** A re-wrap changes only which
