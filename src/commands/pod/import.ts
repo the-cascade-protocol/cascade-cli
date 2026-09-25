@@ -84,6 +84,7 @@ import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket
 import { toJsonText } from '../../lib/json-output.js';
 import { appendTier0Journal, TIER0_JOURNAL_RELATIVE_PATH } from '../../lib/tier0-journal.js';
 import { shellCommand } from '../../lib/shell-quote.js';
+import { appendAll } from '../../lib/append-all.js';
 
 // ---------------------------------------------------------------------------
 // Import report type
@@ -530,7 +531,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         for (const s of expanded.skipped) {
           sourceSkips.push(`Skipped ${path.basename(s.path)}: ${s.reason}`);
         }
-        if (expanded.completeness) completeness.push(...expanded.completeness);
+        if (expanded.completeness) appendAll(completeness, expanded.completeness);
         for (const st of expanded.streamed ?? []) {
           if (st.kind === 'apple-health-export-xml') streamedExports.push(st.path);
         }
@@ -551,8 +552,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             (expanded.skipped.length ? `, skipping ${expanded.skipped.length}` : ''),
           globalOpts,
         );
-        expandedFiles.push(
-          ...expanded.files.map((f) => ({
+        appendAll(
+          expandedFiles,
+          expanded.files.map((f) => ({
             path: f,
             label: expanded.sourceLabel,
             source: expanded.fileSources?.[f],
@@ -666,8 +668,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           }
           turtleContent = result.output;
           resourceCount = result.resourceCount;
-          warnings.push(...result.warnings);
-          allWarnings.push(...result.warnings.map(w => `${filePath}: ${w}`));
+          appendAll(warnings, result.warnings);
+          appendAll(allWarnings, result.warnings.map(w => `${filePath}: ${w}`));
           for (const s of result.sectionCensus ?? []) {
             const acc = sectionCensus.find((e) => e.label === s.label && e.loinc === s.loinc);
             if (acc) {
@@ -713,8 +715,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           }
           turtleContent = result.output;
           resourceCount = result.resourceCount;
-          warnings.push(...result.warnings);
-          allWarnings.push(...result.warnings.map(w => `${filePath}: ${w}`));
+          appendAll(warnings, result.warnings);
+          appendAll(allWarnings, result.warnings.map(w => `${filePath}: ${w}`));
           if (result.edgeResolution) {
             edgeResolution.resolved += result.edgeResolution.resolved;
             edgeResolution.unresolved += result.edgeResolution.unresolved;
@@ -1346,7 +1348,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           resourceCount: wr.recordsRead,
           warnings: wr.warnings,
         });
-        allWarnings.push(...wr.warnings.map((w) => `${path.basename(exportXml)}: ${w}`));
+        appendAll(allWarnings, wr.warnings.map((w) => `${path.basename(exportXml)}: ${w}`));
         if (wr.dayZone.rule !== 'pod') {
           allWarnings.push(
             `Wellness days are cut in ${wr.dayZone.zone} (${wr.dayZone.rule}); ` +

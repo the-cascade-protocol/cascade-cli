@@ -22,6 +22,7 @@ import {
   quadsToJsonLd,
   mintSubjectUri,
 } from './types.js';
+import { appendAll } from '../append-all.js';
 
 /**
  * FHIR resource types that are intentionally excluded from conversion.
@@ -57,7 +58,7 @@ export function convertFhirPassthrough(resource: any, minimal = false): Conversi
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.fhir + resourceType));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   // Layer promotion status — pending Layer 2 mapping
   quads.push(tripleRef(subjectUri, NS.cascade + 'layerPromotionStatus', NS.cascade + 'PendingLayerTwoPromotion'));

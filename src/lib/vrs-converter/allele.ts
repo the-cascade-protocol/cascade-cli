@@ -48,6 +48,7 @@ import {
 } from '../fhir-converter/types.js';
 import { GENOMICS_NS } from '../fhir-genomics-converter/types.js';
 import type { VrsAllele } from './types.js';
+import { appendAll } from '../append-all.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -214,7 +215,7 @@ export function ingestVrsAllele(parsed: unknown, ctx: ImportContext): IngestOutp
   const variantIri = mintVariantIri(declaredId);
   const quads: Quad[] = [];
   quads.push(tripleType(variantIri, GENOMICS_NS + 'Variant'));
-  quads.push(...commonTriples(variantIri));
+  appendAll(quads, commonTriples(variantIri));
 
   // genomics:vrsId — the declared id verbatim.
   quads.push(tripleStr(variantIri, GENOMICS_NS + 'vrsId', declaredId));

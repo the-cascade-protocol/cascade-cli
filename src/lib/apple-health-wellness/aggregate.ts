@@ -45,6 +45,7 @@ import { dayIntervalUtc, isKnownZone, isoUtc, localDateOf, parseAppleTimestamp, 
 import { deviceIdentityOf, stripDeviceAddress } from './device.js';
 import { decodeSample, type ScanResult, type SeriesKey, type SpilledSample, type WorkoutElement } from './scan.js';
 import type { SampleSpill } from './spill.js';
+import { appendAll } from '../append-all.js';
 
 // ---------------------------------------------------------------------------
 // Output model (plain data; `quads.ts` turns it into triples)
@@ -541,7 +542,7 @@ export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateO
     if (rec) result.records.push(rec);
   }
 
-  result.records.push(...devices.records());
+  appendAll(result.records, devices.records());
   return result;
 }
 

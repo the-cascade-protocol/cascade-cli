@@ -84,6 +84,7 @@ import {
   type Tier0Journal,
 } from '../../lib/tier0-journal.js';
 import { shellCommand } from '../../lib/shell-quote.js';
+import { appendAll } from '../../lib/append-all.js';
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const MERGED_FROM = 'https://ns.cascadeprotocol.org/core/v1#mergedFrom';
@@ -764,8 +765,8 @@ function renderTextReport(report: ReconcileReport): string {
   if (merges === 0 && s.conflictsUnresolved === 0 && s.conflictsResolved === 0) {
     lines.push('  No duplicates and no conflicts found. Nothing to reconcile.');
     lines.push('');
-    lines.push(...renderUserResolutions(report));
-    lines.push(...renderConflictQueue(report));
+    appendAll(lines, renderUserResolutions(report));
+    appendAll(lines, renderConflictQueue(report));
     return lines.join('\n');
   }
 
@@ -807,8 +808,8 @@ function renderTextReport(report: ReconcileReport): string {
     lines.push('');
   }
 
-  lines.push(...renderUserResolutions(report));
-  lines.push(...renderConflictQueue(report));
+  appendAll(lines, renderUserResolutions(report));
+  appendAll(lines, renderConflictQueue(report));
 
   if (report.filesUnreadable.length > 0) {
     lines.push(`  ${report.filesUnreadable.length} file(s) could NOT be read and were excluded:`);
@@ -968,7 +969,7 @@ async function runUndo(
           break;
         }
         bucket = rel;
-        quads.push(...quadsFromJournal(d.uri, d.properties));
+        appendAll(quads, quadsFromJournal(d.uri, d.properties));
       }
 
       if (reason) {
@@ -978,7 +979,7 @@ async function runUndo(
 
       merges.push({ ...base, status: 'restorable', bucket });
       const target = toWrite.get(bucket as string) ?? [];
-      target.push(...quads);
+      appendAll(target, quads);
       toWrite.set(bucket as string, target);
       for (const u of restores) restoredSet.add(u);
       undone.push({ canonicalUri: merge.canonicalUri, restoredUris: restores });

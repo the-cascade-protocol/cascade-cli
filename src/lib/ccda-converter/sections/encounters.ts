@@ -23,6 +23,7 @@ import { listOf } from '../multivalued.js';
 import { ccdaRecordUri, ccdaSourceId } from '../record-identity.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
+import { appendAll } from '../../append-all.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -230,7 +231,7 @@ export function extractEncounterQuads(
     const encList = entry?.encounter ? listOf<any>(entry.encounter) : [entry];
     for (const enc of encList) {
       const built = buildEncounterRecord(enc, sourceSystem, warnings);
-      if (built) quads.push(...built.quads);
+      if (built) appendAll(quads, built.quads);
     }
   }
 

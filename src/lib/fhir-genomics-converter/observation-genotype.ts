@@ -43,6 +43,7 @@ import {
 } from '../fhir-converter/types.js';
 import { identityKey } from '../identity.js';
 import { emitPhasedWithLink } from './observation-variant.js';
+import { appendAll } from '../append-all.js';
 
 export interface GenotypeParseOutput {
   record: ParsedRecord;
@@ -257,7 +258,7 @@ export function parseGenotypeObservation(
       memberVariantIris[1],
       hgvsPhase,
     );
-    quads.push(...phasedTriples);
+    appendAll(quads, phasedTriples);
   } else if (memberVariantIris.length >= 2 && !hgvsPhase) {
     gaps.push({
       sourceField: `Observation/${sourceId}.value`,
@@ -270,7 +271,7 @@ export function parseGenotypeObservation(
       memberVariantIris[1],
       'PhaseUnknown',
     );
-    quads.push(...phasedTriples);
+    appendAll(quads, phasedTriples);
   }
 
   // Source identity passthrough.

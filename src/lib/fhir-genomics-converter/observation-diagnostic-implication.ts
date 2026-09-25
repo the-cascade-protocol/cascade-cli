@@ -52,6 +52,7 @@ import {
   deterministicUuid,
 } from '../fhir-converter/types.js';
 import { identityKey } from '../identity.js';
+import { appendAll } from '../append-all.js';
 
 export interface DiagnosticImplicationParseOutput {
   records: ParsedRecord[];
@@ -272,7 +273,7 @@ export function parseDiagnosticImplication(
     // Condition triples (mondoId / omimId / orphaCode + condition IRI ref)
     const { triples: condTriples, matched } = conditionTriples(iri, condCcc);
     if (matched) {
-      quads.push(...condTriples);
+      appendAll(quads, condTriples);
     } else {
       const display = ccDisplayOrCode(condCcc) ?? '<unknown>';
       gaps.push({

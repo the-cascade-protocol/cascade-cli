@@ -36,6 +36,7 @@ import {
 } from './scv-submitter-assertion.js';
 import { GENOMICS_NS } from './types.js';
 import { tripleRef } from '../fhir-converter/types.js';
+import { appendAll } from '../append-all.js';
 
 export { detectClinvar } from './detect.js';
 export { clinvarImporter } from './registry-entry.js';
@@ -122,9 +123,9 @@ export async function convertClinvarXml(
       continue;
     }
     records.push(out.record);
-    quads.push(...out.record.quads);
-    warnings.push(...out.warnings);
-    vocabularyGaps.push(...out.gaps);
+    appendAll(quads, out.record.quads);
+    appendAll(warnings, out.warnings);
+    appendAll(vocabularyGaps, out.gaps);
     importedIdentifiers.push({
       cascadeIri: out.record.iri,
       cascadeType: out.record.cascadeType,
@@ -276,7 +277,7 @@ export async function convertClinvarXml(
       for (let i = 0; i < rcvOut.records.length; i++) {
         const rec = rcvOut.records[i];
         records.push(rec);
-        quads.push(...rec.quads);
+        appendAll(quads, rec.quads);
         importedIdentifiers.push({
           cascadeIri: rec.iri,
           cascadeType: rec.cascadeType,
@@ -325,8 +326,8 @@ export async function convertClinvarXml(
           }
         }
       }
-      warnings.push(...rcvOut.warnings);
-      vocabularyGaps.push(...rcvOut.gaps);
+      appendAll(warnings, rcvOut.warnings);
+      appendAll(vocabularyGaps, rcvOut.gaps);
     }
 
     // ---- ClinicalAssertion → SubmitterAssertion ----
@@ -344,15 +345,15 @@ export async function convertClinvarXml(
         continue;
       }
       records.push(scvOut.record);
-      quads.push(...scvOut.record.quads);
+      appendAll(quads, scvOut.record.quads);
       importedIdentifiers.push({
         cascadeIri: scvOut.record.iri,
         cascadeType: scvOut.record.cascadeType,
         sourceType: 'ClinVar.ClinicalAssertion',
         sourceId: scvOut.record.sourceId,
       });
-      warnings.push(...scvOut.warnings);
-      vocabularyGaps.push(...scvOut.gaps);
+      appendAll(warnings, scvOut.warnings);
+      appendAll(vocabularyGaps, scvOut.gaps);
 
       // Resolve aggregation hints → genomics:aggregatedFrom triples on
       // the matching VariantInterpretation(s). Try keys in priority

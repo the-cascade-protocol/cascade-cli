@@ -23,6 +23,7 @@ import {
   mintSubjectUri,
 } from './types.js';
 import { referencePlaceholder } from './reference-resolution.js';
+import { appendAll } from '../append-all.js';
 
 // ---------------------------------------------------------------------------
 // Claim converter (B3)
@@ -34,7 +35,7 @@ export function convertClaim(resource: any): ConversionResult & { _quads: Quad[]
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.coverage + 'ClaimRecord'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   // Claim date — from billablePeriod.start or created
   const claimDate = resource.billablePeriod?.start ?? resource.created;
@@ -112,7 +113,7 @@ export function convertExplanationOfBenefit(resource: any): ConversionResult & {
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.coverage + 'BenefitStatement'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   // Adjudication date — from billablePeriod.end or created
   const adjDate = resource.billablePeriod?.end ?? resource.created;

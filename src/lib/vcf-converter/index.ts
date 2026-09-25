@@ -35,6 +35,7 @@ import { isGzipped } from './detect.js';
 import { parseHeaderLines, classifySource } from './header.js';
 import { parseRecordLine, type ParsedRecord } from './record.js';
 import { emitSequencingRun } from './multi-sample.js';
+import { appendAll } from '../append-all.js';
 
 export { detectVcf, isGzipped, inflateGzip } from './detect.js';
 export { vcfImporter } from './registry-entry.js';
@@ -161,8 +162,8 @@ export async function convertVcf(
       sequencingRunIri = sequencingRun.iri;
       result.sequencingRunIri = sequencingRunIri;
       result.records.push(sequencingRun);
-      result.quads.push(...sequencingRun.quads);
-      result.vocabularyGaps.push(...sequencingRun.gaps);
+      appendAll(result.quads, sequencingRun.quads);
+      appendAll(result.vocabularyGaps, sequencingRun.gaps);
       result.importedIdentifiers.push({
         cascadeIri: sequencingRun.iri,
         cascadeType: sequencingRun.cascadeType,
@@ -186,7 +187,7 @@ export async function convertVcf(
     result.recordsRead += 1;
     for (const variantRecord of out.records) {
       result.records.push(variantRecord);
-      result.quads.push(...variantRecord.quads);
+      appendAll(result.quads, variantRecord.quads);
       result.importedIdentifiers.push({
         cascadeIri: variantRecord.iri,
         cascadeType: variantRecord.cascadeType,
@@ -195,8 +196,8 @@ export async function convertVcf(
       });
       result.variantsEmitted += 1;
     }
-    result.warnings.push(...out.warnings);
-    result.vocabularyGaps.push(...out.gaps);
+    appendAll(result.warnings, out.warnings);
+    appendAll(result.vocabularyGaps, out.gaps);
   }
 
   // Edge case: a VCF with header lines only (no records). Still emit
@@ -206,8 +207,8 @@ export async function convertVcf(
     const sequencingRun = emitSequencingRun(header, ctx, contentDigest);
     result.sequencingRunIri = sequencingRun.iri;
     result.records.push(sequencingRun);
-    result.quads.push(...sequencingRun.quads);
-    result.vocabularyGaps.push(...sequencingRun.gaps);
+    appendAll(result.quads, sequencingRun.quads);
+    appendAll(result.vocabularyGaps, sequencingRun.gaps);
     result.importedIdentifiers.push({
       cascadeIri: sequencingRun.iri,
       cascadeType: sequencingRun.cascadeType,

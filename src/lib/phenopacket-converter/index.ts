@@ -42,6 +42,7 @@ import { parseBiosample, buildRawFileRecord } from './biosamples.js';
 import { parseMedicalActions } from './medical-actions.js';
 import { auditPhenopacketTopLevel, auditCohortWrapper } from './gap-audit.js';
 import { tripleRef, NS } from '../fhir-converter/types.js';
+import { appendAll } from '../append-all.js';
 
 export { detectPhenopacket, classifyPhenopacket } from './detect.js';
 export { phenopacketImporter } from './registry-entry.js';
@@ -108,9 +109,9 @@ export async function convertPhenopacket(
   if (kind === 'phenopacket') {
     const out = parseSubject(parsed.subject, parsed.id, ctx);
     records.push(out.record);
-    quads.push(...out.record.quads);
-    warnings.push(...out.warnings);
-    vocabularyGaps.push(...out.gaps);
+    appendAll(quads, out.record.quads);
+    appendAll(warnings, out.warnings);
+    appendAll(vocabularyGaps, out.gaps);
     importedIdentifiers.push({
       cascadeIri: out.record.iri,
       cascadeType: out.record.cascadeType,
@@ -124,9 +125,9 @@ export async function convertPhenopacket(
     const probandPp = parsed.proband ?? {};
     const probandOut = parseSubject(probandPp.subject, probandPp.id ?? parsed.id, ctx);
     records.push(probandOut.record);
-    quads.push(...probandOut.record.quads);
-    warnings.push(...probandOut.warnings);
-    vocabularyGaps.push(...probandOut.gaps);
+    appendAll(quads, probandOut.record.quads);
+    appendAll(warnings, probandOut.warnings);
+    appendAll(vocabularyGaps, probandOut.gaps);
     importedIdentifiers.push({
       cascadeIri: probandOut.record.iri,
       cascadeType: probandOut.record.cascadeType,
@@ -143,9 +144,9 @@ export async function convertPhenopacket(
       for (const rel of parsed.relatives) {
         const relOut = parseSubject(rel?.subject, rel?.id ?? rel?.subject?.id, ctx);
         records.push(relOut.record);
-        quads.push(...relOut.record.quads);
-        warnings.push(...relOut.warnings);
-        vocabularyGaps.push(...relOut.gaps);
+        appendAll(quads, relOut.record.quads);
+        appendAll(warnings, relOut.warnings);
+        appendAll(vocabularyGaps, relOut.gaps);
         importedIdentifiers.push({
           cascadeIri: relOut.record.iri,
           cascadeType: relOut.record.cascadeType,
@@ -161,9 +162,9 @@ export async function convertPhenopacket(
       for (const member of parsed.members) {
         const memberOut = parseSubject(member?.subject, member?.id, ctx);
         records.push(memberOut.record);
-        quads.push(...memberOut.record.quads);
-        warnings.push(...memberOut.warnings);
-        vocabularyGaps.push(...memberOut.gaps);
+        appendAll(quads, memberOut.record.quads);
+        appendAll(warnings, memberOut.warnings);
+        appendAll(vocabularyGaps, memberOut.gaps);
         importedIdentifiers.push({
           cascadeIri: memberOut.record.iri,
           cascadeType: memberOut.record.cascadeType,
@@ -181,10 +182,10 @@ export async function convertPhenopacket(
   // -------- Pedigree (only for family resources) --------
   if (kind === 'family') {
     const pedOut = parsePedigree(parsed, subjectIris, ctx);
-    records.push(...pedOut.records);
-    quads.push(...pedOut.quads);
-    warnings.push(...pedOut.warnings);
-    vocabularyGaps.push(...pedOut.gaps);
+    appendAll(records, pedOut.records);
+    appendAll(quads, pedOut.quads);
+    appendAll(warnings, pedOut.warnings);
+    appendAll(vocabularyGaps, pedOut.gaps);
     for (const rec of pedOut.records) {
       importedIdentifiers.push({
         cascadeIri: rec.iri,
@@ -213,10 +214,10 @@ export async function convertPhenopacket(
       );
       // Append to the patient record's quads + the global stream.
       const patientRecord = records.find((r) => r.iri === unit.patientIri);
-      if (patientRecord) patientRecord.quads.push(...out.quads);
-      quads.push(...out.quads);
-      warnings.push(...out.warnings);
-      vocabularyGaps.push(...out.gaps);
+      if (patientRecord) appendAll(patientRecord.quads, out.quads);
+      appendAll(quads, out.quads);
+      appendAll(warnings, out.warnings);
+      appendAll(vocabularyGaps, out.gaps);
     }
 
     // ---- Interpretations → Variant + VariantInterpretation (TASK-2B.4 + 2B.5) ----
@@ -227,10 +228,10 @@ export async function convertPhenopacket(
         ctx,
         ctxLabel,
       );
-      records.push(...out.records);
-      quads.push(...out.quads);
-      warnings.push(...out.warnings);
-      vocabularyGaps.push(...out.gaps);
+      appendAll(records, out.records);
+      appendAll(quads, out.quads);
+      appendAll(warnings, out.warnings);
+      appendAll(vocabularyGaps, out.gaps);
       for (const rec of out.records) {
         importedIdentifiers.push({
           cascadeIri: rec.iri,
@@ -248,10 +249,10 @@ export async function convertPhenopacket(
     if (Array.isArray(unit.pp.biosamples)) {
       for (const bs of unit.pp.biosamples) {
         const out = parseBiosample(bs, unit.patientIri, ctx, ctxLabel);
-        records.push(...out.records);
-        quads.push(...out.quads);
-        warnings.push(...out.warnings);
-        vocabularyGaps.push(...out.gaps);
+        appendAll(records, out.records);
+        appendAll(quads, out.quads);
+        appendAll(warnings, out.warnings);
+        appendAll(vocabularyGaps, out.gaps);
         for (const rec of out.records) {
           importedIdentifiers.push({
             cascadeIri: rec.iri,
@@ -272,8 +273,8 @@ export async function convertPhenopacket(
         const rfOut = buildRawFileRecord(f, ctx, `${ctxLabel}.files`);
         if (rfOut) {
           records.push(rfOut.record);
-          quads.push(...rfOut.record.quads);
-          vocabularyGaps.push(...rfOut.gaps);
+          appendAll(quads, rfOut.record.quads);
+          appendAll(vocabularyGaps, rfOut.gaps);
           importedIdentifiers.push({
             cascadeIri: rfOut.record.iri,
             cascadeType: rfOut.record.cascadeType,
@@ -301,19 +302,19 @@ export async function convertPhenopacket(
         ctxLabel,
       );
       const patientRecord = records.find((r) => r.iri === unit.patientIri);
-      if (patientRecord) patientRecord.quads.push(...out.quads);
-      quads.push(...out.quads);
-      warnings.push(...out.warnings);
-      vocabularyGaps.push(...out.gaps);
+      if (patientRecord) appendAll(patientRecord.quads, out.quads);
+      appendAll(quads, out.quads);
+      appendAll(warnings, out.warnings);
+      appendAll(vocabularyGaps, out.gaps);
     }
 
     // ---- Per-unit comprehensive gap audit (TASK-2B.10) ----
-    vocabularyGaps.push(...auditPhenopacketTopLevel(unit.pp, ctxLabel));
+    appendAll(vocabularyGaps, auditPhenopacketTopLevel(unit.pp, ctxLabel));
   }
 
   // ---- Top-level wrapper-level gap audit (cohort description, etc.) ----
   if (kind === 'cohort') {
-    vocabularyGaps.push(...auditCohortWrapper(parsed));
+    appendAll(vocabularyGaps, auditCohortWrapper(parsed));
   }
 
   return {

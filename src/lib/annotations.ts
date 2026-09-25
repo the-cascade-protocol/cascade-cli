@@ -23,6 +23,7 @@ import type { Quad, Quad_Object } from 'n3';
 import { openPod } from './pod-read.js';
 import { loadShapes, validateTurtle } from './shacl-validator.js';
 import { mergeIntoBucket, KNOWN_PREFIXES, assertWritableIri } from './bucket-write.js';
+import { appendAll } from './append-all.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -206,9 +207,7 @@ export async function appendOverlays(
     if (spec.fileName !== fileName) {
       throw new Error(`appendOverlays: ${spec.fileName} is not ${fileName}`);
     }
-    newQuads.push(
-      ...buildOverlayQuads(spec.subjectUri, spec.rdfType, spec.lines, spec.actorIri, spec.createdIso),
-    );
+    appendAll(newQuads, buildOverlayQuads(spec.subjectUri, spec.rdfType, spec.lines, spec.actorIri, spec.createdIso));
   }
   await mergeIntoBucket(path.join(podDir, ANNOTATIONS_DIR, fileName), newQuads, dek, {
     validate: (turtle, file) => validateOverlayGraph(turtle, file),

@@ -36,6 +36,7 @@ import { recordQuads, sampleFileQuads, ruleActivityQuads, sampleFilePath } from 
 import { fileTextChunks } from './xml-scanner.js';
 import { isKnownZone, isoUtc, machineZone } from './time.js';
 import { wellnessRules } from './rules.js';
+import { appendAll } from '../append-all.js';
 
 const CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
 const HEALTH = 'https://ns.cascadeprotocol.org/health/v1#';
@@ -256,7 +257,7 @@ async function writeFile(
     dryRun,
     combine: (existing, incoming) => additiveCanonicalMerge(existing, incoming, stats),
   });
-  collisions.push(...stats.collisions.map((s) => `${rel}: ${s}`));
+  appendAll(collisions, stats.collisions.map((s) => `${rel}: ${s}`));
   return { key, path: rel, recordsWritten: subjects, recordsNew: stats.added, created };
 }
 
@@ -305,7 +306,7 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
     // 3. DERIVE
     const podSubject = await resolvePodSubject(podDir, dek);
     const agg = aggregate(scan, spill, { podSubject, dayZone: zone });
-    warnings.push(...agg.warnings);
+    appendAll(warnings, agg.warnings);
 
     // 4. WRITE. Sample files, then their descriptors, then the records.
     if (!dryRun && writeZone) writePodDayZone(podDir, zone, rule, dek);
