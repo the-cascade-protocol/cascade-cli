@@ -307,7 +307,7 @@ export function legacyConflictIds(recordType: string, matchedOn: string): string
  * answer given before this change is still found.
  */
 export function findUserResolution(
-  resolutions: Map<string, UserResolution>,
+  resolutions: ReadonlyMap<string, UserResolution>,
   recordType: string,
   matchedOn: string,
 ): UserResolution | undefined {

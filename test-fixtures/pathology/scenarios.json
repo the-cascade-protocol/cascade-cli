@@ -452,9 +452,9 @@
           5,
           6
         ],
-        "podRecords": 6,
+        "podRecords": 10,
         "podRecordsByType": {
-          "Medication": 5,
+          "Medication": 9,
           "PatientProfile": 1
         },
         "merges": 1,
@@ -462,7 +462,7 @@
         "edgesInPod": 0,
         "violations": 0,
         "importWarnings": 0,
-        "_valuesNote": "Every medication carries the dose its source stated, whether that rode on MedicationStatement.dosage or on MedicationRequest.dosageInstruction. Both dose disagreements (levothyroxine 75/100 mcg, sertraline 50/100 mg) therefore raise a conflict, so the outcome no longer depends on which FHIR shape the source used. The list has five entries and four drugs because the two stopped metformin orders are different products (immediate and extended release, different RxNorm codes) and are kept apart.",
+        "_valuesNote": "Every medication carries the dose its source stated, whether that rode on MedicationStatement.dosage or on MedicationRequest.dosageInstruction. Both dose disagreements (levothyroxine 75/100 mcg, sertraline 50/100 mg) therefore raise a conflict, so the outcome no longer depends on which FHIR shape the source used. The two stopped metformin orders are different products (immediate and extended release, different RxNorm codes) and are kept apart. Each of the four conflicts keeps BOTH of its records until someone answers it: an unanswered question is not a merge, so the dose the trust ranking would have discarded (50 mg, 75 mcg, 10 mg, and the stale-active metformin order) stays in the pod as its own record. Nine entries.",
         "values": [
           {
             "on": "clinical:Medication",
@@ -470,7 +470,11 @@
             "values": [
               "100 mcg by mouth every morning",
               "100 mg by mouth every morning",
+              "50 mg by mouth every morning",
+              "75 mcg by mouth every morning",
+              "Take 1 tablet (10 mg) by mouth once daily",
               "Take 1 tablet (20 mg) by mouth once daily",
+              "Take 1 tablet (500 mg) by mouth twice daily",
               "Take 1 tablet (500 mg) by mouth twice daily",
               "Take 1 tablet (500 mg) by mouth twice daily"
             ]

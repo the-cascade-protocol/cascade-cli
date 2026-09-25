@@ -54,10 +54,17 @@ describe('medication dose/frequency/status conflict classification', () => {
     expect(result.report.unresolvedConflicts).toHaveLength(1);
     expect((result.report.unresolvedConflicts[0] as { recordType: string }).recordType).toBe('clinical:Medication');
 
-    // The conflict, and both diverging doses, are annotated on the merged record
-    // (this is what pod-import serializes into pending-conflicts.ttl + the pod).
-    expect(result.turtle).toContain('unresolved-conflict');
-    expect(result.turtle).toContain('conflictField');
+    // The conflict names the field in dispute (this is what pod-import
+    // serializes into pending-conflicts.ttl)...
+    expect((result.report.unresolvedConflicts[0] as { conflictField?: string }).conflictField)
+      .toBe('clinical:dosage');
+    // ...and an unanswered question is not a merge: BOTH records stay, each
+    // flagged and each carrying its own dose, so whichever side the owner
+    // later keeps is still there to keep.
+    expect(result.turtle).toContain('<urn:med:a>');
+    expect(result.turtle).toContain('<urn:med:b>');
+    expect(result.turtle.match(/unresolved-conflict/g)).toHaveLength(2);
+    expect(result.turtle).not.toContain('mergedFrom');
     expect(result.turtle).toContain('10 mg');
     expect(result.turtle).toContain('20 mg');
   });

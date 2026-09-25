@@ -49,17 +49,22 @@ import {
 import {
   writePendingConflicts,
   loadPendingConflicts,
+  loadUserResolutions,
   pendingConflictFromRaised,
   type PendingConflict,
   type RaisedConflict,
+  type UserResolution,
 } from '../../lib/user-resolutions.js';
+import { writeSupersessionRetractions } from '../../lib/resolution-retractions.js';
 // The disposition is imported from the reconcile verb rather than reimplemented
 // here on purpose. Two copies of "what happens to a row of the review queue" is
 // how import came to have none: the rule lived in one verb, the other kept its
 // wholesale rewrite, and the two drifted without anything failing.
 import {
   disposePendingConflicts,
+  emptyUserResolutionReport,
   type PendingConflictDisposition,
+  type UserResolutionReport,
 } from './reconcile.js';
 import {
   isPodEncrypted,
@@ -101,6 +106,12 @@ interface ImportReport {
    * queue provably cannot change and the file is not written at all.
    */
   pendingConflicts?: PendingConflictDisposition;
+  /**
+   * What the owner's recorded answers (`settings/user-resolutions.ttl`) did to
+   * this import's reconciliation: the same block `pod reconcile --json`
+   * reports. Absent when no reconciliation pass ran.
+   */
+  userResolutions?: UserResolutionReport;
   filesWritten: Array<{
     path: string;
     recordsAdded: number;
@@ -744,6 +755,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // where the queue provably cannot change: nothing merged, so no row's
       // meaning moved, and the file is not touched.
       let pendingDisposition: PendingConflictDisposition | undefined;
+      // What the owner's recorded answers did to this run. Undefined when no
+      // reconciliation ran, and then no answer can have applied.
+      let userResolutionReport: UserResolutionReport | undefined;
 
       // Load existing pod data as an implicit source 0 when --reconcile-existing is set
       let existingInputs: ReconcilerInput[] = [];
@@ -766,11 +780,36 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       const shouldReconcile = options.reconcile !== false && allInputs.length > 1;
 
       if (shouldReconcile) {
+        // The owner's recorded answers are an input to this reconciliation, as
+        // they are to `pod reconcile`: an import that re-reads the records a
+        // question was about must not ask it again. Unreadable ends the run
+        // before anything is written, for the reason the queue read below does.
+        let userResolutions: Map<string, UserResolution>;
+        try {
+          userResolutions = await loadUserResolutions(podDir, dek);
+        } catch (err: unknown) {
+          printError(
+            `Could not read settings/user-resolutions.ttl: ` +
+              `${err instanceof Error ? err.message : String(err)}. Refusing to import into ` +
+              `${podDir}: the answers recorded there are an input to reconciliation. ` +
+              `The pod is unchanged.`,
+            globalOpts,
+          );
+          process.exitCode = 2;
+          return;
+        }
+
         printVerbose(`Reconciling ${allInputs.length} inputs (${existingInputs.length} existing + ${reconcilerInputs.length} new)...`, globalOpts);
         const reconcileResult = await runReconciliation(allInputs, {
           trustScores,
           labTolerance: 0.05,
+          userResolutions,
         });
+        userResolutionReport = {
+          ...emptyUserResolutionReport(userResolutions.size),
+          answered: reconcileResult.report.userResolutions.answered,
+          supersessions: reconcileResult.report.userResolutions.supersessions,
+        };
         mergedTurtle = reconcileResult.turtle;
         reconciliationSummary = reconcileResult.report.summary;
         reconciledEdgeRewrites = reconcileResult.report.summary.edgeObjectsRewritten;
@@ -835,6 +874,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           existingConflicts,
           raisedConflicts,
           mergedTurtle,
+          new Set(userResolutions.keys()),
         );
         pendingDisposition = disposition;
 
@@ -1237,6 +1277,30 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         }
       }
 
+      // The owner's keep-one answers, carried out as the retraction overlay a
+      // hand-made merge writes, after the records they name are on disk and
+      // only when every bucket was. Idempotent: an overlay already present is
+      // not written again.
+      if (
+        !dryRun &&
+        userResolutionReport &&
+        userResolutionReport.supersessions.length > 0 &&
+        bucketsRefused.length === 0
+      ) {
+        try {
+          const w = await writeSupersessionRetractions(podDir, userResolutionReport.supersessions, dek);
+          userResolutionReport.retractionsWritten = w.written;
+          userResolutionReport.retractionsAlreadyPresent = w.alreadyPresent;
+        } catch (e: unknown) {
+          printError(
+            `Refusing to write annotations/retractions.ttl: ` +
+              `${e instanceof Error ? e.message : String(e)}`,
+            globalOpts,
+          );
+          process.exitCode = 1;
+        }
+      }
+
       // --- Step 10: Summary and report ---
       const totalRecordsImported = Object.values(typeCounts).reduce((a, b) => a + b, 0);
       const recordsNew = filesWritten.reduce((a, f) => a + f.recordsNew, 0);
@@ -1259,6 +1323,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         // preview says what the queue WOULD look like rather than going quiet
         // about a file it is about to rewrite.
         ...(pendingDisposition ? { pendingConflicts: pendingDisposition } : {}),
+        ...(userResolutionReport ? { userResolutions: userResolutionReport } : {}),
         filesWritten,
         typeCounts,
         bucketsRefused,

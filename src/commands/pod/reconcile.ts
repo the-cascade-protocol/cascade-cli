@@ -65,10 +65,14 @@ import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket
 import {
   writePendingConflicts,
   loadPendingConflicts,
+  loadUserResolutions,
   pendingConflictFromRaised,
   type PendingConflict,
   type RaisedConflict,
+  type UserResolution,
 } from '../../lib/user-resolutions.js';
+import { writeSupersessionRetractions } from '../../lib/resolution-retractions.js';
+import type { AnsweredConflict, Supersession } from '../../lib/reconciler.js';
 import {
   appendTier0Journal,
   appendTier0Undo,
@@ -166,12 +170,41 @@ export interface PendingConflictDisposition {
    * would have swallowed.
    */
   orphaned: number;
+  /**
+   * Pre-existing rows retired because the owner has already answered them in
+   * `settings/user-resolutions.ttl`. `pod resolve` removes the row it answers,
+   * so this is non-zero only for a row an earlier CLI re-raised after it was
+   * answered, which is the defect this count exists to show being repaired.
+   */
+  clearedByResolution: number;
   /** Rows the queue holds afterwards. `raised` plus `kept`, minus re-raises. */
   after: number;
   /** The conflict ids behind `clearedByMerge`, sorted. */
   clearedIds: string[];
   /** The conflict ids behind `orphaned`, sorted. */
   orphanedIds: string[];
+  /** The conflict ids behind `clearedByResolution`, sorted. */
+  answeredIds: string[];
+}
+
+/**
+ * What the owner's recorded judgements did to this run.
+ *
+ * A judgement is an input: `pod resolve` records it, and this verb (and the
+ * reconciliation inside `pod import`) carries it out. Reported so "your answer
+ * was applied" is something the user is told, not inferred.
+ */
+export interface UserResolutionReport {
+  /** Judgements in `settings/user-resolutions.ttl`. */
+  recorded: number;
+  /** Conflicts this run would have raised and did not, because they were answered. */
+  answered: AnsweredConflict[];
+  /** Records a keep-one answer supersedes, each written as a retraction overlay. */
+  supersessions: Supersession[];
+  /** Overlays this run wrote. Zero in a dry run, and zero on a repeat run. */
+  retractionsWritten: number;
+  /** Overlays that were already in the pod from an earlier run. */
+  retractionsAlreadyPresent: number;
 }
 
 export interface ReconcileReport {
@@ -201,6 +234,8 @@ export interface ReconcileReport {
     conflictsUnresolved: number;
     identityCollisionsSplit: number;
     tier0MergesApplied: number;
+    /** Conflicts answered by a recorded owner judgement instead of being raised. */
+    userResolutionsApplied: number;
   };
   /** Every group that is not a plain pass-through, itemized. */
   groups: ReconcileGroupReport[];
@@ -208,6 +243,8 @@ export interface ReconcileReport {
   tier0Merges: Tier0Merge[];
   /** What this run does to the pending-conflict queue. */
   pendingConflicts: PendingConflictDisposition;
+  /** What the owner's recorded judgements did to this run. */
+  userResolutions: UserResolutionReport;
   filesWritten: string[];
 }
 
@@ -219,9 +256,22 @@ export function emptyDisposition(before = 0): PendingConflictDisposition {
     kept: before,
     clearedByMerge: 0,
     orphaned: 0,
+    clearedByResolution: 0,
     after: before,
     clearedIds: [],
     orphanedIds: [],
+    answeredIds: [],
+  };
+}
+
+/** The judgement report for a run that reconciled nothing. */
+export function emptyUserResolutionReport(recorded = 0): UserResolutionReport {
+  return {
+    recorded,
+    answered: [],
+    supersessions: [],
+    retractionsWritten: 0,
+    retractionsAlreadyPresent: 0,
   };
 }
 
@@ -459,11 +509,16 @@ function countRecordsIn(inputs: ReconcilerInput[]): number {
  * it carries the `detectedAt` the user first saw and the subject IRI anything
  * else in the pod may reference. A conflict does not become newer by being
  * noticed again.
+ *
+ * A row the owner has already answered (`answeredIds`, the keys of
+ * `settings/user-resolutions.ttl`) never survives, whatever its records are
+ * doing: the question is closed, and asking it again is the defect.
  */
 export function disposePendingConflicts(
   existing: readonly PendingConflict[],
   raised: readonly PendingConflict[],
   reconciledTurtle: string,
+  answeredIds: ReadonlySet<string> = new Set(),
 ): { disposition: PendingConflictDisposition; queue: PendingConflict[] } {
   const surviving = new Set<string>();
   const absorbed = new Set<string>();
@@ -477,8 +532,13 @@ export function disposePendingConflicts(
   const kept: PendingConflict[] = [];
   const clearedIds: string[] = [];
   const orphanedIds: string[] = [];
+  const answered: string[] = [];
 
   for (const c of existing) {
+    if (answeredIds.has(c.conflictId)) {
+      answered.push(c.conflictId);
+      continue;
+    }
     const alive = c.candidateRecordUris.filter((u) => surviving.has(u));
     const merged = c.candidateRecordUris.filter((u) => absorbed.has(u));
     if (alive.length >= 2) {
@@ -491,7 +551,7 @@ export function disposePendingConflicts(
   }
 
   const keptIds = new Set(kept.map((c) => c.conflictId));
-  const newRows = raised.filter((c) => !keptIds.has(c.conflictId));
+  const newRows = raised.filter((c) => !keptIds.has(c.conflictId) && !answeredIds.has(c.conflictId));
 
   return {
     disposition: {
@@ -500,9 +560,11 @@ export function disposePendingConflicts(
       kept: kept.length,
       clearedByMerge: clearedIds.length,
       orphaned: orphanedIds.length,
+      clearedByResolution: answered.length,
       after: kept.length + newRows.length,
       clearedIds: clearedIds.sort(),
       orphanedIds: orphanedIds.sort(),
+      answeredIds: answered.sort(),
     },
     queue: [...kept, ...newRows],
   };
@@ -645,12 +707,49 @@ function renderConflictQueue(report: ReconcileReport): string[] {
     lines.push('    question is answered rather than dropped.');
     for (const id of p.clearedIds) lines.push(`      ${id}`);
   }
+  if (p.clearedByResolution > 0) {
+    lines.push(
+      `    ${p.clearedByResolution} cleared by your recorded answer (settings/user-resolutions.ttl):`,
+    );
+    for (const id of p.answeredIds) lines.push(`      ${id}`);
+  }
   if (p.orphaned > 0) {
     lines.push(
       `    ${p.orphaned} orphaned: their candidate records are no longer in the pod, and no`,
     );
     lines.push(`    merge in this run explains it. These${verb} leave the queue unanswered.`);
     for (const id of p.orphanedIds) lines.push(`      ${id}`);
+  }
+  lines.push('');
+  return lines;
+}
+
+/**
+ * The owner's-answers paragraph. Printed whenever a recorded answer touched this
+ * run, so "your answer was carried out" is said rather than left to be inferred
+ * from a queue that got shorter.
+ */
+function renderUserResolutions(report: ReconcileReport): string[] {
+  const u = report.userResolutions;
+  if (u.answered.length === 0 && u.supersessions.length === 0) return [];
+  const lines: string[] = [];
+  lines.push(
+    `  Your recorded answers (settings/user-resolutions.ttl): ${u.answered.length} conflict(s) ` +
+      `not asked again.`,
+  );
+  for (const a of u.answered) lines.push(`    ${a.conflictId}  [${a.resolution}]`);
+  if (u.supersessions.length > 0) {
+    lines.push(
+      report.applied
+        ? `    ${u.supersessions.length} record(s) superseded by the record you kept ` +
+            `(annotations/retractions.ttl: ${u.retractionsWritten} written, ` +
+            `${u.retractionsAlreadyPresent} already there):`
+        : `    ${u.supersessions.length} record(s) would be superseded by the record you kept ` +
+            `(annotations/retractions.ttl):`,
+    );
+    for (const s of u.supersessions) {
+      lines.push(`      ${s.supersededRecordUri}  ->  ${s.keptRecordUri}`);
+    }
   }
   lines.push('');
   return lines;
@@ -669,6 +768,7 @@ function renderTextReport(report: ReconcileReport): string {
   if (merges === 0 && s.conflictsUnresolved === 0 && s.conflictsResolved === 0) {
     lines.push('  No duplicates and no conflicts found. Nothing to reconcile.');
     lines.push('');
+    lines.push(...renderUserResolutions(report));
     lines.push(...renderConflictQueue(report));
     return lines.join('\n');
   }
@@ -711,6 +811,7 @@ function renderTextReport(report: ReconcileReport): string {
     lines.push('');
   }
 
+  lines.push(...renderUserResolutions(report));
   lines.push(...renderConflictQueue(report));
 
   if (report.filesUnreadable.length > 0) {
@@ -1050,6 +1151,25 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
           return;
         }
 
+        // The owner's recorded answers are an INPUT to the run, read with the
+        // same refusal as the queue: a run that could not read them would
+        // re-ask every answered question and, with --apply, write the pod as if
+        // no one had answered anything.
+        let userResolutions: Map<string, UserResolution>;
+        try {
+          userResolutions = await loadUserResolutions(podDir, dek);
+        } catch (err: unknown) {
+          printError(
+            `Could not read settings/user-resolutions.ttl: ` +
+              `${err instanceof Error ? err.message : String(err)}. Refusing to reconcile ` +
+              `${podDir}: the answers recorded there are an input to reconciliation. ` +
+              `The pod is unchanged.`,
+            globalOpts,
+          );
+          process.exitCode = 2;
+          return;
+        }
+
         const { inputs, filesRead, unreadable, ledger } = await readPodBuckets(reader);
 
         // A record file this run could not read is FATAL, in the dry run as much
@@ -1098,6 +1218,7 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
               conflictsUnresolved: 0,
               identityCollisionsSplit: 0,
               tier0MergesApplied: 0,
+              userResolutionsApplied: 0,
             },
             groups: [],
             tier0Merges: [],
@@ -1106,6 +1227,7 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
             // because "your queue has 8 items" is true and useful on a pod
             // that holds no reconcilable records at all.
             pendingConflicts: emptyDisposition(existingConflicts.length),
+            userResolutions: emptyUserResolutionReport(userResolutions.size),
             filesWritten: [],
           };
           // `--report` is honoured here too. A caller that asked for the report
@@ -1123,7 +1245,11 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
         const recordsBefore = countRecordsIn(inputs);
         printVerbose(`Reconciling ${recordsBefore} record(s) from ${inputs.length} file(s)...`, globalOpts);
 
-        const result = await runReconciliation(inputs, { trustScores, labTolerance: 0.05 });
+        const result = await runReconciliation(inputs, {
+          trustScores,
+          labTolerance: 0.05,
+          userResolutions,
+        });
 
         // Conflicts this run raises go through the SAME queue every other conflict
         // does, so `pod conflicts` and `pod resolve` see them. Building them here
@@ -1137,6 +1263,7 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
           existingConflicts,
           raisedConflicts,
           result.turtle,
+          new Set(userResolutions.keys()),
         );
 
         const groups: ReconcileGroupReport[] = (
@@ -1178,10 +1305,16 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
             conflictsUnresolved: result.report.summary.conflictsUnresolved,
             identityCollisionsSplit: result.report.summary.identityCollisionsSplit,
             tier0MergesApplied: result.report.summary.tier0MergesApplied,
+            userResolutionsApplied: result.report.summary.userResolutionsApplied,
           },
           groups,
           tier0Merges: result.report.tier0Merges,
           pendingConflicts: disposition,
+          userResolutions: {
+            ...emptyUserResolutionReport(userResolutions.size),
+            answered: result.report.userResolutions.answered,
+            supersessions: result.report.userResolutions.supersessions,
+          },
           filesWritten: [],
         };
 
@@ -1256,6 +1389,29 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
 
           if (result.report.tier0Merges.length > 0) {
             appendTier0Journal(podDir, result.report.tier0Merges, 'pod reconcile --apply', dek);
+          }
+
+          // The owner's keep-one answers, carried out as the overlay a hand-made
+          // merge writes. After the records, so a retraction never names a
+          // record the run failed to write; skipped when any bucket failed.
+          if (failed.length === 0 && result.report.userResolutions.supersessions.length > 0) {
+            try {
+              const w = await writeSupersessionRetractions(
+                podDir,
+                result.report.userResolutions.supersessions,
+                dek,
+              );
+              report.userResolutions.retractionsWritten = w.written;
+              report.userResolutions.retractionsAlreadyPresent = w.alreadyPresent;
+              if (w.written > 0) report.filesWritten.push('annotations/retractions.ttl');
+            } catch (e: unknown) {
+              printError(
+                `Refusing to write annotations/retractions.ttl: ` +
+                  `${e instanceof Error ? e.message : String(e)}`,
+                globalOpts,
+              );
+              failed.push('annotations/retractions.ttl');
+            }
           }
 
           report.applied = true;

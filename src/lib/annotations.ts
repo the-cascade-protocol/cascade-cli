@@ -187,6 +187,34 @@ export async function appendOverlay(
   });
 }
 
+/**
+ * Append several overlays to ONE file in a single validated write.
+ *
+ * The same builder and the same SHACL gate as {@link appendOverlay}, so an
+ * overlay written in bulk is byte-for-byte the shape of one written by hand.
+ * Every spec must name `fileName`; mixing files in one call is refused.
+ */
+export async function appendOverlays(
+  podDir: string,
+  fileName: string,
+  specs: readonly OverlaySpec[],
+  dek: Buffer | undefined,
+): Promise<void> {
+  if (specs.length === 0) return;
+  const newQuads: Quad[] = [];
+  for (const spec of specs) {
+    if (spec.fileName !== fileName) {
+      throw new Error(`appendOverlays: ${spec.fileName} is not ${fileName}`);
+    }
+    newQuads.push(
+      ...buildOverlayQuads(spec.subjectUri, spec.rdfType, spec.lines, spec.actorIri, spec.createdIso),
+    );
+  }
+  await mergeIntoBucket(path.join(podDir, ANNOTATIONS_DIR, fileName), newQuads, dek, {
+    validate: (turtle, file) => validateOverlayGraph(turtle, file),
+  });
+}
+
 let cachedShapes: ReturnType<typeof loadShapes> | undefined;
 
 /**

@@ -75,7 +75,26 @@ cascade pod reconcile ./my-pod --apply
 Two organizations reporting the same lab result, at the same instant, with identical values, are
 merged without raising a conflict. Every such merge is appended to `settings/tier0-merge-journal.json`
 with the full content of the record it discarded. Anything less certain than that is reported for
-review and reaches `cascade pod conflicts`.
+review and reaches `cascade pod conflicts`. A conflict under review is not a merge: both of its
+records stay in the pod until someone answers it.
+
+Answering a conflict is two steps, and the second is the one that changes the pod:
+
+```bash
+# Record the answer in settings/user-resolutions.ttl. Changes no record.
+cascade pod resolve ./my-pod --conflict <id> --keep source-a
+
+# Carry it out. `pod import` does the same on every import it reconciles.
+cascade pod reconcile ./my-pod --apply
+```
+
+Recorded answers are an input to every reconciliation. An answered conflict is never raised again,
+and a `source-a` / `source-b` answer is carried out as the same `workbench:Retraction` overlay
+`pod retract --superseded-by` writes (in `annotations/retractions.ttl`), with `prov:wasDerivedFrom`
+pointing at the answer that caused it. Both records stay; the one you chose against is marked as
+superseded by the one you kept. The overlay is derived from the answer alone, so a second run writes
+nothing, and the same records plus the same `settings/user-resolutions.ttl` give the same result in
+any pod. `--keep both` keeps both records and supersedes neither.
 
 Those merges are reversible, with the same report-first gate:
 
@@ -93,7 +112,8 @@ already holding the IRI, or a bucket that no longer exists) is refused on its ow
 rest of the journal is replayed.
 
 Every run also reports what it does to the review queue: how many pending conflicts were kept,
-cleared because their records merged, and orphaned because their records are gone.
+cleared because their records merged, cleared because you had already answered them, and orphaned
+because their records are gone.
 
 If a record file cannot be read, the command refuses to run at all (exit 2) rather than report counts
 about a pod it only partly opened. The same holds for the review queue and the journal: a file that
