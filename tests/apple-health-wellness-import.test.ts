@@ -55,6 +55,7 @@ const H = 'https://ns.cascadeprotocol.org/health/v1#';
 const C = 'https://ns.cascadeprotocol.org/core/v1#';
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const PROV = 'http://www.w3.org/ns/prov#';
+const DCT = 'http://purl.org/dc/terms/';
 
 interface Report {
   wellness?: Array<{ dayZone: { zone: string; rule: string; written: boolean }; closedDays: number; correlationRecordsSkipped: number }>;
@@ -104,15 +105,26 @@ describe('pod import of an Apple Health export folder: wellness', () => {
       descriptors.filter((q) => q.predicate.value === RDF_TYPE && q.object.value === PROV + 'Activity').map((q) => q.subject.value),
     );
     expect(activities.size).toBe(1);
+    // group -> the pack that lists it, and the group's sample digest
+    const packOfGroup = new Map(
+      descriptors.filter((q) => q.predicate.value === DCT + 'hasPart').map((q) => [q.object.value, q.subject.value]),
+    );
+    const digestOfGroup = new Map(
+      descriptors.filter((q) => q.predicate.value === DCT + 'identifier').map((q) => [q.subject.value, q.object.value]),
+    );
     let aggregates = 0;
     for (const rel of ['heart-rate.ttl', 'hrv.ttl', 'body-measurements.ttl', 'activity.ttl']) {
       const qs = quadsOf(path.join(podDir, 'wellness', rel));
       for (const q of qs.filter((x) => x.predicate.value === PROV + 'wasDerivedFrom')) {
         aggregates++;
-        const p = attachmentPath.get(q.object.value);
+        const pack = packOfGroup.get(q.object.value);
+        expect(pack, q.subject.value).toBeDefined();
+        const p = attachmentPath.get(pack!);
         expect(p, q.subject.value).toBeDefined();
         const bytes = fs.readFileSync(path.join(podDir, p!));
         expect(createHash('sha256').update(bytes).digest('hex')).toBe(path.basename(p!));
+        const doc = JSON.parse(bytes.toString('utf8')) as { groups: Array<{ sampleDigest: string }> };
+        expect(doc.groups.map((g) => g.sampleDigest)).toContain(digestOfGroup.get(q.object.value));
         const generatedBy = qs.find((x) => x.subject.value === q.subject.value && x.predicate.value === PROV + 'wasGeneratedBy');
         expect(activities.has(generatedBy!.object.value)).toBe(true);
       }

@@ -68,6 +68,20 @@ export function isKnownZone(zone: string): boolean {
   }
 }
 
+/**
+ * The runtime's canonical name for a known zone: `US/Pacific` and
+ * `America/Los_Angeles` are one zone, and must be counted as one and written
+ * one way. Undefined for a zone the runtime does not know.
+ */
+export function canonicalZone(zone: string): string | undefined {
+  if (!isKnownZone(zone)) return undefined;
+  try {
+    return new Intl.DateTimeFormat(undefined, { timeZone: zone }).resolvedOptions().timeZone;
+  } catch {
+    return undefined;
+  }
+}
+
 interface WallClock {
   y: number;
   mo: number;

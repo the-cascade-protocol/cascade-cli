@@ -30,6 +30,7 @@ const CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
 const HEALTH = 'https://ns.cascadeprotocol.org/health/v1#';
 const FHIR = 'http://hl7.org/fhir/';
 const PROV = 'http://www.w3.org/ns/prov#';
+const DCT = 'http://purl.org/dc/terms/';
 const SCT = 'http://snomed.info/sct/';
 const LOINC = 'http://loinc.org/rdf#';
 
@@ -171,16 +172,35 @@ export function sampleFilePath(digest: string): string {
   return `attachments/sha-256/${digest}`;
 }
 
-/** The `cascade:Attachment` node describing one retained sample file. */
+/**
+ * The `cascade:Attachment` node describing one retained sample pack, the
+ * groups it holds (`dct:hasPart`), and each group's own node.
+ *
+ * Every triple here is a function of the subject's name: the pack's are fixed
+ * by its bytes (it is named by their digest), and a group's by its sample
+ * digest (it is named by that). A group held by two packs (the same day in two
+ * exports, where some OTHER series changed) is therefore one node with the same
+ * triples, listed by both packs.
+ */
 export function sampleFileQuads(f: SampleFile): Quad[] {
-  return new QuadBuilder(f.iri)
+  const b = new QuadBuilder(f.iri)
     .type(CASCADE + 'Attachment')
     .str(CASCADE + 'attachmentPath', sampleFilePath(f.digest))
     .str(CASCADE + 'contentHash', f.digest)
     .str(CASCADE + 'hashAlgorithm', 'sha-256')
     .str(CASCADE + 'attachmentMediaType', 'application/json')
-    .typed(CASCADE + 'byteSize', f.bytes.length, 'integer')
-    .str(CASCADE + 'attachmentTitle', `Apple Health samples for ${f.localDate} (${f.timeZone})`).quads;
+    .typed(CASCADE + 'byteSize', f.byteSize, 'integer')
+    .str(CASCADE + 'attachmentTitle', `Apple Health samples for ${f.localDate} (${f.timeZone})`);
+  for (const g of f.groups) b.iri(DCT + 'hasPart', g.iri);
+  const out = b.quads;
+  for (const g of f.groups) {
+    const gb = new QuadBuilder(g.iri)
+      .type(PROV + 'Entity')
+      .str(DCT + 'identifier', g.sampleDigest)
+      .str(PROV + 'label', 'Apple Health samples one set of daily aggregates was computed from; dct:identifier is the sampleDigest of their group in a pack that lists this node with dct:hasPart');
+    for (const q of gb.quads) out.push(q);
+  }
+  return out;
 }
 
 /** The activity every computed aggregate names: the rule and its version. */

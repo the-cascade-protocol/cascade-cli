@@ -11,10 +11,17 @@ import path from 'node:path';
 import { stringChunks } from '../src/lib/apple-health-wellness/xml-scanner.js';
 import { scanExport } from '../src/lib/apple-health-wellness/scan.js';
 import { SampleSpill } from '../src/lib/apple-health-wellness/spill.js';
-import { aggregate, type AggregationResult, type WellnessRecord } from '../src/lib/apple-health-wellness/aggregate.js';
+import { aggregate, majorityTimeZone, type AggregationResult, type SampleFile, type WellnessRecord } from '../src/lib/apple-health-wellness/aggregate.js';
+import { recordQuads, sampleFileQuads } from '../src/lib/apple-health-wellness/quads.js';
 import { wellnessRules } from '../src/lib/apple-health-wellness/rules.js';
 import { dayIntervalUtc, isoUtc } from '../src/lib/apple-health-wellness/time.js';
-import { wellnessSourceRecordSeed, wellnessDigestSeed, wellnessSampleDigest, wellnessDeviceIdentity } from '../src/lib/identity.js';
+import {
+  wellnessSourceRecordSeed,
+  wellnessDigestSeed,
+  wellnessSampleDigest,
+  wellnessDeviceIdentity,
+  wellnessSupportSeed,
+} from '../src/lib/identity.js';
 import { deterministicUuid } from '../src/lib/fhir-converter/types.js';
 
 const POD = '/profile/card.ttl#me';
@@ -60,11 +67,17 @@ function exportXml(exportDateZ: string, body: string, offset = -7): string {
   );
 }
 
+/** Each run's sample packs, by digest, as the importer's writer would receive them. */
+const packBytes = new WeakMap<AggregationResult, Map<string, Buffer>>();
+
 async function run(xml: string, zone = LA): Promise<AggregationResult> {
   const spill = new SampleSpill(256); // a tiny budget forces many encrypted flushes
   try {
     const scan = await scanExport(stringChunks(xml, 997), spill);
-    return aggregate(scan, spill, { podSubject: POD, dayZone: zone });
+    const bytes = new Map<string, Buffer>();
+    const r = aggregate(scan, spill, { podSubject: POD, dayZone: zone, onSampleFile: (f, b) => bytes.set(f.digest, b) });
+    packBytes.set(r, bytes);
+    return r;
   } finally {
     spill.close();
   }
@@ -279,18 +292,103 @@ describe('naming: tier 1 when the source supplies an id, the digest tier otherwi
 });
 
 describe('retained samples', () => {
-  it('every aggregate points at the sample file of its day, which holds exactly its samples', async () => {
+  it('every aggregate points at its own sample group, listed by the pack of its day, which holds exactly its samples', async () => {
     const r = await run(fs.readFileSync(FIXTURE, 'utf8'));
-    const byIri = new Map(r.sampleFiles.map((f) => [f.iri, f]));
+    const bytes = packBytes.get(r)!;
+    const packOf = new Map<string, SampleFile>();
+    for (const f of r.sampleFiles) for (const g of f.groups) packOf.set(g.iri, f);
     for (const a of [...of(r, 'vitalReading'), ...of(r, 'stepSnapshot')]) {
-      const f = byIri.get(a.derivedFrom);
+      const f = packOf.get(a.derivedFrom);
       expect(f, a.iri).toBeDefined();
-      const doc = JSON.parse(f!.bytes.toString('utf8'));
+      const group = f!.groups.find((g) => g.iri === a.derivedFrom)!;
+      // The group's name is its sample digest's, and nothing else's.
+      expect(a.derivedFrom).toBe(urn(wellnessSupportSeed({ podSubject: POD, kind: 'sample-group', key: group.sampleDigest })));
+      const doc = JSON.parse(bytes.get(f!.digest)!.toString('utf8'));
       expect(doc.periodStart).toBe(a.periodStart);
       expect(doc.periodEnd).toBe(a.periodEnd);
+      const entry = (doc.groups as Array<{ sampleDigest: string; series: Array<{ value: string[] }> }>).find(
+        (g) => g.sampleDigest === group.sampleDigest,
+      );
+      expect(entry, a.iri).toBeDefined();
+      expect(entry!.series.reduce((n, se) => n + se.value.length, 0)).toBe(a.sampleCount);
       expect(JSON.stringify(doc)).not.toMatch(/0x[0-9a-f]{6,}/);
     }
     expect(r.samplesRetained).toBeGreaterThanOrEqual(r.samplesAggregated);
     expect(isoUtc(r.coverageEnd!)).toBe('2026-03-10T16:00:00Z');
+  });
+
+  it('a change to one series of a day leaves every other aggregate of that day with the same name AND the same triples', async () => {
+    // One day, two sources and three metrics. The second export differs in ONE
+    // sample of ONE series (the phone's steps), which makes a new pack for the
+    // day. Every other aggregate of the day must be byte-for-byte what it was.
+    const day = (phoneSteps: string): string =>
+      [
+        { type: 'HeartRate', unit: 'count/min', start: '2026-03-03T17:00:00Z', value: '61', device: WATCH() },
+        { type: 'HeartRate', unit: 'count/min', start: '2026-03-03T18:00:00Z', value: '75', device: WATCH() },
+        { type: 'RestingHeartRate', unit: 'count/min', start: '2026-03-03T19:00:00Z', value: '52', device: WATCH() },
+        { type: 'StepCount', unit: 'count', start: '2026-03-03T20:00:00Z', value: '1200', device: WATCH() },
+        { type: 'StepCount', unit: 'count', source: 'Alex iPhone', start: '2026-03-03T20:00:00Z', value: '900', device: PHONE },
+        { type: 'StepCount', unit: 'count', source: 'Alex iPhone', start: '2026-03-03T21:00:00Z', value: phoneSteps, device: PHONE },
+      ]
+        .map((x) => record(x))
+        .join('\n');
+    const a = await run(exportXml('2026-03-06T00:00:00Z', day('300')));
+    const b = await run(exportXml('2026-03-06T00:00:00Z', day('310')));
+    // The day's pack did change.
+    expect(a.sampleFiles.map((f) => f.digest)).not.toEqual(b.sampleFiles.map((f) => f.digest));
+
+    const triples = (r: AggregationResult): Map<string, string> =>
+      new Map(
+        [...of(r, 'vitalReading'), ...of(r, 'stepSnapshot')].map((x) => [
+          x.iri,
+          recordQuads(x)
+            .map((q) => `${q.predicate.value} ${q.object.termType === 'Literal' ? JSON.stringify(q.object.value) : q.object.value}`)
+            .sort()
+            .join('\n'),
+        ]),
+      );
+    const ta = triples(a);
+    const tb = triples(b);
+    const phone = (r: AggregationResult): Set<string> =>
+      new Set(of(r, 'stepSnapshot').filter((x) => x.sourceName === 'Alex iPhone').map((x) => x.iri));
+    const untouchedA = [...ta.keys()].filter((k) => !phone(a).has(k));
+    expect(untouchedA.length).toBe(ta.size - phone(a).size);
+    expect(untouchedA.length).toBeGreaterThanOrEqual(4);
+    for (const iri of untouchedA) expect(tb.get(iri), iri).toBe(ta.get(iri));
+    // The changed series is a new record, under a new name.
+    for (const iri of phone(b)) expect(ta.has(iri)).toBe(false);
+
+    // And the group nodes those aggregates point at carry the same triples in
+    // both descriptors, though each export lists them from a different pack.
+    const groupTriples = (r: AggregationResult): Map<string, string> => {
+      const m = new Map<string, string>();
+      for (const f of r.sampleFiles) {
+        const gs = new Set(f.groups.map((g) => g.iri));
+        for (const q of sampleFileQuads(f)) {
+          if (!gs.has(q.subject.value)) continue;
+          m.set(q.subject.value, [m.get(q.subject.value) ?? '', `${q.predicate.value} ${q.object.value}`].sort().join('\n'));
+        }
+      }
+      return m;
+    };
+    const ga = groupTriples(a);
+    const gb = groupTriples(b);
+    for (const iri of untouchedA) {
+      const g = [...of(a, 'vitalReading'), ...of(a, 'stepSnapshot')].find((x) => x.iri === iri)!.derivedFrom;
+      expect(gb.get(g), g).toBe(ga.get(g));
+    }
+  });
+});
+
+describe('the day-zone default', () => {
+  it('counts an alias as the zone it names, and returns the canonical name', () => {
+    const counts = new Map([
+      ['US/Pacific', 2],
+      ['America/Los_Angeles', 2],
+      ['America/New_York', 3],
+      ['Not/AZone', 9],
+    ]);
+    expect(majorityTimeZone(counts)).toBe('America/Los_Angeles');
+    expect(majorityTimeZone(new Map([['US/Pacific', 1]]))).toBe('America/Los_Angeles');
   });
 });

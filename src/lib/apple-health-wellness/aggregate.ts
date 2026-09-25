@@ -17,9 +17,15 @@
  *      a READ rule, applied by a reader or by the canonical layer, never here.
  *   4. A computed aggregate is a DERIVED VIEW (the D-WELLNESS-1 amendment of
  *      2026-09-25), so its samples are retained BEFORE it is written: one
- *      compact sample file per closed day, content-addressed under
- *      `attachments/sha-256/`, and every aggregate of that day points at it with
- *      `prov:wasDerivedFrom`.
+ *      compact sample pack per closed day, content-addressed under
+ *      `attachments/sha-256/`. Inside the pack the samples are grouped the way
+ *      the aggregates are (type, source, device), each group keyed by its own
+ *      sample digest, and an aggregate points with `prov:wasDerivedFrom` at its
+ *      GROUP, a node named from that same digest, never at the day's pack. So
+ *      the same aggregate name always carries the same triples: a change to one
+ *      series makes a new pack for the day, and every other aggregate of the
+ *      day keeps both its name and its link. The pack lists its groups
+ *      (`dct:hasPart`), which is how a reader goes from a group to its bytes.
  *   5. An aggregate is named from its inputs: the digest-tier seed over the pod
  *      subject, id space, device, metric, statistic, UTC interval and a digest
  *      of the samples that fed it (`identity.ts`).
@@ -41,7 +47,7 @@ import {
   type WellnessIdSpace,
 } from '../identity.js';
 import { wellnessRules, metricRuleFor, type WellnessStatistic } from './rules.js';
-import { dayIntervalUtc, isKnownZone, isoUtc, localDateOf, parseAppleTimestamp, utcDayNumber } from './time.js';
+import { canonicalZone, dayIntervalUtc, isKnownZone, isoUtc, localDateOf, parseAppleTimestamp, utcDayNumber } from './time.js';
 import { deviceIdentityOf, stripDeviceAddress } from './device.js';
 import { decodeSample, type ScanResult, type SeriesKey, type SpilledSample, type WorkoutElement } from './scan.js';
 import type { SampleSpill } from './spill.js';
@@ -63,7 +69,7 @@ interface AggregateBase {
   /** The source's own name for itself (`sourceName`), as the export states it. */
   sourceName: string;
   deviceIri?: string;
-  /** IRI of the retained sample file this aggregate was computed from. */
+  /** IRI of the retained sample group this aggregate was computed from (see {@link SampleGroup}). */
   derivedFrom: string;
   /** IRI of the activity naming the rule and its version. */
   generatedBy: string;
@@ -127,13 +133,28 @@ export interface DeviceRecord {
   softwareVersions: string[];
 }
 
+/**
+ * The samples one aggregate group (day, type, source, device) was computed
+ * from. Named from their sample digest alone, the same digest that is an input
+ * to every aggregate's name, so an aggregate's name fixes its group's name and
+ * a group's triples depend on nothing but that digest.
+ */
+export interface SampleGroup {
+  iri: string;
+  /** {@link wellnessSampleDigest} of the samples the group's aggregates were computed from. */
+  sampleDigest: string;
+}
+
+/** A retained sample pack: one closed day's samples, grouped. Its bytes go to the caller's writer. */
 export interface SampleFile {
   iri: string;
-  /** Lowercase hex SHA-256 of `bytes`: the file's name under attachments/sha-256/. */
+  /** Lowercase hex SHA-256 of the pack's bytes: the file's name under attachments/sha-256/. */
   digest: string;
-  bytes: Buffer;
+  byteSize: number;
   localDate: string;
   timeZone: string;
+  /** The groups the pack holds, sorted by sample digest. */
+  groups: SampleGroup[];
 }
 
 export interface RuleActivity {
@@ -209,30 +230,60 @@ function seriesSortKey(k: SeriesKey): Buffer {
   return Buffer.from(JSON.stringify([k.type, k.sourceName, k.sourceVersion, k.unit, k.device]), 'utf8');
 }
 
-/**
- * The compact, canonical sample file for one closed day: packed columns per
- * series, never one node per sample. Series and samples are sorted, so the
- * same samples always produce the same bytes and therefore the same digest,
- * whatever order the export listed them in.
- */
-function buildSampleFile(
-  localDate: string,
-  zone: string,
-  start: number,
-  end: number,
-  samples: SpilledSample[],
-  series: SeriesKey[],
-): Buffer {
+/** One series of samples as packed columns. */
+function packSeries(k: SeriesKey, list: SpilledSample[], dayStart: number): Record<string, unknown> {
+  list.sort(compareSamples);
+  const col: Record<string, unknown> = {
+    type: k.type,
+    sourceName: k.sourceName,
+    sourceVersion: k.sourceVersion,
+    unit: k.unit,
+    device: k.device,
+    start: list.map((s) => Math.round((s.start - dayStart) / 1000)),
+    duration: list.map((s) => Math.round((s.end - s.start) / 1000)),
+    creation: list.map((s) => (s.creation === null ? null : Math.round(s.creation / 1000))),
+    value: list.map((s) => s.value),
+  };
+  if (list.some((s) => s.syncIdentifier !== null)) col.syncIdentifier = list.map((s) => s.syncIdentifier);
+  if (list.some((s) => s.syncVersion !== null)) col.syncVersion = list.map((s) => s.syncVersion);
+  if (list.some((s) => s.externalUuid !== null)) col.externalUuid = list.map((s) => s.externalUuid);
+  return col;
+}
+
+/** Samples split by series, in canonical series order, each series packed. */
+function packAll(samples: SpilledSample[], series: SeriesKey[], dayStart: number): Record<string, unknown>[] {
   const bySeries = new Map<number, SpilledSample[]>();
   for (const s of samples) {
     let a = bySeries.get(s.series);
     if (!a) bySeries.set(s.series, (a = []));
     a.push(s);
   }
-  const ordered = [...bySeries.entries()].sort((x, y) => Buffer.compare(seriesSortKey(series[x[0]]), seriesSortKey(series[y[0]])));
+  return [...bySeries.entries()]
+    .sort((x, y) => Buffer.compare(seriesSortKey(series[x[0]]), seriesSortKey(series[y[0]])))
+    .map(([idx, list]) => packSeries(series[idx], list, dayStart));
+}
+
+/**
+ * The compact, canonical sample pack for one closed day: packed columns per
+ * series, never one node per sample. The samples an aggregate group used are
+ * filed under that group's sample digest; samples no aggregate used (a unit
+ * the rules do not accept, a value that is not a number) are kept too, under
+ * `unaggregated`. Groups, series and samples are sorted, so the same samples
+ * always produce the same bytes and therefore the same digest, whatever order
+ * the export listed them in.
+ */
+function buildSampleFile(
+  localDate: string,
+  zone: string,
+  start: number,
+  end: number,
+  groups: Array<{ sampleDigest: string; samples: SpilledSample[] }>,
+  unaggregated: SpilledSample[],
+  series: SeriesKey[],
+): Buffer {
   const out = {
     format: 'cascade-wellness-samples',
-    formatVersion: 1,
+    formatVersion: 2,
     source: 'apple-health-export',
     idSpace: 'healthkit',
     localDate,
@@ -245,25 +296,10 @@ function buildSampleFile(
       creation: 'creationDate as seconds since the Unix epoch, or null',
       value: 'the value exactly as the export wrote it',
     },
-    series: ordered.map(([idx, list]) => {
-      const k = series[idx];
-      list.sort(compareSamples);
-      const col: Record<string, unknown> = {
-        type: k.type,
-        sourceName: k.sourceName,
-        sourceVersion: k.sourceVersion,
-        unit: k.unit,
-        device: k.device,
-        start: list.map((s) => Math.round((s.start - start) / 1000)),
-        duration: list.map((s) => Math.round((s.end - s.start) / 1000)),
-        creation: list.map((s) => (s.creation === null ? null : Math.round(s.creation / 1000))),
-        value: list.map((s) => s.value),
-      };
-      if (list.some((s) => s.syncIdentifier !== null)) col.syncIdentifier = list.map((s) => s.syncIdentifier);
-      if (list.some((s) => s.syncVersion !== null)) col.syncVersion = list.map((s) => s.syncVersion);
-      if (list.some((s) => s.externalUuid !== null)) col.externalUuid = list.map((s) => s.externalUuid);
-      return col;
-    }),
+    groups: [...groups]
+      .sort((a, b) => cmpStr(a.sampleDigest, b.sampleDigest))
+      .map((g) => ({ sampleDigest: g.sampleDigest, series: packAll(g.samples, series, start) })),
+    unaggregated: packAll(unaggregated, series, start),
   };
   return Buffer.from(JSON.stringify(out) + '\n', 'utf8');
 }
@@ -330,6 +366,12 @@ class DeviceRegistry {
 export interface AggregateOptions {
   podSubject: string;
   dayZone: string;
+  /**
+   * Receives each closed day's sample pack as soon as it is built, BEFORE any
+   * aggregate derived from it is returned, so the caller can write it and the
+   * bytes need not be held until the end. Omitted, the bytes are dropped.
+   */
+  onSampleFile?: (file: SampleFile, bytes: Buffer) => void;
 }
 
 export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateOptions): AggregationResult {
@@ -395,11 +437,6 @@ export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateO
       continue;
     }
     result.closedDays++;
-
-    const bytes = buildSampleFile(localDate, zone, start, end, samples, scan.series);
-    const digest = createHash('sha256').update(bytes).digest('hex');
-    const sampleFileIri = urn(wellnessSupportSeed({ podSubject: opts.podSubject, kind: 'attachment', key: `sha-256/${digest}` }));
-    result.sampleFiles.push({ iri: sampleFileIri, digest, bytes, localDate, timeZone: zone });
     result.samplesRetained += samples.length;
     const periodStart = isoUtc(start);
     const periodEnd = isoUtc(end);
@@ -415,10 +452,17 @@ export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateO
       g.samples.push(s);
     }
 
+    const packGroups: Array<{ sampleDigest: string; samples: SpilledSample[] }> = [];
+    const unaggregated: SpilledSample[] = [];
+    const dayGroups: SampleGroup[] = [];
+    const dayRecords: WellnessRecord[] = [];
     for (const gk of [...groups.keys()].sort(cmpStr)) {
       const g = groups.get(gk)!;
       const rule = metricRuleFor(g.type);
-      if (!rule) continue;
+      if (!rule) {
+        appendAll(unaggregated, g.samples);
+        continue;
+      }
       const used: SpilledSample[] = [];
       const values: number[] = [];
       for (const s of g.samples) {
@@ -427,11 +471,13 @@ export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateO
         if (factor === undefined) {
           const key = `${k.type} ${k.unit || '(no unit)'}`;
           result.unknownUnits[key] = (result.unknownUnits[key] ?? 0) + 1;
+          unaggregated.push(s);
           continue;
         }
         const v = Number(s.value);
         if (s.value.trim() === '' || !Number.isFinite(v)) {
           result.nonNumericSamples++;
+          unaggregated.push(s);
           continue;
         }
         used.push(s);
@@ -442,6 +488,12 @@ export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateO
       result.samplesAggregated += used.length;
 
       const sampleDigest = wellnessSampleDigest(used.map((s) => sampleFields(s, scan.series[s.series])));
+      const group: SampleGroup = {
+        iri: urn(wellnessSupportSeed({ podSubject: opts.podSubject, kind: 'sample-group', key: sampleDigest })),
+        sampleDigest,
+      };
+      dayGroups.push(group);
+      packGroups.push({ sampleDigest, samples: used });
       // Every series in a group shares one device identity; any of its raw strings names it.
       const deviceIri = devices.note(g.deviceRaw || undefined);
       for (const idx of new Set(used.map((u) => u.series))) devices.note(scan.series[idx].device || undefined);
@@ -470,12 +522,12 @@ export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateO
           sampleCount: used.length,
           sourceName: g.sourceName,
           deviceIri,
-          derivedFrom: sampleFileIri,
+          derivedFrom: group.iri,
           generatedBy: activity.iri,
         };
         const value = statisticOf(statistic, values);
         if (rule.record === 'vitalReading') {
-          result.records.push({
+          dayRecords.push({
             ...base,
             kind: 'vitalReading',
             hkType: g.type,
@@ -485,10 +537,26 @@ export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateO
             unit: rule.unit,
           });
         } else {
-          result.records.push({ ...base, kind: 'stepSnapshot', steps: Math.round(value) });
+          dayRecords.push({ ...base, kind: 'stepSnapshot', steps: Math.round(value) });
         }
       }
     }
+
+    // The pack is built and handed over BEFORE the day's aggregates join the
+    // result: a derived view never exists without the samples it came from.
+    const bytes = buildSampleFile(localDate, zone, start, end, packGroups, unaggregated, scan.series);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    const file: SampleFile = {
+      iri: urn(wellnessSupportSeed({ podSubject: opts.podSubject, kind: 'attachment', key: `sha-256/${digest}` })),
+      digest,
+      byteSize: bytes.length,
+      localDate,
+      timeZone: zone,
+      groups: dayGroups.sort((a, b) => cmpStr(a.sampleDigest, b.sampleDigest)),
+    };
+    opts.onSampleFile?.(file, bytes);
+    result.sampleFiles.push(file);
+    appendAll(result.records, dayRecords);
   }
 
   // --- Apple's own daily rollups: source records, named by date ----------
@@ -660,12 +728,20 @@ function workoutRecord(
   return rec;
 }
 
-/** The pod's day-zone default from an export: the most frequent `HKTimeZone`, ties broken by name. */
+/**
+ * The pod's day-zone default from an export: the most frequent `HKTimeZone`,
+ * ties broken by name. Aliases are counted as the one zone they name, and the
+ * zone returned is its canonical name, never an alias the export happened to use.
+ */
 export function majorityTimeZone(counts: Map<string, number>): string | undefined {
+  const canonical = new Map<string, number>();
+  for (const [zone, n] of counts) {
+    const c = canonicalZone(zone);
+    if (c !== undefined) canonical.set(c, (canonical.get(c) ?? 0) + n);
+  }
   let best: string | undefined;
   let bestCount = 0;
-  for (const [zone, n] of [...counts.entries()].sort((x, y) => cmpStr(x[0], y[0]))) {
-    if (!isKnownZone(zone)) continue;
+  for (const [zone, n] of [...canonical.entries()].sort((x, y) => cmpStr(x[0], y[0]))) {
     if (n > bestCount) {
       best = zone;
       bestCount = n;

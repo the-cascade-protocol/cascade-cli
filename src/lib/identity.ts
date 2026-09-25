@@ -562,10 +562,16 @@ export function wellnessDeviceSeed(opts: { podSubject: string; deviceIdentity: s
 
 /**
  * Seed for a supporting node named by what it IS: a content-addressed sample
- * file (`kind` "attachment", `key` its digest), or the activity that names a
- * derivation rule and its version (`kind` "rule").
+ * file (`kind` "attachment", `key` its digest), the group of samples one set
+ * of aggregates was computed from (`kind` "sample-group", `key` the group's
+ * {@link wellnessSampleDigest}, the same digest those aggregates' seeds carry),
+ * or the activity that names a derivation rule and its version (`kind` "rule").
  */
-export function wellnessSupportSeed(opts: { podSubject: string; kind: 'attachment' | 'rule'; key: string }): string {
+export function wellnessSupportSeed(opts: {
+  podSubject: string;
+  kind: 'attachment' | 'sample-group' | 'rule';
+  key: string;
+}): string {
   return lengthPrefixed([`wellness-${opts.kind}`, opts.podSubject, opts.key]);
 }
 

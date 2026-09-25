@@ -70,6 +70,8 @@ export interface ScanResult {
   correlationRecordsSkipped: number;
   /** Aggregated-type samples dropped because a timestamp would not parse. */
   invalidSamples: number;
+  /** Top-level `<Record>` types this release does not read, and how many of each were passed over. */
+  unreadRecordTypes: Map<string, number>;
 }
 
 /** Serialize a spilled sample as one spill line. */
@@ -110,6 +112,7 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
     samplesSpilled: 0,
     correlationRecordsSkipped: 0,
     invalidSamples: 0,
+    unreadRecordTypes: new Map(),
   };
 
   const stack: string[] = [];
@@ -127,7 +130,10 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
     countZone(r.metadata);
     const a = r.attrs;
     const type = a.type ?? '';
-    if (!metricRuleFor(type)) return;
+    if (!metricRuleFor(type)) {
+      result.unreadRecordTypes.set(type, (result.unreadRecordTypes.get(type) ?? 0) + 1);
+      return;
+    }
     const start = parseAppleTimestamp(a.startDate);
     const end = parseAppleTimestamp(a.endDate);
     if (start === undefined || end === undefined || a.value === undefined) {

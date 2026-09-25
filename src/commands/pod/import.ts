@@ -1626,6 +1626,20 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           console.log(
             `    Source records:   ${wr.activitySummaries.imported} ActivitySummary day(s), ${wr.workouts} workout(s), ${wr.devices} device(s)`,
           );
+          const dupes = Object.values(wr.duplicateRecords).reduce((a, b) => a + b, 0);
+          if (dupes > 0) {
+            console.log(
+              `    Duplicates:       ${dupes} record(s) listed more than once with identical content, written once (` +
+                Object.entries(wr.duplicateRecords).map(([k, n]) => `${k} ${n}`).join(', ') + ')',
+            );
+          }
+          const unread = Object.entries(wr.unreadRecordTypes);
+          if (unread.length > 0) {
+            console.log(
+              `    Not read:         ${unread.reduce((a, [, n]) => a + n, 0)} record(s) of ${unread.length} type(s) ` +
+                'this release does not import (per type in the --report JSON, wellness[].unreadRecordTypes)',
+            );
+          }
           if (wr.correlationRecordsSkipped > 0) {
             console.log(`    Skipped:          ${wr.correlationRecordsSkipped} record(s) nested in <Correlation> (each also appears at top level)`);
           }

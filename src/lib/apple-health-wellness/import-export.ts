@@ -31,12 +31,12 @@ import { DATA_TYPES } from '../pod-data-types.js';
 import { PodReader } from '../pod-read.js';
 import { SampleSpill } from './spill.js';
 import { scanExport } from './scan.js';
-import { aggregate, majorityTimeZone, type WellnessRecord } from './aggregate.js';
+import { aggregate, majorityTimeZone, type SampleFile, type WellnessRecord } from './aggregate.js';
+import { appendAll } from '../append-all.js';
 import { recordQuads, sampleFileQuads, ruleActivityQuads, sampleFilePath } from './quads.js';
 import { fileTextChunks } from './xml-scanner.js';
-import { isKnownZone, isoUtc, machineZone } from './time.js';
+import { canonicalZone, isKnownZone, isoUtc, machineZone } from './time.js';
 import { wellnessRules } from './rules.js';
-import { appendAll } from '../append-all.js';
 
 const CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
 const HEALTH = 'https://ns.cascadeprotocol.org/health/v1#';
@@ -84,11 +84,24 @@ export interface WellnessImportReport {
   closedDays: number;
   openDaysSkipped: number;
   activitySummaries: { imported: number; sentinel: number; openDay: number; empty: number };
+  /** Distinct workouts (a workout the export lists more than once is counted once; see `duplicateRecords`). */
   workouts: number;
   devices: number;
+  /**
+   * Records the export yielded more than once with identical content, by kind:
+   * written once, counted here and nowhere else. The same name with DIFFERENT
+   * content is a collision (`collisions`), never a duplicate.
+   */
+  duplicateRecords: Record<string, number>;
+  /** Top-level `<Record>` types this release does not read, and how many of each the export holds. */
+  unreadRecordTypes: Record<string, number>;
   sampleFiles: { total: number; new: number };
   files: WellnessFileReport[];
-  /** Records whose name already exists in the pod with different content; the pod keeps what it had. */
+  /**
+   * Names that arrived with content different from what the pod (or this same
+   * export) already gave them. The pod keeps what it had; within one export,
+   * the version whose canonical triples sort first is kept.
+   */
   collisions: string[];
   warnings: string[];
   /** HealthKit types aggregated by this release. */
@@ -210,6 +223,8 @@ function additiveCanonicalMerge(
     return m;
   };
   const have = group(existing);
+  // `incoming` holds each subject once: same-name records within one export
+  // were compared and resolved before the write (`dedupeRecords`).
   for (const [k, quads] of group(incoming)) {
     const prior = have.get(k);
     if (!prior) {
@@ -240,6 +255,46 @@ function additiveCanonicalMerge(
     }
   }
   return out;
+}
+
+/** One record's triples and the canonical string they compare by. */
+interface PreparedRecord {
+  record: WellnessRecord;
+  quads: Quad[];
+  canonical: string;
+}
+
+/**
+ * Resolve records the export yielded under one name. Identical content is a
+ * duplicate (an export can list the same workout twice): kept once and
+ * counted. Different content is a collision: reported, and the version whose
+ * canonical triples sort first is kept, so the outcome does not depend on the
+ * order the export listed them in. Never a union of the two.
+ */
+function dedupeRecords(records: WellnessRecord[]): {
+  unique: PreparedRecord[];
+  duplicates: Record<string, number>;
+  collisions: string[];
+} {
+  const byIri = new Map<string, PreparedRecord>();
+  const duplicates: Record<string, number> = {};
+  const collided = new Set<string>();
+  for (const record of records) {
+    const quads = recordQuads(record);
+    const canonical = quads.map(quadKey).sort(cmpStr).join('\u0001');
+    const prior = byIri.get(record.iri);
+    if (!prior) {
+      byIri.set(record.iri, { record, quads, canonical });
+      continue;
+    }
+    if (prior.canonical === canonical) {
+      duplicates[record.kind] = (duplicates[record.kind] ?? 0) + 1;
+      continue;
+    }
+    collided.add(record.iri);
+    if (canonical < prior.canonical) byIri.set(record.iri, { record, quads, canonical });
+  }
+  return { unique: [...byIri.values()], duplicates, collisions: [...collided].sort(cmpStr) };
 }
 
 async function writeFile(
@@ -292,11 +347,11 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
     }
     if (!zone) {
       const majority = majorityTimeZone(scan.timeZoneCounts);
-      const machine = opts.machineZoneOverride ?? machineZone();
+      const machine = canonicalZone(opts.machineZoneOverride ?? machineZone() ?? '');
       if (majority) {
         zone = majority;
         rule = 'HKTimeZone majority';
-      } else if (machine && isKnownZone(machine)) {
+      } else if (machine) {
         zone = machine;
         rule = 'importing machine';
       } else {
@@ -305,51 +360,56 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
       }
     }
     const writeZone = stated === undefined && profile.readable;
-
-    // 3. DERIVE
-    const podSubject = await resolvePodSubject(podDir, dek);
-    const agg = aggregate(scan, spill, { podSubject, dayZone: zone });
-    appendAll(warnings, agg.warnings);
-
-    // 4. WRITE. Sample files, then their descriptors, then the records.
     if (!dryRun && writeZone) writePodDayZone(podDir, zone, rule, dek);
 
+    // 3. DERIVE, and 4a. WRITE each day's sample pack as soon as it is built,
+    // before any aggregate derived from it is written, and without holding
+    // every day's bytes until the end.
+    const podSubject = await resolvePodSubject(podDir, dek);
     let newSampleFiles = 0;
-    for (const f of agg.sampleFiles) {
+    const writeSamplePack = (f: SampleFile, bytes: Buffer): void => {
       const target = path.join(podDir, ...sampleFilePath(f.digest).split('/'));
       if (fs.existsSync(target)) {
         // Content-addressed: a file already under this name holds these bytes,
         // unless it was damaged. Verify rather than trust, and never overwrite.
         let intact = false;
         try {
-          intact = readResourceBytes(target, dek).equals(f.bytes);
+          intact = readResourceBytes(target, dek).equals(bytes);
         } catch {
           intact = false;
         }
         if (!intact) warnings.push(`${sampleFilePath(f.digest)} exists but does not hold the bytes its name promises; it was left untouched.`);
-        continue;
+        return;
       }
       newSampleFiles++;
       if (!dryRun) {
         fs.mkdirSync(path.dirname(target), { recursive: true });
-        writeResourceBytes(target, f.bytes, dek);
+        writeResourceBytes(target, bytes, dek);
       }
-    }
+    };
+    const agg = aggregate(scan, spill, { podSubject, dayZone: zone, onSampleFile: writeSamplePack });
+    appendAll(warnings, agg.warnings);
+    // The scratch store has served its purpose; drop it before the writes.
+    spill.close();
 
+    // 4b. Descriptors, then the records that point at them.
     const collisions: string[] = [];
+    const deduped = dedupeRecords(agg.records);
+    for (const iri of deduped.collisions) collisions.push(`(this export): ${iri}`);
     const files: WellnessFileReport[] = [];
-    const hasAggregates = agg.records.some((r) => r.kind === 'vitalReading' || r.kind === 'stepSnapshot');
+    const hasAggregates = deduped.unique.some((r) => r.record.kind === 'vitalReading' || r.record.kind === 'stepSnapshot');
     if (hasAggregates) {
-      const quads = [...ruleActivityQuads(agg.activity), ...agg.sampleFiles.flatMap(sampleFileQuads)];
+      const quads = ruleActivityQuads(agg.activity);
+      for (const f of agg.sampleFiles) appendAll(quads, sampleFileQuads(f));
       files.push(
         await writeFile(podDir, WELLNESS_SAMPLES_DESCRIPTOR, 'wellness-samples', quads, agg.sampleFiles.length + 1, dek, dryRun, collisions),
       );
     }
 
-    const byFile = new Map<string, WellnessRecord[]>();
-    for (const r of agg.records) {
-      let a = byFile.get(r.fileKey);
-      if (!a) byFile.set(r.fileKey, (a = []));
+    const byFile = new Map<string, PreparedRecord[]>();
+    for (const r of deduped.unique) {
+      let a = byFile.get(r.record.fileKey);
+      if (!a) byFile.set(r.record.fileKey, (a = []));
       a.push(r);
     }
     for (const key of [...byFile.keys()].sort(cmpStr)) {
@@ -357,13 +417,16 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
       if (!info) throw new Error(`wellness rules name an unknown pod data type "${key}"`);
       const records = byFile.get(key)!;
       const rel = `${info.directory}/${info.filename}`;
-      files.push(await writeFile(podDir, rel, key, records.flatMap(recordQuads), records.length, dek, dryRun, collisions));
+      const quads: Quad[] = [];
+      for (const r of records) appendAll(quads, r.quads);
+      files.push(await writeFile(podDir, rel, key, quads, records.length, dek, dryRun, collisions));
     }
 
     if (collisions.length > 0) {
       warnings.push(
-        `${collisions.length} record(s) already in the pod under the same name with different content were left as they were ` +
-          `(a record is never edited in place): ${collisions.slice(0, 5).join(', ')}${collisions.length > 5 ? ', ...' : ''}`,
+        `${collisions.length} name(s) arrived with content different from what the pod or this export already gave them; ` +
+          `the version already held was kept, nothing was edited in place and no two versions were merged: ` +
+          `${collisions.slice(0, 5).join(', ')}${collisions.length > 5 ? ', ...' : ''}`,
       );
     }
     const unknownUnitTotal = Object.values(agg.unknownUnits).reduce((a, b) => a + b, 0);
@@ -377,7 +440,7 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
       );
     }
 
-    const count = (kind: WellnessRecord['kind']): number => agg.records.filter((r) => r.kind === kind).length;
+    const count = (kind: WellnessRecord['kind']): number => deduped.unique.filter((r) => r.record.kind === kind).length;
     return {
       export: opts.exportXmlPath,
       dayZone: { zone, rule, written: writeZone && !dryRun },
@@ -395,6 +458,8 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
       activitySummaries: { imported: count('activitySummary'), ...agg.activitySummariesSkipped },
       workouts: count('workout'),
       devices: count('device'),
+      duplicateRecords: deduped.duplicates,
+      unreadRecordTypes: Object.fromEntries([...scan.unreadRecordTypes.entries()].sort((a, b) => cmpStr(a[0], b[0]))),
       sampleFiles: { total: agg.sampleFiles.length, new: newSampleFiles },
       files,
       collisions,
