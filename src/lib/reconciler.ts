@@ -1321,11 +1321,18 @@ function dateOnly(dt: string): string { return dt.split('T')[0] ?? dt; }
  * ({@link classifyMedicationStatus}), never in a list here. The split asks one
  * narrower question of it: does one side SAY the medication ended (class
  * `stopped`, or a repudiated `entered-in-error` record) while the other does
- * not? An `unknown` side (no status, `on-hold`, `draft`, anything unmatched) is
- * not a statement that the medication is being taken, but it is not a statement
- * that it ended either, so an active record and a status-less record of the
- * same drug still merge, and a stopped record never collapses silently into
- * either.
+ * not? A `paused` side (`on-hold`: halted, expected to continue) has not ended,
+ * and an `unknown` side (no status, `draft`, anything unmatched) is not a
+ * statement that the medication is being taken, but it is not a statement that
+ * it ended either, so an active record and an on-hold or status-less record of
+ * the same drug still merge, and a stopped record never collapses silently into
+ * any of them.
+ *
+ * `entered-in-error` counts as ended here, as it did before the shared table,
+ * so an `entered-in-error` record and a `stopped` record of the same drug merge
+ * silently. That is narrower than the table's own reading (a repudiated record
+ * says nothing about the medication and should be dropped, not merged); this
+ * function keeps the old behaviour and does not implement the drop.
  */
 function medicationEnded(status: string | undefined): boolean {
   const { lifecycle } = classifyMedicationStatus(status);

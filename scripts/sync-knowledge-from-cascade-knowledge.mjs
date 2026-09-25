@@ -4,8 +4,8 @@
  * tables from `cascade-knowledge` into `src/knowledge/medication-status.snapshot.json`.
  *
  * `cascade-knowledge` is the one place the medication status lifecycle table is
- * authored (FHIR R4 medication status code -> active | stopped | unknown |
- * entered-in-error, plus the non-canonical status synonyms). This repository
+ * authored (FHIR R4 medication status code -> active | stopped | paused |
+ * unknown | entered-in-error, plus the non-canonical status synonyms). This repository
  * takes no npm dependency on it; it vendors the two JSONL families, the way
  * `src/shapes/` vendors `spec`.
  *

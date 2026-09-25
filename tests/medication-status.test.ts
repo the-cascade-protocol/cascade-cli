@@ -44,8 +44,8 @@ for (const r of lifecycleRows) if (MED_SYSTEMS.includes(r.subject.system)) table
  * changes the table changes these in the same commit, in both repositories.
  */
 const PINNED_DIGESTS = {
-  'medication-status-lifecycle': 'f8870fea5e109e5fd694e972cb795f6a03a47eeca54c68770c2d16d1c3bce92b',
-  'medication-status-synonym': '8cee42c8517c58675fb166de0aecc8fe56312e6bf2f9efa3688023ad28a411db',
+  'medication-status-lifecycle': 'abdb1504d95e23b10217ded0eb6fd7549553c5ab6567dce613306aee85f3f152',
+  'medication-status-synonym': 'd7e70c9a78ec79da0e789a52350431346e13d5599e452f9a82b3f6b2fdea6842',
 };
 
 /**
@@ -115,6 +115,58 @@ describe('medication status table (vendored from cascade-knowledge)', () => {
   it('an unrecognized status is unknown and says so', () => {
     expect(classifyMedicationStatus('as needed')).toEqual({ lifecycle: 'unknown', matchedBy: 'unmatched' });
   });
+
+  it('on-hold is its own class, paused, and says which code it resolved to', () => {
+    expect(classifyMedicationStatus('on-hold')).toEqual({ lifecycle: 'paused', matchedBy: 'code', code: 'on-hold' });
+    expect(classifyMedicationStatus('held')).toEqual({ lifecycle: 'paused', matchedBy: 'synonym', code: 'on-hold' });
+  });
+
+  /**
+   * PINNED EXPECTATIONS, mirrored verbatim from cascade-knowledge
+   * test/medication-status.test.mjs (and the desktop app's contracts test). A
+   * row added, removed or retargeted upstream that flips any of these goes red
+   * here after the re-sync, not silently in a pod.
+   */
+  const PINNED_EXPECTATIONS: [string, string][] = [
+    ['inactive', 'stopped'],
+    ['not active', 'stopped'],
+    ['activated', 'unknown'],
+    ['on hold', 'paused'],
+    ['hold on', 'unknown'],
+    ['continued off', 'stopped'],
+    ['past due', 'unknown'],
+    ['prior auth pending', 'unknown'],
+    ['prior to admission', 'unknown'],
+    ['on hold pending prior auth', 'paused'],
+    ['Stopped?', 'stopped'],
+    ['STOPPED', 'stopped'],
+    [' stopped ', 'stopped'],
+    ['d/c', 'stopped'],
+    ["dc'd", 'stopped'],
+    ['discontinued 2024', 'stopped'],
+    ['active - on hold', 'paused'],
+    ['', 'unknown'],
+    ['   ', 'unknown'],
+    ['null', 'unknown'],
+    ['unknown', 'unknown'],
+    ['not currently taking', 'stopped'],
+    ['never started', 'stopped'],
+    ['not started yet', 'stopped'],
+    // Out of scope under the precedence (knowledge README): a negated hold reads as stopped.
+    ['no longer on hold', 'stopped'],
+    ['not taking', 'stopped'],
+    ['no longer active', 'stopped'],
+    ['expired', 'stopped'],
+    ['history of', 'stopped'],
+    ['active', 'active'],
+    ['currently taking', 'active'],
+    ['entered-in-error', 'entered-in-error'],
+  ];
+
+  it('pinned expectations (mirrored from cascade-knowledge)', () => {
+    const got = PINNED_EXPECTATIONS.map(([input]) => [input, classifyMedicationStatus(input).lifecycle]);
+    expect(got).toEqual(PINNED_EXPECTATIONS);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -155,7 +207,7 @@ describe('reconciler medication status split', () => {
     expect(await conflicts(undefined, 'active')).toBe(0);
   });
 
-  it('on-hold vs active is not a status conflict (on-hold is unknown, not ended)', async () => {
+  it('on-hold vs active is not a status conflict (on-hold is paused, not ended)', async () => {
     expect(await conflicts('on-hold', 'active')).toBe(0);
   });
 

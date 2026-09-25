@@ -4,7 +4,7 @@
  *
  * The answer is data, not code: the table is `cascade-knowledge`'s
  * `medication-status-lifecycle` family (every FHIR R4 MedicationRequest.status
- * and MedicationStatement.status code -> active | stopped | unknown |
+ * and MedicationStatement.status code -> active | stopped | paused | unknown |
  * entered-in-error, plus a row for an ABSENT status) and its
  * `medication-status-synonym` family (legacy spellings and free text -> the FHIR
  * code they mean). Both are vendored verbatim in
@@ -19,7 +19,7 @@
  *   3. key is a FHIR status code -> its class
  *   4. key is a synonym_of subject -> its target code's class
  *   5. key contains fragment_of subjects -> the most conservative target class,
- *      in the order entered-in-error, stopped, unknown, active
+ *      in the order entered-in-error, stopped, paused, unknown, active
  *   6. otherwise -> unknown, reported as unmatched
  *
  * A consumer that needs a narrower question (the reconciler asks only "is one
@@ -29,7 +29,7 @@
 
 import snapshot from '../knowledge/medication-status.snapshot.json' with { type: 'json' };
 
-export type MedicationLifecycle = 'active' | 'stopped' | 'unknown' | 'entered-in-error';
+export type MedicationLifecycle = 'active' | 'stopped' | 'paused' | 'unknown' | 'entered-in-error';
 
 export interface MedicationStatusClassification {
   lifecycle: MedicationLifecycle;
@@ -47,7 +47,7 @@ interface Row {
 
 const MED_STATUS_SYSTEMS = new Set(['FHIR-MEDICATIONREQUEST-STATUS', 'FHIR-MEDICATIONSTATEMENT-STATUS']);
 const ABSENT_SYSTEM = 'FHIR-DATA-ABSENT-REASON';
-const LIFECYCLES: readonly MedicationLifecycle[] = ['entered-in-error', 'stopped', 'unknown', 'active'];
+const LIFECYCLES: readonly MedicationLifecycle[] = ['entered-in-error', 'stopped', 'paused', 'unknown', 'active'];
 
 /** Step 1 of the contract. */
 export function medicationStatusKey(raw: string): string {
