@@ -72,18 +72,6 @@
       ]
     },
     {
-      "term": "clinical:documentType",
-      "iri": "https://ns.cascadeprotocol.org/clinical/v1#documentType",
-      "emittedAs": [
-        "predicate"
-      ],
-      "writeSites": 2,
-      "files": [
-        "src/lib/ccda-converter/narrative.ts",
-        "src/lib/fhir-converter/converters-clinical.ts"
-      ]
-    },
-    {
       "term": "clinical:documentUrl",
       "iri": "https://ns.cascadeprotocol.org/clinical/v1#documentUrl",
       "emittedAs": [

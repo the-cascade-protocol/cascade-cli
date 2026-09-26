@@ -14,6 +14,34 @@
 # different data sources (EHR, device, patient-reported).
 #
 # Changelog:
+# v1.20 (2026-09-24): Put the document narrative on its declared spelling, relax
+#     its single-value constraint to sh:Warning, and constrain the newly declared
+#     clinical:documentType. Strictly widening: one constraint drops from
+#     sh:Violation to sh:Warning and every new finding is at sh:Warning.
+#
+#     Paired with clinical v1.20 (the clinical:narrativeText comment restated
+#     for FHIR and C-CDA, and the new clinical:documentType).
+#
+#     1. clinical:ClinicalDocumentShape's clinical:narrativeText property shape
+#        loses its sh:maxCount 1 and keeps its sh:datatype, still a Violation.
+#     2. NEW clinical:NarrativeTextCountShape carries that sh:maxCount 1 at
+#        sh:Warning, targeting all SEVEN document classes by sh:targetClass.
+#        The constraint could not be relaxed in place: ClinicalDocumentShape
+#        is the sh:node referent of the six subtype shapes, and a nested
+#        Warning is re-reported as a Violation on each of them (rule S5; the
+#        v1.17 entry below). Relaxed because a C-CDA document with two sections
+#        sharing a LOINC section code puts two narratives on one record, whose
+#        IRI is keyed on that code.
+#     3. NEW clinical:DocumentTypeShape: clinical:documentType, xsd:string,
+#        sh:maxCount 1, sh:Warning, on the same seven classes.
+#     4. NEW clinical:NarrativeTextSpellingShape, sh:targetSubjectsOf
+#        cascade:narrativeText and sh:targetSubjectsOf clinical:content, each
+#        with an sh:maxCount 0 property shape at sh:Warning. Modelled on
+#        clinical:MedicationDateSpellingShape (v1.19). Neither predicate is
+#        declared by any vocabulary; this shape is the whole migration window
+#        and is removed when the warning is observably absent from conforming
+#        output.
+#
 # v1.19 (2026-09-06): Declare the medication effective dates on the shape that
 #     carries them, and warn on the undefined health: spelling. Shapes-only,
 #     additive, and both new findings are at sh:Warning.
@@ -338,13 +366,20 @@ clinical:ClinicalDocumentShape a sh:NodeShape ;
         sh:name "Display Name"@en
     ] ;
 
-    # Optional: narrativeText (unbounded length for clinical notes)
+    # Optional: narrativeText (unbounded length for clinical notes).
+    #
+    # NO sh:maxCount HERE, deliberately (v1.20). The single-value constraint
+    # this property carried through v1.19 is on clinical:NarrativeTextCountShape
+    # below, at sh:Warning. It cannot be relaxed in place: this shape is the
+    # sh:node referent of the six document subtype shapes, so a Warning written
+    # here would be re-reported as a Violation on every one of them (rule S5 in
+    # validation/index.md; the clinical v1.16 defect). The datatype stays here
+    # and stays a Violation.
     sh:property [
         sh:path clinical:narrativeText ;
         sh:datatype xsd:string ;
-        sh:maxCount 1 ;
         sh:name "Narrative Text"@en ;
-        sh:description "Plain text content extracted from FHIR narrative"@en
+        sh:description "Plain text of the document's narrative, markup stripped: FHIR Narrative text.div, or a C-CDA section's text element"@en
     ] ;
 
     # Optional: narrativeXHTML
@@ -748,6 +783,119 @@ clinical:DocumentStatusShape a sh:NodeShape ;
                "appended" "cancelled" "entered-in-error" "unknown") ;
         sh:name "Status"@en ;
         sh:message "Document status should be one of the FHIR R4 codes a document-class record can carry: the four composition-status codes (preliminary, final, amended, entered-in-error) that DocumentReference.docStatus is bound to, or the ten diagnostic-report-status codes (registered, partial, preliminary, final, amended, corrected, appended, cancelled, entered-in-error, unknown) that a DiagnosticReport-derived report such as a laboratory report carries"@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ============================================================================
+# Shapes: narrative text and document type (v1.20)
+# ============================================================================
+#
+# Both are advisory constraints on the document family, so both follow the
+# v1.17 construction above for the same reason: a Warning cannot live on
+# clinical:ClinicalDocumentShape, which the six subtype shapes reach by
+# sh:node, so each shape names all seven document classes in sh:targetClass.
+# That keeps the target set stated rather than inferred (rule S1) and reaches a
+# subtype exactly as the v1.19 constraint did through sh:node, so the set of
+# nodes checked does not change; only the severity does.
+
+# The single-value constraint on clinical:narrativeText, relaxed from
+# sh:Violation (on clinical:ClinicalDocumentShape through v1.19) to sh:Warning.
+#
+# WHY IT IS RELAXED. It never fired before v1.20, because the narrative was
+# written under an undeclared spelling. Once written as clinical:narrativeText
+# it fires on a C-CDA document with two sections that share a LOINC section
+# code: the section record is keyed on the document, the section code and the
+# source, so both narratives land on one record. That is correct data under an
+# identity scheme that does not yet distinguish the two sections, not a record
+# that should be rejected. Re-keying the section record would re-mint every
+# existing narrative node, so the key is left alone and the count is reported.
+#
+# WHY sh:targetClass AND NOT sh:targetSubjectsOf clinical:narrativeText. A
+# predicate target would also reach a subject of another class carrying the
+# property, which the v1.19 constraint never did. Class targets keep the scope
+# exactly as it was.
+#
+# The constraint returns to sh:Violation when section records have an identity
+# that separates two sections sharing a code, and a release shows the warning
+# absent from conforming output.
+clinical:NarrativeTextCountShape a sh:NodeShape ;
+    sh:targetClass clinical:ClinicalDocument ;
+    sh:targetClass clinical:ProgressNote ;
+    sh:targetClass clinical:DischargeSummary ;
+    sh:targetClass clinical:ConsultationNote ;
+    sh:targetClass clinical:LaboratoryReport ;
+    sh:targetClass clinical:ImagingReport ;
+    sh:targetClass clinical:VisitSummary ;
+    rdfs:label "Narrative Text Count Shape"@en ;
+    rdfs:comment "Reports a document record carrying more than one clinical:narrativeText. Warning severity from clinical v1.20; a Violation on clinical:ClinicalDocumentShape through v1.19."@en ;
+
+    sh:property [
+        sh:path clinical:narrativeText ;
+        sh:maxCount 1 ;
+        sh:name "Narrative Text"@en ;
+        sh:message "A document record should carry one narrative text. Two values usually mean two C-CDA sections with the same LOINC section code were converted onto one record; both texts are kept and neither is authoritative over the other."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# clinical:documentType, declared in clinical v1.20. It was written before it was
+# declared, so per the core v3.5 ratchet the first release to constrain it does
+# so at sh:Warning. FHIR R4 DocumentReference.type is 0..1, so one label.
+# There is no value set: the label is source text, and the coded value set for
+# document types (LOINC document ontology) belongs to a code property.
+clinical:DocumentTypeShape a sh:NodeShape ;
+    sh:targetClass clinical:ClinicalDocument ;
+    sh:targetClass clinical:ProgressNote ;
+    sh:targetClass clinical:DischargeSummary ;
+    sh:targetClass clinical:ConsultationNote ;
+    sh:targetClass clinical:LaboratoryReport ;
+    sh:targetClass clinical:ImagingReport ;
+    sh:targetClass clinical:VisitSummary ;
+    rdfs:label "Document Type Shape"@en ;
+    rdfs:comment "Advisory constraint on clinical:documentType, the human-readable document type label, on every document class. Warning severity, per the core v3.5 ratchet."@en ;
+
+    sh:property [
+        sh:path clinical:documentType ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:name "Document Type"@en ;
+        sh:message "Document type should be one string: the human-readable label for the kind of document (FHIR R4 DocumentReference.type, 0..1). The slug form (progress-note, summarization) belongs on cascade:documentType."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# The migration signal for the narrative text spellings (clinical v1.20).
+#
+# Modelled on clinical:MedicationDateSpellingShape (v1.19). It targets the
+# SUBJECTS OF the undeclared predicates rather than a class, so it fires once
+# per record that carries a legacy spelling and never on one that does not,
+# whatever the record is typed. One shape carries both targets; they union, so
+# a record carrying both spellings is reached once and reports one result per
+# predicate.
+#
+# As in v1.19 there is NO sh:or window on the node shape to pair with this:
+# the narrative is OPTIONAL, so no pod fails for carrying a legacy spelling and
+# none will. This warning is the whole migration window. It closes when the
+# warning is observably absent from conforming output, and then this shape is
+# removed with nothing to restore in its place. cascade:narrativeText and
+# clinical:content are named here and declared nowhere, deliberately.
+clinical:NarrativeTextSpellingShape a sh:NodeShape ;
+    sh:targetSubjectsOf cascade:narrativeText ;
+    sh:targetSubjectsOf clinical:content ;
+    rdfs:label "Narrative Text Spelling Shape"@en ;
+    rdfs:comment "Warns that a record carries narrative text on the undeclared cascade:narrativeText or clinical:content spelling. Accepted during the clinical v1.20 migration window; removed with the window."@en ;
+
+    sh:property [
+        sh:path cascade:narrativeText ;
+        sh:maxCount 0 ;
+        sh:name "Narrative Text (undeclared spelling)"@en ;
+        sh:message "Narrative text is written on cascade:narrativeText, which no Cascade vocabulary defines. Write clinical:narrativeText instead: it is the canonical spelling for FHIR text.div and C-CDA section text alike, and the one both JSON-LD contexts map. Accepted during the clinical v1.20 migration window; this becomes a VIOLATION when the window closes."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path clinical:content ;
+        sh:maxCount 0 ;
+        sh:name "Content (undeclared spelling)"@en ;
+        sh:message "Narrative text is written on clinical:content, which no Cascade vocabulary defines. Write clinical:narrativeText instead, once. Accepted during the clinical v1.20 migration window; this becomes a VIOLATION when the window closes."@en ;
         sh:severity sh:Warning
     ] .
 
