@@ -1,52 +1,41 @@
-# Encrypted resources (encryption at rest)
+# Encrypted pods in the CLI (encryption at rest)
 
-> **Status:** Implemented in `@the-cascade-protocol/cli`. This document is the
-> working spec for the on-disk encryption format. **Promote this into
-> `spec/pod-structure.md`** (the authoritative pod-structure spec) once the
-> format is ratified, so the Swift SDK, TypeScript/Python SDKs, and the CLI all
-> reference one source of truth.
+> **The format is specified in the Cascade Protocol specification:
+> [`pod-encryption.md`](https://github.com/the-cascade-protocol/spec/blob/main/pod-encryption.md)**
+> (version 1.0, Draft). That document is normative for every implementation:
+> the sealed file layout, which files stay plaintext, the header
+> `settings/encryption.json` in versions 1.0 and 1.1, the reader limits, the
+> writer invariants, the re-key, file system safety, and the security
+> considerations. Section numbers below refer to it.
+>
+> This document covers how `cascade` implements that format and how to operate
+> it: commands, passphrase handling, `--json` output, exit codes and `reason`
+> strings, error messages, and where each rule lives in the source. Where this
+> document and the specification disagree, the specification is authoritative
+> and the difference is a bug in this tool.
 
-A Cascade Pod may be encrypted at rest. When enabled, every pod **resource**
-(the `.ttl` files plus the non-`.ttl` resources `.well-known/solid` and
-`settings/preferences`) is stored as ciphertext on disk, while the CLI
-transparently decrypts on read and encrypts on write. `README.md` is left as
-plaintext documentation and is not a pod resource.
-
-A pod is encrypted **iff** it contains an encryption manifest at
-`settings/encryption.json`. Plaintext pods (no manifest) are unaffected: all
-read/write paths fall through to plaintext.
+A pod is encrypted **iff** anything is present at `settings/encryption.json`
+(spec section 4.1). Plaintext pods (nothing at that path) are unaffected: all
+read and write paths fall through to plaintext. In an encrypted pod every
+regular file is sealed except the three plaintext-by-design paths of spec
+section 3.2 (`settings/encryption.json`, `README.md`,
+`provenance/egress-log.jsonl`); in this tool that list is
+`PLAINTEXT_BY_DESIGN` in `src/lib/pod-resources.ts`.
 
 ## Envelope encryption
 
-Encryption uses an envelope (two-key) scheme:
+A random per-pod 256-bit data key (DEK) seals every file; the DEK is wrapped
+by a key-encryption key (KEK) derived from a passphrase, and the wrapped DEK is
+stored in the header (spec section 1.1). Changing the passphrase re-wraps the
+same DEK without touching any sealed file; replacing the DEK is a re-key (see
+[Re-keying](#re-keying-a-new-data-key)).
 
-- A random per-pod **Data Encryption Key (DEK)** — 256-bit — encrypts each
-  resource.
-- The DEK is **wrapped** (encrypted) by a **Key Encryption Key (KEK)** derived
-  from a passphrase. The wrapped DEK is stored in the manifest.
+## Sealed files
 
-This lets the passphrase be changed (re-wrap the same DEK) without re-encrypting
-every resource, and lets multiple key holders unlock the same pod by storing
-multiple wraps of the same DEK (see [Multi-wrap design](#multi-wrap-design)).
-
-## Resource layout (`.combined`, CryptoKit-interoperable)
-
-Each encrypted resource blob is exactly:
-
-```
-nonce(12) || ciphertext || tag(16)
-```
-
-- **Cipher:** AES-256-GCM (256-bit DEK).
-- **nonce:** 12 random bytes, fresh per write.
-- **tag:** 16-byte GCM authentication tag.
-- **No magic header** precedes the blob.
-
-This is byte-for-byte identical to Apple CryptoKit's
-`AES.GCM.SealedBox(...).combined` representation, so blobs written by this CLI
-are directly openable by the Swift SDK's `PodEncryption` (and vice versa).
-
-The CLI builds/parses the combined layout manually over Node's `node:crypto`:
+The layout is `nonce(12) || ciphertext || tag(16)` under AES-256-GCM with no
+associated data (spec sections 2 and 3.1), byte-for-byte Apple CryptoKit's
+`AES.GCM.SealedBox.combined`. The CLI builds and parses it over Node's
+`node:crypto`:
 
 ```ts
 // encrypt
@@ -65,224 +54,96 @@ decipher.setAuthTag(tag);
 const plaintext = Buffer.concat([decipher.update(ct), decipher.final()]);
 ```
 
-Any GCM authentication failure (wrong key or tampered bytes) surfaces as a
-single clean error: **`incorrect passphrase or corrupt key`**.
+A GCM authentication failure on a sealed file (wrong key or tampered bytes)
+surfaces as one error: **`incorrect passphrase or corrupt key`**.
 
-## Key derivation (Argon2id)
+## Key derivation
 
-The passphrase KEK is derived with **Argon2id** (memory-hard, side-channel
-resistant) via `@noble/hashes` — a pure-JS implementation, so there is no native
-build step. Default parameters (recorded in the manifest):
+The KEK is Argon2id (spec section 2) from `@noble/hashes`, a pure-JS
+implementation, so there is no native build step. New passphrase wraps use the
+specification's defaults, `t = 3`, `m = 65536` (KiB, 64 MiB), `p = 1`, with a
+fresh 16-byte random salt and a 32-byte output.
 
-| Param | Value | Meaning |
-|-------|-------|---------|
-| `t`   | 3     | time cost (iterations) |
-| `m`   | 65536 | memory cost in **KiB** (= 64 MiB) |
-| `p`   | 1     | parallelism |
-| —     | salt  | 16 random bytes (base64 in manifest) |
-| —     | dkLen | 32 bytes (256-bit KEK) |
+## The header, `settings/encryption.json`
 
-The parameters are stored in the manifest so a future reader can reproduce the
-KEK even if the defaults change.
+The header's members, both versions, the wrap kinds, the wrap identifier and
+the 1.0 to 1.1 migration are specified in spec sections 4 and 6.4.
 
-## Manifest schema — `settings/encryption.json`
+What this tool reads and writes:
 
-```jsonc
-{
-  "version": "1.0",
-  "algorithm": "aes-256-gcm",
-  "kdf": "argon2id",
-  "kdfParams": {
-    "salt": "<base64>",   // Argon2id salt
-    "t": 3,               // time cost
-    "m": 65536,           // memory cost (KiB)
-    "p": 1                // parallelism
-  },
-  // Multiple wraps of the SAME DEK may coexist.
-  // v1 implements only the "passphrase" wrap.
-  "wraps": [
-    {
-      "by": "passphrase",
-      "wrappedDek": "<base64 combined nonce||ct||tag>"
-    }
-  ]
-}
-```
+- **Reads** versions `1.0` and `1.1`. Any other version is refused with a
+  message that the pod was written by a newer tool
+  (`reason: "manifest-version-unsupported"`).
+- **Writes** version `1.1` from every command that writes the header.
+  `pod init --encrypt` and `pod encrypt` write one passphrase wrap with
+  `label: "primary"` and `createdAt` set when the pod key is created;
+  `pod passphrase set` migrates a 1.0 header in memory and re-wraps;
+  `pod passphrase set --rotate-dek` writes one wrap of a new data key.
+- **Wrap kinds.** `passphrase` is implemented. `device-keychain` is reserved by
+  the specification and not implemented; like any kind this tool does not
+  implement, it is skipped. A header with no wrap this tool implements cannot
+  be opened here:
 
-The `wrappedDek` is itself a combined AES-256-GCM blob (the DEK encrypted under
-the KEK), base64-encoded.
+  ```
+  Cannot open this pod: its encryption manifest holds no wrap this tool implements
+  ```
 
-The schema above is **version 1.0**. Earlier versions of this tool wrote it
-from `pod init --encrypt` and `pod encrypt`; no command writes it now, and every
-command still reads it.
-
-### Version 1.1
-
-Every command that writes the header writes **version 1.1**, which moves the
-KDF parameters into each passphrase wrap (one salt cannot serve two secrets) and
-gives each wrap a `label` and a `createdAt`. `pod init --encrypt` and
-`pod encrypt` write one passphrase wrap with `label: "primary"` and `createdAt`
-set when the pod key is created; `pod passphrase set` migrates a 1.0 header in
-memory and re-wraps; `pod passphrase set --rotate-dek` writes one wrap of a new
-data key:
-
-```json
-{
-  "version": "1.1",
-  "algorithm": "aes-256-gcm",
-  "wraps": [
-    {
-      "by": "passphrase",
-      "label": "primary",
-      "createdAt": "2026-09-23T17:04:11.123Z",
-      "kdf": "argon2id",
-      "kdfParams": { "salt": "<base64 of 16 random bytes>", "t": 3, "m": 65536, "p": 1 },
-      "wrappedDek": "<base64 of nonce(12) || ciphertext(32) || tag(16)>"
-    }
-  ]
-}
-```
-
-Rules:
-
-1. No top-level `kdf` or `kdfParams` in 1.1. A 1.1 manifest that carries
-   either is malformed: readers refuse it, writers never produce it.
-2. Every `passphrase` wrap carries its own `kdf` (`"argon2id"`) and
-   `kdfParams`. Salts are 16 random bytes, fresh per wrap, and unique across
-   the wraps of one manifest.
-3. `label` is a string or `null`. Neutral words only (`"primary"`): the
-   manifest is plaintext and travels with the folder.
-4. `createdAt` is an ISO 8601 UTC timestamp with milliseconds, or `null` for a
-   wrap migrated from 1.0 whose age is unknown. It is set once when the wrap is
-   created.
-5. `wraps` is never empty.
-6. `by` is `"passphrase"` or `"device-keychain"` (reserved, not implemented).
-   Readers skip a wrap whose non-empty `by` they do not implement; a missing,
-   non-string or empty (`""`) `by` makes the whole manifest malformed. A
-   manifest with no wrap the reader implements cannot be opened.
-7. A wrap's public identifier is its `kdfParams.salt`. In 1.0 the single
-   top-level salt plays this role, so reading a 1.0 pod leaves its identifier
-   unchanged, and a re-wrapped pod has a new one.
-8. Readers accept `"1.0"` and `"1.1"`. Any other version is refused with a
-   message that the pod was written by a newer tool.
-9. To open: try each `passphrase` wrap in manifest order with its own KDF
-   parameters; the first whose GCM tag verifies yields the DEK. All wraps
-   resolve the same DEK.
-10. Migration 1.0 to 1.1 (done in memory by the writing command): the top-level
-    `kdf` and `kdfParams` move into the single `passphrase` wrap, its `label`
-    becomes `"primary"` and its `createdAt` becomes `null`; any other wrap is
-    carried over with `label: null` and `createdAt: null`. Reading a 1.0
-    manifest without migrating it gives the same labels: the first
-    `passphrase` wrap reads as `"primary"`, every other wrap as `null`.
-
-In the CLI, `src/lib/pod-encryption.ts` is the only code that reads the
-manifest's key material. It reads both versions into one normalized shape (a
-list of wraps, each passphrase wrap with its own KDF parameters), and a source
-test fails if `kdfParams` or `wrappedDek` is read anywhere else.
+`src/lib/pod-encryption.ts` is the only code that reads the header's key
+material. It reads both versions into one normalized shape (a list of wraps,
+each passphrase wrap with its own KDF parameters), and a source test fails if
+`kdfParams` or `wrappedDek` is read anywhere else.
 
 ### Reader limits
 
-The manifest is plaintext, so anyone who can write to the pod directory can
-edit its KDF parameters, and a reader derives a key from whatever it finds
-there. Without a bound, one edited number makes every open allocate gigabytes
-or run for hours before the passphrase is even checked. Readers therefore
-enforce these limits when the manifest is **parsed** (1.0 and 1.1 alike),
-before any key derivation runs:
-
-| Field | Accepted | Why |
-|---|---|---|
-| header file size | at most 65536 bytes; never more than 65537 bytes are read | a real header is under 1 KiB |
-| `kdfParams.m` (KiB) | `8 * p` to 131072 (128 MiB) | writers use 65536 (64 MiB); 2x headroom |
-| `kdfParams.t` | 1 to 6 | writers use 3 |
-| `kdfParams.p` | 1 to 4 | writers use 1 |
-| `kdfParams.salt` | canonical padded base64 of exactly 16 bytes | every writer uses 16 |
-| `wrappedDek` | canonical padded base64 of exactly 60 bytes (12 nonce + 32 key + 16 tag) | a 256-bit data key |
-| passphrase wraps per manifest | at most 6 | bounds try-each-wrap |
-| wraps of any kind per manifest | at most 16 | bounds the parse |
-| `kdf` | exactly `"argon2id"` | the only KDF implemented |
-
-`t`, `m` and `p` must be written as plain decimal digits (`0|[1-9][0-9]*`):
-`3.0`, `3e0`, `30e-1`, `-0` and `"3"` are refused as malformed even though
-most JSON parsers read the first three as the integer 3, because readers in
-other languages do not all agree on them. The check is made on the header's
-text, before the parsed value is used. The header's bytes must be valid UTF-8
-with no byte order mark; an invalid sequence is refused rather than replaced
-with U+FFFD.
-
-A value outside these limits anywhere in the manifest refuses the whole
-manifest, even when an earlier wrap would have opened. The refusal names the
-field and never echoes the value:
+The limits, the lexical rules for `t`, `m`, `p`, `salt` and `wrappedDek`, and
+the rule that the whole header is validated before any key is derived are
+spec sections 4.5, 5.2 and 5.3. A header outside them is refused as malformed
+(`reason: "manifest-malformed"`); the message names the field and never echoes
+the value:
 
 ```
 The pod's encryption header asks for settings outside this tool's limits (field: wraps[0].kdfParams.m).
 ```
 
-Every writer stays inside the limits (`t=3, m=65536, p=1`, 16-byte salts,
-60-byte wraps), and a test pins that; `buildPassphraseManifest` refuses
-parameters outside them rather than write a manifest a reader would refuse. The
-worst case the limits allow is six passphrase wraps at `m=131072, t=6, p=4`:
-about 1.7 seconds per wrap and 10.2 seconds for all six with the pure-JS
-Argon2id on an Apple M5, at about 305 MiB of resident memory. That is bounded,
-which is the point.
+Every writer in this tool stays inside the limits, and a test pins that;
+`buildPassphraseManifest` refuses parameters outside them rather than write a
+header a reader would refuse. Measured cost of the worst case the limits allow
+(six passphrase wraps at `m=131072, t=6, p=4`) with this tool's pure-JS
+Argon2id on an Apple M5: about 1.7 seconds per wrap, 10.2 seconds for all six,
+at about 305 MiB of resident memory.
 
 ### The header file itself
 
-`settings/encryption.json` must be a **regular file**, reached without a
-symbolic link. The reader opens it without following a link in its last
-component and without blocking (so a FIFO cannot hang the open), then checks
-the kind with `fstat` on the open handle, and refuses anything else: a
-symbolic link (dangling or not), a FIFO, a device such as `/dev/zero`, a
-directory, a socket. A `settings` directory that is itself a symbolic link is
-refused the same way. The read is bounded to 65537 bytes whatever the handle
-reports, because a device or a FIFO reports size 0.
-
-These are ordinary malformed-header refusals (`reason: "manifest-malformed"`):
+How the header is opened (never through a symbolic link, without blocking,
+kind checked on the open handle, read bounded to 65537 bytes, strict UTF-8
+with no byte order mark) is spec section 5.1. Each refusal is an ordinary
+malformed-header refusal (`reason: "manifest-malformed"`):
 
 ```
 Malformed settings/encryption.json: not a regular file
 ```
 
-Anything at the header path counts as the pod being encrypted, a dangling
-link included, so a link there is refused rather than read as "not encrypted".
-A `settings` directory that is a symbolic link makes the pod encrypted too,
-whether or not a header is behind it, and is then refused: such a pod reads as
-locked, never as a plaintext pod a writer would store plaintext into.
+A `settings` directory that is a symbolic link makes the pod encrypted, whether
+or not a header is behind it, and is then refused: such a pod reads as locked,
+never as a plaintext pod a writer would store plaintext into (spec section 4.1).
 
 ### Symbolic links inside a pod
 
-Every read and write of a file or folder inside a pod resolves its path through
-one chokepoint (`src/lib/pod-path.ts`), which never follows a symbolic link
-below the pod root:
+The rule is spec section 8. In this tool every read and write of a file or
+folder inside a pod resolves its path through one chokepoint,
+`src/lib/pod-path.ts`, which checks each existing component with `lstat`,
+refuses `..` and paths outside the pod, confirms the resolved path is under the
+pod root, opens files without following a link or blocking, and creates
+folders one component at a time. The pod root itself, and any folder above it,
+may be a symbolic link.
 
-- every existing component of the pod-relative path is checked with `lstat`,
-  and a link anywhere is refused (a record file, a container such as
-  `clinical/`, `settings/`, a dangling link);
-- `..` and absolute paths outside the pod are refused, and, as a second check,
-  the path must resolve to somewhere under the pod root;
-- files are opened without following a link and without blocking, and anything
-  that is not a regular file is refused;
-- folders are created one component at a time, never through a link.
-
-The pod root itself, and any folder above it, may be a symbolic link (a pods
-folder moved to another disk). A refused read is a file the command could not
-read (exit 2); a refused write names the file and fails the command, and
-nothing is written outside the pod. The error names the pod-relative path and
-never where a link points. `pod export` refuses a pod holding a link or special
-file (`reason: "symlink-in-pod"`, exit 2), since the export would either leave
-the file out or copy another folder's contents into it; the encrypt, decrypt
-and record walks skip links, and a re-key refuses them.
-
-### Multi-wrap design
-
-`wraps` is an **array** so the same DEK can be unlocked by different key holders.
-Each entry is identified by its `by` discriminator:
-
-- **`passphrase`** — implemented. DEK wrapped under an Argon2id passphrase KEK.
-- **`device-keychain`** — **RESERVED, not implemented in v1.** The slot is
-  documented so a future writer can add a wrap of the form
-  `{ "by": "device-keychain", ... }` (DEK wrapped under a device keychain /
-  secure-enclave key) **without a schema bump**. Readers should ignore wrap
-  kinds they do not understand and fall back to one they can use.
+A refused read is a file the command could not read (exit 2); a refused write
+names the file and fails the command, and nothing is written outside the pod.
+The error names the pod-relative path and never where a link points.
+`pod export` refuses a pod holding a link or special file
+(`reason: "symlink-in-pod"`, exit 2), since the export would either leave the
+file out or copy another folder's contents into it; the encrypt, decrypt and
+record walks skip links, and a re-key refuses them.
 
 ## Commands
 
@@ -330,9 +191,9 @@ variables. Neither the passphrase nor any key is ever printed or logged.
 ### Changing the passphrase
 
 `cascade pod passphrase set <dir>` re-wraps the pod's DEK under a new
-passphrase. Every resource is sealed under the DEK, not the passphrase, so the
-change is one write of `settings/encryption.json`; no resource file is read or
-written, and the DEK never touches disk.
+passphrase (spec section 6.5). Every resource is sealed under the DEK, not the
+passphrase, so the change is one write of `settings/encryption.json`; no
+resource file is read or written, and the DEK never touches disk.
 
 1. The current passphrase must open a wrap. If it does not, the command refuses
    before asking for the new one.
@@ -368,10 +229,10 @@ No passphrase, salt or key is ever printed.
 A re-wrap changes which passphrase opens the DEK and nothing else, so anyone
 who opened the pod before could have kept the DEK itself and still read every
 file. `cascade pod passphrase set <dir> --rotate-dek` cuts that off: it
-generates a NEW DEK, re-encrypts every sealed file under it, and writes a 1.1
-header with exactly ONE passphrase wrap, for the new passphrase (its `label` kept
-from the wrap the current passphrase opened, else `"primary"`; fresh salt;
-`createdAt` now). Other wraps are not carried over: their holders' secrets are
+generates a NEW DEK, re-encrypts every sealed file under it (spec section 7),
+and writes a 1.1 header with exactly ONE passphrase wrap, for the new
+passphrase (its `label` kept from the wrap the current passphrase opened, else
+`"primary"`; fresh salt; `createdAt` now). Other wraps are not carried over: their holders' secrets are
 not available, and dropping them is the revocation.
 
 Both passphrases come from the environment only, `CASCADE_POD_PASSPHRASE` (the
@@ -446,15 +307,29 @@ the final re-scan and the first rename.
 A copy of the pod made before the change still opens with the old passphrase:
 the copy carries its own header and its own copy of the old DEK.
 
-## Known limitations (v1)
+## Known limitations
 
-- `cascade pod conflicts` / `cascade pod resolve` read and write
-  `settings/pending-conflicts.ttl` and `settings/user-resolutions.ttl` as
-  plaintext. They are **not yet encryption-aware**. `cascade pod encrypt` will
-  encrypt those files if they already exist (they are `settings/*.ttl`), after
-  which the conflicts/resolve commands cannot read them until they are wired the
-  same way as import/query/validate. A freshly initialized + imported pod only
-  creates these files when reconciliation conflicts occur.
+- **Sealed files are not bound to their paths** (spec section 9.4). The format
+  uses no associated data, so anyone who can write to the pod folder can copy
+  one sealed file over another, or restore an older sealed copy of a file, and
+  this tool accepts the result as authentic, as every conforming reader does.
+  Do not treat an encrypted pod as tamper-evident against someone who can write
+  to its folder. The ratified design that binds each file to its path is
+  [D-SEAL-1](https://github.com/the-cascade-protocol/spec/blob/main/decisions/2026-09-26-sealed-resource-binding.md);
+  it is not yet part of the format.
 - Changing the passphrase is `pod passphrase set`, and re-keying is
   `pod passphrase set --rotate-dek`. Adding a second wrap is not yet exposed as
   a command.
+
+## Conformance
+
+The cross-implementation fixtures and vectors for the format live in the
+[`conformance`](https://github.com/the-cascade-protocol/conformance) repository
+under `pod-encryption/` (spec section 10). Its harness drives this tool
+through the command line and ratchets the result against
+`pod-encryption/KNOWN_FAILURES.json`. From a `conformance` checkout, with this
+tool built:
+
+```bash
+python3 scripts/check_pod_encryption.py --cascade "node /path/to/cascade-cli/dist/index.js"
+```
