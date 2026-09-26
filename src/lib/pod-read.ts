@@ -43,7 +43,6 @@
  *   2 — could not read what exists (the pod, or a file inside it)
  */
 
-import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import {
@@ -65,6 +64,7 @@ import {
 } from './pod-encryption.js';
 import { obtainPassphrase } from './passphrase.js';
 import { looksLikePlaintext } from './pod-resources.js';
+import { readPodFile } from './pod-path.js';
 import { DATA_TYPES } from './pod-data-types.js';
 
 // ─── Failure model ────────────────────────────────────────────────────────────
@@ -162,10 +162,10 @@ export class PodUnreadableError extends Error {
  * AES-GCM is here to provide: anyone who could drop a file into the directory
  * would otherwise have their records read back as the patient's own.
  */
-export function decryptFailureReason(absPath: string, err: unknown): string {
+export function decryptFailureReason(podDir: string, absPath: string, err: unknown): string {
   let blob: Buffer;
   try {
-    blob = fs.readFileSync(absPath);
+    blob = readPodFile(podDir, absPath);
   } catch {
     return errText(err);
   }
@@ -305,7 +305,7 @@ export class PodReader {
    */
   readText(absPath: string): PodReadResult<string> {
     try {
-      return { ok: true, value: readResource(absPath, this.dek) };
+      return { ok: true, value: readResource(this.podDir, absPath, this.dek) };
     } catch (e: unknown) {
       if (this.dek && e instanceof PodDecryptError) {
         return { ok: false, failure: this.failure(absPath, 'decrypt', this.decryptReason(absPath, e)) };
@@ -315,7 +315,7 @@ export class PodReader {
   }
 
   private decryptReason(absPath: string, e: PodDecryptError): string {
-    return decryptFailureReason(absPath, e);
+    return decryptFailureReason(this.podDir, absPath, e);
   }
 
   /**

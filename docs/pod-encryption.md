@@ -201,6 +201,14 @@ before any key derivation runs:
 | wraps of any kind per manifest | at most 16 | bounds the parse |
 | `kdf` | exactly `"argon2id"` | the only KDF implemented |
 
+`t`, `m` and `p` must be written as plain decimal digits (`0|[1-9][0-9]*`):
+`3.0`, `3e0`, `30e-1`, `-0` and `"3"` are refused as malformed even though
+most JSON parsers read the first three as the integer 3, because readers in
+other languages do not all agree on them. The check is made on the header's
+text, before the parsed value is used. The header's bytes must be valid UTF-8
+with no byte order mark; an invalid sequence is refused rather than replaced
+with U+FFFD.
+
 A value outside these limits anywhere in the manifest refuses the whole
 manifest, even when an earlier wrap would have opened. The refusal names the
 field and never echoes the value:
@@ -236,6 +244,33 @@ Malformed settings/encryption.json: not a regular file
 
 Anything at the header path counts as the pod being encrypted, a dangling
 link included, so a link there is refused rather than read as "not encrypted".
+A `settings` directory that is a symbolic link makes the pod encrypted too,
+whether or not a header is behind it, and is then refused: such a pod reads as
+locked, never as a plaintext pod a writer would store plaintext into.
+
+### Symbolic links inside a pod
+
+Every read and write of a file or folder inside a pod resolves its path through
+one chokepoint (`src/lib/pod-path.ts`), which never follows a symbolic link
+below the pod root:
+
+- every existing component of the pod-relative path is checked with `lstat`,
+  and a link anywhere is refused (a record file, a container such as
+  `clinical/`, `settings/`, a dangling link);
+- `..` and absolute paths outside the pod are refused, and, as a second check,
+  the path must resolve to somewhere under the pod root;
+- files are opened without following a link and without blocking, and anything
+  that is not a regular file is refused;
+- folders are created one component at a time, never through a link.
+
+The pod root itself, and any folder above it, may be a symbolic link (a pods
+folder moved to another disk). A refused read is a file the command could not
+read (exit 2); a refused write names the file and fails the command, and
+nothing is written outside the pod. The error names the pod-relative path and
+never where a link points. `pod export` refuses a pod holding a link or special
+file (`reason: "symlink-in-pod"`, exit 2), since the export would either leave
+the file out or copy another folder's contents into it; the encrypt, decrypt
+and record walks skip links, and a re-key refuses them.
 
 ### Multi-wrap design
 

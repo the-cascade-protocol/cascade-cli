@@ -162,20 +162,20 @@ describe('readResource / writeResource passthrough', () => {
     const dek = generateDek();
     const ttl = '@prefix ex: <http://example.org/> . ex:s a ex:Thing .';
 
-    writeResource(file, ttl, dek);
+    writeResource(path.dirname(file), file, ttl, dek);
     const onDisk = fs.readFileSync(file);
     // On-disk bytes must not be readable Turtle.
     expect(onDisk.toString('utf-8')).not.toContain('@prefix');
 
-    expect(readResource(file, dek)).toBe(ttl);
+    expect(readResource(path.dirname(file), file, dek)).toBe(ttl);
   });
 
   it('writes and reads plaintext when no DEK is supplied', () => {
     const dir = mkTmpDir();
     const file = path.join(dir, 'r.ttl');
     const ttl = '@prefix ex: <http://example.org/> .';
-    writeResource(file, ttl);
+    writeResource(path.dirname(file), file, ttl);
     expect(fs.readFileSync(file, 'utf-8')).toBe(ttl);
-    expect(readResource(file)).toBe(ttl);
+    expect(readResource(path.dirname(file), file)).toBe(ttl);
   });
 });

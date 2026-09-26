@@ -55,7 +55,6 @@
  * never needed.
  */
 
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Parser } from 'n3';
 import type { Quad } from 'n3';
@@ -63,6 +62,7 @@ import { KNOWN_PREFIXES, findIllegalIriChar } from './bucket-write.js';
 import { encryptResource, readResource } from './pod-encryption.js';
 import { atomicWriteBytes, looksLikePlaintext } from './pod-resources.js';
 import { tidyReason, type PodReader, type PodReadFailure } from './pod-read.js';
+import { readPodFile, writePodFile } from './pod-path.js';
 
 // ─── The registry ─────────────────────────────────────────────────────────────
 
@@ -450,8 +450,13 @@ export function assertPrependOnly(original: string, repaired: string, header: st
  * the damage shapes this very command exists to report. A repair tool that can
  * create the damage it diagnoses is not one to ship.
  */
-function writeResourceAtomic(absPath: string, content: string, dek: Buffer | undefined): void {
-  atomicWriteBytes(absPath, dek ? encryptResource(content, dek) : Buffer.from(content, 'utf-8'));
+function writeResourceAtomic(podDir: string, absPath: string, content: string, dek: Buffer | undefined): void {
+  atomicWriteBytes(podDir, absPath, dek ? encryptResource(content, dek) : Buffer.from(content, 'utf-8'));
+}
+
+/** Copy one pod file to another, both through the pod path chokepoint. */
+function copyPodFile(podDir: string, from: string, to: string): void {
+  writePodFile(podDir, to, readPodFile(podDir, from));
 }
 
 /** What {@link applyRepair} did. */
@@ -467,6 +472,7 @@ type RepairOutcome =
  * BACK through the same door a later command will, and only then call it done.
  */
 function applyRepair(
+  podDir: string,
   absPath: string,
   original: string,
   header: string,
@@ -492,15 +498,15 @@ function applyRepair(
   // one would break the restore below: it would put back a file that is not what
   // this write replaced.
   const backup = absPath + BACKUP_SUFFIX;
-  fs.copyFileSync(absPath, backup);
+  copyPodFile(podDir, absPath, backup);
 
-  writeResourceAtomic(absPath, repaired, dek);
+  writeResourceAtomic(podDir, absPath, repaired, dek);
 
   let readBack: string;
   try {
-    readBack = readResource(absPath, dek);
+    readBack = readResource(podDir, absPath, dek);
   } catch (e: unknown) {
-    fs.copyFileSync(backup, absPath);
+    copyPodFile(podDir, backup, absPath);
     return {
       ok: false,
       reason: `The repaired file could not be read back (${tidyReason(errText(e))}).`,
@@ -509,7 +515,7 @@ function applyRepair(
   }
 
   if (!strictParseTurtle(readBack).ok || !readBack.endsWith(original)) {
-    fs.copyFileSync(backup, absPath);
+    copyPodFile(podDir, backup, absPath);
     return {
       ok: false,
       reason: 'The repaired file did not verify after being written.',
@@ -584,7 +590,7 @@ export async function runPodDoctor(
     // string of replacement characters and reports as "this file is corrupt
     // Turtle", which is a misdiagnosis of the one situation where the user still
     // has something to save. Ask the bytes first.
-    if (reader.dek === undefined && looksLikeSealedBytes(absPath)) {
+    if (reader.dek === undefined && looksLikeSealedBytes(reader.podDir, absPath)) {
       findings.push(notTextFinding(file));
       continue;
     }
@@ -629,7 +635,7 @@ export async function runPodDoctor(
       continue;
     }
 
-    const outcome = applyRepair(absPath, text.value, diagnosis.header, reader.dek);
+    const outcome = applyRepair(reader.podDir, absPath, text.value, diagnosis.header, reader.dek);
     if (!outcome.ok) {
       findings.push({
         ...shared,
@@ -671,9 +677,9 @@ export async function runPodDoctor(
  * pods with no manifest: when a DEK exists, GCM authentication has already
  * answered the question properly.
  */
-function looksLikeSealedBytes(absPath: string): boolean {
+function looksLikeSealedBytes(podDir: string, absPath: string): boolean {
   try {
-    return !looksLikePlaintext(fs.readFileSync(absPath));
+    return !looksLikePlaintext(readPodFile(podDir, absPath));
   } catch {
     // Unreadable for some other reason; let the normal read report it.
     return false;

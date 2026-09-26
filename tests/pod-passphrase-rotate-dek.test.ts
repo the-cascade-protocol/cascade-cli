@@ -272,7 +272,7 @@ function libPod(pass = PASS_A): { root: string; pod: string; dek: Buffer } {
   const dek = generateDek();
   writeEncryptionManifest(pod, buildPassphraseManifestV11(dek, pass, { kdf: FAST_KDF }));
   const seal = (rel: string, text: string): void =>
-    atomicWriteBytes(path.join(pod, rel), encryptBytes(Buffer.from(text, 'utf-8'), dek));
+    atomicWriteBytes(pod, path.join(pod, rel), encryptBytes(Buffer.from(text, 'utf-8'), dek));
   seal('index.ttl', '@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#> .\n');
   seal('clinical/medications.ttl', '# synthetic medications\n');
   seal('notes/deep/note.ttl', '# a synthetic note\n');
@@ -306,7 +306,7 @@ describe('rotateDataKey (in process)', () => {
           writeStaged: (abs, bytes, mode) => {
             const out = Buffer.from(bytes);
             if (abs.split(path.sep).join('/').endsWith(`/${victim}`)) out[out.length - 1] ^= 0x01;
-            atomicWriteBytes(abs, out, mode);
+            atomicWriteBytes(path.dirname(abs), abs, out, mode);
           },
         });
       } catch (e) {
@@ -339,9 +339,9 @@ describe('rotateDataKey (in process)', () => {
           // put the medications file's new-key ciphertext at index.ttl's path.
           if (rel.endsWith('/index.ttl') && medications) {
             swapped = true;
-            atomicWriteBytes(abs, medications, mode);
+            atomicWriteBytes(path.dirname(abs), abs, medications, mode);
           } else {
-            atomicWriteBytes(abs, bytes, mode);
+            atomicWriteBytes(path.dirname(abs), abs, bytes, mode);
           }
         },
       });

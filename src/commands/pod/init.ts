@@ -24,6 +24,7 @@ import {
 } from '../../lib/pod-encryption.js';
 import { obtainNewPassphrase } from '../../lib/passphrase.js';
 import { shellCommand } from '../../lib/shell-quote.js';
+import { mkdirInPod, writePodFile } from '../../lib/pod-path.js';
 
 // ─── Pod Init Templates ──────────────────────────────────────────────────────
 
@@ -307,8 +308,12 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
           path.join(absDir, 'wellness'),
         ];
 
+        // The pod folder itself (and anything above it) may be reached through
+        // a link; everything created INSIDE it goes through the pod path
+        // chokepoint, which never creates a folder through one.
+        await fs.mkdir(absDir, { recursive: true });
         for (const dir of dirs) {
-          await fs.mkdir(dir, { recursive: true });
+          mkdirInPod(absDir, dir);
         }
 
         // If --encrypt: generate a DEK, wrap it with a passphrase-derived KEK,
@@ -332,18 +337,18 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
 
         // Write template files. Pod resources route through writeResource so they
         // are encrypted when a DEK is present; README.md stays plaintext (docs).
-        writeResource(path.join(absDir, '.well-known', 'solid'), wellKnownSolid(absDir), dek);
-        writeResource(path.join(absDir, 'profile', 'card.ttl'), cardTtl, dek);
-        writeResource(path.join(absDir, 'profile', 'extended.ttl'), EXTENDED_PROFILE_TTL, dek);
-        writeResource(path.join(absDir, 'settings', 'preferences'), PREFERENCES_TTL, dek);
-        writeResource(path.join(absDir, 'settings', 'publicTypeIndex.ttl'), PUBLIC_TYPE_INDEX_TTL, dek);
-        writeResource(path.join(absDir, 'settings', 'privateTypeIndex.ttl'), PRIVATE_TYPE_INDEX_TTL, dek);
-        writeResource(path.join(absDir, 'index.ttl'), indexTtl(dirName), dek);
+        writeResource(absDir, path.join(absDir, '.well-known', 'solid'), wellKnownSolid(absDir), dek);
+        writeResource(absDir, path.join(absDir, 'profile', 'card.ttl'), cardTtl, dek);
+        writeResource(absDir, path.join(absDir, 'profile', 'extended.ttl'), EXTENDED_PROFILE_TTL, dek);
+        writeResource(absDir, path.join(absDir, 'settings', 'preferences'), PREFERENCES_TTL, dek);
+        writeResource(absDir, path.join(absDir, 'settings', 'publicTypeIndex.ttl'), PUBLIC_TYPE_INDEX_TTL, dek);
+        writeResource(absDir, path.join(absDir, 'settings', 'privateTypeIndex.ttl'), PRIVATE_TYPE_INDEX_TTL, dek);
+        writeResource(absDir, path.join(absDir, 'index.ttl'), indexTtl(dirName), dek);
         // The last use of the pod key: zero it rather than leave it for the
         // garbage collector.
         const encrypted = dek !== undefined;
         dek?.fill(0);
-        await fs.writeFile(path.join(absDir, 'README.md'), README_MD);
+        writePodFile(absDir, 'README.md', README_MD);
 
         const filesCreated = [
           '.well-known/solid',

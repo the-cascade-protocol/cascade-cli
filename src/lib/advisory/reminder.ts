@@ -21,8 +21,8 @@
  * both forms canonicalize to the local name when persisted.
  */
 
-import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { mkdirInPod, podPathExists, readPodFile, writePodFile } from '../pod-path.js';
 
 export type TierName =
   | 'SafetyCritical'
@@ -137,9 +137,9 @@ function statePath(podDir: string): string {
 
 function readState(podDir: string): StateMap {
   const p = statePath(podDir);
-  if (!fs.existsSync(p)) return {};
   try {
-    const raw = fs.readFileSync(p, 'utf8');
+    if (!podPathExists(podDir, p)) return {};
+    const raw = readPodFile(podDir, p).toString('utf8');
     const parsed = JSON.parse(raw) as unknown;
     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
       // Filter to string values only.
@@ -156,7 +156,6 @@ function readState(podDir: string): StateMap {
 }
 
 function writeState(podDir: string, state: StateMap): void {
-  const dir = path.join(podDir, STATE_DIR_NAME);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(statePath(podDir), JSON.stringify(state, null, 2), 'utf8');
+  mkdirInPod(podDir, STATE_DIR_NAME);
+  writePodFile(podDir, statePath(podDir), JSON.stringify(state, null, 2));
 }

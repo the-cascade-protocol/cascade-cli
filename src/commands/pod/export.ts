@@ -23,10 +23,11 @@
 import type { Command } from 'commander';
 import * as fs from 'node:fs/promises';
 import * as path from 'path';
-import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
+import { printResult, printError, printErrorDetail, printVerbose, type OutputOptions } from '../../lib/output.js';
 import { resolvePodDir, isDirectory, copyDirectory, createZipArchive } from './helpers.js';
 import { isPodEncrypted, MANIFEST_RELATIVE_PATH } from '../../lib/pod-encryption.js';
 import { shellCommand } from '../../lib/shell-quote.js';
+import { walkPodTree } from '../../lib/pod-path.js';
 
 /** File name of the note stamped into an encrypted export. */
 export const ENCRYPTED_EXPORT_NOTICE_FILE = 'ENCRYPTED-EXPORT-README.md';
@@ -121,11 +122,29 @@ export function registerExportSubcommand(pod: Command, program: Command): void {
           ? [{ name: ENCRYPTED_EXPORT_NOTICE_FILE, content: encryptedExportNotice(path.basename(absDir)) }]
           : [];
 
+        // The export is a copy of the pod's own files. A symbolic link inside
+        // the pod is never followed (it would put another folder's files into
+        // the export) and never silently dropped (the export would look whole
+        // and not be), so the export is refused before anything is written.
+        const tree = walkPodTree(absDir);
+        if (tree.refused.length > 0) {
+          printErrorDetail(
+            `Cannot export ${absDir}: the pod holds ${tree.refused.length} symbolic link(s) or ` +
+              `special file(s), which are never followed or copied. Nothing was exported. ` +
+              tree.refused.slice(0, 5).join(', ') +
+              (tree.refused.length > 5 ? `, and ${tree.refused.length - 5} more` : ''),
+            { reason: 'symlink-in-pod', exported: false, files: tree.refused },
+            globalOpts,
+          );
+          process.exitCode = 2;
+          return;
+        }
+
         try {
           if (options.format === 'directory') {
             // Copy to new directory
             const outputDir = options.output ?? `${absDir}-export`;
-            await copyDirectory(absDir, outputDir);
+            await copyDirectory(absDir, outputDir, tree);
             for (const extra of notice) {
               await fs.writeFile(path.join(outputDir, extra.name), extra.content, 'utf-8');
             }
@@ -155,7 +174,7 @@ export function registerExportSubcommand(pod: Command, program: Command): void {
             const outputZip = options.output ?? `${path.basename(absDir)}.zip`;
             const absOutputZip = path.resolve(process.cwd(), outputZip);
 
-            await createZipArchive(absDir, absOutputZip, notice);
+            await createZipArchive(absDir, absOutputZip, notice, tree);
 
             if (globalOpts.json) {
               printResult(

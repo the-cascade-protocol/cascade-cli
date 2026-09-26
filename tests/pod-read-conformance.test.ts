@@ -192,7 +192,7 @@ beforeAll(async () => {
   writeEncryptionManifest(sealedPod, buildPassphraseManifest(dek, PASSPHRASE, { t: 1, m: 8192, p: 1 }));
 
   // A narrative document, so `pod extract --dry-run` has something to find.
-  writeResource(path.join(sealedPod, 'clinical', 'documents.ttl'), DOCUMENTS_TTL, dek);
+  writeResource(sealedPod, path.join(sealedPod, 'clinical', 'documents.ttl'), DOCUMENTS_TTL, dek);
 
   // A pending conflict, so `pod conflicts` has something to report. Without it
   // the verb answers "none" in every scenario and proves nothing.

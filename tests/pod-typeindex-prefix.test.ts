@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { Parser } from 'n3';
 import { mkdtempSync, writeFileSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 
 import {
   missingPrefixHeader,
@@ -80,7 +80,7 @@ describe('appendTypeRegistration round-trip parses under n3 (R0)', () => {
     writeFileSync(indexPath, LEGACY_PUBLIC_INDEX, 'utf-8');
 
     // Before the fix this produced `coverage:ClaimRecord` with no @prefix coverage:.
-    return appendTypeRegistration(indexPath, 'claims', DATA_TYPES.claims, false).then((appended) => {
+    return appendTypeRegistration(dirname(indexPath), indexPath, 'claims', DATA_TYPES.claims, false).then((appended) => {
       expect(appended).toBe(true);
       const result = readFileSync(indexPath, 'utf-8');
       expect(result).toContain('coverage:ClaimRecord');
@@ -95,7 +95,7 @@ describe('appendTypeRegistration round-trip parses under n3 (R0)', () => {
     const indexPath = join(dir, 'publicTypeIndex.ttl');
     writeFileSync(indexPath, PUBLIC_TYPE_INDEX_TTL, 'utf-8');
 
-    return appendTypeRegistration(indexPath, 'benefits', DATA_TYPES.benefits, false).then(() => {
+    return appendTypeRegistration(dirname(indexPath), indexPath, 'benefits', DATA_TYPES.benefits, false).then(() => {
       const result = readFileSync(indexPath, 'utf-8');
       expect(result).toContain('coverage:BenefitStatement');
       const err = parseError(result);

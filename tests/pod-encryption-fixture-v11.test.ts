@@ -55,7 +55,7 @@ describe('manifest 1.1 fixture', () => {
     for (const f of sealed) {
       expect(() => decryptBytes(fs.readFileSync(path.join(POD, f)), dek), f).not.toThrow();
     }
-    const meds = readResource(path.join(POD, 'clinical', 'medications.ttl'), dek);
+    const meds = readResource(POD, path.join(POD, 'clinical', 'medications.ttl'), dek);
     expect(meds).toContain('Lisinopril 10 MG');
     expect(meds).toContain('0e9d7c1a-5b2f-4f3e-8a61-00000000f001');
   }, 30_000);

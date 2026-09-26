@@ -19,13 +19,13 @@
  * "no conflicts" from "could not read the conflicts".
  */
 
-import { readFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Parser, Writer, DataFactory } from 'n3';
 import { NS, TURTLE_PREFIXES } from './fhir-converter/types.js';
 import { randomUUID } from 'node:crypto';
 import { readResource, writeResource, PodDecryptError } from './pod-encryption.js';
 import { decryptFailureReason } from './pod-read.js';
+import { mkdirInPod } from './pod-path.js';
 
 export { randomUUID };
 
@@ -60,10 +60,10 @@ function isNotFound(err: unknown): boolean {
  * @returns the Turtle text, or `null` when the file simply does not exist.
  * @throws {ConflictStoreError} on any other read or decrypt failure.
  */
-async function readStoreFile(filePath: string, dek?: Buffer): Promise<string | null> {
+async function readStoreFile(podDir: string, filePath: string, dek?: Buffer): Promise<string | null> {
   if (dek) {
     try {
-      return readResource(filePath, dek);
+      return readResource(podDir, filePath, dek);
     } catch (err) {
       if (isNotFound(err)) return null;
       if (err instanceof PodDecryptError) {
@@ -72,7 +72,7 @@ async function readStoreFile(filePath: string, dek?: Buffer): Promise<string | n
         // same words every other read does. Both raise the same GCM failure,
         // and only one of them is about the passphrase.
         throw new ConflictStoreError(
-          `Could not decrypt ${filePath}: ${decryptFailureReason(filePath, err)}`,
+          `Could not decrypt ${filePath}: ${decryptFailureReason(podDir, filePath, err)}`,
           filePath,
           err,
         );
@@ -85,7 +85,7 @@ async function readStoreFile(filePath: string, dek?: Buffer): Promise<string | n
     }
   }
   try {
-    return await readFile(filePath, 'utf-8');
+    return readResource(podDir, filePath);
   } catch (err) {
     if (isNotFound(err)) return null;
     throw new ConflictStoreError(
@@ -390,7 +390,7 @@ export async function loadUserResolutions(
   const filePath = join(podDir, 'settings', 'user-resolutions.ttl');
   const map = new Map<string, UserResolution>();
 
-  const content = await readStoreFile(filePath, dek);
+  const content = await readStoreFile(podDir, filePath, dek);
   if (content === null) return map; // File doesn't exist yet
 
   return new Promise((resolve, reject) => {
@@ -470,8 +470,7 @@ export async function saveUserResolution(
   resolution: UserResolution,
   dek?: Buffer,
 ): Promise<void> {
-  const settingsDir = join(podDir, 'settings');
-  await mkdir(settingsDir, { recursive: true });
+  const settingsDir = mkdirInPod(podDir, 'settings');
   const filePath = join(settingsDir, 'user-resolutions.ttl');
 
   // Load existing resolutions
@@ -479,10 +478,11 @@ export async function saveUserResolution(
   existing.set(resolution.conflictId, resolution);
 
   // Write all resolutions to file
-  await writeUserResolutions(filePath, Array.from(existing.values()), dek);
+  await writeUserResolutions(podDir, filePath, Array.from(existing.values()), dek);
 }
 
 async function writeUserResolutions(
+  podDir: string,
   filePath: string,
   resolutions: UserResolution[],
   dek?: Buffer,
@@ -517,7 +517,7 @@ async function writeUserResolutions(
     writer.end((err, result) => {
       if (err) { reject(err); return; }
       try {
-        writeResource(filePath, result, dek);
+        writeResource(podDir, filePath, result, dek);
         resolve();
       } catch (writeErr) {
         reject(writeErr);
@@ -539,8 +539,7 @@ export async function writePendingConflicts(
   conflicts: PendingConflict[],
   dek?: Buffer,
 ): Promise<void> {
-  const settingsDir = join(podDir, 'settings');
-  await mkdir(settingsDir, { recursive: true });
+  const settingsDir = mkdirInPod(podDir, 'settings');
   const filePath = join(settingsDir, 'pending-conflicts.ttl');
 
   return new Promise((resolve, reject) => {
@@ -580,7 +579,7 @@ export async function writePendingConflicts(
     writer.end((err, result) => {
       if (err) { reject(err); return; }
       try {
-        writeResource(filePath, result, dek);
+        writeResource(podDir, filePath, result, dek);
         resolve();
       } catch (writeErr) {
         reject(writeErr);
@@ -605,7 +604,7 @@ export async function loadPendingConflicts(
   const filePath = join(podDir, 'settings', 'pending-conflicts.ttl');
   const conflicts: PendingConflict[] = [];
 
-  const content = await readStoreFile(filePath, dek);
+  const content = await readStoreFile(podDir, filePath, dek);
   if (content === null) return conflicts;
 
   return new Promise((resolve, reject) => {

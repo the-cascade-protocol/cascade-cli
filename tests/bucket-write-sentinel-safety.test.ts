@@ -94,21 +94,21 @@ describe('sentinel collision: untrusted text is never re-identified', () => {
   for (const [label, iri] of HOSTILE_IRIS) {
     it(`keeps ${label} in SUBJECT position byte-exact`, async () => {
       const p = seed(`<${iri}> <urn:p> "v".\n`);
-      await mergeIntoBucket(p, recordQuads(), undefined);
+      await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
       const subjects = strictParse(fs.readFileSync(p, 'utf-8')).map((q) => q.subject.value);
       expect(subjects, `subject ${iri} was rewritten`).toContain(iri);
     });
 
     it(`keeps ${label} in OBJECT position byte-exact`, async () => {
       const p = seed(`<urn:s> <urn:p> <${iri}>.\n`);
-      await mergeIntoBucket(p, recordQuads(), undefined);
+      await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
       const objects = strictParse(fs.readFileSync(p, 'utf-8')).map((q) => q.object.value);
       expect(objects, `object ${iri} was rewritten`).toContain(iri);
     });
 
     it(`keeps ${label} in PREDICATE position byte-exact`, async () => {
       const p = seed(`<urn:s> <${iri}> "v".\n`);
-      await mergeIntoBucket(p, recordQuads(), undefined);
+      await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
       const predicates = strictParse(fs.readFileSync(p, 'utf-8')).map((q) => q.predicate.value);
       expect(predicates, `predicate ${iri} was rewritten`).toContain(iri);
     });
@@ -119,7 +119,7 @@ describe('sentinel collision: untrusted text is never re-identified', () => {
     // resource into a statement about `http://real.example/thing` — a real
     // resource on a real host that the document never mentioned.
     const p = seed(`<x-cascade-rel:http://real.example/thing> <urn:p> "v".\n`);
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const subjects = strictParse(fs.readFileSync(p, 'utf-8')).map((q) => q.subject.value);
     expect(subjects).not.toContain('http://real.example/thing');
   });
@@ -127,7 +127,7 @@ describe('sentinel collision: untrusted text is never re-identified', () => {
   it('is stable: a hostile IRI survives five successive merges unchanged', async () => {
     const p = seed(`<x-cascade-rel:http://real.example/thing> <urn:p> <x-cascade-rel:foo>.\n`);
     for (let i = 0; i < 5; i++) {
-      await mergeIntoBucket(p, recordQuads(`urn:uuid:N${i}`), undefined);
+      await mergeIntoBucket(path.dirname(p), p, recordQuads(`urn:uuid:N${i}`), undefined);
       const quads = strictParse(fs.readFileSync(p, 'utf-8'));
       const hit = quads.find((q) => q.predicate.value === 'urn:p');
       expect(hit?.subject.value, `merge ${i + 1}`).toBe('x-cascade-rel:http://real.example/thing');
@@ -139,7 +139,7 @@ describe('sentinel collision: untrusted text is never re-identified', () => {
     // Both properties at once: the real relative IRI round-trips as a relative
     // IRI, and the lookalike beside it is untouched.
     const p = seed(`<urn:s> <urn:p> </profile/card.ttl#me>; <urn:q> <x-cascade-rel:foo>.\n`);
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const out = fs.readFileSync(p, 'utf-8');
     expect(out).toContain('</profile/card.ttl#me>');
     expect(out).toContain('<x-cascade-rel:foo>');
@@ -170,7 +170,7 @@ describe('sentinel leak: no term position lets the sentinel reach disk', () => {
   for (const [label, ttl] of RELATIVE_IN_EVERY_POSITION) {
     it(`does not leak the sentinel from a relative IRI in ${label}`, async () => {
       const p = seed(ttl + '\n');
-      await mergeIntoBucket(p, recordQuads(), undefined);
+      await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
       expect(fs.readFileSync(p, 'utf-8')).not.toMatch(SENTINEL_RE);
     });
 
@@ -180,7 +180,7 @@ describe('sentinel leak: no term position lets the sentinel reach disk', () => {
       // removes it. One contaminated write is forever.
       const p = seed(ttl + '\n');
       for (let i = 0; i < 3; i++) {
-        await mergeIntoBucket(p, recordQuads(`urn:uuid:N${i}`), undefined);
+        await mergeIntoBucket(path.dirname(p), p, recordQuads(`urn:uuid:N${i}`), undefined);
         expect(fs.readFileSync(p, 'utf-8'), `write ${i + 1}`).not.toMatch(SENTINEL_RE);
       }
     });
@@ -188,7 +188,7 @@ describe('sentinel leak: no term position lets the sentinel reach disk', () => {
 
   it('preserves the relative datatype IRI exactly, not just "not the sentinel"', async () => {
     const p = seed(`<urn:s> <urn:p> "5"^^<myLocalType>.\n`);
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const out = fs.readFileSync(p, 'utf-8');
     expect(out).toContain('^^<myLocalType>');
     const dt = strictParse(out).find((q) => q.predicate.value === 'urn:p');
@@ -200,7 +200,7 @@ describe('sentinel leak: no term position lets the sentinel reach disk', () => {
     // rdf:langString is absolute, so it must survive untouched — and the
     // language must not be dropped by whatever rebuilds the literal.
     const p = seed(`<urn:s> <urn:p> "hola"@es; <urn:q> "5"^^<myLocalType>.\n`);
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const out = fs.readFileSync(p, 'utf-8');
     expect(out).toContain('"hola"@es');
     expect(out).not.toMatch(SENTINEL_RE);
@@ -212,7 +212,7 @@ describe('sentinel leak: no term position lets the sentinel reach disk', () => {
       `</records/1> </vocab#q> "5"^^<myType>.\n` +
       `</records/1> </vocab#r> [ </vocab#s> <#frag> ].\n`,
     );
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const out = fs.readFileSync(p, 'utf-8');
     expect(out).not.toMatch(SENTINEL_RE);
     for (const q of strictParse(out)) {
@@ -255,7 +255,7 @@ describe('the sentinel is a per-process nonce, not a literal', () => {
     const p = seed(
       `<urn:s> <urn:a> </profile/card.ttl#me>; <urn:b> <profile/card.ttl>; <urn:c> <>; <urn:d> <#me>.\n`,
     );
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const out = fs.readFileSync(p, 'utf-8');
     for (const form of ['</profile/card.ttl#me>', '<profile/card.ttl>', '<>', '<#me>']) {
       expect(out, `relative form ${form} was rewritten`).toContain(form);
@@ -314,7 +314,7 @@ describe('the leak assertion is a real tripwire, not decoration', () => {
   it('throws rather than writing a term that still mentions the sentinel', async () => {
     const p = path.join(tmp, 'x.ttl');
     await expect(
-      mergeIntoBucket(p, [makeQuad(namedNode('urn:s'), namedNode('urn:p'), namedNode(smuggled()))], undefined),
+      mergeIntoBucket(path.dirname(p), p, [makeQuad(namedNode('urn:s'), namedNode('urn:p'), namedNode(smuggled()))], undefined),
     ).rejects.toBeInstanceOf(SentinelLeakError);
     expect(fs.existsSync(p)).toBe(false);
   });
@@ -323,7 +323,7 @@ describe('the leak assertion is a real tripwire, not decoration', () => {
     const p = seed(`<urn:uuid:OLD> <urn:p> "v".\n`);
     const before = fs.readFileSync(p);
     await expect(
-      mergeIntoBucket(p, [makeQuad(namedNode('urn:s'), namedNode('urn:p'), namedNode(smuggled()))], undefined),
+      mergeIntoBucket(path.dirname(p), p, [makeQuad(namedNode('urn:s'), namedNode('urn:p'), namedNode(smuggled()))], undefined),
     ).rejects.toBeInstanceOf(SentinelLeakError);
     expect(fs.readFileSync(p).equals(before)).toBe(true);
   });

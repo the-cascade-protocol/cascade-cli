@@ -5,7 +5,7 @@
  * to track agent access to health data.
  */
 
-import * as fs from 'fs/promises';
+import { appendPodFile, mkdirInPod, podPathExists, writePodFile } from '../pod-path.js';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 
@@ -65,26 +65,13 @@ export async function writeAuditEntry(podPath: string, entry: AuditEntry): Promi
   const provenanceDir = path.join(podPath, 'provenance');
   const auditLogPath = path.join(provenanceDir, 'audit-log.ttl');
 
-  // Ensure provenance directory exists
-  await fs.mkdir(provenanceDir, { recursive: true });
-
-  // Check if audit log exists
-  let exists = false;
-  try {
-    await fs.access(auditLogPath);
-    exists = true;
-  } catch {
-    // File doesn't exist yet
-  }
-
+  // Through the pod path chokepoint: never created or written through a link.
+  mkdirInPod(podPath, provenanceDir);
   const turtleEntry = formatAuditEntry(entry);
-
-  if (exists) {
-    // Append to existing file
-    await fs.appendFile(auditLogPath, turtleEntry, 'utf-8');
+  if (podPathExists(podPath, auditLogPath)) {
+    appendPodFile(podPath, auditLogPath, turtleEntry);
   } else {
-    // Create new file with prefixes
-    await fs.writeFile(auditLogPath, AUDIT_PREFIXES + turtleEntry, 'utf-8');
+    writePodFile(podPath, auditLogPath, AUDIT_PREFIXES + turtleEntry);
   }
 }
 

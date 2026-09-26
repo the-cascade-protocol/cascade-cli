@@ -83,6 +83,7 @@ import {
   type Tier0Journal,
 } from '../../lib/tier0-journal.js';
 import { shellCommand } from '../../lib/shell-quote.js';
+import { podPathPresentOrRefused } from '../../lib/pod-path.js';
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const MERGED_FROM = 'https://ns.cascadeprotocol.org/core/v1#mergedFrom';
@@ -419,7 +420,7 @@ async function readPodBuckets(
 
   for (const { rel } of registeredBuckets()) {
     const abs = path.join(reader.podDir, ...rel.split('/'));
-    if (!fsSync.existsSync(abs)) continue;
+    if (!podPathPresentOrRefused(reader.podDir, abs)) continue;
     ledger.attempt();
 
     // Through the SHARED read door, not a local try/catch. It is the only thing
@@ -964,7 +965,7 @@ async function runUndo(
           reason = `no registered bucket holds <${typeIri}>, which is the type of ${d.uri}.`;
           break;
         }
-        if (!fsSync.existsSync(path.join(podDir, ...rel.split('/')))) {
+        if (!podPathPresentOrRefused(podDir, path.join(podDir, ...rel.split('/')))) {
           reason =
             `the bucket ${rel} that ${d.uri} belongs in no longer exists in this pod. ` +
             `Restoring into a file the pod has since dropped would put the record somewhere ` +
@@ -1026,7 +1027,7 @@ async function runUndo(
       const incoming = targets.get(rel) as Quad[];
       const abs = path.join(podDir, ...rel.split('/'));
       try {
-        await mergeIntoBucket(abs, incoming, dek, {
+        await mergeIntoBucket(podDir, abs, incoming, dek, {
           combine: (existing, added) => {
             // The lineage the merge wrote is withdrawn along with the merge. A
             // survivor that still claimed `mergedFrom` a record now sitting
@@ -1367,9 +1368,9 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
             if (!key) continue;
             const quads = (buckets.get(key) ?? []).flat();
             const target = path.join(podDir, ...rel.split('/'));
-            if (quads.length === 0 && !fsSync.existsSync(target)) continue;
+            if (quads.length === 0 && !podPathPresentOrRefused(podDir, target)) continue;
             try {
-              await mergeIntoBucket(target, quads, dek, { combine: (_existing, incoming) => incoming });
+              await mergeIntoBucket(podDir, target, quads, dek, { combine: (_existing, incoming) => incoming });
               report.filesWritten.push(rel);
             } catch (e: unknown) {
               printError(
@@ -1386,7 +1387,7 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
           // user-decision queue, so the set written here is the one the report
           // above already told the user about.
           const conflictsFile = path.join(podDir, 'settings', 'pending-conflicts.ttl');
-          if (finalConflicts.length > 0 || fsSync.existsSync(conflictsFile)) {
+          if (finalConflicts.length > 0 || podPathPresentOrRefused(podDir, conflictsFile)) {
             await writePendingConflicts(podDir, finalConflicts, dek);
           }
 

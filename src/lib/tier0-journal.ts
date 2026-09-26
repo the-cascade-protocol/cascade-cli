@@ -31,9 +31,9 @@
  * encrypting here.
  */
 
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { readResource, writeResource } from './pod-encryption.js';
+import { mkdirInPod, podPathExists } from './pod-path.js';
 import { toJsonText } from './json-output.js';
 import type { Tier0Merge } from './reconciler.js';
 
@@ -107,8 +107,8 @@ function journalPath(podDir: string): string {
  */
 export function readTier0Journal(podDir: string, dek?: Buffer): Tier0Journal {
   const p = journalPath(podDir);
-  if (!fs.existsSync(p)) return { entries: [] };
-  const raw = readResource(p, dek);
+  if (!podPathExists(podDir, p)) return { entries: [] };
+  const raw = readResource(podDir, p, dek);
   const parsed = JSON.parse(raw) as Partial<Tier0Journal>;
   return { entries: Array.isArray(parsed.entries) ? parsed.entries : [] };
 }
@@ -134,8 +134,8 @@ export function appendTier0Journal(
     merges,
   };
   const p = journalPath(podDir);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  writeResource(p, toJsonText({ entries: [...existing.entries, entry] }), dek);
+  mkdirInPod(podDir, path.dirname(p));
+  writeResource(podDir, p, toJsonText({ entries: [...existing.entries, entry] }), dek);
   return merges.length;
 }
 
@@ -161,8 +161,8 @@ export function appendTier0Undo(
     undone,
   };
   const p = journalPath(podDir);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  writeResource(p, toJsonText({ entries: [...existing.entries, entry] }), dek);
+  mkdirInPod(podDir, path.dirname(p));
+  writeResource(podDir, p, toJsonText({ entries: [...existing.entries, entry] }), dek);
   return restored;
 }
 

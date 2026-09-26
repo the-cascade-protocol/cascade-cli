@@ -9,6 +9,37 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+**Pod reads and writes refuse symbolic links below the pod root.** Every read
+and write of a file or folder inside a pod (records, settings, the encryption
+header, attachments, walkers, import, export, extract, the MCP write tool,
+advisory state and re-key staging) now resolves its path through one
+chokepoint that checks each existing component with `lstat` and refuses a
+link, refuses `..` and paths outside the pod, confirms the resolved path is
+under the pod root, and opens files without following a link or blocking.
+Before, a record file or container folder that was a link was followed: a read
+returned the linked files' records, and a write could land outside the pod.
+The pod root itself, and its ancestors, may still be links. A refused read
+fails the command as a file it could not read (exit 2); a refused write names
+the file and fails the command. `pod export` refuses a pod holding a link or
+special file (`reason: "symlink-in-pod"`, exit 2).
+
+**A `settings` folder that is a symbolic link makes the pod encrypted.** It was
+read as "no header, not encrypted" when nothing was behind the link, so a
+writer could treat an encrypted pod as plaintext. The pod is now encrypted and
+its header refused (`manifest-malformed`), whether or not a header is behind
+the link.
+
+### Fixed
+
+**The header reader checks how `t`, `m` and `p` are written.** They must be
+plain decimal digits; `3.0`, `1e0`, `6.4e1`, `-0` and `"3"` are refused as
+malformed, as the specification requires, instead of being read as the integer
+they denote. The header is decoded as strict UTF-8: an invalid byte sequence,
+or a byte order mark, refuses the header instead of being replaced with
+U+FFFD.
+
 ### Added
 
 **`cascade pod passphrase set <pod-dir> --rotate-dek`: a new data key, and
