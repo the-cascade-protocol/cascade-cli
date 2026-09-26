@@ -7,10 +7,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [0.23.0] - 2026-09-25
+## [Unreleased]
 
-Everything below, including the entries written before this heading was added,
-ships in 0.23.0.
+To ship in 0.24.0: the Apple Health wellness import and the pod identifier.
 
 ### Added
 

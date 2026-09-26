@@ -1,7 +1,7 @@
 # Apple Health wellness import
 
 `cascade pod import <pod-dir> <Apple Health export folder>` imports the export's
-clinical records (the `clinical-records/` FHIR files) and, since 0.23.0, its
+clinical records (the `clinical-records/` FHIR files) and, since 0.24.0, its
 wellness data from `export.xml`. This page says what the wellness half reads,
 what it writes and where, and which parts are provisional.
 
