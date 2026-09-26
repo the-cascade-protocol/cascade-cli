@@ -123,6 +123,12 @@ spec: `cascade:podIdentifier` and `cascade:PodIdentifierShape` (at most one
 value, `sh:Violation`; the lowercase version 4 `urn:uuid` form, `sh:Warning`).
 Additive: every graph that validated under core 3.10 still does.
 
+## [0.23.0] - 2026-09-26
+
+Pod path safety: reads and writes inside a pod refuse symbolic links, and the encryption header
+reader follows the pod encryption specification's strict number and text rules. Also ships
+`--rotate-dek`, `pod doctor`'s re-key recovery, and version 1.1 headers for new encrypted pods.
+
 ### Security
 
 **Pod reads and writes refuse symbolic links below the pod root.** Every read
@@ -178,6 +184,17 @@ interrupted `--rotate-dek` left beside the pod (dry run, exit 1) and rolls back
 or completes it with `--write`, without a passphrase.
 
 ### Changed
+
+**`docs/pod-encryption.md` points at the specification.** The encryption
+format is now specified in the protocol specification's `pod-encryption.md`
+(version 1.0, Draft), so this document no longer restates the header schema,
+its rules and the reader limits; it links the spec section for each and keeps
+what is specific to this tool: commands, passphrase handling, `--json` output,
+exit codes and `reason` strings, error messages, and where each rule lives in
+the source. It also states the format's disclosed limitation (sealed files are
+not bound to their paths), shows how to run the `conformance` repository's
+pod encryption harness against this tool, and drops a stale limitation:
+`pod conflicts` and `pod resolve` are encryption-aware.
 
 **New encrypted pods get a version 1.1 header.** `pod init --encrypt` and
 `pod encrypt` now write `settings/encryption.json` as version 1.1 with one
