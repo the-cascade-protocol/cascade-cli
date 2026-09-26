@@ -1,0 +1,287 @@
+{
+  "conformance/fixtures/ccda/allergies-section.xml": {
+    "sha256": "67b1bce6d308ab7c8eaec8e37fa4d2da93bfe5a94d79dbd00757f703d2bfac1f",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "Allergy|2.16.840.1.113883.3.88.11.32.1:ALLERGY-001": "urn:uuid:95041a1c-d9da-5c36-a968-d8f10317501d"
+    }
+  },
+  "conformance/fixtures/ccda/cerner-summarization.xml": {
+    "sha256": "36a0b8ae6b64ba8ca36a536c128a6ce191bf96e4e4dd43a42885f0ab3bf585d2",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "Condition|2.16.840.1.113883.3.88.11.32.1:CERNER-COND-OBS-001": "urn:uuid:444e15a5-b50c-542f-b1e2-b2bf4692200b",
+      "Allergy|2.16.840.1.113883.3.88.11.32.1:CERNER-ALLERGY-001": "urn:uuid:6e96d12a-213d-5d03-8f3b-094a45cd625a"
+    }
+  },
+  "conformance/fixtures/ccda/epic-summarization.xml": {
+    "sha256": "e6e498ee4c8c1e6198c668f957706f939580faa26c8cb6e1b26770b3e3ea47a2",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "Allergy|2.16.840.1.113883.3.88.11.32.1:EPIC-ALLERGY-001": "urn:uuid:803717ea-8333-50e5-b1da-514baa92c2c2",
+      "Immunization|2.16.840.1.113883.3.88.11.32.1:EPIC-IMMUN-001": "urn:uuid:2ba32880-ecfd-5895-a7e9-6c45ea4d8d7a",
+      "MedicationRequest|2.16.840.1.113883.3.88.11.32.1:EPIC-MED-001": "urn:uuid:5e3ef130-9c41-588b-b685-786d481fe149",
+      "Condition|2.16.840.1.113883.3.88.11.32.1:EPIC-COND-OBS-001": "urn:uuid:9da5293c-6898-55d2-9a44-71981d81e962",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:EPIC-LAB-OBS-001": "urn:uuid:992c472f-1f7a-5295-9a96-0b3bf1ac2b30",
+      "LaboratoryReport|2.16.840.1.113883.3.88.11.32.1:EPIC-LAB-ORG-001": "urn:uuid:292e6bd7-a46e-550f-9feb-f09599b5c8df"
+    }
+  },
+  "conformance/fixtures/ccda/full-summarization.xml": {
+    "sha256": "91e9e2aadd457b040582ad8b8fd4a680fb2fe4742c015755c8cb6611d8e54289",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "Allergy|2.16.840.1.113883.3.88.11.32.1:ALLERGY-001": "urn:uuid:95041a1c-d9da-5c36-a968-d8f10317501d",
+      "Immunization|2.16.840.1.113883.3.88.11.32.1:IMMUN-001": "urn:uuid:607a935d-7688-5cea-8428-11cb0ad91823",
+      "MedicationRequest|2.16.840.1.113883.3.88.11.32.1:MED-001": "urn:uuid:8e0fb18b-bb1f-5a35-a6b3-0dbb66e171bf",
+      "Condition|2.16.840.1.113883.3.88.11.32.1:COND-OBS-001": "urn:uuid:93801be2-a71d-570e-9bcc-8f91ad9b3295",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:LAB-OBS-001": "urn:uuid:685a35ca-8f19-534f-8fe2-fd550de688b5",
+      "LaboratoryReport|2.16.840.1.113883.3.88.11.32.1:LAB-ORG-001": "urn:uuid:115c5050-0ce2-5d30-ae59-25d42892d5cb"
+    }
+  },
+  "conformance/fixtures/ccda/immunizations-section.xml": {
+    "sha256": "bc6c2d9b603f0dcbba34a168494cbd9f075a1313fe8d7cbdee81162a01f10d0a",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "Immunization|2.16.840.1.113883.3.88.11.32.1:IMMUN-001": "urn:uuid:607a935d-7688-5cea-8428-11cb0ad91823"
+    }
+  },
+  "conformance/fixtures/ccda/labs-section.xml": {
+    "sha256": "2fd607d402a15bae83560ce2f1472070e1373c901de6c794b14038d2d5268f1b",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:LAB-OBS-001": "urn:uuid:685a35ca-8f19-534f-8fe2-fd550de688b5",
+      "LaboratoryReport|2.16.840.1.113883.3.88.11.32.1:LAB-ORG-001": "urn:uuid:115c5050-0ce2-5d30-ae59-25d42892d5cb"
+    }
+  },
+  "conformance/fixtures/ccda/narrative-only-section.xml": {
+    "sha256": "c26c277a741f9842d2424640ff31b01d8b671b7aba98b45a69edb935422a8681",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "Allergy|2.16.840.1.113883.3.88.11.32.1:NARR-ALLERGY-001": "urn:uuid:aa507337-452a-5585-971a-0db8ecd3a18c"
+    }
+  },
+  "test-fixtures/ccda-encounter-csn-twin.xml": {
+    "sha256": "a9d86dbf6dedd6df06f3efea01cfba55098654e5f5f103fe336a15d06f233cff",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "Encounter|1.2.840.114350.1.13.999.2.7.3.698084.8:20100000001": "urn:uuid:d6238ca6-cb9a-575f-85a7-f912969bc9fb"
+    }
+  },
+  "test-fixtures/ccda-encounter-dates.xml": {
+    "sha256": "8e4a476f91e455aaa3dfd8c521f42a876d32f2ee0777b89748e50ac3047cada2",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "Encounter|2.16.840.1.113883.3.88.11.32.1:ENC-INTERVAL": "urn:uuid:dadac7e3-af72-562d-ba43-df13518d1857",
+      "Encounter|2.16.840.1.113883.3.88.11.32.1:ENC-SINGLE": "urn:uuid:dca04918-11ea-556c-a45a-840cbb9639f8",
+      "Encounter|2.16.840.1.113883.3.88.11.32.1:ENC-LOW-ONLY": "urn:uuid:46501fee-3168-5b55-9a4f-01109cf91529",
+      "Encounter|2.16.840.1.113883.3.88.11.32.1:ENC-UNDATED": "urn:uuid:30a1e368-177b-55f0-8467-09f82deddee0",
+      "Encounter|2.16.840.1.113883.3.88.11.32.1:ENC-BOTH": "urn:uuid:ae7579e5-abeb-5004-bd54-2ead0edf9723"
+    }
+  },
+  "test-fixtures/ccda-encounter-panel.xml": {
+    "sha256": "c483e6955fd70463d217647e78da3511c1a529f035fd9e83cfefd775d5641e62",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:LAB-GLU-1": "urn:uuid:7f05ea79-255d-531d-b032-5b10de4c1a1b",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:LAB-CREAT-2": "urn:uuid:db00d019-4e6c-5f50-bb97-a1fc458f4cd2",
+      "Encounter|1.2.840.114350.1.13.999.2.7.3.111.8:VISIT-778899": "urn:uuid:3ea1a023-9cf8-55e4-8f79-53fe664cece6",
+      "LaboratoryReport|2.16.840.1.113883.3.88.11.32.1:PANEL-BMP-1": "urn:uuid:0c69df91-4ae2-52d3-8110-f06b9541da9a"
+    }
+  },
+  "test-fixtures/ccda-lab-panel.xml": {
+    "sha256": "40e1fe81d46ce04e7ee9d74dd6ea10a77d2eb5daa5f5a4f2b1733f0e42814968",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:LAB-WBC-1": "urn:uuid:0fbc2597-ac6a-5ac0-855e-a495e8dcdaf4",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:LAB-RBC-1": "urn:uuid:73a91ab3-70dd-585b-8eb3-1307f6a73067",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:LAB-HGB-1": "urn:uuid:039756d9-b102-5d37-8c40-cf2f0e17fd7a",
+      "LaboratoryReport|2.16.840.1.113883.3.88.11.32.1:PANEL-CBC-1": "urn:uuid:b49aed3c-1dcd-56ad-a925-d7df1e3e2341",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:LAB-CREAT-1": "urn:uuid:ff31b29f-b93d-554b-b0ba-60ef85803df4"
+    }
+  },
+  "test-fixtures/ccda-narrative-names-unresolved.xml": {
+    "sha256": "ab4ef39f985bd7c444769f3bbbbec06ba7af105d67c8d2895a2aa08ef9679f47",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:NR-LAB-DANGLING": "urn:uuid:e98b9794-dad3-584a-b278-b592ab25d5be",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:NR-LAB-BLANK": "urn:uuid:ce71ef10-92d6-5de1-9b07-737232a05a04",
+      "LaboratoryReport|2.16.840.1.113883.3.88.11.32.1:NR-ORG-001": "urn:uuid:f170107d-9b93-52d0-8e64-aef069d1fe9e"
+    }
+  },
+  "test-fixtures/ccda-narrative-names.xml": {
+    "sha256": "9a0c168353eed93a76f2e2ce0addb46c7234503a75e20bb46a25b28d58ff67d7",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:NN-LAB-NARRATIVE": "urn:uuid:6f1e698b-52e9-54b4-a537-c6fece4e0ed7",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:NN-LAB-INLINE": "urn:uuid:8c8d8700-ba34-51df-8abb-74bf6273ea62",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:NN-LAB-OBS-TEXT": "urn:uuid:60b5ed4d-2f91-5ce3-997c-ea848994b686",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:NN-LAB-DISPLAYNAME": "urn:uuid:965c099b-9242-5d54-830e-6f4d41188c2e",
+      "LaboratoryReport|2.16.840.1.113883.3.88.11.32.1:NN-ORG-001": "urn:uuid:f5d01de4-5707-5793-9802-6f81da6dd4df",
+      "Condition|2.16.840.1.113883.3.88.11.32.1:NN-PROB-OBS": "urn:uuid:2ae517c1-edf7-5b9d-be03-6608f836ad89",
+      "Procedure|2.16.840.1.113883.3.88.11.32.1:NN-PROC-001": "urn:uuid:df636404-2fb5-591e-9de3-1d16a7eaa5ff"
+    }
+  },
+  "test-fixtures/ccda-root-only-ids.xml": {
+    "sha256": "12bcb3ba0084acdb3670f3ee44881c4d34103afe776df582a5911dc15a957e7d",
+    "tier1": {
+      "Patient|7f1e0000-0000-4000-8000-0000000000aa": "urn:uuid:5673e690-f461-5736-b0f7-22109a17befa",
+      "Immunization|33333333-0000-4000-8000-0000000000c1": "urn:uuid:164fb7c5-f0cb-59f1-a64f-6cb224eccc31",
+      "Immunization|33333333-0000-4000-8000-0000000000c2": "urn:uuid:82892ccc-638b-558e-b2bb-6636db19bd11",
+      "MedicationRequest|44444444-0000-4000-8000-0000000000d1": "urn:uuid:f316c204-2720-572c-8f0c-2fae3b54c02f",
+      "MedicationRequest|44444444-0000-4000-8000-0000000000d2": "urn:uuid:fd88536a-2b4e-5d9f-b5dd-516c2e6b5c5c",
+      "VitalSign|55555555-0000-4000-8000-0000000000e1": "urn:uuid:07daa9d9-98e7-5902-80ca-25f174abf813",
+      "VitalSign|55555555-0000-4000-8000-0000000000e2": "urn:uuid:cba8d66f-59ec-5f62-a8de-8a208a112016",
+      "Procedure|66666666-0000-4000-8000-0000000000f1": "urn:uuid:a7643b71-7788-5823-ae27-ad4573d13607",
+      "Procedure|66666666-0000-4000-8000-0000000000f2": "urn:uuid:0ee689b9-c7f7-5189-a8ad-919d7a683664",
+      "Encounter|77777777-0000-4000-8000-000000000101": "urn:uuid:dd0ac3c6-e721-539e-b08a-5c58e43d6bd0",
+      "Encounter|77777777-0000-4000-8000-000000000102": "urn:uuid:9268b287-3281-524c-b7b7-0b162dac6e57",
+      "LabResult|88888888-0000-4000-8000-000000000211": "urn:uuid:81ba35c6-0f7d-5fe0-822c-d323149dc212",
+      "LabResult|88888888-0000-4000-8000-000000000212": "urn:uuid:ae1e9622-9500-53ac-9819-b4a4f74dc1a7",
+      "LaboratoryReport|88888888-0000-4000-8000-000000000201": "urn:uuid:b07de8f8-98da-567c-a25f-88f08a60e313",
+      "LabResult|88888888-0000-4000-8000-000000000221": "urn:uuid:4edd19b6-de01-5423-a5bf-f381c09c4648",
+      "LaboratoryReport|88888888-0000-4000-8000-000000000202": "urn:uuid:723cd27d-7c59-5f9a-8f38-b0b013346243",
+      "FamilyHistory|99999999-0000-4000-8000-000000000311": "urn:uuid:8a6ff261-c7e9-50b3-a46e-17e5d5efb461",
+      "FamilyHistory|99999999-0000-4000-8000-000000000312": "urn:uuid:18995a5f-ed89-55ce-9664-dee9c0b9e305",
+      "Device|aaaaaaaa-0000-4000-8000-000000000401": "urn:uuid:80c8e7b4-b307-5947-b0d8-6ed654519cbe",
+      "Device|aaaaaaaa-0000-4000-8000-000000000402": "urn:uuid:d51a69f7-5e95-532d-b91d-0c2dee6b808c"
+    }
+  },
+  "test-fixtures/ccda-typed-dates.xml": {
+    "sha256": "49df08c6b1a0db09005682fb6142bf1c2ab206528ee3c1f191c75ef8df838d24",
+    "tier1": {
+      "Patient|2.16.840.1.113883.4.1:000-00-0000": "urn:uuid:11066ef9-54ab-576b-a29b-7c34c7fd8093",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:TD-OBS-TIMED": "urn:uuid:04676dfd-f30c-520c-8c91-5bce522ef0b4",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:TD-OBS-DAY": "urn:uuid:8c985c0a-fde9-5c4f-b0f4-52fd91c2db96",
+      "LaboratoryReport|2.16.840.1.113883.3.88.11.32.1:TD-ORG-001": "urn:uuid:a0cd3bfe-2bee-5d41-91ff-f9e3b62ed657",
+      "Condition|2.16.840.1.113883.3.88.11.32.1:TD-PROB-OBS": "urn:uuid:c4af1fdf-778b-5d6f-b3de-707f0b76b78b",
+      "Immunization|2.16.840.1.113883.3.88.11.32.1:TD-IMM-001": "urn:uuid:772df519-9488-5597-892b-991192fcaaff",
+      "VitalSign|2.16.840.1.113883.3.88.11.32.1:TD-VIT-HR": "urn:uuid:42dd2519-3058-5021-94f8-ec03498d15a5",
+      "LabResult|2.16.840.1.113883.3.88.11.32.1:TD-VIT-MBP": "urn:uuid:2a823f81-0e57-56ca-a7ab-cfd0a97ce348"
+    }
+  },
+  "test-fixtures/pathology/p01-dual-label-ccda.xml": {
+    "sha256": "af63ede3715727e7b1a2c03c469c6cf8dd0a2cc3e914c89b198204179876eac2",
+    "tier1": {
+      "Patient|2.16.840.1.113883.19.5.99991.2:MRN-4417": "urn:uuid:109dd41d-23e8-5151-b7d2-678555b7b35e",
+      "Condition|2.16.840.1.113883.19.5.99991.3:P01-PROB-OBS": "urn:uuid:bfac17d9-5034-5902-ac10-de00ba6d0fdf",
+      "LabResult|2.16.840.1.113883.19.5.99991.4:P01-OBS-A1C": "urn:uuid:aa7622d6-9e51-51ca-9026-a6c6c7991cab",
+      "LaboratoryReport|2.16.840.1.113883.19.5.99991.4:P01-ORG-A1C": "urn:uuid:d3e74e76-7a77-5cf4-8482-4a8eb2dd5dcc"
+    }
+  },
+  "test-fixtures/pathology/p02-duplicate-source-id-ccda.xml": {
+    "sha256": "7657e3e2bc5c99687ff20e8b94487484a09926587ed660ee4745a0959d09610d",
+    "tier1": {
+      "Patient|2.16.840.1.113883.19.5.99992.2:MRN-6620": "urn:uuid:679e796a-5f02-532a-86c3-193d803a0b83",
+      "LabResult|2.16.840.1.113883.19.5.99992.5:P02-OBS-CREAT": "urn:uuid:74582215-15da-5451-b4d1-24cabbe5afc6",
+      "LaboratoryReport|2.16.840.1.113883.19.5.99992.4:P02-ORG-BMP": "urn:uuid:a6dad333-ca33-5df8-bef9-9de39e518168"
+    }
+  },
+  "test-fixtures/pathology/p03-narrative-names-ccda.xml": {
+    "sha256": "b43aab6e5dab4d4e6bd1142dcf4d0173915f4b7bdd53abf1e8d54521002f10d1",
+    "tier1": {
+      "Patient|2.16.840.1.113883.19.5.99993.2:MRN-8115": "urn:uuid:83d802dd-73c3-5526-8f2d-3e1df791a820",
+      "LabResult|2.16.840.1.113883.19.5.99993.5:P03-RESOLVES-CODE": "urn:uuid:4c9b4bee-939d-5b59-a644-d23f67819875",
+      "LabResult|2.16.840.1.113883.19.5.99993.5:P03-RESOLVES-TEXT": "urn:uuid:97b86135-2bc9-5e3f-a763-f6155ede3cd1",
+      "LabResult|2.16.840.1.113883.19.5.99993.5:P03-RESOLVES-INLINE": "urn:uuid:89a5e482-9163-5174-921b-102cb98bf005",
+      "LabResult|2.16.840.1.113883.19.5.99993.5:P03-DANGLING": "urn:uuid:3e4a8df9-3699-5f39-b3bb-e77d481c735b",
+      "LabResult|2.16.840.1.113883.19.5.99993.5:P03-NO-NAME-AT-ALL": "urn:uuid:ed0caceb-94cf-51cf-9386-1e7d7968322b",
+      "LaboratoryReport|2.16.840.1.113883.19.5.99993.4:P03-ORG-THY": "urn:uuid:8ed0cab1-800f-5196-ab59-0caac4b1782a"
+    }
+  },
+  "test-fixtures/pathology/p04-date-precision-ccda.xml": {
+    "sha256": "2376dec45adec7f5b5664ab2a5c8f1623812186e30ae57a01aa4356f25dc06f4",
+    "tier1": {
+      "Patient|2.16.840.1.113883.19.5.99994.2:MRN-2043": "urn:uuid:9f41d1dd-288a-5c96-b805-a4182dbceddf",
+      "LabResult|2.16.840.1.113883.19.5.99994.5:P04-DAY": "urn:uuid:0fab9134-1263-5df1-bd50-562c4b43c86f",
+      "LabResult|2.16.840.1.113883.19.5.99994.5:P04-TIMED": "urn:uuid:7f490f91-4983-5e71-8f99-ba0a8671b29b",
+      "LabResult|2.16.840.1.113883.19.5.99994.5:P04-MONTH": "urn:uuid:23978576-7f6a-5b0e-b112-fa4e9f522bb5",
+      "LaboratoryReport|2.16.840.1.113883.19.5.99994.4:P04-ORG-NUTR": "urn:uuid:3ebdb22f-2af1-5942-bcc4-ae0dfa1efcf4",
+      "Procedure|2.16.840.1.113883.19.5.99994.6:P04-PROC-001": "urn:uuid:bd401df5-0071-5797-a7e7-0230994fd4c4"
+    }
+  },
+  "test-fixtures/pathology/p12-vendor-defects-a-ccda.xml": {
+    "sha256": "814859a515fb20ef17205aa52d131fff957a05403fe98306f0a819f4e5dcc676",
+    "tier1": {
+      "Patient|2.16.840.1.113883.19.5.99995.2:MRN-3372": "urn:uuid:c3ab479d-e8ca-520a-9243-3bac7bbf4eef",
+      "LabResult|2.16.840.1.113883.19.5.99995.5:P12A-MALFORMED-DATE": "urn:uuid:bdef4c91-2cc6-53ba-ac00-6bca3d3db5bc",
+      "LabResult|2.16.840.1.113883.19.5.99995.5:P12A-NULL-UNK": "urn:uuid:6255fd3f-c150-5e18-8abb-5a05ce0d116c",
+      "LabResult|2.16.840.1.113883.19.5.99995.5:P12A-NULL-NAV": "urn:uuid:0f75fcee-86c9-5ee9-acee-697bb3199b9e",
+      "LabResult|2.16.840.1.113883.19.5.99995.5:P12A-NULL-ASKU": "urn:uuid:e41c9d31-c30c-55ae-877c-30556370af78",
+      "LaboratoryReport|2.16.840.1.113883.19.5.99995.4:P12A-ORG": "urn:uuid:805605bb-45d3-5153-8560-1c606c34daf6"
+    }
+  },
+  "test-fixtures/pathology/p12-vendor-defects-b-ccda.xml": {
+    "sha256": "af63e18e2414cb056d03618862e76d1178a3636e09549132d11583f83b5a06fb",
+    "tier1": {
+      "Patient|2.16.840.1.113883.19.5.99995.2:MRN-3372": "urn:uuid:c3ab479d-e8ca-520a-9243-3bac7bbf4eef",
+      "LabResult|2.16.840.1.113883.19.5.99995.7:P12B-ALT": "urn:uuid:ed3e1d06-88c9-5805-8b6d-9a5beb1f427c",
+      "LabResult|2.16.840.1.113883.19.5.99995.7:P12B-ALP": "urn:uuid:18ad2ba3-193a-5cfd-b426-a80c84700355",
+      "LaboratoryReport|2.16.840.1.113883.19.5.99995.6:P12B-ORG": "urn:uuid:0a471c35-0d18-5660-93e4-d2b257772447"
+    }
+  },
+  "test-fixtures/pathology/p13-unnamed-org-ccda.xml": {
+    "sha256": "74ba55b1a24fec8c834436b80ffada525b356278edd2a6a1a5ca78904a092e45",
+    "tier1": {
+      "Patient|2.16.840.1.113883.19.5.99993.2:MRN-6620": "urn:uuid:87dc40d3-d966-5070-b5d8-327fac4f817b",
+      "Condition|2.16.840.1.113883.19.5.99993.3:P13-PROB-OBS": "urn:uuid:f1aa5eb9-5e6f-5ec0-821f-336aecdcca72",
+      "LabResult|2.16.840.1.113883.19.5.99993.4:P13-OBS-CREAT": "urn:uuid:27860fed-cdc0-5dfc-8e23-391f36c82965",
+      "LaboratoryReport|2.16.840.1.113883.19.5.99993.4:P13-ORG-BMP": "urn:uuid:a91bd499-b0c6-5ee5-826e-d8de6c047d40"
+    }
+  },
+  "tests/ccda-synthetic-documents.ts#SYNTHETIC_EPIC_CCDA": {
+    "sha256": "5174b3032210fcc5d4fbee3fbee7dfe50f8648cfdbdc6971f1b2642d1df70440",
+    "tier1": {
+      "Patient|2.16.840.1.113883.19.5:SYNTH-PATIENT-001": "urn:uuid:fb726287-2413-5806-8331-4a8914243a7d",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-HR": "urn:uuid:07c3e8fe-0d22-50ef-a72d-77d0640813f0",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-SBP": "urn:uuid:8e8b63a6-feda-5680-baa9-6c94d58a058e",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-DBP": "urn:uuid:8af60b9b-9394-5b64-8e97-3bbc926de5f6",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-TEMP": "urn:uuid:651b558e-b669-548d-bbed-cd9591ab95b6",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-RR": "urn:uuid:5e69f912-5159-5c41-a840-0097a3011e2e",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-SPO2": "urn:uuid:aa86e5c6-9d11-5fe4-9ed0-394696f8022d",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-WT": "urn:uuid:2aac6454-460f-53cc-bdbb-8b2c7613fb03",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-HT": "urn:uuid:7c6da444-fdea-59cc-b757-1e1f8d569e13",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-NA": "urn:uuid:c6030f39-abb6-5e1e-87fe-284e04074780",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-K": "urn:uuid:51f77022-949d-5c39-b112-0e229dbd7c33",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-CL": "urn:uuid:39627f4c-f791-5cbb-9e9d-26a4e49e17a6",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-CREAT": "urn:uuid:b8eeef91-5a86-5123-9935-188ed6dd6c83",
+      "Encounter|2.16.840.1.113883.19.5:SYNTH-ENC-001": "urn:uuid:57fa22fd-d36c-523c-ba49-294642d432ff",
+      "LaboratoryReport|2.16.840.1.113883.19.5:SYNTH-LAB-ORG-BMP": "urn:uuid:da28182e-2196-5593-bef9-4ea70242c30e",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-CHOL": "urn:uuid:da956d4a-181a-5496-9f7d-75949aaba5ee",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-HDL": "urn:uuid:212eea68-657a-5e14-842a-9b5022b818d5",
+      "LaboratoryReport|2.16.840.1.113883.19.5:SYNTH-LAB-ORG-LIPID": "urn:uuid:75f75a9c-fc6f-5855-ab70-92245944e837",
+      "FamilyHistory|2.16.840.1.113883.19.5:SYNTH-FHX-OBS-MOTHER-DM": "urn:uuid:141afb3f-a06e-5c1e-9fd7-a8ec1a53399e",
+      "FamilyHistory|2.16.840.1.113883.19.5:SYNTH-FHX-OBS-FATHER-MI": "urn:uuid:f2e5bc8c-ecc4-5e5a-8603-7d0049dac584",
+      "Condition|2.16.840.1.113883.19.5:SYNTH-PROBLEM-OBS-001": "urn:uuid:c8a73088-cf81-5f39-aae2-6e20e7c79086",
+      "Procedure|2.16.840.1.113883.19.5:SYNTH-PROCEDURE-001": "urn:uuid:4c975d55-ed16-5f46-9b8f-0d76a9a2558b",
+      "Device|2.16.840.1.113883.19.5:SYNTH-DEVICE-001": "urn:uuid:370105c1-e2e9-5e25-8835-74303d08d34a"
+    }
+  },
+  "tests/ccda-synthetic-documents.ts#SYNTHETIC_UNKNOWN_VENDOR_CCDA": {
+    "sha256": "81dd67ab8427cfaf4657d61c15258a80a3ec1f3240a6b9936e946d1f6c8e0301",
+    "tier1": {
+      "Patient|2.16.840.1.113883.19.5:SYNTH-PATIENT-001": "urn:uuid:fb726287-2413-5806-8331-4a8914243a7d",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-HR": "urn:uuid:07c3e8fe-0d22-50ef-a72d-77d0640813f0",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-SBP": "urn:uuid:8e8b63a6-feda-5680-baa9-6c94d58a058e",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-DBP": "urn:uuid:8af60b9b-9394-5b64-8e97-3bbc926de5f6",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-TEMP": "urn:uuid:651b558e-b669-548d-bbed-cd9591ab95b6",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-RR": "urn:uuid:5e69f912-5159-5c41-a840-0097a3011e2e",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-SPO2": "urn:uuid:aa86e5c6-9d11-5fe4-9ed0-394696f8022d",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-WT": "urn:uuid:2aac6454-460f-53cc-bdbb-8b2c7613fb03",
+      "VitalSign|2.16.840.1.113883.19.5:SYNTH-VITAL-OBS-HT": "urn:uuid:7c6da444-fdea-59cc-b757-1e1f8d569e13",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-NA": "urn:uuid:c6030f39-abb6-5e1e-87fe-284e04074780",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-K": "urn:uuid:51f77022-949d-5c39-b112-0e229dbd7c33",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-CL": "urn:uuid:39627f4c-f791-5cbb-9e9d-26a4e49e17a6",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-CREAT": "urn:uuid:b8eeef91-5a86-5123-9935-188ed6dd6c83",
+      "Encounter|2.16.840.1.113883.19.5:SYNTH-ENC-001": "urn:uuid:57fa22fd-d36c-523c-ba49-294642d432ff",
+      "LaboratoryReport|2.16.840.1.113883.19.5:SYNTH-LAB-ORG-BMP": "urn:uuid:da28182e-2196-5593-bef9-4ea70242c30e",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-CHOL": "urn:uuid:da956d4a-181a-5496-9f7d-75949aaba5ee",
+      "LabResult|2.16.840.1.113883.19.5:SYNTH-LAB-OBS-HDL": "urn:uuid:212eea68-657a-5e14-842a-9b5022b818d5",
+      "LaboratoryReport|2.16.840.1.113883.19.5:SYNTH-LAB-ORG-LIPID": "urn:uuid:75f75a9c-fc6f-5855-ab70-92245944e837",
+      "FamilyHistory|2.16.840.1.113883.19.5:SYNTH-FHX-OBS-MOTHER-DM": "urn:uuid:141afb3f-a06e-5c1e-9fd7-a8ec1a53399e",
+      "FamilyHistory|2.16.840.1.113883.19.5:SYNTH-FHX-OBS-FATHER-MI": "urn:uuid:f2e5bc8c-ecc4-5e5a-8603-7d0049dac584",
+      "Condition|2.16.840.1.113883.19.5:SYNTH-PROBLEM-OBS-001": "urn:uuid:c8a73088-cf81-5f39-aae2-6e20e7c79086",
+      "Procedure|2.16.840.1.113883.19.5:SYNTH-PROCEDURE-001": "urn:uuid:4c975d55-ed16-5f46-9b8f-0d76a9a2558b",
+      "Device|2.16.840.1.113883.19.5:SYNTH-DEVICE-001": "urn:uuid:370105c1-e2e9-5e25-8835-74303d08d34a"
+    }
+  }
+}
