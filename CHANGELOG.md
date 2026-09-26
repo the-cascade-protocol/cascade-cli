@@ -9,7 +9,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-To ship in 0.24.0: the Apple Health wellness import and the pod identifier.
+## [0.24.0] - 2026-09-26
+
+The Apple Health wellness import (daily records from `export.xml`, with each day's samples retained) and the pod identifier (`cascade:podIdentifier`, minted once and used to name records). Bundled vocabulary: core 3.11.
 
 ### Added
 
