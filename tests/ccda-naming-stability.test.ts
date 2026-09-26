@@ -216,7 +216,8 @@ function sharedIdMedication(d: Download, n: number, rx: string, name: string, st
       </manufacturedMaterial></manufacturedProduct></consumable>
       ${author(d)}
       ${n === 1 ? bareVisitReference() : ''}
-      <entryRelationship typeCode="REFR"><supply classCode="SPLY" moodCode="INT">
+      <entryRelationship typeCode="REFR"><supply classCode="SPLY" moodCode="EVN">
+        <effectiveTime value="${isFirst(d) ? '20310720' : '20310918'}"/>
         <repeatNumber value="${isFirst(d) ? 5 : 3}"/><quantity value="30"/>
       </supply></entryRelationship>
     </substanceAdministration></entry>`;
