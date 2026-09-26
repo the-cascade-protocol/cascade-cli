@@ -364,7 +364,7 @@ export function registerValidateCommand(program: Command): void {
         printVerbose(`Validating: ${file}`, globalOpts);
 
         try {
-          const result = validateFile(file, shapesStore, shapeFiles, dek);
+          const result = validateFile(file, shapesStore, shapeFiles, dek ? { podDir: targetPath, dek } : undefined);
           results.push(result);
 
           if (failsValidation(result)) {

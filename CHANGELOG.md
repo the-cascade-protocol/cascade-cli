@@ -72,6 +72,28 @@ reconcile rewrites each record into the file it was written to.
 
 Not yet built: sleep sessions, blood pressure readings, basal energy, VO2 max.
 
+**Every pod has one identifier, minted once (core v3.11).** `pod init`, plain
+and `--encrypt`, now writes `cascade:podIdentifier` on `<#me>` in the
+owner-only `profile/extended.ttl`: a random lowercase version 4 UUID in
+`urn:uuid:` form, typed `xsd:anyURI`. It is the naming subject for any naming
+rule that includes a pod subject, so two pods never mint the same name for the
+same thing. A pod created before this release gets one the first time a
+command needs it, written before anything is named from it; after that it is
+only ever read back, never recomputed. `ensurePodIdentifier` in
+`src/lib/pod-identifier.ts` is the only writer: it appends one statement, keeps
+every other byte of the profile, replaces the file atomically (owner-only), and
+creates `extended.ttl` and the `rdfs:seeAlso` link from `card.ttl` when a pod
+lacks them. A profile holding two values, a malformed value, or Turtle that
+does not parse is refused with a typed error and nothing is written. It is
+never written to `card.ttl` and never appears in a FHIR export; a whole-pod
+copy (`pod export`) keeps it in `extended.ttl`, so a restore keeps every name.
+
+**`pod doctor` checks the identifier.** A pod without one is a notice, not
+damage (exit code unchanged); `--write` mints it. Two values, a malformed
+value, or one stated on the public `card.ttl` are refused (exit 1) for a human
+to resolve, since records may already be named from one of them. The JSON
+report gains a `notices` count and a `notice` finding status.
+
 ### Fixed
 
 - **`pod import` and `pod reconcile` no longer crash on a pod holding a large
@@ -90,6 +112,46 @@ Not yet built: sleep sessions, blood pressure readings, basal energy, VO2 max.
   days; a time zone alias (`US/Pacific`) counts as the zone it names when the
   day zone is chosen; Ctrl-C during a wellness import removes its encrypted
   scratch directory, and the next import sweeps any left by a killed one.
+
+### Changed
+
+**Bundled vocabulary: core 3.10 to 3.11** (`core.shapes.ttl` 1.10), synced from
+spec: `cascade:podIdentifier` and `cascade:PodIdentifierShape` (at most one
+value, `sh:Violation`; the lowercase version 4 `urn:uuid` form, `sh:Warning`).
+Additive: every graph that validated under core 3.10 still does.
+
+### Security
+
+**Pod reads and writes refuse symbolic links below the pod root.** Every read
+and write of a file or folder inside a pod (records, settings, the encryption
+header, attachments, walkers, import, export, extract, the MCP write tool,
+advisory state and re-key staging) now resolves its path through one
+chokepoint that checks each existing component with `lstat` and refuses a
+link, refuses `..` and paths outside the pod, confirms the resolved path is
+under the pod root, and opens files without following a link or blocking.
+Before, a record file or container folder that was a link was followed: a read
+returned the linked files' records, and a write could land outside the pod.
+The pod root itself, and its ancestors, may still be links. A refused read
+fails the command as a file it could not read (exit 2); a refused write names
+the file and fails the command. `pod export` refuses a pod holding a link or
+special file (`reason: "symlink-in-pod"`, exit 2).
+
+**A `settings` folder that is a symbolic link makes the pod encrypted.** It was
+read as "no header, not encrypted" when nothing was behind the link, so a
+writer could treat an encrypted pod as plaintext. The pod is now encrypted and
+its header refused (`manifest-malformed`), whether or not a header is behind
+the link.
+
+### Fixed
+
+**The header reader checks how `t`, `m` and `p` are written.** They must be
+plain decimal digits; `3.0`, `1e0`, `6.4e1`, `-0` and `"3"` are refused as
+malformed, as the specification requires, instead of being read as the integer
+they denote. The header is decoded as strict UTF-8: an invalid byte sequence,
+or a byte order mark, refuses the header instead of being replaced with
+U+FFFD.
+
+### Added
 
 **`cascade pod passphrase set <pod-dir> --rotate-dek`: a new data key, and
 every sealed file re-encrypted under it.** A re-wrap changes only which

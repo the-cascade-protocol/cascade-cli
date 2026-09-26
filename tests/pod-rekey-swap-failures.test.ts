@@ -81,8 +81,8 @@ function libPod(): { root: string; pod: string } {
   fs.mkdirSync(path.join(pod, 'clinical'), { recursive: true });
   const dek = generateDek();
   writeEncryptionManifest(pod, buildPassphraseManifestV11(dek, PASS_A, { kdf: FAST_KDF }));
-  atomicWriteBytes(path.join(pod, 'index.ttl'), encryptBytes(Buffer.from('# synthetic index\n'), dek));
-  atomicWriteBytes(path.join(pod, 'clinical', 'medications.ttl'), encryptBytes(Buffer.from('# synthetic\n'), dek));
+  atomicWriteBytes(pod, path.join(pod, 'index.ttl'), encryptBytes(Buffer.from('# synthetic index\n'), dek));
+  atomicWriteBytes(pod, path.join(pod, 'clinical', 'medications.ttl'), encryptBytes(Buffer.from('# synthetic\n'), dek));
   dek.fill(0);
   return { root, pod };
 }

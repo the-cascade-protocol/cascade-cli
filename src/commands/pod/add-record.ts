@@ -249,7 +249,7 @@ export function registerAddRecordSubcommand(pod: Command, program: Command): voi
       // wrote does not lose `rxnorm:` / `sct:` / `loinc:` / `vcard:` the moment
       // a hand-entered record lands in it.
       try {
-        await mergeIntoBucket(targetFile, newQuads, dek);
+        await mergeIntoBucket(podDir, targetFile, newQuads, dek);
       } catch (e: unknown) {
         printError(e instanceof Error ? e.message : String(e), globalOpts);
         process.exitCode = 1;

@@ -65,8 +65,12 @@ codes without bending them:
 `2` outranks `1` when both apply. A file doctor could not open was never
 examined, and a verb whose entire job is to report the state of your pod must
 not describe files it never read. Its `--json` report carries a per-file
-`status` of `repaired`, `repairable`, `refused` or `unreadable`, and the
-unreadable ones are also named on stderr in the usual envelope.
+`status` of `repaired`, `repairable`, `refused`, `unreadable` or `notice`, and
+the unreadable ones are also named on stderr in the usual envelope. A `notice`
+is information, not damage, and never changes the exit code: today, a pod that
+has no `cascade:podIdentifier` yet (the next command that names records mints
+it; `--write` mints it now). Two identifier values, a malformed one, or one on
+the public `card.ttl` is `refused`.
 
 ## The `--json` error envelope
 
@@ -104,6 +108,7 @@ takes both passphrases from the environment only and reports a missing one as
 | `manifest-malformed` | `settings/encryption.json` is not valid JSON, breaks a strictness rule, asks for settings outside the reader limits (see `docs/pod-encryption.md`), or could not be read at all. No passphrase was tried. |
 | `manifest-version-unsupported` | `settings/encryption.json` is a version this tool does not read, or holds no wrap of a kind it implements: a newer tool wrote it. No passphrase was tried. |
 | `files-unreadable` | The pod opened, and one or more files inside it could not be decrypted, parsed or read. `files` names them. |
+| `symlink-in-pod` | `pod export`: the pod holds a symbolic link or special file, which is never followed or copied, so nothing was exported. `files` names them. Other commands report a link inside the pod as a file they could not read (see `docs/pod-encryption.md`). |
 
 The header is judged before a passphrase is asked for, so a pod whose header is
 malformed reports `manifest-malformed` even when no passphrase is set, never

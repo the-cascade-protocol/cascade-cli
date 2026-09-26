@@ -627,6 +627,7 @@ describe('exit codes and JSON', () => {
       repairable: 0,
       refused: 0,
       unreadable: 0,
+      notices: 0,
       findings: [],
     };
     expect(doctorExitCode(base)).toBe(0);

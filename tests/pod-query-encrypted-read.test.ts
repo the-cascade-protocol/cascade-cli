@@ -282,6 +282,7 @@ describe('pod query on an encrypted pod', () => {
       const dek = resolveDek(pod, PASSPHRASE);
       fs.mkdirSync(path.join(pod, 'investigations'), { recursive: true });
       writeResource(
+        pod,
         path.join(pod, 'investigations', 'i1.ttl'),
         '<urn:i> oa:bodyValue "no prefix declared" .\n',
         dek,

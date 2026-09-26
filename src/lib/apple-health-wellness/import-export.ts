@@ -22,7 +22,6 @@
  * value, so importing the same export twice leaves every file byte-identical.
  */
 
-import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { Quad } from 'n3';
@@ -30,6 +29,7 @@ import { mergeIntoBucket } from '../bucket-write.js';
 import { readResource, writeResource, writeResourceBytes, readResourceBytes } from '../pod-encryption.js';
 import { DATA_TYPES } from '../pod-data-types.js';
 import { PodReader } from '../pod-read.js';
+import { mkdirInPod, podPathExists } from '../pod-path.js';
 import { SampleSpill } from './spill.js';
 import { scanExport } from './scan.js';
 import { aggregate, majorityTimeZone, type SampleFile, type WellnessRecord } from './aggregate.js';
@@ -145,7 +145,7 @@ function readPodQuads(podDir: string, rel: string, dek?: Buffer): Quad[] | undef
  */
 export async function resolvePodSubject(podDir: string, dek?: Buffer): Promise<string> {
   const fallback = '/profile/card.ttl#me';
-  if (!fs.existsSync(path.join(podDir, 'profile', 'card.ttl'))) return fallback;
+  if (!podPathExists(podDir, 'profile/card.ttl')) return fallback;
   const quads = readPodQuads(podDir, 'profile/card.ttl', dek);
   const topic = quads?.find((q) => q.predicate.value === 'http://xmlns.com/foaf/0.1/primaryTopic')?.object.value;
   if (!topic) return fallback;
@@ -158,7 +158,7 @@ export async function resolvePodSubject(podDir: string, dek?: Buffer): Promise<s
  * then unknown, and nothing may be appended to a file that cannot be read.
  */
 export async function readPodDayZone(podDir: string, dek?: Buffer): Promise<{ zone?: string; readable: boolean }> {
-  if (!fs.existsSync(path.join(podDir, 'profile', 'extended.ttl'))) return { readable: true };
+  if (!podPathExists(podDir, 'profile/extended.ttl')) return { readable: true };
   const quads = readPodQuads(podDir, 'profile/extended.ttl', dek);
   if (!quads) return { readable: false };
   const zone = quads.find((q) => q.predicate.value === CASCADE + 'dayZone' && q.object.termType === 'Literal')?.object.value;
@@ -171,14 +171,14 @@ export async function readPodDayZone(podDir: string, dek?: Buffer): Promise<{ zo
  * file survive and the triple parses whatever prefixes the file declares.
  */
 function writePodDayZone(podDir: string, zone: string, rule: DayZoneRule, dek?: Buffer): void {
-  const ext = path.join(podDir, 'profile', 'extended.ttl');
-  const existing = fs.existsSync(ext) ? readResource(ext, dek) : '';
+  const ext = 'profile/extended.ttl';
+  const existing = podPathExists(podDir, ext) ? readResource(podDir, ext, dek) : '';
   const block =
     `\n# The zone a day is cut in for daily wellness records (cascade:dayZone).\n` +
     `# Set by the first wellness import (${rule}). Change it only on a permanent move.\n` +
     `<#me> <${CASCADE}dayZone> "${zone}" .\n`;
-  fs.mkdirSync(path.dirname(ext), { recursive: true });
-  writeResource(ext, existing + block, dek);
+  mkdirInPod(podDir, 'profile');
+  writeResource(podDir, ext, existing + block, dek);
 }
 
 // ---------------------------------------------------------------------------
@@ -313,11 +313,11 @@ async function writeFile(
   collisions: string[],
 ): Promise<WellnessFileReport> {
   const target = path.join(podDir, ...rel.split('/'));
-  const created = !fs.existsSync(target);
+  const created = !podPathExists(podDir, rel);
   const stats = { added: 0, collisions: [] as string[] };
-  await mergeIntoBucket(target, quads, dek, {
+  await mergeIntoBucket(podDir, target, quads, dek, {
     dryRun,
-    combine: (existing, incoming) => additiveCanonicalMerge(existing, incoming, stats),
+    combine: (existing: Quad[], incoming: Quad[]) => additiveCanonicalMerge(existing, incoming, stats),
   });
   appendAll(collisions, stats.collisions.map((s) => `${rel}: ${s}`));
   const classes = [...new Set(quads.filter((q) => q.predicate.value === RDF_TYPE).map((q) => q.object.value))].sort(cmpStr);
@@ -373,13 +373,13 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
     const podSubject = await resolvePodSubject(podDir, dek);
     let newSampleFiles = 0;
     const writeSamplePack = (f: SampleFile, bytes: Buffer): void => {
-      const target = path.join(podDir, ...sampleFilePath(f.digest).split('/'));
-      if (fs.existsSync(target)) {
+      const rel = sampleFilePath(f.digest);
+      if (podPathExists(podDir, rel)) {
         // Content-addressed: a file already under this name holds these bytes,
         // unless it was damaged. Verify rather than trust, and never overwrite.
         let intact = false;
         try {
-          intact = readResourceBytes(target, dek).equals(bytes);
+          intact = readResourceBytes(podDir, rel, dek).equals(bytes);
         } catch {
           intact = false;
         }
@@ -388,8 +388,8 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
       }
       newSampleFiles++;
       if (!dryRun) {
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        writeResourceBytes(target, bytes, dek);
+        mkdirInPod(podDir, path.posix.dirname(rel));
+        writeResourceBytes(podDir, rel, bytes, dek);
       }
     };
     const agg = aggregate(scan, spill, { podSubject, dayZone: zone, onSampleFile: writeSamplePack });

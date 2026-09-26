@@ -8,7 +8,7 @@
 # ============================================================================
 # Cascade Protocol -- Core Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.9 (2026-09-24)
+# Version: 1.10 (2026-09-26)
 # Validates: cascade:PatientProfile, cascade:Address, cascade:EmergencyContact,
 #            cascade:PharmacyInfo, cascade:AdvanceDirectives, cascade:ProxyAgent,
 #            cascade:ExportManifest, cascade:RecordSummary,
@@ -19,6 +19,10 @@
 #            wherever they appear
 #
 # CHANGELOG
+#   1.10 (2026-09-26) -- Added cascade:PodIdentifierShape for core v3.11:
+#                       at most one cascade:podIdentifier (Violation: two
+#                       would name the same thing two ways) and a lowercase
+#                       version 4 urn:uuid form (Warning). Open-world.
 #   1.9 (2026-09-24) -- Added cascade:StatisticShape and cascade:DayZoneShape
 #                       for core v3.10. Both open-world (sh:targetSubjectsOf),
 #                       both at sh:Warning: the statistic is one of eleven
@@ -1007,6 +1011,28 @@ cascade:DayZoneShape a sh:NodeShape ;
         sh:pattern "^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$" ;
         sh:name "Day Zone"@en ;
         sh:message "cascade:dayZone must be a single IANA time zone name such as 'America/Los_Angeles'. A numeric UTC offset is not a zone: it cannot say which zone a later day belongs to."@en ;
+        sh:severity sh:Warning
+    ] .
+
+cascade:PodIdentifierShape a sh:NodeShape ;
+    sh:targetSubjectsOf cascade:podIdentifier ;
+    rdfs:label "Pod Identifier Shape"@en ;
+    rdfs:comment "Constrains the pod's identifier on <#me> in /profile/extended.ttl (D-POD-ID-1). Open-world: absence is not a finding here; an importer mints one before it names anything from it."@en ;
+
+    sh:property [
+        sh:path cascade:podIdentifier ;
+        sh:maxCount 1 ;
+        sh:name "Pod Identifier (cardinality)"@en ;
+        sh:message "A pod has exactly one cascade:podIdentifier. A second value would give the pod two naming subjects, so the same record could be named two ways."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path cascade:podIdentifier ;
+        sh:datatype xsd:anyURI ;
+        sh:pattern "^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" ;
+        sh:name "Pod Identifier (form)"@en ;
+        sh:message "cascade:podIdentifier must be a lowercase version 4 UUID in urn:uuid form, typed xsd:anyURI."@en ;
         sh:severity sh:Warning
     ] .
 

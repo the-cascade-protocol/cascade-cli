@@ -140,7 +140,7 @@ describe('pod decrypt: the canary round trip (root BACKLOG 1.8)', () => {
     ]) {
       const p = path.join(dir, rel);
       fs.mkdirSync(path.dirname(p), { recursive: true });
-      writeResource(p, `${CANARY} ${rel}`, dek);
+      writeResource(path.dirname(p), p, `${CANARY} ${rel}`, dek);
     }
 
     // Precondition: sealed. The canary is NOT readable on disk anywhere.
@@ -175,7 +175,7 @@ describe('pod decrypt: the canary round trip (root BACKLOG 1.8)', () => {
     const dir = path.join(mkTmpDir(), 'pod');
     await runCli(['pod', 'init', dir, '--encrypt']);
     const dek = resolveDek(dir, PASSPHRASE);
-    writeResource(path.join(dir, 'index.ttl'), readResource(path.join(dir, 'index.ttl'), dek), dek);
+    writeResource(dir, path.join(dir, 'index.ttl'), readResource(dir, path.join(dir, 'index.ttl'), dek), dek);
 
     const { resources } = await enumeratePodResources(dir);
     const dec = await runCli(['--json', 'pod', 'decrypt', dir]);
@@ -279,7 +279,7 @@ describe('pod decrypt: order of operations and idempotency', () => {
     await runCli(['pod', 'init', dir, '--encrypt']);
     const dek = resolveDek(dir, PASSPHRASE);
     fs.mkdirSync(path.join(dir, 'analysis'), { recursive: true });
-    writeResource(path.join(dir, 'analysis', 'run-0001.ttl'), CANARY, dek);
+    writeResource(dir, path.join(dir, 'analysis', 'run-0001.ttl'), CANARY, dek);
 
     // Sealed under a DIFFERENT key: neither this pod's ciphertext nor text.
     const foreignPath = path.join(dir, 'analysis', 'foreign.bin');
@@ -299,7 +299,7 @@ describe('pod decrypt: order of operations and idempotency', () => {
     expect(plainTextContains(path.join(dir, 'analysis', 'run-0001.ttl'), CANARY)).toBe(false);
 
     // The pod is still fully usable, which is the point of keeping the manifest.
-    expect(readResource(path.join(dir, 'analysis', 'run-0001.ttl'), dek)).toBe(CANARY);
+    expect(readResource(dir, path.join(dir, 'analysis', 'run-0001.ttl'), dek)).toBe(CANARY);
   }, TEST_TIMEOUT_MS);
 
   it('--force decrypts the rest, leaves the unopenable file alone, and warns', async () => {
@@ -307,7 +307,7 @@ describe('pod decrypt: order of operations and idempotency', () => {
     await runCli(['pod', 'init', dir, '--encrypt']);
     const dek = resolveDek(dir, PASSPHRASE);
     fs.mkdirSync(path.join(dir, 'analysis'), { recursive: true });
-    writeResource(path.join(dir, 'analysis', 'run-0001.ttl'), CANARY, dek);
+    writeResource(dir, path.join(dir, 'analysis', 'run-0001.ttl'), CANARY, dek);
     const foreignPath = path.join(dir, 'analysis', 'foreign.bin');
     fs.writeFileSync(foreignPath, encryptBytes(Buffer.from('other-pod-secret'), generateDek()));
     const foreignBefore = rawBytes(foreignPath);

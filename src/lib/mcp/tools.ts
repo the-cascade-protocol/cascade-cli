@@ -28,6 +28,7 @@ import {
 import { loadShapes, validateTurtle, validateFile, findTurtleFiles } from '../shacl-validator.js';
 import { convert } from '../fhir-converter/index.js';
 import { writeAuditEntry, createAuditEntry } from './audit.js';
+import { appendPodFile, mkdirInPod, podPathExists, writePodFile } from '../pod-path.js';
 import { describeMcpTools } from './describe.js';
 import { MCP_TOOL_ENRICHMENT } from '../capabilities/enrichment.js';
 import { CLI_VERSION, CLI_PACKAGE_NAME } from '../version.js';
@@ -448,21 +449,15 @@ function registerWrite(server: McpServer): void {
         throw new Error('Target file path is outside the Pod directory.');
       }
 
-      await fs.mkdir(targetDir, { recursive: true });
+      // Through the pod path chokepoint: a record folder or file that is a
+      // symbolic link is refused, never created through or written through.
+      mkdirInPod(absDir, targetDir);
 
-      let fileExistsFlag = false;
-      try {
-        await fs.access(targetFile);
-        fileExistsFlag = true;
-      } catch {
-        // File doesn't exist
-      }
-
-      if (fileExistsFlag) {
-        await fs.appendFile(targetFile, '\n' + turtle, 'utf-8');
+      if (podPathExists(absDir, targetFile)) {
+        appendPodFile(absDir, targetFile, '\n' + turtle);
       } else {
         const prefixes = generatePrefixes();
-        await fs.writeFile(targetFile, prefixes + '\n' + turtle, 'utf-8');
+        writePodFile(absDir, targetFile, prefixes + '\n' + turtle);
       }
 
       await writeAuditEntry(

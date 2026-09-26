@@ -124,7 +124,7 @@ const IMPORTED_BUCKET = `@prefix cascade: <https://ns.cascadeprotocol.org/core/v
 describe('mergeIntoBucket: the existing document keeps the prefixes it declared', () => {
   it('leaves an imported bucket parseable after a record is merged in', async () => {
     const p = seed(IMPORTED_BUCKET);
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
 
     const out = fs.readFileSync(p, 'utf-8');
     // The whole point: a STRICT parse, which is what the whole-pod read does.
@@ -134,7 +134,7 @@ describe('mergeIntoBucket: the existing document keeps the prefixes it declared'
 
   it('keeps every registry prefix the file declared and the CURIEs that use them', async () => {
     const p = seed(IMPORTED_BUCKET);
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const out = fs.readFileSync(p, 'utf-8');
 
     for (const prefix of ['rxnorm', 'sct', 'loinc', 'vcard']) {
@@ -151,7 +151,7 @@ describe('mergeIntoBucket: the existing document keeps the prefixes it declared'
     const p = seed(
       `@prefix mine: <http://alice.example/vocab#>.\n@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#>.\n<urn:uuid:OLD> a clinical:Medication.\n`,
     );
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     expect(fs.readFileSync(p, 'utf-8')).toContain('@prefix mine: <http://alice.example/vocab#>');
   });
 
@@ -166,7 +166,7 @@ describe('mergeIntoBucket: the existing document keeps the prefixes it declared'
       `@prefix clinical: <https://ns.cascadeprotocol.org/clinical/v1#>.\n` +
       `<urn:uuid:OLD> a clinical:Medication; clinical:ndcCode ndc:0093-1023.\n`,
     );
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const out = fs.readFileSync(p, 'utf-8');
     expect(out).toContain('@prefix ndc: <http://hl7.org/fhir/sid/ndc/>');
     expect(out).toContain('ndc:0093-1023');
@@ -180,7 +180,7 @@ describe('mergeIntoBucket: the existing document keeps the prefixes it declared'
 <urn:uuid:OLD> a clinical:Medication; clinical:drugName "Aspirin".
 `;
     const p = seed(hostile);
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
 
     const out = fs.readFileSync(p, 'utf-8');
     const quads = strictParse(out);
@@ -204,7 +204,7 @@ describe('mergeIntoBucket: the existing document keeps the prefixes it declared'
     // declaration, because the writer decides the abbreviation, not the caller.
     const p = file();
     const s = namedNode('urn:uuid:X');
-    await mergeIntoBucket(p, [makeQuad(s, namedNode('http://weird.example/v9#p'), literal('v'))], undefined);
+    await mergeIntoBucket(path.dirname(p), p, [makeQuad(s, namedNode('http://weird.example/v9#p'), literal('v'))], undefined);
     const out = fs.readFileSync(p, 'utf-8');
     expect(out).toContain('<http://weird.example/v9#p>');
     expect(() => strictParse(out)).not.toThrow();
@@ -219,10 +219,10 @@ describe('mergeIntoBucket: the existing document keeps the prefixes it declared'
     // every bucket moved. A whole-file diff on the next write is not a
     // cosmetic difference for a document users read and version.
     const p = seed(IMPORTED_BUCKET);
-    await mergeIntoBucket(p, [], undefined);
+    await mergeIntoBucket(path.dirname(p), p, [], undefined);
     const before = fs.readFileSync(p, 'utf-8');
 
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const after = fs.readFileSync(p, 'utf-8');
 
     expect(after.startsWith(before), 'the existing document was rewritten, not appended to').toBe(true);
@@ -233,7 +233,7 @@ describe('mergeIntoBucket: the existing document keeps the prefixes it declared'
   it('is stable: repeated merges neither duplicate nor drop a declaration', async () => {
     const p = seed(IMPORTED_BUCKET);
     for (let i = 0; i < 5; i++) {
-      await mergeIntoBucket(p, recordQuads(`urn:uuid:N${i}`), undefined);
+      await mergeIntoBucket(path.dirname(p), p, recordQuads(`urn:uuid:N${i}`), undefined);
     }
     const out = fs.readFileSync(p, 'utf-8');
     for (const prefix of ['rxnorm', 'sct', 'loinc', 'vcard', 'clinical', 'cascade']) {
@@ -261,13 +261,13 @@ describe('mergeIntoBucket: an existing file that does not parse is a refusal', (
     const p = seed(CORRUPT);
     const before = fs.readFileSync(p);
 
-    await expect(mergeIntoBucket(p, recordQuads(), undefined)).rejects.toBeInstanceOf(BucketParseError);
+    await expect(mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined)).rejects.toBeInstanceOf(BucketParseError);
     expect(fs.readFileSync(p).equals(before)).toBe(true);
   });
 
   it('names the file and the underlying reason', async () => {
     const p = seed(CORRUPT);
-    const err = await mergeIntoBucket(p, recordQuads(), undefined).catch((e) => e as BucketParseError);
+    const err = await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined).catch((e) => e as BucketParseError);
     expect(err).toBeInstanceOf(BucketParseError);
     expect(err.file).toBe(p);
     expect(err.message).toContain(p);
@@ -278,14 +278,14 @@ describe('mergeIntoBucket: an existing file that does not parse is a refusal', (
   it('refuses on outright garbage too', async () => {
     const p = seed('<<< this is not turtle &&& ');
     const before = fs.readFileSync(p);
-    await expect(mergeIntoBucket(p, recordQuads(), undefined)).rejects.toBeInstanceOf(BucketParseError);
+    await expect(mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined)).rejects.toBeInstanceOf(BucketParseError);
     expect(fs.readFileSync(p).equals(before)).toBe(true);
   });
 
   it('does not create the file when the merge is refused', async () => {
     // Belt and braces: the refusal happens before any mkdir/write.
     const p = seed(CORRUPT, 'nested/deep/meds.ttl');
-    await expect(mergeIntoBucket(p, recordQuads(), undefined)).rejects.toThrow();
+    await expect(mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined)).rejects.toThrow();
     expect(fs.readdirSync(path.dirname(p))).toEqual(['meds.ttl']);
   });
 
@@ -293,7 +293,7 @@ describe('mergeIntoBucket: an existing file that does not parse is a refusal', (
     const p = seed(IMPORTED_BUCKET);
     const before = fs.readFileSync(p);
     await expect(
-      mergeIntoBucket(p, recordQuads(), undefined, {
+      mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined, {
         validate: () => { throw new Error('SHACL says no'); },
       }),
     ).rejects.toThrow(/SHACL says no/);
@@ -317,7 +317,7 @@ describe('mergeIntoBucket: relative IRIs come out exactly as they went in', () =
     it(`preserves a ${label} IRI across six successive writes`, async () => {
       const p = seed(`@prefix prov: <http://www.w3.org/ns/prov#>.\n<urn:uuid:OLD> prov:wasAttributedTo ${iri}.\n`);
       for (let i = 0; i < 6; i++) {
-        await mergeIntoBucket(p, recordQuads(`urn:uuid:N${i}`), undefined);
+        await mergeIntoBucket(path.dirname(p), p, recordQuads(`urn:uuid:N${i}`), undefined);
         const out = fs.readFileSync(p, 'utf-8');
         // Assert on the IRI TEXT. `baseIRI: ''` still produced a parseable
         // file; it just said "undefined/profile/card.ttl#me" instead.
@@ -329,7 +329,7 @@ describe('mergeIntoBucket: relative IRIs come out exactly as they went in', () =
 
   it('never lets the sentinel base reach disk', async () => {
     const p = seed(`<urn:uuid:OLD> <urn:p> </profile/card.ttl#me>.\n`);
-    for (let i = 0; i < 3; i++) await mergeIntoBucket(p, recordQuads(`urn:uuid:N${i}`), undefined);
+    for (let i = 0; i < 3; i++) await mergeIntoBucket(path.dirname(p), p, recordQuads(`urn:uuid:N${i}`), undefined);
     expect(fs.readFileSync(p, 'utf-8')).not.toContain(relBase());
   });
 
@@ -339,7 +339,7 @@ describe('mergeIntoBucket: relative IRIs come out exactly as they went in', () =
     // that travelled through their own parsers. If one of them ever stops
     // derelativizing, the sentinel must still not reach disk.
     const p = file();
-    await mergeIntoBucket(p, [
+    await mergeIntoBucket(path.dirname(p), p, [
       makeQuad(
         namedNode(relBase() + '/records/1'),
         namedNode('urn:p'),
@@ -354,7 +354,7 @@ describe('mergeIntoBucket: relative IRIs come out exactly as they went in', () =
 
   it('leaves absolute IRIs untouched', async () => {
     const p = seed(`<urn:uuid:OLD> <urn:p> <https://example.org/a?q=1&r=2#f>.\n`);
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     expect(fs.readFileSync(p, 'utf-8')).toContain('<https://example.org/a?q=1&r=2#f>');
   });
 
@@ -363,7 +363,7 @@ describe('mergeIntoBucket: relative IRIs come out exactly as they went in', () =
     // parse-time directive the writer does not re-emit, so the IRIs it resolved
     // are written out in full. Semantics are preserved; the directive is not.
     const p = seed(`@base <https://pod.example/alice/>.\n<records/1> <urn:p> <urn:o>.\n`);
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const quads = strictParse(fs.readFileSync(p, 'utf-8'));
     expect(quads.some((q) => q.subject.value === 'https://pod.example/alice/records/1')).toBe(true);
   });
@@ -383,7 +383,7 @@ describe('mergeIntoBucket: blank-node labels stay bounded', () => {
     // N3's parser prefixes each label it reads with a fresh counter, so without
     // normalization `_:b1` becomes `_:b2_b1`, `_:b3_b2_b1`, ... forever.
     const p = seed(`<urn:uuid:OLD> <urn:p> [ <urn:q> "deep" ].\n`);
-    for (let i = 0; i < 10; i++) await mergeIntoBucket(p, recordQuads(`urn:uuid:N${i}`), undefined);
+    for (let i = 0; i < 10; i++) await mergeIntoBucket(path.dirname(p), p, recordQuads(`urn:uuid:N${i}`), undefined);
 
     const out = fs.readFileSync(p, 'utf-8');
     const labels = [...out.matchAll(/_:([A-Za-z0-9_]+)/g)].map((m) => m[1]);
@@ -397,7 +397,7 @@ describe('mergeIntoBucket: blank-node labels stay bounded', () => {
   it('preserves blank-node structure, including cycles and shared nodes', async () => {
     const p = seed(`_:x <urn:p> _:y. _:y <urn:p> _:x. <urn:uuid:OLD> <urn:r> _:x.\n`);
     const before = strictParse(fs.readFileSync(p, 'utf-8'));
-    await mergeIntoBucket(p, [], undefined);
+    await mergeIntoBucket(path.dirname(p), p, [], undefined);
     const after = strictParse(fs.readFileSync(p, 'utf-8'));
     expect(sameGraph(before, after)).toBe(true);
   });
@@ -455,7 +455,7 @@ describe('mergeIntoBucket: round-trip fidelity of Turtle a bucket could hold', (
     it(`preserves: ${name}`, async () => {
       const p = seed(ttl + '\n');
       const before = strictParse(fs.readFileSync(p, 'utf-8'));
-      await mergeIntoBucket(p, [], undefined);
+      await mergeIntoBucket(path.dirname(p), p, [], undefined);
       const after = strictParse(fs.readFileSync(p, 'utf-8'));
       expect(after.length).toBeGreaterThan(0);
       expect(sameGraph(before, after), `${name}: graph changed`).toBe(true);
@@ -464,9 +464,9 @@ describe('mergeIntoBucket: round-trip fidelity of Turtle a bucket could hold', (
 
   it('is a fixed point: a second merge of nothing changes nothing', async () => {
     const p = seed(IMPORTED_BUCKET);
-    await mergeIntoBucket(p, [], undefined);
+    await mergeIntoBucket(path.dirname(p), p, [], undefined);
     const once = fs.readFileSync(p, 'utf-8');
-    await mergeIntoBucket(p, [], undefined);
+    await mergeIntoBucket(path.dirname(p), p, [], undefined);
     expect(fs.readFileSync(p, 'utf-8')).toBe(once);
   });
 
@@ -475,7 +475,7 @@ describe('mergeIntoBucket: round-trip fidelity of Turtle a bucket could hold', (
     // population on a literal comment line, so routing it through this chokepoint
     // would permanently break that. The boundary is not cosmetic.
     const p = seed(`# a load-bearing comment\n<urn:uuid:a> <urn:p> "v".\n`);
-    await mergeIntoBucket(p, [], undefined);
+    await mergeIntoBucket(path.dirname(p), p, [], undefined);
     expect(fs.readFileSync(p, 'utf-8')).not.toContain('load-bearing comment');
   });
 });
@@ -487,7 +487,7 @@ describe('mergeIntoBucket: round-trip fidelity of Turtle a bucket could hold', (
 describe('mergeIntoBucket: degenerate documents', () => {
   it('creates the file, and its parent directories, when it does not exist', async () => {
     const p = path.join(tmp, 'clinical', 'medications.ttl');
-    const res = await mergeIntoBucket(p, recordQuads(), undefined);
+    const res = await mergeIntoBucket(tmp, p, recordQuads(), undefined);
     expect(res.existedBefore).toBe(false);
     expect(res.triplesBefore).toBe(0);
     expect(res.triplesAfter).toBe(4);
@@ -496,19 +496,19 @@ describe('mergeIntoBucket: degenerate documents', () => {
 
   it('handles an empty file', async () => {
     const p = seed('');
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     expect(strictParse(fs.readFileSync(p, 'utf-8'))).toHaveLength(4);
   });
 
   it('handles a whitespace-only file', async () => {
     const p = seed('   \n\n\t \n');
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     expect(strictParse(fs.readFileSync(p, 'utf-8'))).toHaveLength(4);
   });
 
   it('handles a header-only file with no statements', async () => {
     const p = seed(`@prefix rxnorm: <http://www.nlm.nih.gov/research/umls/rxnorm/>.\n`);
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const out = fs.readFileSync(p, 'utf-8');
     expect(strictParse(out)).toHaveLength(4);
     expect(out).toContain('@prefix rxnorm:');
@@ -518,7 +518,7 @@ describe('mergeIntoBucket: degenerate documents', () => {
     const p = seed(
       `<urn:uuid:A> <urn:p> <urn:o>.\n@prefix rxnorm: <http://www.nlm.nih.gov/research/umls/rxnorm/>.\n<urn:uuid:B> <urn:p> rxnorm:1.\n`,
     );
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const out = fs.readFileSync(p, 'utf-8');
     expect(() => strictParse(out)).not.toThrow();
     expect(out).toContain('@prefix rxnorm:');
@@ -529,7 +529,7 @@ describe('mergeIntoBucket: degenerate documents', () => {
     const p = seed(
       `PREFIX rxnorm: <http://www.nlm.nih.gov/research/umls/rxnorm/>\n<urn:uuid:OLD> <urn:p> rxnorm:1.\n`,
     );
-    await mergeIntoBucket(p, recordQuads(), undefined);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined);
     const out = fs.readFileSync(p, 'utf-8');
     expect(() => strictParse(out)).not.toThrow();
     expect(out).toContain('rxnorm:1');
@@ -538,7 +538,7 @@ describe('mergeIntoBucket: degenerate documents', () => {
   it('writes an empty document when every quad is combined away', async () => {
     // `pod erase` of the last record in a bucket.
     const p = seed(IMPORTED_BUCKET);
-    await mergeIntoBucket(p, [], undefined, { combine: () => [] });
+    await mergeIntoBucket(path.dirname(p), p, [], undefined, { combine: () => [] });
     const out = fs.readFileSync(p, 'utf-8');
     expect(strictParse(out)).toHaveLength(0);
     expect(() => strictParse(out)).not.toThrow();
@@ -560,7 +560,7 @@ describe('mergeIntoBucket: dryRun and encrypted pods', () => {
   it('computes the document but writes nothing under dryRun', async () => {
     const p = seed(IMPORTED_BUCKET);
     const before = fs.readFileSync(p);
-    const res = await mergeIntoBucket(p, recordQuads(), undefined, { dryRun: true });
+    const res = await mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined, { dryRun: true });
     expect(res.written).toBe(false);
     expect(res.triplesAfter).toBe(10);
     expect(res.turtle).toContain('@prefix rxnorm:');
@@ -569,19 +569,19 @@ describe('mergeIntoBucket: dryRun and encrypted pods', () => {
 
   it('still refuses an unreadable file under dryRun', async () => {
     const p = seed(`@prefix cascade: <https://ns.cascadeprotocol.org/core/v1#>.\n<urn:uuid:O> <urn:p> rxnorm:1.\n`);
-    await expect(mergeIntoBucket(p, recordQuads(), undefined, { dryRun: true }))
+    await expect(mergeIntoBucket(path.dirname(p), p, recordQuads(), undefined, { dryRun: true }))
       .rejects.toBeInstanceOf(BucketParseError);
   });
 
   it('is transparent over an encrypted resource', async () => {
     const dek = generateDek();
     const p = file();
-    await mergeIntoBucket(p, recordQuads('urn:uuid:A'), dek);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads('urn:uuid:A'), dek);
     // Ciphertext on disk: the plaintext must not be readable.
     expect(fs.readFileSync(p).toString('utf-8')).not.toContain('Vitamin D');
     // ...and a second merge reads it back, keeping both records.
-    await mergeIntoBucket(p, recordQuads('urn:uuid:B', 'Magnesium'), dek);
-    const plain = readResource(p, dek);
+    await mergeIntoBucket(path.dirname(p), p, recordQuads('urn:uuid:B', 'Magnesium'), dek);
+    const plain = readResource(path.dirname(p), p, dek);
     expect(plain).toContain('Vitamin D');
     expect(plain).toContain('Magnesium');
     expect(strictParse(plain)).toHaveLength(8);
@@ -641,9 +641,9 @@ describe('mergeIntoBucket: a read failure is never reported as a parse failure',
     // a bucket that is perfectly intact — the worst possible advice, given the
     // file is ciphertext they cannot inspect to check.
     const p = file();
-    await mergeIntoBucket(p, recordQuads('urn:uuid:A'), generateDek());
+    await mergeIntoBucket(path.dirname(p), p, recordQuads('urn:uuid:A'), generateDek());
 
-    const err = await mergeIntoBucket(p, recordQuads('urn:uuid:B'), generateDek())
+    const err = await mergeIntoBucket(path.dirname(p), p, recordQuads('urn:uuid:B'), generateDek())
       .then(() => undefined, (e: unknown) => e);
     expect(err, 'a merge under the wrong DEK must not succeed').toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(BucketParseError);

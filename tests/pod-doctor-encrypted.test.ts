@@ -163,19 +163,19 @@ function isCiphertext(file: string): boolean {
 function stripPrefixHeaderSealed(podDir: string, relFile: string): string {
   const dek = resolveDek(podDir, PASSPHRASE);
   const abs = path.join(podDir, relFile);
-  const plaintext = readResource(abs, dek);
+  const plaintext = readResource(path.dirname(abs), abs, dek);
   expect(plaintext, 'the fixture does not carry the prefix header').toContain('@prefix rxnorm:');
   const damaged = plaintext
     .split('\n')
     .filter((l) => !l.trimStart().startsWith('@prefix'))
     .join('\n');
-  writeResource(abs, damaged, dek);
+  writeResource(path.dirname(abs), abs, damaged, dek);
   expect(isCiphertext(abs), 'the fixture stopped being ciphertext').toBe(true);
   return damaged;
 }
 
 function plaintextOf(podDir: string, relFile: string): string {
-  return readResource(path.join(podDir, relFile), resolveDek(podDir, PASSPHRASE));
+  return readResource(podDir, path.join(podDir, relFile), resolveDek(podDir, PASSPHRASE));
 }
 
 function parsesStrictly(ttl: string): boolean {

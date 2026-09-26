@@ -182,7 +182,7 @@ export async function appendOverlay(
     spec.createdIso,
   );
 
-  await mergeIntoBucket(filePath, newQuads, dek, {
+  await mergeIntoBucket(podDir, filePath, newQuads, dek, {
     // Validate the merged graph BEFORE writing. A malformed overlay must fail.
     validate: (turtle, file) => validateOverlayGraph(turtle, file),
   });
@@ -209,7 +209,7 @@ export async function appendOverlays(
     }
     appendAll(newQuads, buildOverlayQuads(spec.subjectUri, spec.rdfType, spec.lines, spec.actorIri, spec.createdIso));
   }
-  await mergeIntoBucket(path.join(podDir, ANNOTATIONS_DIR, fileName), newQuads, dek, {
+  await mergeIntoBucket(podDir, path.join(podDir, ANNOTATIONS_DIR, fileName), newQuads, dek, {
     validate: (turtle, file) => validateOverlayGraph(turtle, file),
   });
 }

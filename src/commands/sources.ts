@@ -38,7 +38,7 @@
  */
 
 import type { Command } from 'commander';
-import * as fs from 'node:fs/promises';
+import { PodPathError, readPodDir } from '../lib/pod-path.js';
 import * as path from 'node:path';
 
 import {
@@ -55,6 +55,7 @@ import {
   isDirectory,
   PodReadLedger,
   PodUnreadableError,
+  tidyReason,
   unreadableFilesMessage,
   type PodReader,
 } from '../lib/pod-read.js';
@@ -71,11 +72,16 @@ const SOURCES_DIR = 'sources';
 /** Extensions the scan attempts to parse as FHIR JSON. */
 const JSON_EXTENSIONS = new Set(['.json', '.ndjson']);
 
-async function listSourceFiles(dir: string): Promise<string[]> {
+/**
+ * Every retained source file, listed through the pod path chokepoint: a
+ * `sources` folder that is a symbolic link is refused, and a link or special
+ * file below it is handed to the read, which refuses it by name rather than
+ * the scan following it or passing over it in silence.
+ */
+async function listSourceFiles(podDir: string, dir: string): Promise<string[]> {
   const out: string[] = [];
   const walk = async (current: string): Promise<void> => {
-    const entries = await fs.readdir(current, { withFileTypes: true });
-    for (const entry of entries) {
+    for (const entry of readPodDir(podDir, current)) {
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) await walk(full);
       else if (JSON_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) out.push(full);
@@ -138,7 +144,17 @@ interface ScanResult {
 }
 
 async function scanSources(reader: PodReader, sourcesDir: string, ledger: PodReadLedger): Promise<ScanResult> {
-  const files = await listSourceFiles(sourcesDir);
+  let files: string[];
+  try {
+    files = await listSourceFiles(reader.podDir, sourcesDir);
+  } catch (e: unknown) {
+    if (!(e instanceof PodPathError)) throw e;
+    // A retained-sources folder this command will not walk: its contents are
+    // unknown, which the ledger reports as fatal rather than as "no sources".
+    ledger.attempt();
+    ledger.record({ file: reader.relativePath(sourcesDir), kind: 'io', reason: tidyReason(e.message) });
+    files = [];
+  }
   const accumulator = new CoverageAccumulator();
   const seen = new Set<string>();
   const unparseableFiles: string[] = [];

@@ -691,7 +691,11 @@ export function validateFile(
   filePath: string,
   shapesStore: Store,
   shapeFiles: string[],
-  dek?: Buffer,
+  /**
+   * For a file inside an encrypted pod: the pod root and its key. The file is
+   * then read through the pod path chokepoint and decrypted.
+   */
+  sealed?: { podDir: string; dek: Buffer },
 ): ValidationResult {
   if (!fs.existsSync(filePath)) {
     return {
@@ -711,8 +715,8 @@ export function validateFile(
     };
   }
 
-  const content = dek
-    ? readResource(filePath, dek)
+  const content = sealed
+    ? readResource(sealed.podDir, filePath, sealed.dek)
     : fs.readFileSync(filePath, 'utf-8');
   return validateTurtle(content, shapesStore, shapeFiles, filePath);
 }

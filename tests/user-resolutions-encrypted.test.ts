@@ -313,7 +313,7 @@ describe('the loaders throw instead of swallowing', () => {
   it('an unparseable decrypted body throws rather than forgetting the decisions', async () => {
     const { dir, dek } = await encryptedPodWithConflict();
     // Correctly sealed, but the plaintext inside is not Turtle.
-    writeResource(conflictsPath(dir), 'not ] turtle @@@ {', dek);
+    writeResource(path.dirname(conflictsPath(dir)), conflictsPath(dir), 'not ] turtle @@@ {', dek);
     await expect(loadPendingConflicts(dir, dek)).rejects.toBeInstanceOf(ConflictStoreError);
   }, TEST_TIMEOUT_MS);
 });

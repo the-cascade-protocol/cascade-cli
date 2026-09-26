@@ -98,7 +98,7 @@ beforeAll(() => {
   // default cost is deliberately heavy. The pod records its own parameters, so
   // every code path under test is unchanged.
   writeEncryptionManifest(sealedPod, buildPassphraseManifest(dek, PASSPHRASE, { t: 1, m: 8192, p: 1 }));
-  writeResource(path.join(sealedPod, 'sources', 'bundle-1.json'), bundleOf(all), dek);
+  writeResource(sealedPod, path.join(sealedPod, 'sources', 'bundle-1.json'), bundleOf(all), dek);
 });
 
 afterAll(() => {
