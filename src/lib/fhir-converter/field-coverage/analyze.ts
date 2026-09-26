@@ -36,6 +36,7 @@ import { EXCLUDED_TYPES } from '../converters-passthrough.js';
 import { childFieldPaths, enumerateFieldPaths, topLevelFieldPaths, withoutPath } from './paths.js';
 import type { FieldCoverageVerdict, FieldDropEntry } from './types.js';
 import { lookupFieldDrop } from './manifests/index.js';
+import { appendAll } from '../../append-all.js';
 
 /**
  * A conversion's content, independent of which subject IRI carries it.
@@ -147,7 +148,7 @@ export function analyzeResourceCoverage(resource: unknown): ResourceCoverage {
       continue;
     }
     emitted.push(path);
-    queue.push(...childFieldPaths(resource, path));
+    appendAll(queue, childFieldPaths(resource, path));
   }
 
   return { resourceType, emitted, dropped, untestable, typeExcluded: false };

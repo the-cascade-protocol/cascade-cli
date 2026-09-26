@@ -22,6 +22,7 @@ import type { BatchConversionResult } from '../fhir-converter/types.js';
 import { convertCcda } from './index.js';
 import { parseCcdaXml } from './parser.js';
 import { collectNarrativeBlocks, type NarrativeBlock } from './narrative-extractor.js';
+import { appendAll } from '../append-all.js';
 
 function adapt(r: BatchConversionResult): ImportResult {
   const warnings: ImportWarning[] = r.warnings.map((message) => ({ message }));
@@ -91,7 +92,7 @@ export const ccdaImporter: FormatImporter = {
             const xml = entry.getData().toString('utf-8');
             const parsedDoc = parseCcdaXml(xml);
             const blocks = collectNarrativeBlocks(parsedDoc);
-            allBlocks.push(...blocks);
+            appendAll(allBlocks, blocks);
           } catch {
             // Skip unparseable entries — partial results are still useful.
           }
@@ -99,7 +100,7 @@ export const ccdaImporter: FormatImporter = {
       } else {
         const xml = Buffer.isBuffer(input) ? input.toString('utf-8') : input;
         const parsedDoc = parseCcdaXml(xml);
-        allBlocks.push(...collectNarrativeBlocks(parsedDoc));
+        appendAll(allBlocks, collectNarrativeBlocks(parsedDoc));
       }
 
       const narrativesPath =

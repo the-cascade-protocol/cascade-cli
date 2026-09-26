@@ -9,22 +9,32 @@
  *   - electrocardiograms/, workout-routes/ (device data)
  *
  * The clinical-records FHIR files are small and the existing FHIR importer
- * already converts them. The two giant XMLs are device time-series, over Node's
- * whole-file read limit, and not the clinical data a user is usually after. So
- * this adapter imports clinical-records and SKIPS the device exports with a clear
- * reason (rather than failing on a 2.3 GB read). Streaming import of the device
- * series is a later slice; when it lands, this adapter starts yielding it too.
+ * already converts them. `export.xml` is the device time-series, over Node's
+ * whole-file read limit, so it is not a per-file input: it is yielded as a
+ * STREAMED artifact, which `pod import` hands to the wellness aggregator
+ * (`lib/apple-health-wellness/`), a single streaming pass. `export_cda.xml` is
+ * a redundant CDA rendering of the same samples and stays skipped, with a
+ * reason, as do the ECG and workout-route folders.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { CompletenessCheck, ExpandedSource, FileSourceMeta, SkippedArtifact, SourceAdapter } from './types.js';
+import type {
+  CompletenessCheck,
+  ExpandedSource,
+  FileSourceMeta,
+  SkippedArtifact,
+  SourceAdapter,
+  StreamedArtifact,
+} from './types.js';
 
 const CLINICAL_DIR = 'clinical-records';
 /** The primary device export Apple writes at the export root (the firehose). */
 const PRIMARY_EXPORT = 'export.xml';
 /** The multi-GB device exports Apple writes at the export root. */
 const DEVICE_EXPORTS = ['export.xml', 'export_cda.xml'];
+/** The redundant CDA rendering of the device series: never imported. */
+const CDA_EXPORT = 'export_cda.xml';
 /** Other non-clinical device-data folders. */
 const DEVICE_DIRS = ['electrocardiograms', 'workout-routes'];
 
@@ -131,7 +141,7 @@ function readClinicalRecordSources(
 export const appleHealthAdapter: SourceAdapter = {
   id: 'apple-health',
   description:
-    'Apple Health export folder (imports clinical-records FHIR; device exports skipped pending streaming import)',
+    'Apple Health export folder (imports clinical-records FHIR, and export.xml wellness data by streaming daily aggregation)',
 
   detect(targetPath: string): boolean {
     if (!isDir(targetPath)) return false;
@@ -190,14 +200,16 @@ export const appleHealthAdapter: SourceAdapter = {
       });
     }
 
-    for (const f of DEVICE_EXPORTS) {
-      const p = path.join(targetPath, f);
-      if (fs.existsSync(p)) {
-        skipped.push({
-          path: p,
-          reason: `Apple Health device export (${sizeGB(p)} GB of time-series); streaming import not yet supported`,
-        });
-      }
+    const streamed: StreamedArtifact[] = [];
+    if (fs.existsSync(exportXmlPath)) {
+      streamed.push({ path: exportXmlPath, kind: 'apple-health-export-xml' });
+    }
+    const cdaPath = path.join(targetPath, CDA_EXPORT);
+    if (fs.existsSync(cdaPath)) {
+      skipped.push({
+        path: cdaPath,
+        reason: `a CDA rendering (${sizeGB(cdaPath)} GB) of the same device samples export.xml carries, which is imported instead`,
+      });
     }
     for (const d of DEVICE_DIRS) {
       const p = path.join(targetPath, d);
@@ -206,6 +218,6 @@ export const appleHealthAdapter: SourceAdapter = {
       }
     }
 
-    return { files, skipped, sourceLabel: 'Apple Health export', fileSources, completeness };
+    return { files, streamed, skipped, sourceLabel: 'Apple Health export', fileSources, completeness };
   },
 };

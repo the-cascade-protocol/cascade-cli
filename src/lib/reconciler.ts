@@ -46,6 +46,7 @@ import {
   type ResolutionChoice,
   type UserResolution,
 } from './user-resolutions.js';
+import { appendAll } from './append-all.js';
 
 // Re-export so existing consumers of the reconciler's normalizeMedName keep
 // working. The canonical definition now lives in ./medication-normalize.ts
@@ -461,7 +462,7 @@ async function collectQuads(turtle: string): Promise<{ passthrough: Quad[]; all:
         for (const quads of quadsBySubject.values()) {
           const typeQuad = quads.find(q => q.predicate.value === NS.rdf + 'type');
           if (typeQuad && KNOWN_TYPES[typeQuad.object.value]) continue; // reconciled elsewhere
-          passthrough.push(...quads);
+          appendAll(passthrough, quads);
         }
         resolve({ passthrough, all });
         return;
@@ -2895,11 +2896,11 @@ export async function runReconciliation(
     const records = await parseTurtle(
       input.content, input.systemName, input.existingPod === true, input.labelIsPlaceholder === true,
     );
-    allRecords.push(...records);
+    appendAll(allRecords, records);
     sourceInfo.push({ system: input.systemName, count: records.length });
 
     const { passthrough, all } = await collectQuads(input.content);
-    allInputQuads.push(...all);
+    appendAll(allInputQuads, all);
     for (const q of passthrough) {
       const key = quadKey(q);
       if (seenPassthrough.has(key)) continue;

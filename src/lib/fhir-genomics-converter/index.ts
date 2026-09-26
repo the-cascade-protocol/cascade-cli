@@ -25,6 +25,7 @@ import { parseGenotypeObservation } from './observation-genotype.js';
 import { parseDiagnosticImplication } from './observation-diagnostic-implication.js';
 import { parseDiagnosticReport } from './diagnostic-report.js';
 import { parseServiceRequest } from './service-request.js';
+import { appendAll } from '../append-all.js';
 
 export { detectFhirGenomics } from './detect.js';
 export { fhirGenomicsImporter } from './registry-entry.js';
@@ -103,9 +104,9 @@ export async function convertGenomicsBundle(
       const out = parseVariantObservation(r, ctx);
       if (out) {
         records.push(out.record);
-        quads.push(...out.record.quads);
-        warnings.push(...out.warnings);
-        vocabularyGaps.push(...out.gaps);
+        appendAll(quads, out.record.quads);
+        appendAll(warnings, out.warnings);
+        appendAll(vocabularyGaps, out.gaps);
         importedIdentifiers.push({
           cascadeIri: out.record.iri,
           cascadeType: out.record.cascadeType,
@@ -118,9 +119,9 @@ export async function convertGenomicsBundle(
       const out = parseServiceRequest(r, ctx);
       if (out) {
         records.push(out.record);
-        quads.push(...out.record.quads);
-        warnings.push(...out.warnings);
-        vocabularyGaps.push(...out.gaps);
+        appendAll(quads, out.record.quads);
+        appendAll(warnings, out.warnings);
+        appendAll(vocabularyGaps, out.gaps);
         importedIdentifiers.push({
           cascadeIri: out.record.iri,
           cascadeType: out.record.cascadeType,
@@ -140,9 +141,9 @@ export async function convertGenomicsBundle(
       const out = parseHaplotypeObservation(r, idIndex, ctx);
       if (out) {
         records.push(out.record);
-        quads.push(...out.record.quads);
-        warnings.push(...out.warnings);
-        vocabularyGaps.push(...out.gaps);
+        appendAll(quads, out.record.quads);
+        appendAll(warnings, out.warnings);
+        appendAll(vocabularyGaps, out.gaps);
         importedIdentifiers.push({
           cascadeIri: out.record.iri,
           cascadeType: out.record.cascadeType,
@@ -162,9 +163,9 @@ export async function convertGenomicsBundle(
       const out = parseGenotypeObservation(r, idIndex, ctx);
       if (out) {
         records.push(out.record);
-        quads.push(...out.record.quads);
-        warnings.push(...out.warnings);
-        vocabularyGaps.push(...out.gaps);
+        appendAll(quads, out.record.quads);
+        appendAll(warnings, out.warnings);
+        appendAll(vocabularyGaps, out.gaps);
         importedIdentifiers.push({
           cascadeIri: out.record.iri,
           cascadeType: out.record.cascadeType,
@@ -198,7 +199,7 @@ export async function convertGenomicsBundle(
       if (out) {
         for (const rec of out.records) {
           records.push(rec);
-          quads.push(...rec.quads);
+          appendAll(quads, rec.quads);
           importedIdentifiers.push({
             cascadeIri: rec.iri,
             cascadeType: rec.cascadeType,
@@ -213,8 +214,8 @@ export async function convertGenomicsBundle(
         if (out.records.length > 0) {
           registerId(idIndex, r, out.records[0].iri, fullUrlByResource.get(r));
         }
-        warnings.push(...out.warnings);
-        vocabularyGaps.push(...out.gaps);
+        appendAll(warnings, out.warnings);
+        appendAll(vocabularyGaps, out.gaps);
       }
     }
   }
@@ -234,9 +235,9 @@ export async function convertGenomicsBundle(
       const out = parseDiagnosticReport(r, idIndex, ctx, variantIris);
       if (out) {
         records.push(out.record);
-        quads.push(...out.record.quads);
-        warnings.push(...out.warnings);
-        vocabularyGaps.push(...out.gaps);
+        appendAll(quads, out.record.quads);
+        appendAll(warnings, out.warnings);
+        appendAll(vocabularyGaps, out.gaps);
         importedIdentifiers.push({
           cascadeIri: out.record.iri,
           cascadeType: out.record.cascadeType,

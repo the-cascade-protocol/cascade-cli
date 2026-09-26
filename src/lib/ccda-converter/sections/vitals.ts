@@ -17,6 +17,7 @@ import { resolveCodeUri } from '../code-systems.js';
 import { ccdaDateQuad } from '../dates.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
+import { appendAll } from '../../append-all.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -67,10 +68,10 @@ export function extractVitalQuads(
     const organizer = firstOf<any>(entry?.organizer);
     if (organizer?.component) {
       for (const comp of listOf<any>(organizer.component)) {
-        observations.push(...listOf<any>(comp?.observation));
+        appendAll(observations, listOf<any>(comp?.observation));
       }
     } else if (entry?.observation) {
-      observations.push(...listOf<any>(entry.observation));
+      appendAll(observations, listOf<any>(entry.observation));
     }
 
     for (const obs of observations) {
@@ -108,7 +109,7 @@ export function extractVitalQuads(
       if (!shaclVitalType) {
         // Not a VitalSign per the shape (no LOINC match, or a LOINC outside the
         // canonical enum). Preserve the value as a lab result rather than drop it.
-        quads.push(...buildLabFallback({
+        appendAll(quads, buildLabFallback({
           sourceSystem, loincCode, isLoinc, loincOid,
           displayName, dateStr, dateVal, value, unit, sourceId, source: obs, warnings,
         }));

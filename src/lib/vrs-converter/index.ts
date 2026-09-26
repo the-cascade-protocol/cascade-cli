@@ -22,6 +22,7 @@ import type {
   ImportedIdentifier,
 } from '../import-types.js';
 import { ingestVrsAllele, type ParsedRecord } from './allele.js';
+import { appendAll } from '../append-all.js';
 
 export { detectVrs } from './detect.js';
 export { vrsImporter } from './registry-entry.js';
@@ -88,7 +89,7 @@ export async function convertVrs(
   }
   if (ingest.record) {
     result.records.push(ingest.record);
-    result.quads.push(...ingest.record.quads);
+    appendAll(result.quads, ingest.record.quads);
     result.importedIdentifiers.push({
       cascadeIri: ingest.record.iri,
       cascadeType: ingest.record.cascadeType,
@@ -96,7 +97,7 @@ export async function convertVrs(
       sourceId: ingest.record.sourceId,
     });
   }
-  result.warnings.push(...ingest.warnings);
-  result.vocabularyGaps.push(...ingest.gaps);
+  appendAll(result.warnings, ingest.warnings);
+  appendAll(result.vocabularyGaps, ingest.gaps);
   return result;
 }

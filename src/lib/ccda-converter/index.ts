@@ -49,6 +49,7 @@ import {
 import { identityKey } from '../identity.js';
 import { beginCcdaIdScope, endCcdaIdScope } from './record-identity.js';
 import { sourceIdentity, sourceLabel } from '../source-identity.js';
+import { appendAll } from '../append-all.js';
 
 // Map templateId → extractor function and LOINC code.
 //
@@ -129,7 +130,7 @@ export async function convertCcda(
   for (const xml of xmlFiles) {
     try {
       const result = convertSingleCcda(xml, options, importedAt, warnings);
-      allQuads.push(...result.quads);
+      appendAll(allQuads, result.quads);
       mergeSectionCensus(sectionCensus, result.census);
     } catch (err) {
       warnings.push(`Failed to convert C-CDA document: ${err instanceof Error ? err.message : String(err)}`);
@@ -371,7 +372,7 @@ function convertNormalizedCcda(
     sourceSystem,
     warnings,
   );
-  allQuads.push(...patientQuads);
+  appendAll(allQuads, patientQuads);
 
   // Process each section
   // `<component>` is a repeatable element and is therefore always an array (see
@@ -425,7 +426,7 @@ function convertNormalizedCcda(
         sectionText, effectiveLoinc, documentType, documentId, sourceSystem, importedAt,
         requiresLLMExtraction, sourceEhr, warnings,
       );
-      allQuads.push(...narrativeQuads);
+      appendAll(allQuads, narrativeQuads);
     }
 
     // Extract structured entries
@@ -453,7 +454,7 @@ function convertNormalizedCcda(
         }
       }
 
-      allQuads.push(...quads);
+      appendAll(allQuads, quads);
 
       // Entries read versus records written, for THIS section. Counted from the
       // handler's own output — the distinct subjects it gave an rdf:type — so it

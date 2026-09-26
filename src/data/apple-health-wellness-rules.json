@@ -1,0 +1,112 @@
+{
+  "rule": "apple-health-daily-aggregate",
+  "ruleVersion": "1",
+  "idSpace": "healthkit",
+  "valueDecimals": 4,
+  "metrics": [
+    {
+      "hkType": "HKQuantityTypeIdentifierStepCount",
+      "record": "activitySnapshot",
+      "property": "steps",
+      "unit": "steps",
+      "sourceUnits": { "count": 1 },
+      "statistics": ["sum"],
+      "file": "activity"
+    },
+    {
+      "hkType": "HKQuantityTypeIdentifierHeartRate",
+      "record": "vitalReading",
+      "snomed": "364075005",
+      "loinc": "8867-4",
+      "unit": "bpm",
+      "sourceUnits": { "count/min": 1 },
+      "statistics": ["minimum", "average", "maximum"],
+      "file": "heart-rate"
+    },
+    {
+      "hkType": "HKQuantityTypeIdentifierRestingHeartRate",
+      "record": "vitalReading",
+      "snomed": "364075005",
+      "loinc": "40443-4",
+      "unit": "bpm",
+      "sourceUnits": { "count/min": 1 },
+      "statistics": ["average"],
+      "file": "heart-rate"
+    },
+    {
+      "hkType": "HKQuantityTypeIdentifierWalkingHeartRateAverage",
+      "record": "vitalReading",
+      "snomed": "364075005",
+      "loinc": "89270-3",
+      "unit": "bpm",
+      "sourceUnits": { "count/min": 1 },
+      "statistics": ["average"],
+      "file": "heart-rate"
+    },
+    {
+      "hkType": "HKQuantityTypeIdentifierHeartRateVariabilitySDNN",
+      "record": "vitalReading",
+      "snomed": "80404004",
+      "loinc": "80404-7",
+      "unit": "ms",
+      "sourceUnits": { "ms": 1 },
+      "statistics": ["average"],
+      "file": "hrv"
+    },
+    {
+      "hkType": "HKQuantityTypeIdentifierRespiratoryRate",
+      "record": "vitalReading",
+      "snomed": "86290005",
+      "loinc": "9279-1",
+      "unit": "breaths/min",
+      "sourceUnits": { "count/min": 1 },
+      "statistics": ["average"],
+      "file": "body-measurements"
+    },
+    {
+      "hkType": "HKQuantityTypeIdentifierOxygenSaturation",
+      "record": "vitalReading",
+      "snomed": "431314004",
+      "loinc": "2708-6",
+      "unit": "%",
+      "sourceUnits": { "%": 100 },
+      "statistics": ["average"],
+      "file": "body-measurements"
+    },
+    {
+      "hkType": "HKQuantityTypeIdentifierBodyMass",
+      "record": "vitalReading",
+      "snomed": "27113001",
+      "loinc": "29463-7",
+      "unit": "kg",
+      "sourceUnits": { "kg": 1, "g": 0.001, "lb": 0.45359237 },
+      "statistics": ["average"],
+      "file": "body-measurements"
+    },
+    {
+      "hkType": "HKQuantityTypeIdentifierActiveEnergyBurned",
+      "record": "vitalReading",
+      "snomed": "251833007",
+      "loinc": "41981-2",
+      "unit": "kcal",
+      "sourceUnits": { "kcal": 1, "Cal": 1, "kJ": 0.2390057361 },
+      "statistics": ["sum"],
+      "file": "activity"
+    }
+  ],
+  "activitySummary": {
+    "file": "activity",
+    "sourceName": "ActivitySummary",
+    "energyUnits": { "kcal": 1, "Cal": 1, "kJ": 0.2390057361 },
+    "earliestDate": "1970-01-01"
+  },
+  "workouts": {
+    "file": "activity",
+    "durationUnits": { "min": 1, "s": 0.016666666666666666, "hr": 60 },
+    "distanceUnits": { "m": 1, "km": 1000, "mi": 1609.344, "ft": 0.3048, "yd": 0.9144 },
+    "energyUnits": { "kcal": 1, "Cal": 1, "kJ": 0.2390057361 }
+  },
+  "devices": {
+    "file": "wellness-devices"
+  }
+}

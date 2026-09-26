@@ -69,6 +69,7 @@ const IDENTITY_MODULES: readonly string[] = [
   'lib/vcf-converter/',
   'lib/clinvar-converter/',
   'lib/vrs-converter/',
+  'lib/apple-health-wellness/',
 ];
 
 /**

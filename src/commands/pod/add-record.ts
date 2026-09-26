@@ -35,6 +35,7 @@ import { DATA_TYPES, resolvePodDir, fileExists, type DataTypeInfo } from './help
 import { resolvePodDek, mintUri } from '../../lib/annotations.js';
 import { mergeIntoBucket, KNOWN_PREFIXES, assertWritableIri } from '../../lib/bucket-write.js';
 import { typedLiteralForPredicate } from '../../lib/shape-datatypes.js';
+import { registeredDataTypeKeyForSubject } from '../../lib/pod-data-types.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -70,13 +71,17 @@ function expandCurie(curie: string): string | undefined {
   return ns + local;
 }
 
-/** Find the DATA_TYPES bucket key whose rdfTypes contains the type IRI. */
-function findBucketForType(typeIri: string): { key: string; info: DataTypeInfo } | undefined {
-  for (const [key, info] of Object.entries(DATA_TYPES)) {
-    if (info.isFhirPassthroughBucket) continue;
-    if (info.rdfTypes.includes(typeIri)) return { key, info };
-  }
-  return undefined;
+/**
+ * The registered bucket a record belongs in, by THE router every filing verb
+ * shares (`registeredDataTypeKeyForSubject`), so a record added by hand lands
+ * in the file `pod import` and `pod reconcile` would file it in (a daily vital
+ * reading goes by its LOINC code, not only its class).
+ */
+function findBucketForRecord(
+  quads: ReadonlyArray<{ predicate: { value: string }; object: { value: string } }>,
+): { key: string; info: DataTypeInfo } | undefined {
+  const key = registeredDataTypeKeyForSubject(quads);
+  return key === undefined ? undefined : { key, info: DATA_TYPES[key] };
 }
 
 export function registerAddRecordSubcommand(pod: Command, program: Command): void {
@@ -111,8 +116,9 @@ export function registerAddRecordSubcommand(pod: Command, program: Command): voi
         process.exitCode = 1;
         return;
       }
-      const bucket = findBucketForType(typeIri);
-      if (!bucket) {
+      // Checked on the type alone first, so an unknown type fails before any
+      // property is looked at; the record's own triples decide the file below.
+      if (!findBucketForRecord([{ predicate: { value: RDF_TYPE }, object: { value: typeIri } }])) {
         printError(
           `No known bucket for type ${options.type}. Supported types are the Cascade record classes registered in the data-type map.`,
           globalOpts,
@@ -230,6 +236,12 @@ export function registerAddRecordSubcommand(pod: Command, program: Command): voi
         literal(createdIso, namedNode(KNOWN_PREFIXES.xsd + 'dateTime')),
       ));
 
+      const bucket = findBucketForRecord(newQuads);
+      if (!bucket) {
+        printError(`No known bucket for type ${options.type}.`, globalOpts);
+        process.exitCode = 1;
+        return;
+      }
       const targetFile = path.join(podDir, bucket.info.directory, bucket.info.filename);
 
       // Read-merge-write through the bucket chokepoint: the existing document's

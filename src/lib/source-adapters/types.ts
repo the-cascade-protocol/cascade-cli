@@ -65,10 +65,24 @@ export interface CompletenessCheck {
   note?: string;
 }
 
+/**
+ * A multi-GB artifact that is imported by a STREAMING importer rather than by
+ * the whole-file, per-file import path. `pod import` hands each to the importer
+ * its `kind` names.
+ */
+export interface StreamedArtifact {
+  /** Absolute path of the file. */
+  path: string;
+  /** Which streaming importer reads it. */
+  kind: 'apple-health-export-xml';
+}
+
 /** The result of expanding a container into importable inputs. */
 export interface ExpandedSource {
   /** Absolute paths of the concrete files to feed the per-file import path. */
   files: string[];
+  /** Artifacts too large for the per-file path, read by a streaming importer. */
+  streamed?: StreamedArtifact[];
   /** Artifacts intentionally not imported (surfaced to the user, never silent). */
   skipped: SkippedArtifact[];
   /** What the adapter recognized, for the import report / verbose log. */

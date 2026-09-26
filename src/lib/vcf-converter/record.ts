@@ -44,6 +44,7 @@ import {
 } from '../fhir-converter/types.js';
 import { GENOMICS_NS } from '../fhir-genomics-converter/types.js';
 import type { VcfHeader, VcfSourceProfile } from './types.js';
+import { appendAll } from '../append-all.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -264,7 +265,7 @@ export function parseRecordLine(
 
     // 1. rdf:type + common triples
     quads.push(tripleType(variantIri, GENOMICS_NS + 'Variant'));
-    quads.push(...commonTriples(variantIri));
+    appendAll(quads, commonTriples(variantIri));
 
     // 2. PROV link to sequencing run
     quads.push(tripleRef(variantIri, NS.prov + 'wasGeneratedBy', sequencingRunIri));

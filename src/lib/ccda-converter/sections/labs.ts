@@ -52,6 +52,7 @@ import { buildNarrativeIdMap, narrativeTextFor, resolveNarrativeName } from '../
 import { buildEncounterRecord } from './encounters.js';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
+import { appendAll } from '../../append-all.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -418,7 +419,7 @@ export function extractLabQuads(
         for (const obs of obsList) {
           const member = extractObservationQuads(obs, sourceSystem, narrativeIdMap, warnings);
           if (!member) continue;
-          quads.push(...member.quads);
+          appendAll(quads, member.quads);
           memberSubjects.push(member.subject);
           if (member.date) memberDates.push(member.date);
         }
@@ -447,11 +448,11 @@ export function extractLabQuads(
           }
           if (!emittedEncounterSubjects.has(built.subject)) {
             emittedEncounterSubjects.add(built.subject);
-            quads.push(...built.quads);
+            appendAll(quads, built.quads);
           }
         }
 
-        quads.push(...buildPanelQuads(
+        appendAll(quads, buildPanelQuads(
           organizer, sourceSystem, stamp, memberSubjects, memberDates, encounterSubjects, warnings,
         ));
       }
@@ -460,7 +461,7 @@ export function extractLabQuads(
       const obsList = listOf<any>(entry.observation);
       for (const obs of obsList) {
         const member = extractObservationQuads(obs, sourceSystem, narrativeIdMap, warnings);
-        if (member) quads.push(...member.quads);
+        if (member) appendAll(quads, member.quads);
       }
     }
   }

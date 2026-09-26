@@ -27,6 +27,7 @@ import {
   structuredKey,
 } from './types.js';
 import { pushEncounterEdge } from './reference-resolution.js';
+import { appendAll } from '../append-all.js';
 
 // ---------------------------------------------------------------------------
 // Patient converter
@@ -101,7 +102,7 @@ export function convertPatient(resource: any): ConversionResult & { _quads: Quad
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.cascade + 'PatientProfile'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   if (resource.birthDate) {
     quads.push(tripleDate(subjectUri, NS.cascade + 'dateOfBirth', resource.birthDate));
@@ -243,7 +244,7 @@ export function convertImmunization(resource: any): ConversionResult & { _quads:
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'ImmunizationRecord'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   const vaccineName = codeableConceptText(resource.vaccineCode) ?? 'Unknown Vaccine';
   quads.push(tripleStr(subjectUri, NS.health + 'vaccineName', vaccineName));
@@ -367,7 +368,7 @@ export function convertCoverage(resource: any): ConversionResult & { _quads: Qua
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.coverage + 'InsurancePlan'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   // See the note above this function: a modifier element, reported and never
   // invented.

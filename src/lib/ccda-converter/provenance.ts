@@ -26,6 +26,7 @@ import {
 import { SOURCE_EHR_UNKNOWN } from '../fhir-converter/provenance.js';
 import { SOURCE_IDENTITY_PREDICATE, type SourceIdentity } from '../source-identity.js';
 import { firstOf, listOf } from './multivalued.js';
+import { appendAll } from '../append-all.js';
 
 const { namedNode } = DataFactory;
 
@@ -85,7 +86,7 @@ export function ensureProvenanceQuads(quads: Quad[]): void {
 
   for (const subject of subjects) {
     if (!hasProvenance.has(subject) && !hasSchemaVersion.has(subject)) {
-      quads.push(...commonTriples(subject));
+      appendAll(quads, commonTriples(subject));
       continue;
     }
     // Partial coverage: add just the missing half (commonTriples emits both).

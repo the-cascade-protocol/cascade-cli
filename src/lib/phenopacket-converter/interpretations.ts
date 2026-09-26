@@ -56,6 +56,7 @@ import {
   deterministicUuid,
 } from '../fhir-converter/types.js';
 import { parseVariationDescriptor } from './variation-descriptor.js';
+import { appendAll } from '../append-all.js';
 
 export interface InterpretationsParseOutput {
   /** All emitted records (Variants + VariantInterpretations). */
@@ -232,9 +233,9 @@ export function parseInterpretations(
         continue;
       }
       records.push(variantOut.record);
-      quads.push(...variantOut.record.quads);
-      warnings.push(...variantOut.warnings);
-      gaps.push(...variantOut.gaps);
+      appendAll(quads, variantOut.record.quads);
+      appendAll(warnings, variantOut.warnings);
+      appendAll(gaps, variantOut.gaps);
 
       // ---- D-Q5: one VariantInterpretation per (variant, condition) pair ----
       const conditionsForFanout = diseases.length > 0 ? diseases : [undefined];
@@ -334,7 +335,7 @@ export function parseInterpretations(
           fhirResourceType: 'Observation',
           quads: ipQuads,
         });
-        quads.push(...ipQuads);
+        appendAll(quads, ipQuads);
       }
     }
   }

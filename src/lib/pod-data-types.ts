@@ -15,6 +15,7 @@
  */
 
 import { CASCADE_NAMESPACES } from './turtle-parser.js';
+import { readingLoincCodesForFile } from './apple-health-wellness/rules.js';
 
 /**
  * Known data file types and the rdf:type IRIs that identify records in them.
@@ -26,7 +27,20 @@ export interface DataTypeInfo {
   filename: string;
   /** If true, type detection uses prefix-matching instead of exact IRI matching */
   isFhirPassthroughBucket?: boolean;
+  /**
+   * `health:DailyVitalReading` is one class for every daily vital, but
+   * pod-structure.md section 4.2 files the readings by domain (heart rate,
+   * HRV, body measurements, activity). A reading whose `cascade:loincCode` is
+   * one of these (full LOINC IRIs) belongs in THIS file; a reading with any
+   * other code, or none, falls back to the class route (`heart-rate`).
+   * Derived from the wellness rules table, so the importer that places a
+   * reading and every verb that later rewrites the file agree on where it lives.
+   */
+  readingLoincCodes?: readonly string[];
 }
+
+const LOINC_NS = 'http://loinc.org/rdf#';
+const loincIris = (fileKey: string): string[] => readingLoincCodesForFile(fileKey).map((c) => LOINC_NS + c);
 
 export const DATA_TYPES: Record<string, DataTypeInfo> = {
   medications: {
@@ -94,9 +108,40 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
   },
   activity: {
     label: 'Activity',
-    rdfTypes: [CASCADE_NAMESPACES.health + 'DailyActivitySnapshot', CASCADE_NAMESPACES.health + 'ActivityData'],
+    // health:Workout is listed on the activity container (serialization
+    // section 12.13), so workouts share its file.
+    rdfTypes: [
+      CASCADE_NAMESPACES.health + 'DailyActivitySnapshot',
+      CASCADE_NAMESPACES.health + 'ActivityData',
+      CASCADE_NAMESPACES.health + 'Workout',
+    ],
     directory: 'wellness',
     filename: 'activity.ttl',
+    readingLoincCodes: loincIris('activity'),
+  },
+  hrv: {
+    label: 'Heart Rate Variability',
+    rdfTypes: [CASCADE_NAMESPACES.health + 'HRVData'],
+    directory: 'wellness',
+    filename: 'hrv.ttl',
+    readingLoincCodes: loincIris('hrv'),
+  },
+  'body-measurements': {
+    label: 'Body Measurements',
+    rdfTypes: [CASCADE_NAMESPACES.health + 'BodyMeasurements'],
+    directory: 'wellness',
+    filename: 'body-measurements.ttl',
+    readingLoincCodes: loincIris('body-measurements'),
+  },
+  // PROVISIONAL placement. pod-structure.md section 4.2 does not yet place
+  // health:Device (health v2.10). One file beside the readings that reference
+  // it is the smallest consistent option; distinct from clinical/devices.ttl,
+  // which holds implanted devices.
+  'wellness-devices': {
+    label: 'Wellness Devices',
+    rdfTypes: [CASCADE_NAMESPACES.health + 'Device'],
+    directory: 'wellness',
+    filename: 'devices.ttl',
   },
   sleep: {
     label: 'Sleep',
@@ -274,4 +319,65 @@ export const STRUCTURAL_SUBNODE_TYPES: ReadonlySet<string> = new Set([
 export function isStructuralSubNode(quads: ReadonlyArray<{ predicate: { value: string }; object: { value: string } }>): boolean {
   const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
   return quads.some((q) => q.predicate.value === RDF_TYPE && STRUCTURAL_SUBNODE_TYPES.has(q.object.value));
+}
+
+const RDF_TYPE_IRI = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+const DAILY_VITAL_READING = CASCADE_NAMESPACES.health + 'DailyVitalReading';
+const LOINC_CODE_PREDICATE = CASCADE_NAMESPACES.cascade + 'loincCode';
+
+/**
+ * Whether the records of a data type go through the reconciler.
+ *
+ * The reconciler matches clinical records (conditions, medications, labs and
+ * the rest) across sources. The `wellness/` buckets hold device data and daily
+ * aggregates it has no matcher for, and a pod with a year of wellness data holds
+ * hundreds of thousands of quads there. Loading them into every clinical import
+ * and every `pod reconcile` only to carry them through untouched costs minutes
+ * and risks nothing but a rewrite of files that must not change. So they stay
+ * out of the reconciler's reads, and a write that lands a record in one of them
+ * is ADDITIVE (the file keeps what it holds) rather than a replacement.
+ */
+export function isReconciledDataType(info: DataTypeInfo): boolean {
+  return info.directory === 'clinical';
+}
+
+/**
+ * THE router: which registered data file a subject belongs in, or undefined
+ * when no registered data type claims it.
+ *
+ * Every verb that files or re-files records (`pod import`, `pod reconcile` and
+ * its undo, `pod add-record`) asks this one function, so a record is always
+ * rewritten into the file it was written to. Routing by the first `rdf:type`,
+ * with one refinement: a `health:DailyVitalReading` is filed by its
+ * `cascade:loincCode` where a data type claims that code
+ * ({@link DataTypeInfo.readingLoincCodes}).
+ */
+export function registeredDataTypeKeyForSubject(
+  quads: ReadonlyArray<{ predicate: { value: string }; object: { value: string } }>,
+): string | undefined {
+  const typeIri = quads.find((q) => q.predicate.value === RDF_TYPE_IRI)?.object.value ?? '';
+  if (typeIri === DAILY_VITAL_READING) {
+    const code = quads.find((q) => q.predicate.value === LOINC_CODE_PREDICATE)?.object.value;
+    if (code) {
+      for (const [key, info] of Object.entries(DATA_TYPES)) {
+        if (info.readingLoincCodes?.includes(code)) return key;
+      }
+    }
+  }
+  for (const [key, info] of Object.entries(DATA_TYPES)) {
+    if (info.isFhirPassthroughBucket) continue;
+    if (info.rdfTypes.includes(typeIri)) return key;
+  }
+  return undefined;
+}
+
+/**
+ * {@link registeredDataTypeKeyForSubject}, with the FHIR passthrough bucket for
+ * a subject no registered type claims: the routing `pod import` and
+ * `pod reconcile` file records by.
+ */
+export function dataTypeKeyForSubject(
+  quads: ReadonlyArray<{ predicate: { value: string }; object: { value: string } }>,
+): string {
+  return registeredDataTypeKeyForSubject(quads) ?? 'fhir-passthrough';
 }
