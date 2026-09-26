@@ -71,6 +71,17 @@ or completes it with `--write`, without a passphrase.
 
 ### Changed
 
+**`docs/pod-encryption.md` points at the specification.** The encryption
+format is now specified in the protocol specification's `pod-encryption.md`
+(version 1.0, Draft), so this document no longer restates the header schema,
+its rules and the reader limits; it links the spec section for each and keeps
+what is specific to this tool: commands, passphrase handling, `--json` output,
+exit codes and `reason` strings, error messages, and where each rule lives in
+the source. It also states the format's disclosed limitation (sealed files are
+not bound to their paths), shows how to run the `conformance` repository's
+pod encryption harness against this tool, and drops a stale limitation:
+`pod conflicts` and `pod resolve` are encryption-aware.
+
 **New encrypted pods get a version 1.1 header.** `pod init --encrypt` and
 `pod encrypt` now write `settings/encryption.json` as version 1.1 with one
 passphrase wrap (`label: "primary"`, `createdAt` set when the pod key is
