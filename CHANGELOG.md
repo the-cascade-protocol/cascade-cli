@@ -40,6 +40,61 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the conformance fixture `positive/ts-produced-v1.1/pod`, which the tests now
   read.
 
+**C-CDA section narratives are named from the document set, and a
+re-download no longer renames them.** Measured on two downloads of the same
+document set from one EHR, seven weeks apart: 0 of 385 section narratives kept
+their name, because the name was built from the per-download document id
+(`ClinicalDocument/id`, new on every download) and from the import batch label
+(by default the downloaded file's name). A narrative is now named from:
+
+- the document set, `ClinicalDocument/setId` (read like any other HL7 id), and
+  the document id only when a document states no set. 25 of the 26 documents
+  in that measurement kept their `setId` across the two downloads and bumped
+  `versionNumber`;
+- the section code;
+- a digest of the narrative under a canonicalisation that drops the markup an
+  EHR regenerates on every download: element `@ID`s (on `table`, `caption`,
+  `tr`, `td`, `content`, `paragraph`, `footnote` and the rest), `footnote` and
+  `footnoteRef`, and `@styleCode`. A section whose clinical text changed gets a
+  new name, where it used to become a second text on its predecessor's
+  subject; two sections with one code and different text in one document are
+  now two records rather than one subject holding both.
+
+The import batch label (`--source-system`, or the file name) is no longer part
+of the name, so one document imported under two labels names its narratives
+once. This renames section narratives in FUTURE imports only; nothing already
+in a pod is renamed, so the first import after upgrading adds one copy of each
+section narrative under its new name.
+
+**The C-CDA id-reuse disambiguator hashes stable clinical fields only.** When
+one `<id>` is claimed by statements that disagree clinically, each claimant is
+named from the id plus a fingerprint of its content. That fingerprint was of
+the whole element, and in the same measurement 22 of the 344 records named
+this way were renamed between downloads with their clinical content unchanged
+(17 encounters, 3 lab reports, 2 medications), led by narrative reference
+pointers (`code/originalText/reference/@value`, `text/reference/@value`),
+visit wrappers nested in lab panels (`component/encounter`) and author
+organisation addresses. It now hashes the claimant's code, effective time,
+value, negation, dose, route, product, participants and similar clinical
+fields, and those of the statements nested in it (except nested encounters,
+orders and status observations), with narrative pointers, ids, addresses,
+authorship, `statusCode` and rendering stripped at every depth. Claimants that
+disagree clinically still split. A statement that cites a record by id and
+states nothing clinical (a medication's bare `<encounter>` link to its visit)
+no longer counts as a contradicting claimant, so the cited record keeps its
+plain id name. A record whose id is unique in its document is not affected: a
+new test pins the name of every such record in every committed C-CDA fixture
+(165 records) against the build before this change.
+
+### Fixed
+
+- **An identity-collision split keeps the pod's record on the minted IRI.**
+  When an arriving record shared its minted IRI with a different record the
+  pod already held, the record with the smaller content fingerprint kept the
+  IRI, so the pod's own record could be moved to a new subject during an
+  import. The pod's record now keeps it and the arrival moves; with no pod copy
+  involved the choice is by fingerprint as before, independent of input order.
+
 ## [0.24.0] - 2026-09-26
 
 The Apple Health wellness import (daily records from `export.xml`, with each day's samples retained) and the pod identifier (`cascade:podIdentifier`, minted once and used to name records). Bundled vocabulary: core 3.11.

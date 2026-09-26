@@ -38,7 +38,7 @@ import { extractEncounterQuads, ENCOUNTERS_TEMPLATE_ID } from './sections/encoun
 import { extractFamilyHistoryQuads, FAMILY_HISTORY_TEMPLATE_ID } from './sections/family-history.js';
 import { extractDeviceQuads, DEVICES_TEMPLATE_ID } from './sections/devices.js';
 import { extractSocialHistoryQuads, SOCIAL_HISTORY_TEMPLATE_ID } from './sections/social-history.js';
-import { extractNarrativeQuads } from './narrative.js';
+import { extractNarrativeQuads, type NarrativeDocumentContext } from './narrative.js';
 import {
   deriveCcdaIdNamespace,
   deriveSourceEhr,
@@ -47,7 +47,7 @@ import {
   ensureSourceIdentityQuads,
 } from './provenance.js';
 import { identityKey } from '../identity.js';
-import { beginCcdaIdScope, endCcdaIdScope } from './record-identity.js';
+import { beginCcdaIdScope, ccdaSourceId, endCcdaIdScope } from './record-identity.js';
 import { sourceIdentity, sourceLabel } from '../source-identity.js';
 import { appendAll } from '../append-all.js';
 
@@ -332,7 +332,7 @@ function convertNormalizedCcda(
   // which is the ratified data-absent token.
   const sourceEhr = sourceLabel(documentOrigin, statedOrganization) ?? statedOrganization;
 
-  // Document ID for narrative linking
+  // Document ID: the narrative context when the document states no setId
   const docIdEl = firstOf<any>(ccdaDoc?.id);
   // HL7 II semantics: root+extension when both present; root alone IS the
   // globally unique document id when extension is absent. When the document
@@ -354,6 +354,14 @@ function convertNormalizedCcda(
         : (docIdEl?.['@_root'] ?? docIdEl?.root)
           ? `${docIdEl['@_root'] ?? docIdEl.root}`
           : `doc:${identityKey(undefined, ccdaDoc, warnings, 'C-CDA ClinicalDocument (no <id>)')}`;
+
+  // The context section narratives are named in: the document SET when the
+  // document states one, because a re-issued summary keeps its setId and gets a
+  // new id (see `NarrativeDocumentContext`).
+  const documentSetId = ccdaSourceId(ccdaDoc?.setId);
+  const narrativeContext: NarrativeDocumentContext = documentSetId
+    ? { documentSet: documentSetId }
+    : { document: documentId };
 
   const allQuads: any[] = [];
   const census: SectionCensusEntry[] = [];
@@ -423,7 +431,7 @@ function convertNormalizedCcda(
       const effectiveLoinc =
         sectionCode || (matchedTemplateId ? (SECTION_HANDLERS[matchedTemplateId]?.loinc ?? '') : '');
       const narrativeQuads = extractNarrativeQuads(
-        sectionText, effectiveLoinc, documentType, documentId, sourceSystem, importedAt,
+        sectionText, effectiveLoinc, documentType, narrativeContext, sourceSystem, importedAt,
         requiresLLMExtraction, sourceEhr, warnings,
       );
       appendAll(allQuads, narrativeQuads);
