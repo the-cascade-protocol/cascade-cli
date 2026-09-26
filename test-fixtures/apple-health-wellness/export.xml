@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE HealthData [
+<!-- SYNTHETIC. Every value in this file is invented for tests; no real person's data. -->
+<!-- HealthKit Export Version: 14 -->
+<!ELEMENT HealthData (ExportDate,Me,(Record|Correlation|Workout|ActivitySummary|ClinicalRecord)*)>
+<!ATTLIST HealthData
+  locale CDATA #REQUIRED
+>
+<!ELEMENT ExportDate EMPTY>
+<!ATTLIST ExportDate
+  value CDATA #REQUIRED
+>
+<!ELEMENT Record ((MetadataEntry|HeartRateVariabilityMetadataList)*)>
+<!ATTLIST Record
+  type          CDATA #REQUIRED
+  unit          CDATA #IMPLIED
+  value         CDATA #IMPLIED
+  sourceName    CDATA #REQUIRED
+  sourceVersion CDATA #IMPLIED
+  device        CDATA #IMPLIED
+  creationDate  CDATA #IMPLIED
+  startDate     CDATA #REQUIRED
+  endDate       CDATA #REQUIRED
+>
+<!-- Note: Any Records that appear as children of a correlation also appear as top-level records in this document. -->
+<!ELEMENT Correlation ((MetadataEntry|Record)*)>
+<!ELEMENT Workout ((MetadataEntry|WorkoutEvent|WorkoutRoute|WorkoutStatistics)*)>
+<!ELEMENT ActivitySummary EMPTY>
+]>
+<HealthData locale="en_US">
+ <ExportDate value="2026-03-10 09:00:00 -0700"/>
+ <Me HKCharacteristicTypeIdentifierDateOfBirth="" HKCharacteristicTypeIdentifierBiologicalSex="HKBiologicalSexNotSet" HKCharacteristicTypeIdentifierBloodType="HKBloodTypeNotSet" HKCharacteristicTypeIdentifierFitzpatrickSkinType="HKFitzpatrickSkinTypeNotSet" HKCharacteristicTypeIdentifierCardioFitnessMedicationsUse="None"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count/min" creationDate="2026-03-07 09:01:12 -0700" startDate="2026-03-07 09:00:00 -0700" endDate="2026-03-07 09:00:00 -0700" value="62">
+  <MetadataEntry key="HKMetadataKeyHeartRateMotionContext" value="1"/>
+ </Record>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count/min" creationDate="2026-03-07 13:00:40 -0700" startDate="2026-03-07 13:00:00 -0700" endDate="2026-03-07 13:00:00 -0700" value="88"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count/min" creationDate="2026-03-08 00:31:02 -0700" startDate="2026-03-08 00:30:00 -0700" endDate="2026-03-08 00:30:00 -0700" value="58"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count/min" creationDate="2026-03-08 02:31:10 -0700" startDate="2026-03-08 02:30:00 -0700" endDate="2026-03-08 02:30:00 -0700" value="55"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count/min" creationDate="2026-03-08 11:00:31 -0700" startDate="2026-03-08 11:00:00 -0700" endDate="2026-03-08 11:00:00 -0700" value="91"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count/min" creationDate="2026-03-08 23:31:00 -0700" startDate="2026-03-08 23:30:00 -0700" endDate="2026-03-08 23:30:00 -0700" value="70"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3.1" device="&lt;&lt;HKDevice: 0x7000044b5e10&gt;, name:Apple Watch, manufacturer:Apple, model:Watch, hardware:Watch6,1, software:10.3.1, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count/min" creationDate="2026-03-09 00:11:05 -0700" startDate="2026-03-09 00:10:00 -0700" endDate="2026-03-09 00:10:00 -0700" value="60"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3.1" device="&lt;&lt;HKDevice: 0x7000044b5e10&gt;, name:Apple Watch, manufacturer:Apple, model:Watch, hardware:Watch6,1, software:10.3.1, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count/min" creationDate="2026-03-09 08:00:44 -0700" startDate="2026-03-09 08:00:00 -0700" endDate="2026-03-09 08:00:00 -0700" value="77"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3.1" device="&lt;&lt;HKDevice: 0x7000044b5e10&gt;, name:Apple Watch, manufacturer:Apple, model:Watch, hardware:Watch6,1, software:10.3.1, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count/min" creationDate="2026-03-10 07:00:21 -0700" startDate="2026-03-10 07:00:00 -0700" endDate="2026-03-10 07:00:00 -0700" value="80"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count" creationDate="2026-03-07 12:10:00 -0700" startDate="2026-03-07 11:00:00 -0700" endDate="2026-03-07 12:00:00 -0700" value="5000"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count" creationDate="2026-03-08 10:11:00 -0700" startDate="2026-03-08 10:00:00 -0700" endDate="2026-03-08 10:10:00 -0700" value="1200"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count" creationDate="2026-03-08 12:21:00 -0700" startDate="2026-03-08 12:00:00 -0700" endDate="2026-03-08 12:20:00 -0700" value="2400"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Alex’s iPhone" sourceVersion="17.4" device="&lt;&lt;HKDevice: 0x600002c8d680&gt;, name:iPhone, manufacturer:Apple Inc., model:iPhone, hardware:iPhone15,2, software:17.4, creation date:2025-10-20 18:02:44 -0700&gt;" unit="count" creationDate="2026-03-08 10:12:00 -0700" startDate="2026-03-08 10:00:00 -0700" endDate="2026-03-08 10:10:00 -0700" value="1150"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="Alex’s iPhone" sourceVersion="17.4" device="&lt;&lt;HKDevice: 0x600002c8d680&gt;, name:iPhone, manufacturer:Apple Inc., model:iPhone, hardware:iPhone15,2, software:17.4, creation date:2025-10-20 18:02:44 -0700&gt;" unit="count" creationDate="2026-03-08 14:15:00 -0700" startDate="2026-03-08 14:00:00 -0700" endDate="2026-03-08 14:12:00 -0700" value="800"/>
+ <Record type="HKQuantityTypeIdentifierRestingHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3" unit="count/min" creationDate="2026-03-07 21:10:00 -0700" startDate="2026-03-07 01:05:00 -0700" endDate="2026-03-07 21:05:00 -0700" value="58"/>
+ <Record type="HKQuantityTypeIdentifierRestingHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3" unit="count/min" creationDate="2026-03-08 21:10:00 -0700" startDate="2026-03-08 03:05:00 -0700" endDate="2026-03-08 21:05:00 -0700" value="57"/>
+ <Record type="HKQuantityTypeIdentifierRestingHeartRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3.1" unit="count/min" creationDate="2026-03-09 21:10:00 -0700" startDate="2026-03-09 00:20:00 -0700" endDate="2026-03-09 21:05:00 -0700" value="59"/>
+ <Record type="HKQuantityTypeIdentifierWalkingHeartRateAverage" sourceName="Alex’s Apple Watch" sourceVersion="10.3" unit="count/min" creationDate="2026-03-08 22:00:00 -0700" startDate="2026-03-08 09:00:00 -0700" endDate="2026-03-08 21:00:00 -0700" value="98"/>
+ <Record type="HKQuantityTypeIdentifierHeartRateVariabilitySDNN" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="ms" creationDate="2026-03-08 04:02:00 -0700" startDate="2026-03-08 04:00:00 -0700" endDate="2026-03-08 04:01:00 -0700" value="42.5">
+  <HeartRateVariabilityMetadataList>
+   <InstantaneousBeatsPerMinute bpm="61" time="4:00:03.12 AM"/>
+   <InstantaneousBeatsPerMinute bpm="63" time="4:00:04.08 AM"/>
+  </HeartRateVariabilityMetadataList>
+ </Record>
+ <Record type="HKQuantityTypeIdentifierHeartRateVariabilitySDNN" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="ms" creationDate="2026-03-08 16:02:00 -0700" startDate="2026-03-08 16:00:00 -0700" endDate="2026-03-08 16:01:00 -0700" value="47.5"/>
+ <Record type="HKQuantityTypeIdentifierRespiratoryRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count/min" creationDate="2026-03-08 05:00:00 -0700" startDate="2026-03-08 04:30:00 -0700" endDate="2026-03-08 04:59:00 -0700" value="14"/>
+ <Record type="HKQuantityTypeIdentifierRespiratoryRate" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="count/min" creationDate="2026-03-08 06:00:00 -0700" startDate="2026-03-08 05:30:00 -0700" endDate="2026-03-08 05:59:00 -0700" value="15.5"/>
+ <Record type="HKQuantityTypeIdentifierOxygenSaturation" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="%" creationDate="2026-03-08 03:00:30 -0700" startDate="2026-03-08 03:00:00 -0700" endDate="2026-03-08 03:00:00 -0700" value="0.97"/>
+ <Record type="HKQuantityTypeIdentifierOxygenSaturation" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="%" creationDate="2026-03-08 15:00:30 -0700" startDate="2026-03-08 15:00:00 -0700" endDate="2026-03-08 15:00:00 -0700" value="0.95"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Withings" sourceVersion="6.2.1" unit="lb" creationDate="2026-03-09 07:13:00 -0700" startDate="2026-03-09 07:12:00 -0700" endDate="2026-03-09 07:12:00 -0700" value="165.3">
+  <MetadataEntry key="HKMetadataKeySyncIdentifier" value="wth-2026-03-09-0712"/>
+  <MetadataEntry key="HKMetadataKeySyncVersion" value="1"/>
+ </Record>
+ <Record type="HKQuantityTypeIdentifierActiveEnergyBurned" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="kcal" creationDate="2026-03-08 10:30:00 -0700" startDate="2026-03-08 10:00:00 -0700" endDate="2026-03-08 10:29:00 -0700" value="120.5"/>
+ <Record type="HKQuantityTypeIdentifierActiveEnergyBurned" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="kcal" creationDate="2026-03-08 12:30:00 -0700" startDate="2026-03-08 12:00:00 -0700" endDate="2026-03-08 12:29:00 -0700" value="80.25"/>
+ <Record type="HKQuantityTypeIdentifierBasalEnergyBurned" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" unit="kcal" creationDate="2026-03-08 10:30:00 -0700" startDate="2026-03-08 10:00:00 -0700" endDate="2026-03-08 10:29:00 -0700" value="33.1"/>
+ <Record type="HKQuantityTypeIdentifierBloodPressureSystolic" sourceName="Omron Connect" sourceVersion="7.1" unit="mmHg" creationDate="2026-03-08 07:31:00 -0700" startDate="2026-03-08 07:30:00 -0700" endDate="2026-03-08 07:30:00 -0700" value="124"/>
+ <Record type="HKQuantityTypeIdentifierBloodPressureDiastolic" sourceName="Omron Connect" sourceVersion="7.1" unit="mmHg" creationDate="2026-03-08 07:31:00 -0700" startDate="2026-03-08 07:30:00 -0700" endDate="2026-03-08 07:30:00 -0700" value="79"/>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Alex’s Apple Watch" sourceVersion="10.3" creationDate="2026-03-08 07:40:00 -0700" startDate="2026-03-08 00:40:00 -0700" endDate="2026-03-08 04:10:00 -0700" value="HKCategoryValueSleepAnalysisAsleepCore">
+  <MetadataEntry key="HKTimeZone" value="America/Los_Angeles"/>
+ </Record>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Alex’s Apple Watch" sourceVersion="10.3" creationDate="2026-03-08 07:40:00 -0700" startDate="2026-03-08 04:10:00 -0700" endDate="2026-03-08 05:20:00 -0700" value="HKCategoryValueSleepAnalysisAsleepDeep">
+  <MetadataEntry key="HKTimeZone" value="America/Los_Angeles"/>
+ </Record>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Alex’s Apple Watch" sourceVersion="10.3" creationDate="2026-03-09 07:40:00 -0700" startDate="2026-03-09 00:50:00 -0700" endDate="2026-03-09 06:30:00 -0700" value="HKCategoryValueSleepAnalysisAsleepREM">
+  <MetadataEntry key="HKTimeZone" value="Europe/London"/>
+ </Record>
+ <Correlation type="HKCorrelationTypeIdentifierBloodPressure" sourceName="Omron Connect" sourceVersion="7.1" creationDate="2026-03-08 07:31:00 -0700" startDate="2026-03-08 07:30:00 -0700" endDate="2026-03-08 07:30:00 -0700">
+  <Record type="HKQuantityTypeIdentifierBloodPressureSystolic" sourceName="Omron Connect" sourceVersion="7.1" unit="mmHg" creationDate="2026-03-08 07:31:00 -0700" startDate="2026-03-08 07:30:00 -0700" endDate="2026-03-08 07:30:00 -0700" value="124"/>
+  <Record type="HKQuantityTypeIdentifierBloodPressureDiastolic" sourceName="Omron Connect" sourceVersion="7.1" unit="mmHg" creationDate="2026-03-08 07:31:00 -0700" startDate="2026-03-08 07:30:00 -0700" endDate="2026-03-08 07:30:00 -0700" value="79"/>
+ </Correlation>
+ <Workout workoutActivityType="HKWorkoutActivityTypeWalking" duration="32.5" durationUnit="min" sourceName="Alex’s Apple Watch" sourceVersion="10.3" device="&lt;&lt;HKDevice: 0x6000031a4f00&gt;, name:Apple Watch, manufacturer:Apple Inc., model:Watch, hardware:Watch6,1, software:10.3, creation date:2025-11-02 10:14:05 -0700&gt;" creationDate="2026-03-08 11:34:00 -0700" startDate="2026-03-08 11:00:00 -0700" endDate="2026-03-08 11:33:00 -0700">
+  <MetadataEntry key="HKIndoorWorkout" value="0"/>
+  <MetadataEntry key="HKTimeZone" value="America/Los_Angeles"/>
+  <WorkoutEvent type="HKWorkoutEventTypeSegment" date="2026-03-08 11:00:00 -0700" duration="16.25" durationUnit="min"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" startDate="2026-03-08 11:00:00 -0700" endDate="2026-03-08 11:33:00 -0700" average="104" minimum="88" maximum="121" unit="count/min"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierActiveEnergyBurned" startDate="2026-03-08 11:00:00 -0700" endDate="2026-03-08 11:33:00 -0700" sum="145.2" unit="kcal"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierDistanceWalkingRunning" startDate="2026-03-08 11:00:00 -0700" endDate="2026-03-08 11:33:00 -0700" sum="2.61" unit="km"/>
+  <WorkoutRoute sourceName="Alex’s Apple Watch" sourceVersion="10.3" creationDate="2026-03-08 11:34:00 -0700" startDate="2026-03-08 11:00:00 -0700" endDate="2026-03-08 11:33:00 -0700">
+   <FileReference path="/workout-routes/route_2026-03-08_11.00am.gpx"/>
+  </WorkoutRoute>
+ </Workout>
+ <Workout workoutActivityType="HKWorkoutActivityTypeCycling" duration="55" durationUnit="min" totalDistance="18.2" totalDistanceUnit="km" totalEnergyBurned="410" totalEnergyBurnedUnit="kcal" sourceName="Strava" sourceVersion="3104" creationDate="2026-03-09 17:40:00 -0700" startDate="2026-03-09 16:30:00 -0700" endDate="2026-03-09 17:25:00 -0700">
+  <MetadataEntry key="HKExternalUUID" value="8B6E1F2A-4C3D-4E5F-9A1B-2C3D4E5F6A7B"/>
+  <MetadataEntry key="HKTimeZone" value="America/Los_Angeles"/>
+ </Workout>
+ <ActivitySummary dateComponents="1969-12-31" activeEnergyBurned="0" activeEnergyBurnedGoal="0" activeEnergyBurnedUnit="kcal" appleMoveTime="0" appleMoveTimeGoal="0" appleExerciseTime="0" appleExerciseTimeGoal="0" appleStandHours="0" appleStandHoursGoal="0"/>
+ <ActivitySummary dateComponents="2026-03-07" activeEnergyBurned="310.5" activeEnergyBurnedGoal="400" activeEnergyBurnedUnit="kcal" appleMoveTime="0" appleMoveTimeGoal="0" appleExerciseTime="25" appleExerciseTimeGoal="30" appleStandHours="11" appleStandHoursGoal="12"/>
+ <ActivitySummary dateComponents="2026-03-08" activeEnergyBurned="402.75" activeEnergyBurnedGoal="400" activeEnergyBurnedUnit="kcal" appleMoveTime="0" appleMoveTimeGoal="0" appleExerciseTime="41" appleExerciseTimeGoal="30" appleStandHours="12" appleStandHoursGoal="12"/>
+ <ActivitySummary dateComponents="2026-03-09" activeEnergyBurned="512" activeEnergyBurnedGoal="400" activeEnergyBurnedUnit="kcal" appleMoveTime="0" appleMoveTimeGoal="0" appleExerciseTime="62" appleExerciseTimeGoal="30" appleStandHours="10" appleStandHoursGoal="12"/>
+ <ActivitySummary dateComponents="2026-03-10" activeEnergyBurned="88" activeEnergyBurnedGoal="400" activeEnergyBurnedUnit="kcal" appleMoveTime="0" appleMoveTimeGoal="0" appleExerciseTime="5" appleExerciseTimeGoal="30" appleStandHours="3" appleStandHoursGoal="12"/>
+</HealthData>

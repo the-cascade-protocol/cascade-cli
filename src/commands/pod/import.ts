@@ -39,6 +39,11 @@ import {
   type LiteralLiftSummary,
 } from '../../lib/literal-lifting.js';
 import { detectSource, type FileSourceMeta, type CompletenessCheck } from '../../lib/source-adapters/registry.js';
+import { dataTypeKeyForSubject, isReconciledDataType } from '../../lib/pod-data-types.js';
+import {
+  importAppleHealthWellness,
+  type WellnessImportReport,
+} from '../../lib/apple-health-wellness/import-export.js';
 import {
   DATA_TYPES,
   isStructuralSubNode,
@@ -79,6 +84,7 @@ import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket
 import { toJsonText } from '../../lib/json-output.js';
 import { appendTier0Journal, TIER0_JOURNAL_RELATIVE_PATH } from '../../lib/tier0-journal.js';
 import { shellCommand } from '../../lib/shell-quote.js';
+import { appendAll } from '../../lib/append-all.js';
 
 // ---------------------------------------------------------------------------
 // Import report type
@@ -186,6 +192,13 @@ interface ImportReport {
    * count, omitted the empty buckets, and read as a success.
    */
   sectionCensus: SectionCensusEntry[];
+  /**
+   * One entry per Apple Health `export.xml` read by the streaming wellness
+   * aggregator: the day zone and the rule that chose it, what was read,
+   * retained and derived, and every file written. Absent when the import had
+   * no such export.
+   */
+  wellness?: WellnessImportReport[];
   warnings: string[];
   dryRun: boolean;
 }
@@ -198,8 +211,12 @@ async function loadExistingPodData(
   podDir: string,
   dek?: Buffer,
 ): Promise<{ inputs: ReconcilerInput[]; unreadable: string[] }> {
-  // Pod data directories that contain reconcilable records
-  const DATA_DIRS = ['clinical', 'wellness'];
+  // Pod data directories that contain reconcilable records. `wellness/` is not
+  // one (see `isReconciledDataType`): its buckets hold device data and daily
+  // aggregates the reconciler has no matcher for, hundreds of thousands of
+  // quads in a real pod, and a bucket there that receives records from this
+  // import is merged additively in Step 7 rather than replaced.
+  const DATA_DIRS = ['clinical'];
   const inputs: ReconcilerInput[] = [];
   const unreadable: string[] = [];
 
@@ -281,22 +298,10 @@ async function parseTurtleToQuads(turtle: string): Promise<Map<string, Quad[]>> 
 // Route a subject's rdf:type to a DATA_TYPES key
 // ---------------------------------------------------------------------------
 
+// One router for every verb that files records (`pod-data-types.ts`), so a
+// record this import rewrites lands in the file it was written to.
 function routeTypeKey(quads: Quad[]): string {
-  const rdfTypeIri = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
-  const typeQuad = quads.find(q => q.predicate.value === rdfTypeIri);
-  const typeIri = typeQuad?.object.value ?? '';
-
-  // Exact match first
-  for (const [key, info] of Object.entries(DATA_TYPES)) {
-    if (info.isFhirPassthroughBucket) continue;
-    if (info.rdfTypes.includes(typeIri)) return key;
-  }
-
-  // FHIR passthrough: type starts with http://hl7.org/fhir/
-  if (typeIri.startsWith('http://hl7.org/fhir/')) return 'fhir-passthrough';
-
-  // Unknown type: fallback to fhir-passthrough
-  return 'fhir-passthrough';
+  return dataTypeKeyForSubject(quads);
 }
 
 // ---------------------------------------------------------------------------
@@ -340,13 +345,65 @@ export function missingPrefixHeader(block: string, existingContent: string): str
 }
 
 // ---------------------------------------------------------------------------
-// Build a TypeRegistration block
+// Type index and index.ttl: what is already registered, read by PARSING
 // ---------------------------------------------------------------------------
+//
+// Never by substring on the raw text. The type index `pod init` writes carries a
+// commented example registering `/wellness/heart-rate.ttl`, and `index.ttl` one
+// containing `wellness/heart-rate.ttl`; a substring test took those comments
+// for registrations, so the heart-rate file was never registered anywhere.
 
-function buildTypeRegistration(key: string, info: typeof DATA_TYPES[string]): string {
-  const forClass = shortenForTurtle(info.rdfTypes[0]);
+const SOLID = 'http://www.w3.org/ns/solid/terms#';
+const LDP_CONTAINS = 'http://www.w3.org/ns/ldp#contains';
+/** Base the pod's own documents are parsed against, so pod-relative IRIs compare exactly. */
+const POD_BASE = 'https://pod.invalid/';
+
+function parsePodDocument(content: string, rel: string): Quad[] | undefined {
+  try {
+    return new Parser({ format: 'Turtle', baseIRI: POD_BASE + rel }).parse(content);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Every (class, instance) pair a type index registers, as `class \0 instance`
+ * with the instance resolved to a full IRI, plus every registration subject.
+ * Undefined when the document does not parse.
+ */
+export function typeIndexRegistrations(
+  content: string,
+  indexRel: string,
+): { pairs: Set<string>; subjects: Set<string> } | undefined {
+  const quads = parsePodDocument(content, indexRel);
+  if (!quads) return undefined;
+  const classes = new Map<string, string[]>();
+  const instances = new Map<string, string[]>();
+  const subjects = new Set<string>();
+  for (const q of quads) {
+    subjects.add(q.subject.value);
+    const into = q.predicate.value === SOLID + 'forClass' ? classes : q.predicate.value === SOLID + 'instance' ? instances : undefined;
+    if (!into) continue;
+    const list = into.get(q.subject.value) ?? [];
+    list.push(q.object.value);
+    into.set(q.subject.value, list);
+  }
+  const pairs = new Set<string>();
+  for (const [subject, cs] of classes) {
+    for (const c of cs) for (const i of instances.get(subject) ?? []) pairs.add(`${c}\u0000${i}`);
+  }
+  return { pairs, subjects };
+}
+
+function localNameOf(iri: string): string {
+  const cut = Math.max(iri.lastIndexOf('#'), iri.lastIndexOf('/'));
+  return iri.slice(cut + 1).replace(/[^A-Za-z0-9_-]/g, '') || 'type';
+}
+
+function buildTypeRegistration(fragment: string, classIri: string, info: typeof DATA_TYPES[string]): string {
+  const forClass = shortenForTurtle(classIri);
   const instance = `</${info.directory}/${info.filename}>`;
-  return `\n<#${key}> a solid:TypeRegistration ;\n    solid:forClass ${forClass} ;\n    solid:instance ${instance} .\n`;
+  return `\n<#${fragment}> a solid:TypeRegistration ;\n    solid:forClass ${forClass} ;\n    solid:instance ${instance} .\n`;
 }
 
 // ---------------------------------------------------------------------------
@@ -357,25 +414,59 @@ function typeIndexForInfo(info: typeof DATA_TYPES[string]): 'publicTypeIndex.ttl
   return info.directory === 'clinical' ? 'publicTypeIndex.ttl' : 'privateTypeIndex.ttl';
 }
 
+/**
+ * The classes a type registration is written for. A clinical bucket registers
+ * its data type's primary class. A wellness bucket registers every class the
+ * records handed to it carry, because one file holds several (activity.ttl
+ * holds daily snapshots, workouts and per-device energy readings), and its
+ * data type's first class can be a container class no record carries
+ * (`health:HRVData`), under which a lookup finds nothing.
+ */
+function registrationClasses(info: typeof DATA_TYPES[string], heldClasses: Iterable<string>): string[] {
+  if (info.directory !== 'wellness') return [info.rdfTypes[0]];
+  const held = [...new Set(heldClasses)].sort();
+  return held.length > 0 ? held : [info.rdfTypes[0]];
+}
+
 // ---------------------------------------------------------------------------
 // Append to type index file (string manipulation to preserve comments)
 // ---------------------------------------------------------------------------
 
+/**
+ * Register `info`'s file in a type index for each of `classes` (full IRIs;
+ * default: the data type's primary class) that the index does not already
+ * register it for. True when anything was (or, dry run, would be) appended.
+ * An index that does not parse is left alone.
+ */
 export async function appendTypeRegistration(
   indexPath: string,
   key: string,
   info: typeof DATA_TYPES[string],
   dryRun: boolean,
   dek?: Buffer,
+  classes: readonly string[] = [info.rdfTypes[0]],
 ): Promise<boolean> {
   const content = readResource(indexPath, dek);
+  const indexRel = `settings/${path.basename(indexPath)}`;
+  const registered = typeIndexRegistrations(content, indexRel);
+  if (!registered) return false;
 
-  // Check if already registered (by key name)
-  if (content.includes(`<#${key}>`) || content.includes(`/${info.filename}`)) {
-    return false; // already present
+  const instanceIri = `${POD_BASE}${info.directory}/${info.filename}`;
+  const subjects = new Set(registered.subjects);
+  let block = '';
+  for (const classIri of classes) {
+    if (registered.pairs.has(`${classIri}\u0000${instanceIri}`)) continue;
+    // The data type key is the fragment when it is free (what earlier releases
+    // wrote); a second class for the same file gets the class name appended.
+    let fragment = key;
+    if (subjects.has(`${POD_BASE}${indexRel}#${fragment}`)) {
+      fragment = `${key}-${localNameOf(classIri)}`;
+      for (let n = 2; subjects.has(`${POD_BASE}${indexRel}#${fragment}`); n++) fragment = `${key}-${localNameOf(classIri)}-${n}`;
+    }
+    subjects.add(`${POD_BASE}${indexRel}#${fragment}`);
+    block += buildTypeRegistration(fragment, classIri, info);
   }
-
-  const block = buildTypeRegistration(key, info);
+  if (block === '') return false;
 
   // Declare any prefix the appended block uses that the file does not yet
   // declare (e.g. coverage: for a Claim/ExplanationOfBenefit registration, or
@@ -402,7 +493,10 @@ async function appendIndexContains(
 ): Promise<boolean> {
   const content = readResource(indexPath, dek);
 
-  if (content.includes(relPath)) {
+  const quads = parsePodDocument(content, 'index.ttl');
+  if (!quads) return false; // an index.ttl that does not parse is left alone
+  const target = POD_BASE + relPath;
+  if (quads.some((q) => q.predicate.value === LDP_CONTAINS && q.object.value === target)) {
     return false; // already present
   }
 
@@ -501,6 +595,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // each file's basename ("MedicationRequest-<id>"), which was the Source
       // facet wall. A plain file argument has no label (falls back to basename).
       const expandedFiles: { path: string; label?: string; source?: FileSourceMeta }[] = [];
+      // Multi-GB artifacts read by a streaming importer after the per-file path
+      // (an Apple Health export.xml, read by the wellness aggregator).
+      const streamedExports: string[] = [];
       const sourceSkips: string[] = [];
       const completeness: CompletenessCheck[] = [];
       for (const arg of files) {
@@ -527,8 +624,11 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         for (const s of expanded.skipped) {
           sourceSkips.push(`Skipped ${path.basename(s.path)}: ${s.reason}`);
         }
-        if (expanded.completeness) completeness.push(...expanded.completeness);
-        if (expanded.files.length === 0) {
+        if (expanded.completeness) appendAll(completeness, expanded.completeness);
+        for (const st of expanded.streamed ?? []) {
+          if (st.kind === 'apple-health-export-xml') streamedExports.push(st.path);
+        }
+        if (expanded.files.length === 0 && (expanded.streamed ?? []).length === 0) {
           const why = expanded.skipped.length
             ? ` ${expanded.skipped.map((s) => s.reason).join('; ')}`
             : '';
@@ -541,11 +641,13 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         }
         printVerbose(
           `${expanded.sourceLabel}: importing ${expanded.files.length} file(s)` +
+            ((expanded.streamed ?? []).length ? ` and streaming ${(expanded.streamed ?? []).length}` : '') +
             (expanded.skipped.length ? `, skipping ${expanded.skipped.length}` : ''),
           globalOpts,
         );
-        expandedFiles.push(
-          ...expanded.files.map((f) => ({
+        appendAll(
+          expandedFiles,
+          expanded.files.map((f) => ({
             path: f,
             label: expanded.sourceLabel,
             source: expanded.fileSources?.[f],
@@ -659,8 +761,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           }
           turtleContent = result.output;
           resourceCount = result.resourceCount;
-          warnings.push(...result.warnings);
-          allWarnings.push(...result.warnings.map(w => `${filePath}: ${w}`));
+          appendAll(warnings, result.warnings);
+          appendAll(allWarnings, result.warnings.map(w => `${filePath}: ${w}`));
           for (const s of result.sectionCensus ?? []) {
             const acc = sectionCensus.find((e) => e.label === s.label && e.loinc === s.loinc);
             if (acc) {
@@ -706,8 +808,8 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           }
           turtleContent = result.output;
           resourceCount = result.resourceCount;
-          warnings.push(...result.warnings);
-          allWarnings.push(...result.warnings.map(w => `${filePath}: ${w}`));
+          appendAll(warnings, result.warnings);
+          appendAll(allWarnings, result.warnings.map(w => `${filePath}: ${w}`));
           if (result.edgeResolution) {
             edgeResolution.resolved += result.edgeResolution.resolved;
             edgeResolution.unresolved += result.edgeResolution.unresolved;
@@ -761,7 +863,11 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
 
       // Load existing pod data as an implicit source 0 when --reconcile-existing is set
       let existingInputs: ReconcilerInput[] = [];
-      if (options.reconcileExisting !== false) {
+      // An import whose only input is a streamed wellness export has nothing for
+      // the reconciler to reconcile, so the pod's records are not loaded into it
+      // (loading them would only rewrite every bucket with what it already holds).
+      const wellnessOnly = reconcilerInputs.length === 0 && streamedExports.length > 0;
+      if (options.reconcileExisting !== false && !wellnessOnly) {
         const existing = await loadExistingPodData(podDir, dek);
         existingInputs = existing.inputs;
         for (const rel of existing.unreadable) {
@@ -1101,10 +1207,12 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         // existing bucket that does not parse is a refusal rather than a
         // silently emptied Map.
         try {
-          if (useCrossBatchReplace) {
+          if (useCrossBatchReplace && isReconciledDataType(info)) {
             // Cross-batch reconciliation: the reconciler output already
             // represents the complete merged state (existing + new, deduped),
-            // so the file's contents are REPLACED, not appended to.
+            // so the file's contents are REPLACED, not appended to. Only for a
+            // bucket the reconciler read: a wellness bucket was never loaded,
+            // so replacing it would drop everything it holds.
             const priorSubjects = new Set<string>();
             await mergeIntoBucket(targetFile, allNewQuads, dek, {
               dryRun,
@@ -1183,7 +1291,15 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         const indexPath = indexFile === 'publicTypeIndex.ttl' ? publicIndexPath : privateIndexPath;
 
         if (await fileExists(indexPath)) {
-          const appended = await appendTypeRegistration(indexPath, typeKey, info, dryRun, dek);
+          const held: string[] = [];
+          for (const quads of buckets.get(typeKey) ?? []) {
+            if (isStructuralSubNode(quads)) continue;
+            const t = quads.find((q) => q.predicate.value === 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type');
+            if (t) held.push(t.object.value);
+          }
+          const appended = await appendTypeRegistration(
+            indexPath, typeKey, info, dryRun, dek, registrationClasses(info, held),
+          );
           if (appended) {
             printVerbose(`  ${dryRun ? '[dry-run] ' : ''}Added type registration for ${typeKey} to ${indexFile}`, globalOpts);
           }
@@ -1309,6 +1425,66 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         }
       }
 
+      // --- Step 9c: Apple Health wellness (streamed export.xml) ---
+      // After the per-file records, so the clinical half of an export is on disk
+      // first. The aggregator writes its own files additively and in canonical
+      // order; the type index and index.ttl are updated here the same way Steps
+      // 8 and 9 do it for the per-file path.
+      const wellnessReports: WellnessImportReport[] = [];
+      for (const exportXml of streamedExports) {
+        printVerbose(`Streaming Apple Health wellness data: ${exportXml}`, globalOpts);
+        let wr: WellnessImportReport;
+        try {
+          wr = await importAppleHealthWellness({ podDir, exportXmlPath: exportXml, dek, dryRun });
+        } catch (e: unknown) {
+          printError(
+            `Wellness import of ${exportXml} failed: ${e instanceof Error ? e.message : String(e)}`,
+            globalOpts,
+          );
+          process.exitCode = 1;
+          continue;
+        }
+        wellnessReports.push(wr);
+        sourceReport.push({
+          file: exportXml,
+          system: 'Apple Health export',
+          resourceCount: wr.recordsRead,
+          warnings: wr.warnings,
+        });
+        appendAll(allWarnings, wr.warnings.map((w) => `${path.basename(exportXml)}: ${w}`));
+        if (wr.dayZone.rule !== 'pod') {
+          allWarnings.push(
+            `Wellness days are cut in ${wr.dayZone.zone} (${wr.dayZone.rule}); ` +
+              (wr.dayZone.written
+                ? 'recorded as cascade:dayZone in profile/extended.ttl.'
+                : 'not recorded in the pod by this run.'),
+          );
+        }
+        for (const f of wr.files) {
+          const info = DATA_TYPES[f.key];
+          if (info) {
+            typeCounts[f.key] = (typeCounts[f.key] ?? 0) + f.recordsWritten;
+            filesWritten.push({
+              path: path.join(podDir, ...f.path.split('/')),
+              recordsAdded: f.recordsWritten,
+              recordsNew: f.recordsNew,
+              type: f.key,
+            });
+            const indexPath = typeIndexForInfo(info) === 'publicTypeIndex.ttl' ? publicIndexPath : privateIndexPath;
+            if (await fileExists(indexPath)) {
+              await appendTypeRegistration(indexPath, f.key, info, dryRun, dek, registrationClasses(info, f.classes));
+            }
+          }
+          if (f.created && (await fileExists(indexTtlPath))) {
+            await appendIndexContains(indexTtlPath, f.path, dryRun, dek);
+          }
+          printVerbose(
+            `  ${dryRun ? '[dry-run] ' : ''}${f.created ? 'Created' : 'Updated'} ${f.path} (${f.recordsNew} new of ${f.recordsWritten})`,
+            globalOpts,
+          );
+        }
+      }
+
       // --- Step 10: Summary and report ---
       const totalRecordsImported = Object.values(typeCounts).reduce((a, b) => a + b, 0);
       const recordsNew = filesWritten.reduce((a, f) => a + f.recordsNew, 0);
@@ -1343,6 +1519,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         edgeResolution,
         literalLifting,
         sectionCensus,
+        ...(wellnessReports.length > 0 ? { wellness: wellnessReports } : {}),
         warnings: allWarnings,
         dryRun,
       };
@@ -1436,6 +1613,35 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             ].filter(Boolean).join(', ');
             console.log(`    - clinical:parsedIndicationReference: ${pi.lifted} lifted` +
               (notes ? ` (${notes})` : ''));
+          }
+        }
+        for (const wr of wellnessReports) {
+          console.log(`  Wellness (${path.basename(wr.export)}):`);
+          console.log(`    Day zone:         ${wr.dayZone.zone} (${wr.dayZone.rule})`);
+          console.log(
+            `    Samples:          ${wr.samplesAggregated} aggregated, ${wr.samplesRetained} retained in ` +
+              `${wr.sampleFiles.total} daily sample file(s) (${wr.sampleFiles.new} new)`,
+          );
+          console.log(`    Closed days:      ${wr.closedDays} (${wr.openDaysSkipped} open day(s) left for a later export)`);
+          console.log(
+            `    Source records:   ${wr.activitySummaries.imported} ActivitySummary day(s), ${wr.workouts} workout(s), ${wr.devices} device(s)`,
+          );
+          const dupes = Object.values(wr.duplicateRecords).reduce((a, b) => a + b, 0);
+          if (dupes > 0) {
+            console.log(
+              `    Duplicates:       ${dupes} record(s) listed more than once with identical content, written once (` +
+                Object.entries(wr.duplicateRecords).map(([k, n]) => `${k} ${n}`).join(', ') + ')',
+            );
+          }
+          const unread = Object.entries(wr.unreadRecordTypes);
+          if (unread.length > 0) {
+            console.log(
+              `    Not read:         ${unread.reduce((a, [, n]) => a + n, 0)} record(s) of ${unread.length} type(s) ` +
+                'this release does not import (per type in the --report JSON, wellness[].unreadRecordTypes)',
+            );
+          }
+          if (wr.correlationRecordsSkipped > 0) {
+            console.log(`    Skipped:          ${wr.correlationRecordsSkipped} record(s) nested in <Correlation> (each also appears at top level)`);
           }
         }
         if (reconciledEdgeRewrites > 0) {

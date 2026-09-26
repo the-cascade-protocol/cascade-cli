@@ -61,6 +61,7 @@ import { SOURCE_EHR_UNKNOWN, deriveBundleOrigin } from './provenance.js';
 import { SOURCE_IDENTITY_PREDICATE } from '../source-identity.js';
 import { resolveReferenceEdges, type ConvertedResourceRef } from './reference-resolution.js';
 import { liftTrappedLiterals, type LiteralLiftSummary } from '../literal-lifting.js';
+import { appendAll } from '../append-all.js';
 
 // Re-export public types
 export type { InputFormat, OutputFormat, ConversionResult, BatchConversionResult };
@@ -170,7 +171,7 @@ export async function convert(
       }
       const result = convertFhirResourceToQuads(res, passthroughMinimal);
       if (result) {
-        allQuads.push(...result._quads);
+        appendAll(allQuads, result._quads);
         const subject = result._quads.find(
           (q) => q.predicate.value === NS.rdf + 'type',
         )?.subject.value;
@@ -184,7 +185,7 @@ export async function convert(
           resourceType: result.resourceType,
           cascadeType: result.cascadeType,
         });
-        warnings.push(...result.warnings);
+        appendAll(warnings, result.warnings);
       }
     }
 
@@ -360,7 +361,7 @@ export async function convert(
   } else if (from === 'cascade' && to === 'fhir') {
     // Cascade -> FHIR
     const { resources, warnings: convWarnings } = await convertCascadeToFhir(Buffer.isBuffer(input) ? input.toString('utf-8') : input);
-    warnings.push(...convWarnings);
+    appendAll(warnings, convWarnings);
 
     if (resources.length === 0) {
       return {

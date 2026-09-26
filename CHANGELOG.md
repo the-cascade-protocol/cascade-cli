@@ -7,9 +7,89 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased]
+## [0.23.0] - 2026-09-25
+
+Everything below, including the entries written before this heading was added,
+ships in 0.23.0.
 
 ### Added
+
+**Apple Health wellness data: `cascade pod import <export folder>` now reads
+`export.xml`.** Until now an Apple Health export brought in its clinical
+records and none of the watch or phone data, because `export.xml` (4.6 GB in a
+real export) was skipped. It is now read by a streaming aggregator in one pass
+(a real 4.6 GB export, 5.9 million aggregated samples over 4,378 closed days,
+imports in about a minute with a peak RSS under 0.9 GB, and completes with the
+heap capped at 384 MB), and written as daily wellness records under health v2.11:
+
+- **Computed daily aggregates**, one record per (source, device, metric,
+  statistic, closed day), for steps, heart rate (minimum, average, maximum),
+  resting heart rate, walking heart rate average, HRV (SDNN), respiratory rate,
+  blood oxygen, body mass and active energy. The metric list, units, codes,
+  statistics and target file are data (`src/data/apple-health-wellness-rules.json`),
+  read by one function. No winner is picked across sources: the watch and the
+  phone counting steps on one day are two records.
+- **Only closed days are aggregated**: a day is written once the export's
+  coverage (its `<ExportDate>`) ends strictly after the day does, so importing
+  the same export twice leaves every file byte-identical.
+- **Days are cut in the pod's `cascade:dayZone`**, never in the offset the
+  export prints (Apple renders every timestamp in the exporting device's current
+  zone). When the pod states no zone, the first import sets it from the majority
+  `HKTimeZone` in the export, else the importing machine's zone, and the import
+  report says which rule applied.
+- **Samples are retained before anything is derived from them.** Each closed
+  day's samples are kept as one compact JSON pack (packed columns per series),
+  content-addressed under `attachments/sha-256/` and written as soon as the day
+  is computed. Inside it, samples are filed by aggregate group (type, source,
+  device) under the group's sample digest. `wellness/samples/samples.ttl`
+  (provisional location) describes each pack, the groups it holds
+  (`dct:hasPart`), and a node per group named from its sample digest. Every
+  computed aggregate points at its GROUP with `prov:wasDerivedFrom` (never at
+  the day's pack, which changes whenever any series of the day does, so one
+  aggregate name always carries the same triples) and at the rule and its
+  version with `prov:wasGeneratedBy`.
+- **The report counts what it passes over**: records the export lists more than
+  once with identical content (`duplicateRecords`, written once), names that
+  arrive with different content (`collisions`, never merged), and every
+  `<Record>` type this release does not read (`unreadRecordTypes`, per type).
+- **Each wellness file is registered in the private type index under every class
+  its records carry**, and listed in `index.ttl`.
+- **Names follow D-WELLNESS-1**: an aggregate is named by the digest seed over
+  the pod subject, id space, device, metric, statistic, UTC interval and a
+  digest of its samples; a source record carrying its own id is named from it.
+  Both seeds live in `src/lib/identity.ts`. Samples nested in `<Correlation>`
+  are skipped (they also appear at top level), and the per-export memory address
+  in Apple's device string is stripped before anything is digested.
+- **Source records**: Apple's own `<ActivitySummary>` days (named by date; the
+  all-zero pre-1970 sentinel rows are dropped), `<Workout>`s (no routes), and the
+  `health:Device`s the records reference.
+
+Records land in `wellness/heart-rate.ttl`, `hrv.ttl`, `body-measurements.ttl`
+and `activity.ttl` per the pod structure, and devices in `wellness/devices.ttl`
+(provisional). A `health:DailyVitalReading` is filed by its LOINC code, and
+`pod import` and `pod reconcile` now share one router, so a later import or
+reconcile rewrites each record into the file it was written to.
+
+Not yet built: sleep sessions, blood pressure readings, basal energy, VO2 max.
+
+### Fixed
+
+- **`pod import` and `pod reconcile` no longer crash on a pod holding a large
+  bucket.** Appending with `push(...items)` threw `RangeError: Maximum call
+  stack size exceeded` once one file held more than about 200,000 quads (one
+  year of daily heart rate does). Every such append in `src/` is now a loop, and
+  a test keeps the spread form out.
+- **Wellness buckets are no longer loaded into the reconciler.** It has no
+  matcher for them; a clinical import or `pod reconcile` now leaves them unread,
+  and a write that routes a record into one is additive, never a replacement.
+- **The type index and `index.ttl` are read by parsing.** A substring check
+  matched the commented example in the file `pod init` writes, so
+  `wellness/heart-rate.ttl` was never registered.
+- `pod reconcile`'s undo and `pod add-record` file records through the same
+  router as `pod import`; `pod info` counts wellness records as records, not
+  days; a time zone alias (`US/Pacific`) counts as the zone it names when the
+  day zone is chosen; Ctrl-C during a wellness import removes its encrypted
+  scratch directory, and the next import sweeps any left by a killed one.
 
 **`cascade pod passphrase set <pod-dir> --rotate-dek`: a new data key, and
 every sealed file re-encrypted under it.** A re-wrap changes only which

@@ -10,6 +10,7 @@
 
 import { detectVendor as detectVendorInternal } from './vendor/detect.js';
 import { firstOf, listOf } from './multivalued.js';
+import { appendAll } from '../append-all.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -157,11 +158,11 @@ class DefaultVendorNormalizer implements VendorNormalizer {
     const cells: any[] = [];
 
     const td = row?.td;
-    if (Array.isArray(td)) cells.push(...td);
+    if (Array.isArray(td)) appendAll(cells, td);
     else if (td) cells.push(td);
 
     const th = row?.th;
-    if (Array.isArray(th)) cells.push(...th);
+    if (Array.isArray(th)) appendAll(cells, th);
     else if (th) cells.push(th);
 
     if (cells.length === 0) return false;

@@ -447,3 +447,150 @@ export function identityKey(
 ): string {
   return identitySeed({ explicitId, content, warnings, label }).seed;
 }
+
+// ===========================================================================
+// WELLNESS SEEDS (D-WELLNESS-1 Q1)
+// ===========================================================================
+//
+// A wellness record is named by one of exactly two seeds, one per naming tier
+// of D-CANONICAL-1. Both are built HERE and nowhere else; a converter hands the
+// returned string to `deterministicUuid` and adds nothing to it.
+//
+//   Tier 1, the source supplied an identifier (a workout's HKExternalUUID or
+//   HKMetadataKeySyncIdentifier, an ActivitySummary's date):
+//
+//     pod subject | id space | the raw source identifier
+//
+//   Digest tier, a record no source names (a computed aggregate, or a source
+//   element that carries no identifier):
+//
+//     pod subject | id space | device | metric | statistic | UTC interval |
+//     digest of the constituent samples
+//
+// Components are LENGTH-PREFIXED (UTF-8 byte length, a colon, the bytes), never
+// delimiter-joined, so a source named `a|b` and a source `a` with a metric
+// starting `b` cannot produce one seed. The record class is deliberately absent
+// from both: it is redundant with the metric or the id space, and a component
+// that can disagree with itself is a component that can split one record into
+// two. The metric is the SOURCE's own type identifier, never a LOINC or SNOMED
+// code, so a corrected code mapping re-mints nothing.
+//
+// Length-prefixed sequences parse unambiguously, so a three-component seed can
+// never equal a seven-component one; no tier tag is needed to keep them apart.
+
+/** The closed set of wellness id spaces (health:sourceIdSpace, health v2.10). */
+export const WELLNESS_ID_SPACES = ['healthkit', 'google-health', 'fitbit'] as const;
+export type WellnessIdSpace = (typeof WELLNESS_ID_SPACES)[number];
+
+/** Length-prefix each component by its UTF-8 byte length and concatenate. */
+export function lengthPrefixed(components: readonly string[]): string {
+  return components.map((c) => `${Buffer.byteLength(c, 'utf8')}:${c}`).join('');
+}
+
+function assertIdSpace(idSpace: string): void {
+  if (!(WELLNESS_ID_SPACES as readonly string[]).includes(idSpace)) {
+    throw new Error(`Unknown wellness id space "${idSpace}"; expected one of ${WELLNESS_ID_SPACES.join(', ')}`);
+  }
+}
+
+/**
+ * Tier-1 seed: a record whose source supplied its own identifier.
+ *
+ * The identifier is used RAW. The id space is a separate component rather than
+ * a prefix on the id, so this seed, not a string grammar, decides identity.
+ */
+export function wellnessSourceRecordSeed(opts: {
+  podSubject: string;
+  idSpace: WellnessIdSpace;
+  sourceId: string;
+}): string {
+  assertIdSpace(opts.idSpace);
+  if (opts.sourceId.length === 0) throw new Error('A tier-1 wellness seed needs a non-empty source identifier');
+  return lengthPrefixed([opts.podSubject, opts.idSpace, opts.sourceId]);
+}
+
+/**
+ * Digest-tier seed: a record no source names. For a computed aggregate
+ * `statistic` is its `cascade:statistic`; for a source element that carries no
+ * identifier (a workout without one) it is the empty string.
+ *
+ * `device` is {@link wellnessDeviceIdentity}, or the empty string when the
+ * samples name no device: the source's own name is then still in the seed,
+ * because the sample digest covers it.
+ */
+export function wellnessDigestSeed(opts: {
+  podSubject: string;
+  idSpace: WellnessIdSpace;
+  device: string;
+  metric: string;
+  statistic: string;
+  periodStart: string;
+  periodEnd: string;
+  sampleDigest: string;
+}): string {
+  assertIdSpace(opts.idSpace);
+  if (!/^[0-9a-f]{64}$/.test(opts.sampleDigest)) {
+    throw new Error('A digest-tier wellness seed needs a SHA-256 sample digest (64 lowercase hex characters)');
+  }
+  return lengthPrefixed([
+    opts.podSubject,
+    opts.idSpace,
+    opts.device,
+    opts.metric,
+    opts.statistic,
+    `${opts.periodStart}/${opts.periodEnd}`,
+    opts.sampleDigest,
+  ]);
+}
+
+/**
+ * The identity of a device: normalized name plus hardware model, length-prefixed.
+ *
+ * Never the raw device string (Apple embeds a memory address in it that changes
+ * on every export), never the manufacturer (it flips between "Apple" and
+ * "Apple Inc." by software version), never the software version (it changes
+ * over a device's life).
+ */
+export function wellnessDeviceIdentity(deviceName: string, hardwareVersion: string | undefined): string {
+  return lengthPrefixed([deviceName, hardwareVersion ?? '']);
+}
+
+/** Seed for a `health:Device` record: the pod subject plus the device identity. */
+export function wellnessDeviceSeed(opts: { podSubject: string; deviceIdentity: string }): string {
+  return lengthPrefixed(['health:Device', opts.podSubject, opts.deviceIdentity]);
+}
+
+/**
+ * Seed for a supporting node named by what it IS: a content-addressed sample
+ * file (`kind` "attachment", `key` its digest), the group of samples one set
+ * of aggregates was computed from (`kind` "sample-group", `key` the group's
+ * {@link wellnessSampleDigest}, the same digest those aggregates' seeds carry),
+ * or the activity that names a derivation rule and its version (`kind` "rule").
+ */
+export function wellnessSupportSeed(opts: {
+  podSubject: string;
+  kind: 'attachment' | 'sample-group' | 'rule';
+  key: string;
+}): string {
+  return lengthPrefixed([`wellness-${opts.kind}`, opts.podSubject, opts.key]);
+}
+
+/**
+ * Order-independent SHA-256 digest of a multiset of samples.
+ *
+ * Each sample is its field list (the measured D-WELLNESS-1 field set), made one
+ * canonical line by length-prefixing. Lines are sorted by their UTF-8 bytes,
+ * which is Unicode code point order (the order core.ttl requires of a
+ * multi-valued identity input, never locale collation), and duplicates are
+ * KEPT: two identical samples are two samples, and the digest counts both.
+ */
+export function wellnessSampleDigest(samples: ReadonlyArray<readonly string[]>): string {
+  const lines = samples.map((fields) => Buffer.from(lengthPrefixed(fields), 'utf8'));
+  lines.sort(Buffer.compare);
+  const hash = createHash('sha256');
+  for (const line of lines) {
+    hash.update(`${line.length}:`);
+    hash.update(line);
+  }
+  return hash.digest('hex');
+}

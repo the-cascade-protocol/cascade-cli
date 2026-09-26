@@ -63,6 +63,7 @@ import {
 } from '../../lib/pod-read.js';
 import { expandCurie } from '../../lib/turtle-parser.js';
 import { loadPodGraph, recordEdges, neighborhood } from './graph.js';
+import { appendAll } from '../../lib/append-all.js';
 
 /**
  * Classify an unregistered ("extra") TTL file discovered by `--all` into a
@@ -409,7 +410,7 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             const existing = queryResults[bucketKey];
             if (existing) {
               existing.count += records.length;
-              existing.records.push(...mapped);
+              appendAll(existing.records, mapped);
               if (error && !existing.error) existing.error = error;
             } else {
               queryResults[bucketKey] = {

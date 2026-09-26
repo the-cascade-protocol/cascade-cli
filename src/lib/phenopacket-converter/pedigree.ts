@@ -46,6 +46,7 @@ import {
   tripleRef,
   deterministicUuid,
 } from '../fhir-converter/types.js';
+import { appendAll } from '../append-all.js';
 
 export interface PedigreeParseOutput {
   records: ParsedRecord[];
@@ -240,7 +241,7 @@ export function parsePedigree(
       fhirResourceType: 'FamilyMemberHistory',
       quads: mQuads,
     });
-    quads.push(...mQuads);
+    appendAll(quads, mQuads);
   }
 
   // Push the Pedigree record itself last so its hasMember references resolve.
@@ -251,7 +252,7 @@ export function parsePedigree(
     fhirResourceType: 'List',
     quads: pedQuads,
   });
-  quads.push(...pedQuads);
+  appendAll(quads, pedQuads);
 
   return { records, quads, warnings, gaps };
 }

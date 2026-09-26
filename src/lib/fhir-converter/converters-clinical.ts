@@ -53,6 +53,7 @@ import {
   pushParsedIndicationCandidates,
 } from './reference-resolution.js';
 import { interpretationValue } from './interpretation.js';
+import { appendAll } from '../append-all.js';
 
 // ---------------------------------------------------------------------------
 // Record lifecycle status
@@ -148,7 +149,7 @@ export function convertMedicationStatement(resource: any): ConversionResult & { 
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'Medication'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   quads.push(tripleStr(subjectUri, NS.clinical + 'drugName', medName));
 
@@ -376,7 +377,7 @@ export function convertCondition(resource: any): ConversionResult & { _quads: Qu
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'ConditionRecord'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   const condName = codeableConceptText(resource.code) ?? 'Unknown Condition';
   quads.push(tripleStr(subjectUri, NS.health + 'conditionName', condName));
@@ -536,7 +537,7 @@ export function convertAllergyIntolerance(resource: any): ConversionResult & { _
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'AllergyRecord'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   const allergen = codeableConceptText(resource.code) ?? 'Unknown Allergen';
   quads.push(tripleStr(subjectUri, NS.health + 'allergen', allergen));
@@ -792,7 +793,7 @@ export function convertObservationLab(resource: any): ConversionResult & { _quad
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.health + 'LabResultRecord'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   const testName = codeableConceptText(resource.code) ?? 'Unknown Lab Test';
   quads.push(tripleStr(subjectUri, NS.health + 'testName', testName));
@@ -974,7 +975,7 @@ export function convertObservationVital(resource: any): ConversionResult & { _qu
   }
 
   quads.push(tripleType(subjectUri, NS.clinical + 'VitalSign'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
   if (loincCode) {
     quads.push(tripleRef(subjectUri, NS.clinical + 'loincCode', NS.loinc + loincCode));
   }
@@ -1083,7 +1084,7 @@ export function convertProcedure(resource: any): ConversionResult & { _quads: Qu
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'Procedure'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   // Procedure name
   const name = codeableConceptText(resource.code) ?? 'Unknown Procedure';
@@ -1145,7 +1146,7 @@ export function convertClinicalDocument(resource: any): ConversionResult & { _qu
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'ClinicalDocument'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   // Document type
   const docType = codeableConceptText(resource.type) ?? 'Unknown Document';
@@ -1600,7 +1601,7 @@ export function convertEncounter(resource: any): ConversionResult & { _quads: Qu
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'Encounter'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   // Encounter class (ambulatory, emergency, inpatient, etc.) — the Coding
   // MIRRORED, not reduced to one of its parts.
@@ -1951,7 +1952,7 @@ export function convertDiagnosticReport(resource: any): ConversionResult & { _qu
   }
 
   quads.push(tripleType(subjectUri, NS.clinical + route.cascadeClass));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   // Panel name from code.text or first coding display
   const panelName = codeableConceptText(resource.code) ?? 'Unknown Panel';
@@ -2059,7 +2060,7 @@ export function convertMedicationAdministration(resource: any): ConversionResult
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'MedicationAdministration'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   // Medication name
   const medName = codeableConceptText(resource.medicationCodeableConcept)
@@ -2123,7 +2124,7 @@ export function convertDevice(resource: any): ConversionResult & { _quads: Quad[
   const quads: Quad[] = [];
 
   quads.push(tripleType(subjectUri, NS.clinical + 'ImplantedDevice'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   // Device type
   const deviceType = codeableConceptText(resource.type) ?? 'Unknown Device';
@@ -2221,7 +2222,7 @@ export function convertImagingStudy(resource: any): ConversionResult & { _quads:
   }
 
   quads.push(tripleType(subjectUri, NS.clinical + 'ImagingStudy'));
-  quads.push(...commonTriples(subjectUri));
+  appendAll(quads, commonTriples(subjectUri));
 
   // Modality from first series
   const modality = resource.series?.[0]?.modality?.code;

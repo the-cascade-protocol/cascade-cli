@@ -47,6 +47,7 @@ import {
   deterministicUuid,
 } from '../fhir-converter/types.js';
 import { identityKey } from '../identity.js';
+import { appendAll } from '../append-all.js';
 
 export interface BiosampleParseOutput {
   records: ParsedRecord[];
@@ -282,8 +283,8 @@ export function parseBiosample(
       const rfOut = buildRawFileRecord(f, ctx, `${contextLabel}.biosamples[${sourceId}]`);
       if (rfOut) {
         records.push(rfOut.record);
-        quads.push(...rfOut.record.quads);
-        gaps.push(...rfOut.gaps);
+        appendAll(quads, rfOut.record.quads);
+        appendAll(gaps, rfOut.gaps);
         // Specimen → RawFile link (use cascade:hasRawFile until v1-draft adds one)
         sQuads.push(tripleRef(iri, NS.cascade + 'hasRawFile', rfOut.record.iri));
       }
@@ -297,7 +298,7 @@ export function parseBiosample(
     fhirResourceType: 'Specimen',
     quads: sQuads,
   });
-  quads.push(...sQuads);
+  appendAll(quads, sQuads);
 
   return { records, quads, warnings, gaps };
 }

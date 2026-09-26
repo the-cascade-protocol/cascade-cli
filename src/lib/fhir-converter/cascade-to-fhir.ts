@@ -42,6 +42,7 @@ import {
   restoreClaimRecord,
   restoreBenefitStatement,
 } from './cascade-to-fhir-admin.js';
+import { appendAll } from '../append-all.js';
 
 /**
  * Convert Cascade Turtle to FHIR R4 JSON.
@@ -58,7 +59,7 @@ export async function convertCascadeToFhir(turtle: string): Promise<{
   const quads: Quad[] = [];
   try {
     const parsed = parser.parse(turtle);
-    quads.push(...parsed);
+    appendAll(quads, parsed);
   } catch (err: any) {
     return { resources: [], warnings: [`Turtle parse error: ${err.message}`] };
   }

@@ -63,6 +63,7 @@ import {
   coverageDisclosure,
   type CoverageReport,
 } from '../lib/fhir-converter/field-coverage/analyze.js';
+import { appendAll } from '../lib/append-all.js';
 
 /** The pod-relative directory a pod retains its raw imported sources in. */
 const SOURCES_DIR = 'sources';
@@ -110,7 +111,7 @@ function resourcesIn(text: string): unknown[] {
       const l = line.trim();
       if (!l) continue;
       try {
-        out.push(...fromValue(JSON.parse(l)));
+        appendAll(out, fromValue(JSON.parse(l)));
       } catch {
         return [];
       }

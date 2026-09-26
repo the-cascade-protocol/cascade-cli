@@ -45,6 +45,7 @@ import type {
   CapTriple,
 } from './types.js';
 import { ADVISORY_NS } from './types.js';
+import { appendAll } from '../append-all.js';
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Public API                                                                 */
@@ -812,7 +813,7 @@ class Parser {
 
     while (this.peek().kind !== 'RBRACE' && this.peek().kind !== 'EOF') {
       const stmtTriples = this.parseTripleStatement();
-      triples.push(...stmtTriples);
+      appendAll(triples, stmtTriples);
       if (this.peek().kind === 'DOT') {
         this.consume('DOT');
       } else if (this.peek().kind !== 'RBRACE') {
