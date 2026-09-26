@@ -9,6 +9,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-26
+
+Pod path safety: reads and writes inside a pod refuse symbolic links, and the encryption header
+reader follows the pod encryption specification's strict number and text rules. Also ships
+`--rotate-dek`, `pod doctor`'s re-key recovery, and version 1.1 headers for new encrypted pods.
+
 ### Security
 
 **Pod reads and writes refuse symbolic links below the pod root.** Every read
