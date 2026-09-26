@@ -274,14 +274,22 @@ let contradictedIds: ReadonlySet<string> = new Set<string>();
  *
  * So the disambiguator hashes a PROJECTION of the claimant: the fields below,
  * taken from the statement itself and from the clinical statements nested in it
- * (a concern act's problem, a panel's results), with pointers, identifiers,
- * addresses, authorship and rendering stripped at every depth.
+ * (a concern act's problem and its status, a panel's results), with pointers,
+ * identifiers, addresses and template versions stripped inside them.
+ * Authorship, performers and the statement's own `text` are never read at all.
+ *
+ * Status IS in it (`statusCode`, and a problem's nested status observation):
+ * two statements under one id that agree on everything but status are two
+ * claims about the patient, active or resolved, taking or finished, and folding
+ * them gives one subject two status values. The cost is that a status change
+ * between downloads renames a claimant of a reused id; the name of a record
+ * whose id is unique never depends on any of this.
  *
  * WHAT IT COSTS, STATED
  * ---------------------
  * Two claimants of one id that agree on every field here and differ only in
- * something outside it (a performer, a status, a free-text note) are now one
- * record rather than two. That is the merge direction, and it is taken on
+ * something outside it (a performer, a free-text note) are now one record
+ * rather than two. That is the merge direction, and it is taken on
  * purpose: the source gave them one id and they agree on everything clinical,
  * so the source's own word is the better reading. Claimants that disagree
  * clinically, the case the disambiguator exists for, still split.
@@ -298,13 +306,14 @@ let contradictedIds: ReadonlySet<string> = new Set<string>();
  * fixtures).
  */
 /**
- * Deliberately absent: `statusCode`, which is lifecycle state (an active
- * prescription becomes completed without becoming a different prescription),
- * and `text`, which holds a narrative pointer or free text the EHR re-renders.
+ * Deliberately absent: `text`, which holds a narrative pointer or free text the
+ * EHR re-renders, and `author`, `performer` and `informant`, which say who
+ * rather than what.
  */
 const STABLE_CLINICAL_FIELDS: ReadonlySet<string> = new Set([
   '@_negationInd',
   'code',
+  'statusCode',
   'effectiveTime',
   'value',
   'priorityCode',
@@ -327,12 +336,12 @@ const STABLE_CLINICAL_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Stripped at every depth inside a kept field: narrative pointers, narrative
- * ids, identifiers, addresses and contact points, authorship, rendering.
+ * Stripped at every depth inside a kept field: narrative pointers
+ * (`originalText/reference`), identifiers of the things a statement names (a
+ * location's id, a product's), template versions, and addresses and contact
+ * points. Each is pinned by a test that moves it between two downloads.
  */
-const UNSTABLE_KEYS: ReadonlySet<string> = wordSet(
-  'reference @_ID @_IDREF @_styleCode templateId id addr telecom author performer informant',
-);
+const UNSTABLE_KEYS: ReadonlySet<string> = wordSet('reference templateId id addr telecom');
 
 /** Clinical statements a claimant can be, or be wrapped in (`<entry>`). */
 const STATEMENT_KINDS: readonly string[] = [
@@ -358,9 +367,6 @@ function wordSet(words: string): ReadonlySet<string> {
   return new Set(words.split(' '));
 }
 
-/** LOINC 33999-4, "Status": the nested status observation of a concern act. */
-const STATUS_OBSERVATION_CODE = '33999-4';
-
 function listOf(value: unknown): unknown[] {
   return Array.isArray(value) ? value : value == null ? [] : [value];
 }
@@ -381,11 +387,6 @@ function scrub(value: unknown): unknown {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-function isStatusObservation(stmt: Record<string, unknown>): boolean {
-  const code = listOf(stmt['code'])[0] as Record<string, unknown> | undefined;
-  return code?.['@_code'] === STATUS_OBSERVATION_CODE || code?.['code'] === STATUS_OBSERVATION_CODE;
-}
-
 function projectStatement(stmt: unknown): Record<string, unknown> | undefined {
   if (stmt == null || typeof stmt !== 'object' || Array.isArray(stmt)) return undefined;
   const obj = stmt as Record<string, unknown>;
@@ -404,7 +405,6 @@ function projectStatement(stmt: unknown): Record<string, unknown> | undefined {
       if (wrapper == null || typeof wrapper !== 'object') continue;
       for (const kind of NESTED_KINDS) {
         for (const child of listOf((wrapper as Record<string, unknown>)[kind])) {
-          if (child && typeof child === 'object' && isStatusObservation(child as Record<string, unknown>)) continue;
           const p = projectStatement(child);
           if (p !== undefined) nested.push(stableStringify({ [kind]: p }));
         }
@@ -425,7 +425,7 @@ export function stableClinicalContent(element: unknown): unknown {
   const obj = element as Record<string, unknown>;
   const ownFields = [...STABLE_CLINICAL_FIELDS].some((f) => f in obj);
   const wrapped = STATEMENT_KINDS.filter((k) => k in obj);
-  if (!ownFields && wrapped.length > 0 && !('id' in obj)) {
+  if (!ownFields && wrapped.length > 0) {
     const out: Record<string, unknown> = {};
     for (const kind of wrapped) {
       const items = listOf(obj[kind]).map(projectStatement).filter((p) => p !== undefined);
@@ -441,7 +441,9 @@ export function stableClinicalContent(element: unknown): unknown {
  * C-CDA, at any depth. The fingerprint is of {@link stableClinicalContent}, the
  * same projection the disambiguator hashes, so an element that states no
  * clinical content (a bare citation of a record by its id) claims nothing and
- * cannot contradict the record it cites. Keyed on the id alone rather than on (type, id): a caller's `type` is
+ * cannot contradict the record it cites.
+ *
+ * Keyed on the id alone rather than on (type, id): a caller's `type` is
  * not knowable here, and treating a cross-type id clash as contradicted splits
  * rather than merges, which is the recoverable direction.
  */

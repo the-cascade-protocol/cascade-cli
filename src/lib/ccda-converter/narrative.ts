@@ -41,9 +41,10 @@ export type NarrativeDocumentContext = { documentSet: string } | { document: str
  * set with unchanged clinical text: `@ID` on `table`, `caption`, `tr`, `td`,
  * `content`, `paragraph` and `footnote` (element ids renumbered), footnote text
  * (a retrieval stamp) and `@styleCode` (rendering). A footnote reference
- * (`footnoteRef/@IDREF`) points at one of those ids, so it goes with them.
+ * (`footnoteRef`, whose only content is an `@IDREF` to one of those ids) goes
+ * with them.
  */
-export const NARRATIVE_EXCLUDED_ATTRIBUTES: ReadonlySet<string> = new Set(['@_ID', '@_IDREF', '@_styleCode']);
+export const NARRATIVE_EXCLUDED_ATTRIBUTES: ReadonlySet<string> = new Set(['@_ID', '@_styleCode']);
 export const NARRATIVE_EXCLUDED_ELEMENTS: ReadonlySet<string> = new Set(['footnote', 'footnoteRef']);
 
 /** The narrative with the excluded markup removed, pruning what becomes empty. */
