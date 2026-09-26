@@ -90,7 +90,15 @@ describe('wellness import streams a large export in bounded memory', () => {
       // grow with allocation rate, so RSS alone would not tell retention apart
       // from lazy collection.
       const out = JSON.parse(
-        execFileSync('node', [`--max-old-space-size=${HEAP_CAP_MB}`, runner, podDir, xml], { encoding: 'utf-8', timeout: 1_200_000 }).trim(),
+        execFileSync('node', [`--max-old-space-size=${HEAP_CAP_MB}`, runner, podDir, xml], {
+          encoding: 'utf-8',
+          timeout: 1_200_000,
+          // The synthetic export carries no HKTimeZone, so the day zone falls back
+          // to the machine's. Pin it: the samples start at local midnight in this
+          // zone, which gives exactly 730 closed days. A UTC runner would cut the
+          // same instants into 731 days.
+          env: { ...process.env, TZ: 'America/Los_Angeles' },
+        }).trim(),
       ) as {
         ms: number;
         maxRssMB: number;
