@@ -228,24 +228,15 @@ function ensureCardLinksExtended(podDir: string, dek?: Buffer): void {
 }
 
 /**
- * The pod's identifier: read it, or mint it and write it first.
- *
- * Call this BEFORE computing any name from the pod subject. When the pod has no
- * identifier yet, one is minted, appended to `profile/extended.ttl` (created
- * when missing, with the `rdfs:seeAlso` link from `card.ttl`), written
- * atomically, and read back; the value returned is always the one on disk.
- * A second call returns the same value and writes nothing.
- *
- * @throws {PodIdentifierError} when the file holds two values, a malformed one,
- *   does not parse, or the write did not read back.
- * @throws {PodDecryptError} when the file does not open under `dek`.
- * @throws {PodPathError} when the path is refused.
+ * The value a usable state holds, `undefined` when there is none yet, and a
+ * typed refusal for every state nothing may be named from.
  */
-export function ensurePodIdentifier(podDir: string, dek?: Buffer): PodIdentifier {
-  const state = readPodIdentifier(podDir, dek);
+function usableValue(state: PodIdentifierState): string | undefined {
   switch (state.status) {
     case 'present':
-      return { value: state.value, minted: false };
+      return state.value;
+    case 'absent':
+      return undefined;
     case 'duplicate':
       throw new PodIdentifierError(
         'duplicate',
@@ -265,13 +256,42 @@ export function ensurePodIdentifier(podDir: string, dek?: Buffer): PodIdentifier
         `${EXTENDED_PROFILE_PATH} does not parse as Turtle, so the pod's identifier cannot be read or added. ` +
           `Run \`cascade pod doctor\` on the pod. Nothing was written.`,
       );
-    case 'absent':
-      break;
   }
+}
+
+/**
+ * Read the pod's identifier for naming WITHOUT writing: the value, or
+ * `undefined` when the pod has none yet (a dry run has nothing to name from).
+ *
+ * @throws {PodIdentifierError} for two values, a malformed one, or a profile
+ *   that does not parse: the same refusals {@link ensurePodIdentifier} gives.
+ */
+export function readUsablePodIdentifier(podDir: string, dek?: Buffer): string | undefined {
+  return usableValue(readPodIdentifier(podDir, dek));
+}
+
+/**
+ * The pod's identifier: read it, or mint it and write it first.
+ *
+ * Call this BEFORE computing any name from the pod subject. When the pod has no
+ * identifier yet, one is minted, appended to `profile/extended.ttl` (created
+ * when missing, with the `rdfs:seeAlso` link from `card.ttl`), written
+ * atomically, and read back; the value returned is always the one on disk.
+ * A second call returns the same value and writes nothing.
+ *
+ * @throws {PodIdentifierError} when the file holds two values, a malformed one,
+ *   does not parse, or the write did not read back.
+ * @throws {PodDecryptError} when the file does not open under `dek`.
+ * @throws {PodPathError} when the path is refused.
+ */
+export function ensurePodIdentifier(podDir: string, dek?: Buffer): PodIdentifier {
+  const state = readPodIdentifier(podDir, dek);
+  const held = usableValue(state);
+  if (held !== undefined) return { value: held, minted: false };
+  const fileExists = state.status === 'absent' && state.file === 'present';
 
   const minted = `urn:uuid:${randomUUID()}`;
-  const existing =
-    state.file === 'present' ? readText(podDir, EXTENDED_PROFILE_PATH, dek) : MINIMAL_EXTENDED_PROFILE;
+  const existing = fileExists ? readText(podDir, EXTENDED_PROFILE_PATH, dek) : MINIMAL_EXTENDED_PROFILE;
   const sep = existing === '' || existing.endsWith('\n') ? '' : '\n';
   const next = existing + sep + identifierBlock(minted);
 
@@ -285,7 +305,7 @@ export function ensurePodIdentifier(podDir: string, dek?: Buffer): PodIdentifier
     );
   }
 
-  if (state.file === 'missing') mkdirInPod(podDir, 'profile');
+  if (!fileExists) mkdirInPod(podDir, 'profile');
   writeProfileDocument(podDir, EXTENDED_PROFILE_PATH, next, dek, true);
   ensureCardLinksExtended(podDir, dek);
 

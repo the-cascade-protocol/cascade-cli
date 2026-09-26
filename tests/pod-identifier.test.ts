@@ -28,6 +28,7 @@ import { resolveDek, readResource, writeResource } from '../src/lib/pod-encrypti
 import {
   ensurePodIdentifier,
   readPodIdentifier,
+  readUsablePodIdentifier,
   PodIdentifierError,
   POD_IDENTIFIER_FORM,
   POD_IDENTIFIER_IRI,
@@ -163,6 +164,9 @@ describe('ensurePodIdentifier', () => {
     const pod = await initPod();
     const legacy = stripIdentifier(pod);
     expect(readPodIdentifier(pod)).toEqual({ status: 'absent', file: 'present' });
+    // Reading for a dry run writes nothing and has nothing to name from.
+    expect(readUsablePodIdentifier(pod)).toBeUndefined();
+    expect(fs.readFileSync(ext(pod), 'utf-8')).toBe(legacy);
 
     const got = ensurePodIdentifier(pod);
     expect(got.minted).toBe(true);
@@ -222,6 +226,8 @@ describe('ensurePodIdentifier', () => {
         }
         expect(caught).toBeInstanceOf(PodIdentifierError);
         expect((caught as PodIdentifierError).reason).toBe(reason);
+        // The read-only door refuses the same way.
+        expect(() => readUsablePodIdentifier(pod)).toThrow(PodIdentifierError);
         // No value is echoed into the message.
         expect((caught as Error).message).not.toContain(A);
         expect(fs.readFileSync(ext(pod)).equals(before)).toBe(true);
