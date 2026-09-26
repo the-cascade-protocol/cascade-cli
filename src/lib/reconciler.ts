@@ -1336,12 +1336,17 @@ export function splitIdentityCollisions(
     const rekeyed = new Map<ParsedRecord, string>();
     for (const [uri, bucket] of byUri) {
       if (bucket.length < 2) continue;
-      const distinct = [...new Set(bucket.map((r) => fingerprints.get(r)!))].sort();
-      if (distinct.length < 2) continue;  // a re-import, not a collision
+      const sorted = [...new Set(bucket.map((r) => fingerprints.get(r)!))].sort();
+      if (sorted.length < 2) continue;  // a re-import, not a collision
 
-      // Smallest fingerprint keeps `uri`; the rest move. Ranking on the
-      // fingerprint rather than on position is what makes this independent of
-      // the order the inputs were enumerated.
+      // The record the pod already holds keeps `uri`: a name written to a pod
+      // is never rewritten, and the arrival is the one that moves. Without a
+      // pod copy, the smallest fingerprint keeps it. Either way the choice is a
+      // property of the records, never of the order the inputs were enumerated
+      // (several pod copies of one IRI fall back to the smallest among them).
+      const held = sorted.find((fp) => bucket.some((r) => r.fromExistingPod && fingerprints.get(r) === fp));
+      const keeper = held ?? sorted[0];
+      const distinct = [keeper, ...sorted.filter((fp) => fp !== keeper)];
       const target = new Map<string, string>();
       for (let i = 1; i < distinct.length; i++) target.set(distinct[i], collisionSplitUri(uri, distinct[i]));
       for (const r of bucket) {
