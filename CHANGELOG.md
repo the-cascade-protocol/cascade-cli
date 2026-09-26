@@ -74,12 +74,16 @@ this way were renamed between downloads with their clinical content unchanged
 (17 encounters, 3 lab reports, 2 medications), led by narrative reference
 pointers (`code/originalText/reference/@value`, `text/reference/@value`),
 visit wrappers nested in lab panels (`component/encounter`) and author
-organisation addresses. It now hashes the claimant's code, effective time,
-value, negation, dose, route, product, participants and similar clinical
-fields, and those of the statements nested in it (except nested encounters,
-orders and status observations), with narrative pointers, ids, addresses,
-authorship, `statusCode` and rendering stripped at every depth. Claimants that
-disagree clinically still split. A statement that cites a record by id and
+organisation addresses. It now hashes the claimant's code, status, effective
+time, value, negation, dose, route, product, participants and similar clinical
+fields, and those of the statements nested in it (a problem's status
+observation included; nested encounters and nested orders and fills excluded),
+with narrative pointers, the ids of things a statement names, template versions,
+addresses and phone numbers stripped inside them. The statement's own `text`,
+its authors and its performers are not read. Claimants that disagree
+clinically still split, and so do claimants that differ only in status (a
+problem active and resolved, a medication active and completed): folding them
+would give one record two status values. A statement that cites a record by id and
 states nothing clinical (a medication's bare `<encounter>` link to its visit)
 no longer counts as a contradicting claimant, so the cited record keeps its
 plain id name. A record whose id is unique in its document is not affected: a
