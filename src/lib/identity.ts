@@ -477,6 +477,12 @@ export function identityKey(
 //
 // Length-prefixed sequences parse unambiguously, so a three-component seed can
 // never equal a seven-component one; no tier tag is needed to keep them apart.
+//
+// The POD SUBJECT is the pod's identifier (cascade:podIdentifier, core v3.11)
+// exactly as `profile/extended.ttl` states it: a random urn:uuid minted once
+// per pod and only read back (`src/lib/pod-identifier.ts`), and written before
+// the first name is computed. Never a WebID or a pod path, which every local
+// pod shares and which would give two people's watches one name.
 
 /** The closed set of wellness id spaces (health:sourceIdSpace, health v2.10). */
 export const WELLNESS_ID_SPACES = ['healthkit', 'google-health', 'fitbit'] as const;

@@ -1458,6 +1458,12 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           warnings: wr.warnings,
         });
         appendAll(allWarnings, wr.warnings.map((w) => `${path.basename(exportXml)}: ${w}`));
+        if (wr.podIdentifierMinted) {
+          allWarnings.push(
+            "This pod had no identifier (cascade:podIdentifier); one was minted and recorded in " +
+              'profile/extended.ttl before any wellness record was named from it.',
+          );
+        }
         if (wr.dayZone.rule !== 'pod') {
           allWarnings.push(
             `Wellness days are cut in ${wr.dayZone.zone} (${wr.dayZone.rule}); ` +

@@ -15,6 +15,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Parser, type Quad } from 'n3';
+import { wellnessSourceRecordSeed } from '../src/lib/identity.js';
+import { deterministicUuid } from '../src/lib/fhir-converter/types.js';
 
 const CLI = path.resolve(__dirname, '../dist/index.js');
 const FIXTURE = path.resolve(__dirname, '../test-fixtures/apple-health-wellness');
@@ -58,7 +60,12 @@ const PROV = 'http://www.w3.org/ns/prov#';
 const DCT = 'http://purl.org/dc/terms/';
 
 interface Report {
-  wellness?: Array<{ dayZone: { zone: string; rule: string; written: boolean }; closedDays: number; correlationRecordsSkipped: number }>;
+  wellness?: Array<{
+    dayZone: { zone: string; rule: string; written: boolean };
+    podIdentifierMinted: boolean;
+    closedDays: number;
+    correlationRecordsSkipped: number;
+  }>;
 }
 
 describe('pod import of an Apple Health export folder: wellness', () => {
@@ -209,5 +216,149 @@ describe('pod import of an Apple Health export into an ENCRYPTED pod', () => {
       results: unknown[];
     }>;
     expect(out.every((r) => r.valid && r.results.length === 0)).toBe(true);
+  }, 180_000);
+});
+
+// ---------------------------------------------------------------------------
+// The pod subject: the pod's own identifier
+// ---------------------------------------------------------------------------
+
+const WELLNESS_FILES = [
+  'wellness/heart-rate.ttl',
+  'wellness/hrv.ttl',
+  'wellness/body-measurements.ttl',
+  'wellness/activity.ttl',
+  'wellness/devices.ttl',
+  'wellness/samples/samples.ttl',
+];
+const POD_ID = C + 'podIdentifier';
+
+/** The pod's identifier as extended.ttl states it (plaintext pods only). */
+function podIdentifierOf(podDir: string): string[] {
+  const text = fs.readFileSync(path.join(podDir, 'profile', 'extended.ttl'), 'utf8');
+  return new Parser({ format: 'Turtle', baseIRI: 'https://pod.invalid/profile/extended.ttl' })
+    .parse(text)
+    .filter((q) => q.predicate.value === POD_ID)
+    .map((q) => q.object.value);
+}
+
+/** Every named subject the wellness files hold, grouped by what kind of record it is. */
+function namesByKind(podDir: string): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  const add = (kind: string, iri: string): void => {
+    let set = out.get(kind);
+    if (!set) out.set(kind, (set = new Set()));
+    set.add(iri);
+  };
+  for (const rel of WELLNESS_FILES) {
+    const qs = quadsOf(path.join(podDir, rel));
+    const typeOf = new Map<string, string[]>();
+    for (const q of qs) {
+      if (q.subject.termType !== 'NamedNode') continue;
+      if (!typeOf.has(q.subject.value)) typeOf.set(q.subject.value, []);
+      if (q.predicate.value === RDF_TYPE) typeOf.get(q.subject.value)!.push(q.object.value);
+    }
+    const derived = new Set(qs.filter((q) => q.predicate.value === PROV + 'wasDerivedFrom').map((q) => q.subject.value));
+    for (const [iri, types] of typeOf) {
+      if (types.includes(H + 'Workout')) add('workout', iri);
+      else if (types.includes(H + 'Device')) add('device', iri);
+      else if (derived.has(iri)) add('aggregate', iri);
+      // Apple's own day rollup: a snapshot no aggregate rule derived.
+      else if (types.includes(H + 'DailyActivitySnapshot')) add('activity summary', iri);
+      else if (rel.endsWith('samples.ttl') && types.includes(PROV + 'Activity')) add('rule activity', iri);
+      else if (rel.endsWith('samples.ttl') && types.includes(PROV + 'Entity')) add('sample group', iri);
+      else add(`other ${rel}`, iri);
+    }
+  }
+  return out;
+}
+
+describe('the pod subject in every wellness name is the pod identifier', () => {
+  it('the same export into two pods gives disjoint names for every seeded record', () => {
+    const a = newPod();
+    const b = newPod();
+    cli(['pod', 'import', a, FIXTURE]);
+    cli(['pod', 'import', b, FIXTURE]);
+    expect(podIdentifierOf(a)).toHaveLength(1);
+    expect(podIdentifierOf(b)).toHaveLength(1);
+    expect(podIdentifierOf(a)[0]).not.toBe(podIdentifierOf(b)[0]);
+
+    const na = namesByKind(a);
+    const nb = namesByKind(b);
+    // Every kind the brief names is present, in both pods, in the same numbers.
+    for (const kind of ['workout', 'activity summary', 'device', 'sample group', 'aggregate']) {
+      expect(na.get(kind)?.size ?? 0, kind).toBeGreaterThan(0);
+      expect(nb.get(kind)?.size, kind).toBe(na.get(kind)!.size);
+    }
+    const all = (m: Map<string, Set<string>>): string[] => [...m.values()].flatMap((s) => [...s]);
+    const shared = all(na).filter((iri) => new Set(all(nb)).has(iri));
+    expect(all(na).length).toBeGreaterThan(20);
+    expect(shared).toEqual([]);
+    // The identifier itself never appears in a record file or on the card.
+    for (const pod of [a, b]) {
+      const id = podIdentifierOf(pod)[0];
+      for (const rel of [...WELLNESS_FILES, 'profile/card.ttl']) {
+        expect(fs.readFileSync(path.join(pod, rel), 'utf8'), rel).not.toContain(id);
+      }
+    }
+  }, 180_000);
+
+  it('a pod created without an identifier gets one before its first wellness record, and the names use it', () => {
+    const podDir = newPod();
+    // Turn the pod into one created before the identifier existed.
+    const extPath = path.join(podDir, 'profile', 'extended.ttl');
+    const text = fs.readFileSync(extPath, 'utf8');
+    const legacy = text.slice(0, text.indexOf("\n# The pod's identifier"));
+    fs.writeFileSync(extPath, legacy);
+    expect(podIdentifierOf(podDir)).toEqual([]);
+
+    // A dry run writes nothing, not even the identifier.
+    const dryBefore = snapshot(podDir);
+    cli(['pod', 'import', podDir, FIXTURE, '--dry-run']);
+    expect(snapshot(podDir)).toEqual(dryBefore);
+
+    const reportPath = path.join(path.dirname(podDir), 'report-legacy.json');
+    cli(['pod', 'import', podDir, FIXTURE, '--report', reportPath]);
+    const report = JSON.parse(fs.readFileSync(reportPath, 'utf8')) as Report;
+    expect(report.wellness?.[0].podIdentifierMinted).toBe(true);
+    expect(JSON.stringify(report)).not.toContain('urn:uuid:' + '0000');
+
+    const ids = podIdentifierOf(podDir);
+    expect(ids).toHaveLength(1);
+    expect(ids[0]).toMatch(/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    // Every byte of the old profile is kept; the identifier comes before the day zone.
+    const after = fs.readFileSync(extPath, 'utf8');
+    expect(after.startsWith(legacy)).toBe(true);
+    expect(after.indexOf('podIdentifier')).toBeLessThan(after.indexOf('dayZone'));
+
+    // The names were computed from the identifier now on disk.
+    const summaries = namesByKind(podDir).get('activity summary')!;
+    const expected = `urn:uuid:${deterministicUuid(wellnessSourceRecordSeed({ podSubject: ids[0], idSpace: 'healthkit', sourceId: '2026-03-07' }))}`;
+    expect([...summaries]).toContain(expected);
+
+    // From then on it is only read: a second import is byte-identical and mints nothing.
+    const first = snapshot(podDir);
+    const reportPath2 = path.join(path.dirname(podDir), 'report-legacy-2.json');
+    cli(['pod', 'import', podDir, FIXTURE, '--report', reportPath2]);
+    expect((JSON.parse(fs.readFileSync(reportPath2, 'utf8')) as Report).wellness?.[0].podIdentifierMinted).toBe(false);
+    expect(snapshot(podDir)).toEqual(first);
+  }, 180_000);
+
+  it('a profile with two identifiers stops the import before anything is named', () => {
+    const podDir = newPod();
+    const extPath = path.join(podDir, 'profile', 'extended.ttl');
+    fs.appendFileSync(
+      extPath,
+      `<#me> <${POD_ID}> "urn:uuid:1c7b5d2f-3e4a-4b6c-9d8e-0f1a2b3c4d5e"^^<http://www.w3.org/2001/XMLSchema#anyURI> .\n`,
+    );
+    let failed = false;
+    try {
+      cli(['pod', 'import', podDir, FIXTURE]);
+    } catch {
+      failed = true;
+    }
+    expect(failed).toBe(true);
+    expect(fs.existsSync(path.join(podDir, 'wellness', 'heart-rate.ttl'))).toBe(false);
+    expect(fs.existsSync(path.join(podDir, 'wellness', 'samples', 'samples.ttl'))).toBe(false);
   }, 180_000);
 });

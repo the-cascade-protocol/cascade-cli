@@ -24,7 +24,7 @@ import {
 } from '../src/lib/identity.js';
 import { deterministicUuid } from '../src/lib/fhir-converter/types.js';
 
-const POD = '/profile/card.ttl#me';
+const POD = 'urn:uuid:5b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8';
 const LA = 'America/Los_Angeles';
 const FIXTURE = path.resolve(__dirname, '../test-fixtures/apple-health-wellness/export.xml');
 

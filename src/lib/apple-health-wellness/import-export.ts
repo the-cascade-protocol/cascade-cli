@@ -30,6 +30,7 @@ import { readResource, writeResource, writeResourceBytes, readResourceBytes } fr
 import { DATA_TYPES } from '../pod-data-types.js';
 import { PodReader } from '../pod-read.js';
 import { mkdirInPod, podPathExists } from '../pod-path.js';
+import { ensurePodIdentifier, readUsablePodIdentifier } from '../pod-identifier.js';
 import { SampleSpill } from './spill.js';
 import { scanExport } from './scan.js';
 import { aggregate, majorityTimeZone, type SampleFile, type WellnessRecord } from './aggregate.js';
@@ -73,6 +74,8 @@ export interface WellnessFileReport {
 export interface WellnessImportReport {
   export: string;
   dayZone: { zone: string; rule: DayZoneRule; written: boolean };
+  /** True when this import minted the pod's identifier (the pod had none). Never the value itself. */
+  podIdentifierMinted: boolean;
   exportDate?: string;
   coverageEnd?: string;
   recordsRead: number;
@@ -135,21 +138,39 @@ function readPodQuads(podDir: string, rel: string, dek?: Buffer): Quad[] | undef
 }
 
 /**
- * The pod subject component of every wellness seed: the owner's WebID as the
- * card states it (`/profile/card.ttl#me` for a local pod), or that default.
- *
- * PROVISIONAL. D-WELLNESS-1 requires only that this be stable for the life of
- * the pod. The pod's own identifier (a `urn:uuid` minted at pod creation) is
- * decided but not yet written by `pod init`; once it is, this function reads
- * it instead, and records minted before then are re-minted.
+ * A pod subject for a DRY RUN on a pod that has no identifier yet. Never
+ * written anywhere and never used by a real import: a dry run writes nothing,
+ * so it cannot mint the identifier, and names it computes are not kept.
  */
-export async function resolvePodSubject(podDir: string, dek?: Buffer): Promise<string> {
-  const fallback = '/profile/card.ttl#me';
-  if (!podPathExists(podDir, 'profile/card.ttl')) return fallback;
-  const quads = readPodQuads(podDir, 'profile/card.ttl', dek);
-  const topic = quads?.find((q) => q.predicate.value === 'http://xmlns.com/foaf/0.1/primaryTopic')?.object.value;
-  if (!topic) return fallback;
-  return topic.startsWith(LOCAL_ORIGIN) ? topic.slice(LOCAL_ORIGIN.length) : topic;
+const DRY_RUN_PLACEHOLDER_SUBJECT = 'urn:uuid:00000000-0000-4000-8000-000000000000';
+
+/**
+ * The pod subject component of every wellness seed: the pod's identifier
+ * (`cascade:podIdentifier` in `profile/extended.ttl`), exactly as written.
+ *
+ * Read back, never derived, so it is stable for the life of the pod; and a
+ * different pod has a different one, so the same export imported into two
+ * pods gives two disjoint sets of names. A pod created before the identifier
+ * existed gets one here, WRITTEN before this returns, so no name is ever
+ * computed from a value that is not on disk. A dry run writes nothing: on a
+ * pod with no identifier yet it names from a placeholder, and says so.
+ *
+ * @throws {PodIdentifierError} when the profile holds two values, a malformed
+ *   one, or does not parse. Nothing may be named from such a pod.
+ */
+export function resolvePodSubject(
+  podDir: string,
+  dek: Buffer | undefined,
+  dryRun: boolean,
+): { podSubject: string; minted: boolean; provisional: boolean } {
+  if (!dryRun) {
+    const id = ensurePodIdentifier(podDir, dek);
+    return { podSubject: id.value, minted: id.minted, provisional: false };
+  }
+  const held = readUsablePodIdentifier(podDir, dek);
+  return held === undefined
+    ? { podSubject: DRY_RUN_PLACEHOLDER_SUBJECT, minted: false, provisional: true }
+    : { podSubject: held, minted: false, provisional: false };
 }
 
 /**
@@ -332,6 +353,12 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
   const { podDir, dek } = opts;
   const dryRun = opts.dryRun ?? false;
   const rules = wellnessRules();
+  // 0. SUBJECT. The pod's identifier is the input to every name this import
+  // computes, so it is established (and, on a pod that has none yet, WRITTEN)
+  // first. A pod whose identifier cannot be read is refused here, before an
+  // export that can take a minute to scan is opened.
+  const subject = resolvePodSubject(podDir, dek, dryRun);
+  const podSubject = subject.podSubject;
   const spill = new SampleSpill(opts.spillBudgetChars);
   try {
     // 1. SCAN
@@ -370,7 +397,12 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
     // 3. DERIVE, and 4a. WRITE each day's sample pack as soon as it is built,
     // before any aggregate derived from it is written, and without holding
     // every day's bytes until the end.
-    const podSubject = await resolvePodSubject(podDir, dek);
+    if (subject.provisional) {
+      warnings.push(
+        'This pod has no identifier (cascade:podIdentifier) yet. A dry run writes nothing, so this run named ' +
+          'records from a placeholder; the real import mints the identifier first, and its names will differ.',
+      );
+    }
     let newSampleFiles = 0;
     const writeSamplePack = (f: SampleFile, bytes: Buffer): void => {
       const rel = sampleFilePath(f.digest);
@@ -449,6 +481,7 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
     return {
       export: opts.exportXmlPath,
       dayZone: { zone, rule, written: writeZone && !dryRun },
+      podIdentifierMinted: subject.minted,
       exportDate: scan.exportDate === undefined ? undefined : isoUtc(scan.exportDate),
       coverageEnd: agg.coverageEnd === undefined ? undefined : isoUtc(agg.coverageEnd),
       recordsRead: scan.recordsRead,

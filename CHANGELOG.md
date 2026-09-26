@@ -57,6 +57,9 @@ heap capped at 384 MB), and written as daily wellness records under health v2.11
 - **Names follow D-WELLNESS-1**: an aggregate is named by the digest seed over
   the pod subject, id space, device, metric, statistic, UTC interval and a
   digest of its samples; a source record carrying its own id is named from it.
+  The pod subject is the pod's own identifier (`cascade:podIdentifier`, below),
+  minted and written before the first name is computed, so the same export
+  imported into two pods gives two disjoint sets of names.
   Both seeds live in `src/lib/identity.ts`. Samples nested in `<Correlation>`
   are skipped (they also appear at top level), and the per-export memory address
   in Apple's device string is stripped before anything is digested.

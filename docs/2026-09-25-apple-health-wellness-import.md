@@ -55,6 +55,25 @@ rules table. `pod import` and `pod reconcile` route every record through one
 function (`dataTypeKeyForSubject` in `src/lib/pod-data-types.ts`), so a later
 import or reconcile rewrites each record into the file it was written to.
 
+## The pod subject in every name
+
+Every wellness name (both seeds, in `src/lib/identity.ts`) starts with the pod
+subject: the pod's identifier, `cascade:podIdentifier` on `<#me>` in the
+owner-only `profile/extended.ttl` (core v3.11), exactly as written. `pod init`
+mints it. A pod created before it existed gets one at the start of its first
+wellness import, written to the profile before any record is named, and it is
+only read back after that. So the same export imported into two pods gives two
+disjoint sets of names, and importing it into one pod again gives the same
+names. The seed is hashed, so no name reveals the identifier, and the identifier
+is never written to `card.ttl` or into an export.
+
+A pod rebuilt from the same exports is a new pod with a new identifier, so its
+wellness records get new names; a restore from backup keeps the identifier and
+every name. A profile holding two identifiers, a malformed one, or Turtle that
+does not parse stops the import before anything is named (`pod doctor` reports
+which). A `--dry-run` writes nothing: on a pod with no identifier yet it names
+from a placeholder and says so in its warnings.
+
 ## Days and the day zone
 
 A sample belongs to the day its start instant falls in, cut in the pod's
@@ -116,8 +135,9 @@ adds to what it holds rather than replacing it.
 ## What the import reports
 
 Besides the counts above, `wellness[]` in the `--report` JSON carries
-`duplicateRecords` (records the export lists more than once with identical
-content, written once), `collisions` (a name that arrived with content different
+`podIdentifierMinted` (true when this import minted the pod's identifier; the
+value itself is never reported), `duplicateRecords` (records the export lists
+more than once with identical content, written once), `collisions` (a name that arrived with content different
 from what the pod or the same export already gave it; nothing is edited in
 place and two versions are never merged), `unknownUnits`, and
 `unreadRecordTypes`, a count per `<Record>` type this release does not read.

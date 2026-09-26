@@ -38,8 +38,20 @@ function exportXml(body: string): string {
   );
 }
 
-async function importXml(xml: string) {
+/**
+ * Import into a fresh folder. `podIdentifier` pre-states the pod's identifier,
+ * as a pod restored from the same backup would: two pods compared byte for
+ * byte must share it, because it is the first component of every name.
+ */
+async function importXml(xml: string, podIdentifier?: string) {
   const podDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wellness-report-'));
+  if (podIdentifier) {
+    fs.mkdirSync(path.join(podDir, 'profile'));
+    fs.writeFileSync(
+      path.join(podDir, 'profile', 'extended.ttl'),
+      `<#me> <https://ns.cascadeprotocol.org/core/v1#podIdentifier> "${podIdentifier}"^^<http://www.w3.org/2001/XMLSchema#anyURI> .\n`,
+    );
+  }
   const report = await importAppleHealthWellness({
     podDir,
     exportXmlPath: 'export.xml',
@@ -60,8 +72,9 @@ describe('duplicates and collisions within one export', () => {
   });
 
   it('one name with different content is a collision: one version is written, never the union', async () => {
-    const a = await importXml(exportXml([workout('W-1', '33'), workout('W-1', '41')].join('\n')));
-    const b = await importXml(exportXml([workout('W-1', '41'), workout('W-1', '33')].join('\n')));
+    const id = 'urn:uuid:2d8c6e3f-4a5b-4c7d-8e9f-a0b1c2d3e4f5';
+    const a = await importXml(exportXml([workout('W-1', '33'), workout('W-1', '41')].join('\n')), id);
+    const b = await importXml(exportXml([workout('W-1', '41'), workout('W-1', '33')].join('\n')), id);
     expect(a.report.collisions.length).toBe(1);
     expect(a.report.duplicateRecords).toEqual({});
     const ttlA = fs.readFileSync(path.join(a.podDir, 'wellness', 'activity.ttl'), 'utf8');
