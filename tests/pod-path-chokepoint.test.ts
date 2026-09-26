@@ -47,9 +47,15 @@ function podModules(): string[] {
   return out.filter((rel) => inScope(rel) && rel !== CHOKEPOINT).sort();
 }
 
-/** A raw read, write, folder creation, listing, copy, rename or removal. */
+/**
+ * A raw read, write, folder creation, listing, copy, rename or removal: a
+ * file-system method name on ANY receiver (`fs.`, `fsp.`, `fs.promises.`,
+ * `require('node:fs').`, an alias), or called bare after a named import. The
+ * three short names (`rm`, `open`, `cp`) are matched only on the usual
+ * receivers, since other objects have methods called that too.
+ */
 const RAW_IO =
-  /\b(?:fs|fsp|fsSync)\.(?:readFile|writeFile|appendFile|mkdir|copyFile|cp|readdir|rm|rmdir|unlink|rename|open|truncate|createReadStream|createWriteStream)(?:Sync)?\(|(?<![.\w])(?:readFile|writeFile|appendFile|mkdir|readdir|copyFile)(?:Sync)?\(/g;
+  /\.(?:readFile|writeFile|appendFile|mkdir|copyFile|readdir|rmdir|unlink|rename|truncate|createReadStream|createWriteStream)(?:Sync)?\(|\b(?:fs|fsp|fsSync|promises)\.(?:rm|open|cp)(?:Sync)?\(|(?<![.\w])(?:readFile|writeFile|appendFile|mkdir|readdir|copyFile|rm|open|cp)(?:Sync)?\(/g;
 
 /** Every raw call left in the pod modules, and why it is not a pod path. */
 const ALLOWED: Record<string, { count: number; why: string }> = {
