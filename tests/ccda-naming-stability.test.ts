@@ -111,7 +111,12 @@ function sharedIdResult(d: Download, n: number, code: string, name: string, valu
         <code code="${code}" displayName="${name}" codeSystem="2.16.840.1.113883.6.1">
           <originalText><reference value="#${d.idPrefix}res${n}name"/></originalText>
         </code>
-        <text><reference value="#${d.idPrefix}res${n}"/>${isFirst(d) ? `${name} ${value} mmol/L` : `${name}: ${value} mmol/L (final)`}</text>
+        ${n === 1
+          // Free text the EHR re-renders between downloads. (A <text> holding a
+          // <reference> parses to an object, which the content fingerprint drops
+          // anyway; plain text parses to a string, which it keeps.)
+          ? `<text>${isFirst(d) ? `${name} ${value} mmol/L` : `${name}: ${value} mmol/L (final)`}</text>`
+          : `<text><reference value="#${d.idPrefix}res${n}"/></text>`}
         <statusCode code="completed"/>
         <effectiveTime value="20310801083000-0500"/>
         <value xsi:type="PQ" value="${value}" unit="mmol/L"/>
