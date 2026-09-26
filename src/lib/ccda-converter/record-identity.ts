@@ -297,6 +297,11 @@ let contradictedIds: ReadonlySet<string> = new Set<string>();
  * (`tests/ccda-tier1-names-unmoved.test.ts` pins every one in the committed
  * fixtures).
  */
+/**
+ * Deliberately absent: `statusCode`, which is lifecycle state (an active
+ * prescription becomes completed without becoming a different prescription),
+ * and `text`, which holds a narrative pointer or free text the EHR re-renders.
+ */
 const STABLE_CLINICAL_FIELDS: ReadonlySet<string> = new Set([
   '@_negationInd',
   'code',
@@ -324,11 +329,9 @@ const STABLE_CLINICAL_FIELDS: ReadonlySet<string> = new Set([
 /**
  * Stripped at every depth inside a kept field: narrative pointers, narrative
  * ids, identifiers, addresses and contact points, authorship, rendering.
- * `statusCode` is a lifecycle state (active becomes completed) rather than what
- * the statement is, so a status change does not rename a claimant either.
  */
 const UNSTABLE_KEYS: ReadonlySet<string> = wordSet(
-  'reference @_ID @_IDREF @_styleCode templateId id addr telecom author performer informant statusCode',
+  'reference @_ID @_IDREF @_styleCode templateId id addr telecom author performer informant',
 );
 
 /** Clinical statements a claimant can be, or be wrapped in (`<entry>`). */
