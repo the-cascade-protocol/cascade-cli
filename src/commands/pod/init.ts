@@ -25,6 +25,7 @@ import {
 import { obtainNewPassphrase } from '../../lib/passphrase.js';
 import { shellCommand } from '../../lib/shell-quote.js';
 import { mkdirInPod, writePodFile } from '../../lib/pod-path.js';
+import { ensurePodIdentifier } from '../../lib/pod-identifier.js';
 
 // ─── Pod Init Templates ──────────────────────────────────────────────────────
 
@@ -344,6 +345,9 @@ export function registerInitSubcommand(pod: Command, program: Command): void {
         writeResource(absDir, path.join(absDir, 'settings', 'publicTypeIndex.ttl'), PUBLIC_TYPE_INDEX_TTL, dek);
         writeResource(absDir, path.join(absDir, 'settings', 'privateTypeIndex.ttl'), PRIVATE_TYPE_INDEX_TTL, dek);
         writeResource(absDir, path.join(absDir, 'index.ttl'), indexTtl(dirName), dek);
+        // The pod's one identifier, minted now and never again. Appended to the
+        // extended profile just written, through the only module that writes it.
+        ensurePodIdentifier(absDir, dek);
         // The last use of the pod key: zero it rather than leave it for the
         // garbage collector.
         const encrypted = dek !== undefined;

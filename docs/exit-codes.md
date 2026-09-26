@@ -65,8 +65,12 @@ codes without bending them:
 `2` outranks `1` when both apply. A file doctor could not open was never
 examined, and a verb whose entire job is to report the state of your pod must
 not describe files it never read. Its `--json` report carries a per-file
-`status` of `repaired`, `repairable`, `refused` or `unreadable`, and the
-unreadable ones are also named on stderr in the usual envelope.
+`status` of `repaired`, `repairable`, `refused`, `unreadable` or `notice`, and
+the unreadable ones are also named on stderr in the usual envelope. A `notice`
+is information, not damage, and never changes the exit code: today, a pod that
+has no `cascade:podIdentifier` yet (the next command that names records mints
+it; `--write` mints it now). Two identifier values, a malformed one, or one on
+the public `card.ttl` is `refused`.
 
 ## The `--json` error envelope
 

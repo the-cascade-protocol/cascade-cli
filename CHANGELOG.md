@@ -9,6 +9,37 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+**Every pod has one identifier, minted once (core v3.11).** `pod init`, plain
+and `--encrypt`, now writes `cascade:podIdentifier` on `<#me>` in the
+owner-only `profile/extended.ttl`: a random lowercase version 4 UUID in
+`urn:uuid:` form, typed `xsd:anyURI`. It is the naming subject for any naming
+rule that includes a pod subject, so two pods never mint the same name for the
+same thing. A pod created before this release gets one the first time a
+command needs it, written before anything is named from it; after that it is
+only ever read back, never recomputed. `ensurePodIdentifier` in
+`src/lib/pod-identifier.ts` is the only writer: it appends one statement, keeps
+every other byte of the profile, replaces the file atomically (owner-only), and
+creates `extended.ttl` and the `rdfs:seeAlso` link from `card.ttl` when a pod
+lacks them. A profile holding two values, a malformed value, or Turtle that
+does not parse is refused with a typed error and nothing is written. It is
+never written to `card.ttl` and never appears in a FHIR export; a whole-pod
+copy (`pod export`) keeps it in `extended.ttl`, so a restore keeps every name.
+
+**`pod doctor` checks the identifier.** A pod without one is a notice, not
+damage (exit code unchanged); `--write` mints it. Two values, a malformed
+value, or one stated on the public `card.ttl` are refused (exit 1) for a human
+to resolve, since records may already be named from one of them. The JSON
+report gains a `notices` count and a `notice` finding status.
+
+### Changed
+
+**Bundled vocabulary: core 3.10 to 3.11** (`core.shapes.ttl` 1.10), synced from
+spec: `cascade:podIdentifier` and `cascade:PodIdentifierShape` (at most one
+value, `sh:Violation`; the lowercase version 4 `urn:uuid` form, `sh:Warning`).
+Additive: every graph that validated under core 3.10 still does.
+
 ### Security
 
 **Pod reads and writes refuse symbolic links below the pod root.** Every read
