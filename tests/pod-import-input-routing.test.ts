@@ -29,6 +29,7 @@ import {
   looksLikeZip,
   looksLikeCcdaXml,
   isPathInsidePod,
+  isPathInsidePodAsWritten,
 } from '../src/lib/import-input.js';
 import { resolveDek, writeResource } from '../src/lib/pod-encryption.js';
 
@@ -575,5 +576,80 @@ describe('pod import: pod-internal resources on an encrypted pod', () => {
     // A plaintext pod has no encryption expectation to violate, so there is
     // nothing to warn about here.
     expect(imp.stderr).not.toContain('was NOT encrypted');
+  }, TEST_TIMEOUT_MS);
+});
+
+// ─── A path inside the pod as written is a pod path ──────────────────────────
+
+describe('pod containment as written', () => {
+  it('is decided without resolving links below the pod root', () => {
+    const root = mkTmpDir();
+    const pod = path.join(root, 'pod');
+    fs.mkdirSync(pod, { recursive: true });
+    const outside = path.join(root, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'x.ttl'), 'x');
+    fs.symlinkSync(outside, path.join(pod, 'notes'), 'dir');
+
+    // Resolved, it is outside; as written, it is a pod path.
+    expect(isPathInsidePod(path.join(pod, 'notes', 'x.ttl'), pod)).toBe(false);
+    expect(isPathInsidePodAsWritten(path.join(pod, 'notes', 'x.ttl'), pod)).toBe(true);
+  });
+
+  it('accepts the root through its resolved spelling, and nothing that is not under it', () => {
+    const root = mkTmpDir();
+    const realPod = path.join(root, 'real-pod');
+    fs.mkdirSync(realPod, { recursive: true });
+    const alias = path.join(root, 'alias-pod');
+    fs.symlinkSync(realPod, alias, 'dir');
+
+    expect(isPathInsidePodAsWritten(path.join(fs.realpathSync(realPod), 'a.ttl'), alias)).toBe(true);
+    expect(isPathInsidePodAsWritten(path.join(alias, 'a.ttl'), alias)).toBe(true);
+    expect(isPathInsidePodAsWritten(alias, alias)).toBe(false);
+    expect(isPathInsidePodAsWritten(path.join(root, 'real-pod-backup', 'a.ttl'), realPod)).toBe(false);
+    expect(isPathInsidePodAsWritten(path.join(realPod, '..', 'a.ttl'), realPod)).toBe(false);
+  });
+});
+
+describe('pod import: a link inside the pod is refused, not read as an external document', () => {
+  /** A pod whose `notes` folder, or one file in `analysis`, links to a bundle outside it. */
+  async function podWithLink(kind: 'folder' | 'file', encrypted: boolean): Promise<{ pod: string; input: string }> {
+    if (encrypted) process.env.CASCADE_POD_PASSPHRASE = PASSPHRASE;
+    const root = mkTmpDir();
+    const pod = path.join(root, 'pod');
+    const init = await runCli(encrypted ? ['pod', 'init', pod, '--encrypt'] : ['pod', 'init', pod]);
+    expect(init.exitCode).toBe(0);
+    const outside = path.join(root, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'bundle.json'), syntheticFhirBundle(), 'utf-8');
+    if (kind === 'folder') {
+      fs.symlinkSync(outside, path.join(pod, 'notes'), 'dir');
+      return { pod, input: path.join(pod, 'notes', 'bundle.json') };
+    }
+    fs.mkdirSync(path.join(pod, 'analysis'), { recursive: true });
+    fs.symlinkSync(path.join(outside, 'bundle.json'), path.join(pod, 'analysis', 'bundle.json'));
+    return { pod, input: path.join(pod, 'analysis', 'bundle.json') };
+  }
+
+  for (const encrypted of [false, true]) {
+    for (const kind of ['folder', 'file'] as const) {
+      it(`${encrypted ? 'encrypted' : 'plaintext'} pod, a linked ${kind}: refused, and nothing is imported`, async () => {
+        const { pod, input } = await podWithLink(kind, encrypted);
+        const imp = await runCli(['pod', 'import', pod, input]);
+        expect(imp.exitCode).toBe(1);
+        expect(imp.stderr).toMatch(/symbolic link inside the pod/);
+
+        const q = await runCli(['--json', 'pod', 'query', pod, '--medications']);
+        expect(q.stdout).not.toContain('Lisinopril');
+      }, TEST_TIMEOUT_MS);
+    }
+  }
+
+  it('the same bundle outside the pod still imports (control)', async () => {
+    const { pod } = await podWithLink('folder', false);
+    const imp = await runCli(['pod', 'import', pod, path.join(path.dirname(pod), 'outside', 'bundle.json')]);
+    expect(imp.exitCode).toBe(0);
+    const q = await runCli(['--json', 'pod', 'query', pod, '--medications']);
+    expect(JSON.parse(q.stdout).dataTypes.medications.count).toBe(2);
   }, TEST_TIMEOUT_MS);
 });

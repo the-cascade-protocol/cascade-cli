@@ -9,9 +9,36 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A header with a repeated member name is refused.** A header in which any
+  JSON object contains the same member name twice is malformed, and is now
+  refused before any key is derived (pod encryption specification 4.1).
+  Until now the reader kept the last occurrence, as `JSON.parse` does, while
+  another reader may keep the first, so the same header could open differently
+  in two tools. The rule holds in every object of the header, and names are
+  compared after their escapes are decoded. The check is part of the pass over
+  the header text that already checks how numbers are written.
+- **`pod import` refuses an input inside the pod that reaches out through a
+  link.** An input path that is inside the destination pod as written (before
+  any link is resolved) is now read through the pod path chokepoint on any pod,
+  encrypted or not. `pod import <pod> <pod>/notes/x.ttl` where `notes` links
+  outside the pod used to read the outside file as an external document; it
+  is now refused, naming the refusal, and nothing is imported (pod encryption
+  specification 8). Inputs outside the pod are unchanged.
+
 ### Changed
 
 **Bundled vocabulary: health 2.11 to 2.12, clinical 1.20 to 1.21**, synced from spec. health adds `health:isMainSleep` and `health:basalEnergyKcal`, widens `health:sourceIdSpace` to the daily aggregate classes, removes the wrong LOINC annotation from `health:vo2Max`, and checks that a blood pressure record holds one systolic and one diastolic value (warning). clinical drops the `clinical:VitalSign` domain from `clinical:measurementMethod`. Additive: every graph that validated before still does. No converter change.
+
+- **Tests run the shared Pod encryption vectors.** A new suite runs every
+  entry of `conformance/pod-encryption/vectors.json` against the code in this
+  repository: every positive fixture with every key (and the key that must no
+  longer open it), every header vector with its stated outcome, and every file
+  system vector. The repository's own copy of the manifest 1.1 Pod fixture
+  (`tests/fixtures/pod-encryption-v1.1`) is removed; it was byte-identical to
+  the conformance fixture `positive/ts-produced-v1.1/pod`, which the tests now
+  read.
 
 ## [0.24.0] - 2026-09-26
 

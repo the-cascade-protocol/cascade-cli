@@ -476,15 +476,26 @@ function lexemeKey(p: Array<string | number>): string {
 }
 
 /**
- * Every number token in a JSON text, as WRITTEN, keyed by {@link lexemeKey} of
- * its path. Called only on text `JSON.parse` has already accepted, so it can
- * assume valid JSON. With duplicate member names the last one wins, as it does
- * for `JSON.parse`, so the text checked is the text whose value is used.
- * Iterative, so nesting depth cannot exhaust the stack.
+ * Walk a header's TEXT once, for the two rules a parsed value cannot show:
+ *
+ *  - Duplicate member names. A header in which any JSON object contains the
+ *    same member name twice is malformed; readers refuse it before deriving
+ *    any key (specification 4.1). `JSON.parse` keeps the last occurrence and
+ *    another reader's parser may keep the first, so the same bytes would open
+ *    differently. Names are compared after their escapes are decoded:
+ *    `"label"` and `"lab\u0065l"` are the same name. The refusal does not echo
+ *    the name, which is attacker-chosen.
+ *  - How numbers are written. Returns every number token as WRITTEN, keyed by
+ *    {@link lexemeKey} of its path, for the check in {@link checkKdf}.
+ *
+ * Called only on text `JSON.parse` has already accepted, so it can assume
+ * valid JSON. Iterative, so nesting depth cannot exhaust the stack.
+ *
+ * @throws {EncryptionManifestError} (malformed) on a duplicate member name.
  */
-function numberLexemes(text: string): Map<string, string> {
+function scanHeaderText(text: string): Map<string, string> {
   const out = new Map<string, string>();
-  const frames: Array<{ kind: 'object' | 'array'; key: string | number | null }> = [];
+  const frames: Array<{ kind: 'object' | 'array'; key: string | number | null; names?: Set<string> }> = [];
   const scalar = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null/y;
   let i = 0;
   while (i < text.length) {
@@ -492,7 +503,7 @@ function numberLexemes(text: string): Map<string, string> {
     if (c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === ':') {
       i += 1;
     } else if (c === '{') {
-      frames.push({ kind: 'object', key: null });
+      frames.push({ kind: 'object', key: null, names: new Set() });
       i += 1;
     } else if (c === '[') {
       frames.push({ kind: 'array', key: 0 });
@@ -511,7 +522,10 @@ function numberLexemes(text: string): Map<string, string> {
       i += 1;
       const top = frames[frames.length - 1];
       if (top !== undefined && top.kind === 'object' && top.key === null) {
-        top.key = JSON.parse(text.slice(start, i)) as string;
+        const name = JSON.parse(text.slice(start, i)) as string;
+        if (top.names!.has(name)) throw malformed('an object has the same member name twice');
+        top.names!.add(name);
+        top.key = name;
       }
     } else {
       scalar.lastIndex = i;
@@ -675,7 +689,8 @@ function checkNullableString(v: unknown, what: string): string | null {
  * Strict on purpose. A key file is not a place to guess:
  *  - any version other than 1.0 and 1.1 is refused as written by a newer tool;
  *  - a 1.1 manifest with a top-level `kdf` or `kdfParams` is refused;
- *  - an empty (or missing) `wraps` is refused.
+ *  - an empty (or missing) `wraps` is refused;
+ *  - an object with the same member name twice is refused.
  *
  * @throws {EncryptionManifestError} on any of the above, or invalid JSON.
  */
@@ -690,7 +705,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
     throw malformed('not valid JSON');
   }
   if (!isPlainObject(raw)) throw malformed('not a JSON object');
-  const numbers = numberLexemes(text);
+  const numbers = scanHeaderText(text);
 
   const version = raw.version;
   if (typeof version !== 'string') throw malformed('no version');

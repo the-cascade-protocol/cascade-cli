@@ -19,6 +19,12 @@
  *     comparison wrong. Getting this wrong in the permissive direction would
  *     mean trying to decrypt a genuinely external file, so every uncertain case
  *     answers "outside".
+ *
+ *     A path that is inside the pod AS WRITTEN (`isPathInsidePodAsWritten`)
+ *     is a pod path whatever its links resolve to, and is read through the pod
+ *     path chokepoint, which refuses a link inside the pod: `<pod>/notes/x.ttl`
+ *     where `notes` links out of the pod is refused, never read as an external
+ *     document (pod encryption specification, section 8).
  */
 
 import * as fs from 'node:fs';
@@ -170,4 +176,34 @@ export function isPathInsidePod(filePath: string, podDir: string): boolean {
     if (parent === current) return false; // reached the filesystem root
     current = parent;
   }
+}
+
+/**
+ * True when `filePath`, WITHOUT resolving any link below the pod, names a path
+ * under `podDir`: the pod-relative spelling a person or app wrote. The pod
+ * root itself may be reached through a link (a `/tmp/...` pod is also
+ * `/private/tmp/...`), so the input is compared against the root both as
+ * written and resolved; nothing below the root is resolved.
+ *
+ * Such a path is a pod path, so it is read through the pod path chokepoint and
+ * a link inside the pod is refused rather than followed. The pod directory
+ * itself is not inside itself.
+ */
+export function isPathInsidePodAsWritten(filePath: string, podDir: string): boolean {
+  const abs = path.resolve(filePath);
+  const root = path.resolve(podDir);
+  if (isStrictlyUnder(abs, root)) return true;
+  let rootReal: string;
+  try {
+    rootReal = fs.realpathSync(root);
+  } catch {
+    return false;
+  }
+  return isStrictlyUnder(abs, rootReal);
+}
+
+/** `child` lies under `parent` and is not `parent` itself. Lexical. */
+function isStrictlyUnder(child: string, parent: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
