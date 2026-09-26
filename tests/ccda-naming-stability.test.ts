@@ -56,6 +56,10 @@ interface Download {
   problemText: string;
   /** The shared-id medications' `statusCode`. */
   medicationStatus?: string;
+  /** The shared-id problems' nested status observation value. */
+  problemStatus?: string;
+  /** List a panel's results in reverse order. */
+  reverseResults?: boolean;
 }
 
 const A: Download = {
@@ -119,7 +123,7 @@ function panel(d: Download, code: string, results: string[]): string {
         <statusCode code="completed"/>
         <effectiveTime value="20310801083000-0500"/>
         ${author(d)}
-        ${results.join('\n')}
+        ${(d.reverseResults ? [...results].reverse() : results).join('\n')}
         ${visitWrapper(d)}
       </organizer></entry>`;
 }
@@ -153,6 +157,11 @@ function sharedIdEncounter(d: Download, n: number, code: string, day: string): s
       <text><reference value="#${d.idPrefix}encrow${n}"/></text>
       <effectiveTime><low value="${day}0900-0500"/><high value="${day}0945-0500"/></effectiveTime>
       ${author(d)}
+      <participant typeCode="LOC"><participantRole classCode="SDLOC">
+        <addr><streetAddressLine>${d.street}</streetAddressLine></addr>
+        <telecom value="tel:+1-555-01${d.idPrefix.length}0"/>
+        <playingEntity classCode="PLC"><name>Orchard Valley Clinic East</name></playingEntity>
+      </participantRole></participant>
     </encounter></entry>`;
 }
 
@@ -194,6 +203,28 @@ function sharedIdMedication(d: Download, n: number, rx: string, name: string): s
     </substanceAdministration></entry>`;
 }
 
+/** Two problems claiming ONE id with different diagnoses, each with a nested status. */
+function sharedIdProblem(d: Download, n: number, snomed: string, name: string): string {
+  return `<entry typeCode="DRIV"><act classCode="ACT" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.22.4.3"/>
+      <id root="${OID}.10" extension="CONCERN-${n}"/>
+      <code code="CONC" codeSystem="2.16.840.1.113883.5.6"/>
+      <statusCode code="active"/>
+      <entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.22.4.4"/>
+        <id root="${OID}.11" extension="PROB-SHARED"/>
+        <code code="55607006" codeSystem="2.16.840.1.113883.6.96"/>
+        <text><reference value="#${d.idPrefix}prob${n}"/></text>
+        <effectiveTime><low value="20290401"/></effectiveTime>
+        <value xsi:type="CD" code="${snomed}" displayName="${name}" codeSystem="2.16.840.1.113883.6.96"/>
+        <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+          <code code="33999-4" codeSystem="2.16.840.1.113883.6.1"/>
+          <value xsi:type="CD" code="${d.problemStatus === 'Inactive' ? '73425007' : '55561003'}" displayName="${d.problemStatus ?? 'Active'}" codeSystem="2.16.840.1.113883.6.96"/>
+        </observation></entryRelationship>
+      </observation></entryRelationship>
+    </act></entry>`;
+}
+
 /** The problem list narrative, with internal ids, a footnote and style that move. */
 function problemNarrative(d: Download): string {
   const p = d.idPrefix;
@@ -229,6 +260,8 @@ function download(d: Download): string {
       <code code="11450-4" codeSystem="2.16.840.1.113883.6.1"/>
       <title>Problems</title>
       ${problemNarrative(d)}
+      ${sharedIdProblem(d, 1, '61582004', 'Allergic rhinitis')}
+      ${sharedIdProblem(d, 2, '195967001', 'Asthma')}
     </section></component>
     <component><section>
       <templateId root="2.16.840.1.113883.10.20.22.2.3.1"/>
@@ -360,6 +393,7 @@ describe('the id-reuse disambiguator hashes stable clinical fields only', () => 
   const LAB = `health:LabResultRecord|${OID}.1.5555`;
   const PANEL = `clinical:LaboratoryReport|${OID}.5:PANEL-SHARED`;
   const ENC = `clinical:Encounter|${OID}.4:ENC-SHARED`;
+  const PROBLEM = `health:ConditionRecord|${OID}.11:PROB-SHARED`;
 
   it('shared-id lab results keep their names when pointers and addresses move', async () => {
     const a = await names(download(A));
@@ -399,6 +433,19 @@ describe('the id-reuse disambiguator hashes stable clinical fields only', () => 
     expect(meds(b)).toEqual(meds(a));
   });
 
+  it('a nested status change alone does not rename a shared-id problem', async () => {
+    const a = await names(download(A));
+    const b = await names(download({ ...B, problemStatus: 'Inactive' }));
+    expect(ids(a, PROBLEM)).toHaveLength(2);
+    expect(ids(b, PROBLEM)).toEqual(ids(a, PROBLEM));
+  });
+
+  it('a panel listing its results in another order keeps its name', async () => {
+    const a = await names(download(A));
+    const b = await names(download({ ...B, reverseResults: true }));
+    expect(ids(b, PANEL)).toEqual(ids(a, PANEL));
+  });
+
   it('a bare citation of a visit elsewhere does not contradict the visit\'s own id', async () => {
     // VISIT-88 is stated in full once, and cited by a medication as an
     // `<encounter>` carrying nothing but the id. The citation states no clinical
@@ -419,6 +466,7 @@ describe('CONTROL: genuinely different claimants of one id stay apart', () => {
       expect(new Set(n.bySourceId.get(`health:LabResultRecord|${OID}.1.5555`)).size).toBe(2);
       expect(new Set(n.bySourceId.get(`clinical:LaboratoryReport|${OID}.5:PANEL-SHARED`)).size).toBe(2);
       expect(new Set(n.bySourceId.get(`clinical:Encounter|${OID}.4:ENC-SHARED`)).size).toBe(2);
+      expect(new Set(n.bySourceId.get(`health:ConditionRecord|${OID}.11:PROB-SHARED`)).size).toBe(2);
       const meds = [...cls(n, 'health:MedicationRecord'), ...cls(n, 'clinical:Medication')];
       expect(new Set(meds).size).toBe(2);
     }
