@@ -117,6 +117,18 @@ const EVENT_IDENTITY_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
     why: 'The user-resolution record URI: one per decision a person made, stamped with resolvedAt.',
   },
   {
+    // The one randomness that is not about a record or an act inside the pod:
+    // the pod itself. Narrow on purpose. This entry covers a single file, the
+    // only writer of cascade:podIdentifier, and nothing in it names a record.
+    file: 'lib/pod-identifier.ts',
+    why:
+      "The pod's identifier (cascade:podIdentifier), minted once when the pod is created and " +
+      'then only ever read back. It identifies the CREATION of a pod, an event: two pods built ' +
+      'from the same exports are two pods and must name their records differently, which is the ' +
+      'collision the pod subject in a naming rule exists to prevent. Record names are derived ' +
+      'deterministically from the stored value, never from a fresh draw.',
+  },
+  {
     file: 'lib/advisory/applier.ts',
     why:
       'PROV activity IRIs for one advisory application. A prov:Activity is an occurrence by ' +

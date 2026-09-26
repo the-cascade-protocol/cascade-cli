@@ -63,6 +63,13 @@ import { encryptResource, readResource } from './pod-encryption.js';
 import { atomicWriteBytes, looksLikePlaintext } from './pod-resources.js';
 import { tidyReason, type PodReader, type PodReadFailure } from './pod-read.js';
 import { readPodFile, writePodFile } from './pod-path.js';
+import {
+  CARD_PATH,
+  EXTENDED_PROFILE_PATH,
+  cardCarriesPodIdentifier,
+  ensurePodIdentifier,
+  readPodIdentifier,
+} from './pod-identifier.js';
 
 // ─── The registry ─────────────────────────────────────────────────────────────
 
@@ -189,10 +196,21 @@ export type DoctorDamage =
   /** The file could not be read at all. */
   | 'unreadable'
   /** The repair was written and did not read back correctly; the original was restored. */
-  | 'write-verify-failed';
+  | 'write-verify-failed'
+  /** The pod has no `cascade:podIdentifier` yet. Not damage: the next command that names records mints it. */
+  | 'pod-identifier-missing'
+  /** `profile/extended.ttl` states more than one `cascade:podIdentifier`. */
+  | 'pod-identifier-duplicate'
+  /** The one `cascade:podIdentifier` is not a lowercase version 4 `urn:uuid`, or not on `<#me>`. */
+  | 'pod-identifier-malformed'
+  /** `profile/card.ttl`, the public profile, states a `cascade:podIdentifier`. */
+  | 'pod-identifier-public';
 
-/** What doctor did, or would do, about one file. */
-export type DoctorStatus = 'repairable' | 'repaired' | 'refused' | 'unreadable';
+/**
+ * What doctor did, or would do, about one file. `notice` is information that
+ * is not damage (a pod with no identifier yet) and never changes the exit code.
+ */
+export type DoctorStatus = 'repairable' | 'repaired' | 'refused' | 'unreadable' | 'notice';
 
 /** One file doctor has something to say about. Healthy files produce none. */
 export interface DoctorFinding {
@@ -227,6 +245,8 @@ export interface DoctorReport {
   repairable: number;
   refused: number;
   unreadable: number;
+  /** Findings that are information, not damage. Never counted towards the exit code. */
+  notices: number;
   findings: DoctorFinding[];
 }
 
@@ -654,6 +674,8 @@ export async function runPodDoctor(
     });
   }
 
+  for (const f of podIdentifierFindings(reader, options.write)) findings.push(f);
+
   const count = (status: DoctorStatus) => findings.filter((f) => f.status === status).length;
   return {
     pod: reader.podDir,
@@ -665,8 +687,95 @@ export async function runPodDoctor(
     repairable: count('repairable'),
     refused: count('refused'),
     unreadable: count('unreadable'),
+    notices: count('notice'),
     findings,
   };
+}
+
+/**
+ * The pod's identifier (`cascade:podIdentifier`, core v3.11), checked where it
+ * lives and where it must never be.
+ *
+ *  - None yet: a NOTICE, not damage. The next command that names records from
+ *    the pod mints it first; `--write` mints it now, through the one writer.
+ *  - Two values, or one malformed: REFUSED. Records may already be named from
+ *    one of them, so choosing is a human decision and doctor never rewrites it.
+ *  - Stated on `card.ttl`, the public profile: REFUSED, for a human to remove.
+ *
+ * A profile that does not parse or decrypt is already reported by the file
+ * sweep, so it produces nothing more here.
+ */
+function podIdentifierFindings(reader: PodReader, write: boolean): DoctorFinding[] {
+  const out: DoctorFinding[] = [];
+  let state: ReturnType<typeof readPodIdentifier>;
+  try {
+    state = readPodIdentifier(reader.podDir, reader.dek);
+  } catch {
+    return out; // Unreadable: the file sweep has reported it.
+  }
+
+  if (state.status === 'absent') {
+    if (!write) {
+      out.push({
+        file: EXTENDED_PROFILE_PATH,
+        status: 'notice',
+        damage: 'pod-identifier-missing',
+        reason: "This pod has no identifier (cascade:podIdentifier) yet. That is not damage.",
+        nextStep:
+          'It is minted and written the first time a command names records from it. ' +
+          'Re-run with --write to mint it now.',
+      });
+    } else {
+      try {
+        ensurePodIdentifier(reader.podDir, reader.dek);
+        out.push({
+          file: EXTENDED_PROFILE_PATH,
+          status: 'repaired',
+          damage: 'pod-identifier-missing',
+          reason: "Minted the pod's identifier (cascade:podIdentifier) and appended it; every other byte was kept.",
+        });
+      } catch (e: unknown) {
+        out.push({
+          file: EXTENDED_PROFILE_PATH,
+          status: 'refused',
+          damage: 'pod-identifier-missing',
+          reason: errText(e),
+          nextStep: 'Nothing was written. Fix the profile, then run doctor again.',
+        });
+      }
+    }
+  } else if (state.status === 'duplicate') {
+    out.push({
+      file: EXTENDED_PROFILE_PATH,
+      status: 'refused',
+      damage: 'pod-identifier-duplicate',
+      reason: `The profile states ${state.count} values of cascade:podIdentifier; a pod has exactly one.`,
+      nextStep:
+        "Keep the value this pod's records were named from and remove the others by hand. Doctor " +
+        'will not choose: records may already be named from either.',
+    });
+  } else if (state.status === 'malformed') {
+    out.push({
+      file: EXTENDED_PROFILE_PATH,
+      status: 'refused',
+      damage: 'pod-identifier-malformed',
+      reason: `The pod's identifier (cascade:podIdentifier) is not usable: ${state.reason}.`,
+      nextStep:
+        'It must be one lowercase version 4 UUID in urn:uuid form, typed xsd:anyURI, on <#me>. ' +
+        'Doctor never rewrites it, because records may already be named from it.',
+    });
+  }
+
+  if (cardCarriesPodIdentifier(reader.podDir, reader.dek)) {
+    out.push({
+      file: CARD_PATH,
+      status: 'refused',
+      damage: 'pod-identifier-public',
+      reason: 'The public profile states a cascade:podIdentifier. It belongs only in profile/extended.ttl.',
+      nextStep: 'Remove it from profile/card.ttl by hand; the one in profile/extended.ttl is the one that counts.',
+    });
+  }
+  return out;
 }
 
 /**

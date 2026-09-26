@@ -19,8 +19,8 @@
     dct:description "Core vocabulary for schema versioning, data provenance, identity management, and patient demographics across all Cascade Protocol applications"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-10-31"^^xsd:date ;
-    dct:modified "2026-09-24"^^xsd:date ;
-    owl:versionInfo "3.10" ;
+    dct:modified "2026-09-26"^^xsd:date ;
+    owl:versionInfo "3.11" ;
     rdfs:comment "This vocabulary defines cross-cutting concepts used by all Cascade Protocol health data applications: schema versioning, data provenance, patient demographics (PatientProfile), and supporting identity classes (Address, PharmacyInfo, AdvanceDirectives). Domain-specific vocabularies (e.g., pots:, ecg:, glucose:) import this core vocabulary."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/core/v1.0/> .
 
@@ -310,6 +310,21 @@ cascade:dateOfBirth a owl:DatatypeProperty ;
     rdfs:comment "Patient date of birth for age calculation and screening eligibility. FHIR-aligned: fhir:Patient.birthDate."@en ;
     rdfs:domain cascade:PatientProfile ;
     rdfs:range xsd:date .
+
+cascade:podIdentifier a owl:DatatypeProperty ;
+    rdfs:label "Pod Identifier"@en ;
+    rdfs:comment """The pod's one identifier: a random version 4 UUID in urn:uuid form, lowercase, minted when the pod is created (D-POD-ID-1). It identifies the pod and the patient record the pod keeps. Lives on <#me> in /profile/extended.ttl, which is owner-only; never on /profile/card.ttl.
+
+MINTED ONCE, NEVER RECOMPUTED. pod init mints it; a pod created earlier gets one the first time a command needs it, written before any record is named from it. It is read back, never derived, so it is stable for the life of the pod.
+
+THE NAMING SUBJECT. Wherever a naming rule includes a pod subject (D-WELLNESS-1 Q1), this value as written is the input. The seed is hashed, so a name does not reveal it.
+
+NEVER EXPORTED. Exports carry no Cascade identifier by default (D-CANONICAL-1 ruling 5). It is a property of <#me>, not owl:sameAs, so nothing is inferred to be the same individual.
+
+No rdfs:domain is declared: the extended profile's subject carries no rdf:type of its own (see cascade:ExtendedProfileShape)."""@en ;
+    rdfs:range xsd:anyURI ;
+    rdfs:seeAlso <https://www.rfc-editor.org/rfc/rfc9562> ;
+    owl:versionInfo "Added in core v3.11" .
 
 cascade:dayZone a owl:DatatypeProperty ;
     rdfs:label "Day Zone"@en ;
@@ -856,15 +871,23 @@ WHAT THIS IS NOT. It is not an interpretation, and it is not a substitute for on
 # <#pots-check-123> a pots:POTSCheckResult ;
 #     cascade:schemaVersion "1.2" ;
 #     cascade:dataProvenance cascade:ConsumerGenerated ;
-#     prov:wasAttributedTo <https://id.cascadeprotocol.org/users/abc123> ;
+#     prov:wasAttributedTo </profile/card.ttl#me> ;
 #     prov:wasGeneratedBy [
 #         a prov:Activity ;
-#         prov:wasAssociatedWith <https://id.cascadeprotocol.org/users/abc123> ;
+#         prov:wasAssociatedWith </profile/card.ttl#me> ;
 #         prov:startedAtTime "2025-10-31T10:00:00Z"^^xsd:dateTime
 #     ] .
 
 # ============================================================================
 # Changelog
+#
+# Version 3.11 (2026-09-26)
+# - Added cascade:podIdentifier (owl:DatatypeProperty, range xsd:anyURI): the
+#   pod's one random urn:uuid, minted once at pod creation, on <#me> in the
+#   owner-only /profile/extended.ttl, and the naming subject for every rule
+#   that includes a pod subject (D-POD-ID-1, recording spec#63's outcome).
+# - The commented provenance example no longer shows an
+#   https://id.cascadeprotocol.org/users/ agent: no such identifier is minted.
 #
 # Version 3.10 (2026-09-24)
 # - Added cascade:statistic (owl:DatatypeProperty, range xsd:string): which

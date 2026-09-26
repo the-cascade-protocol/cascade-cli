@@ -63,6 +63,7 @@ const MARKER: Record<DoctorFinding['status'], string> = {
   repairable: 'FIX  ',
   refused: 'STOP ',
   unreadable: '?????',
+  notice: 'NOTE ',
 };
 
 export function registerDoctorSubcommand(pod: Command, program: Command): void {
@@ -214,7 +215,7 @@ function printReport(report: DoctorReport, podDirArg: string): void {
     console.log();
   }
 
-  if (report.findings.length === 0) {
+  if (report.findings.length === report.notices) {
     console.log('Nothing to repair. Every .ttl file in this pod parses.');
     return;
   }
@@ -224,6 +225,7 @@ function printReport(report: DoctorReport, podDirArg: string): void {
     `${report.repairable} repairable`,
     `${report.refused} refused`,
     `${report.unreadable} unreadable`,
+    ...(report.notices > 0 ? [`${report.notices} notice(s)`] : []),
   ];
   console.log(parts.join(', ') + '.');
 

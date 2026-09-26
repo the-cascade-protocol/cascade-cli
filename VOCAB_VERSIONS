@@ -278,7 +278,22 @@
 #   Strictly widening: the one severity change goes from sh:Violation to
 #   sh:Warning, so every graph that validated under clinical v1.19 validates
 #   under v1.20 unchanged.
-core=3.10
+#
+# 2026-09-26 — core 3.10->3.11
+#   Synced with scripts/sync-shapes-from-spec.sh; only core.ttl and
+#   core.shapes.ttl changed.
+#   - ONE new term: cascade:podIdentifier, owl:DatatypeProperty, range
+#     xsd:anyURI. The pod's one random identifier, a lowercase version 4 UUID
+#     in urn:uuid form, on <#me> in the owner-only /profile/extended.ttl, never
+#     on card.ttl and never exported. Minted once by pod init (or, for a pod
+#     created earlier, the first time a command needs it) and read back, never
+#     recomputed. It is the naming subject for any naming rule that includes a
+#     pod subject. src/lib/pod-identifier.ts is the only writer.
+#   - core.shapes.ttl v1.10 adds cascade:PodIdentifierShape (open-world,
+#     sh:targetSubjectsOf): at most one value (sh:Violation) and the lowercase
+#     version 4 urn:uuid form (sh:Warning).
+#   Additive: every graph that validated under core v3.10 validates unchanged.
+core=3.11
 health=2.11
 clinical=1.20
 coverage=1.6
