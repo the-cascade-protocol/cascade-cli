@@ -685,9 +685,11 @@ function collapseResolvedEquivalentEdges(
 // fingerprint keeps the original IRI and every other distinct fingerprint moves
 // to an IRI derived from (original IRI, fingerprint). Reversing the input order
 // therefore produces a byte-identical pod, which is the actual repair for "the
-// filesystem decides which glucose value you keep". Keeping the smallest at the
+// filesystem decides which glucose value you keep". Keeping one record at the
 // original IRI also means the IRI stays occupied, so nothing that referenced it
-// starts dangling.
+// starts dangling. One exception outranks the fingerprint: when the pod already
+// holds a record at the IRI, that record keeps it, because a name written to a
+// pod is never rewritten; the arrival moves instead.
 //
 // WHY IT IS STABLE ACROSS RE-IMPORTS. The derived IRI is a pure function of the
 // original IRI and the record's own content fingerprint, so importing the same
@@ -987,7 +989,7 @@ export interface IdentityCollision {
   /** The IRI the identity layer minted for all of them. */
   mintedUri: string;
   recordType: CascadeRecordType;
-  /** Final IRI of each distinct content, smallest fingerprint first. */
+  /** Final IRI of each distinct content, the one keeping the minted IRI first. */
   resultingUris: string[];
   /** Source systems involved, deduplicated, in the order first seen. */
   sourceSystems: string[];
