@@ -19,15 +19,10 @@
  * by construction, rather than when someone remembers to extend a list.
  */
 
-import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import {
-  MIN_ENVELOPE_LEN,
-  decryptBytes,
-  MANIFEST_RELATIVE_PATH,
-  atomicWriteFile,
-} from './pod-encryption.js';
+import { MIN_ENVELOPE_LEN, decryptBytes, MANIFEST_RELATIVE_PATH } from './pod-encryption.js';
+import { atomicWritePodFile, readPodFile } from './pod-path.js';
 
 /**
  * Pod-relative paths that stay PLAINTEXT by design. Three entries, and adding a
@@ -163,8 +158,8 @@ export function looksLikePlaintext(blob: Buffer): boolean {
  * resource is never mistaken for text. The order matters: the reverse would let
  * a ciphertext blob that happens to decode as UTF-8 be called plaintext.
  */
-export function classifyResource(absPath: string, dek: Buffer): ResourceState {
-  const blob = fs.readFileSync(absPath);
+export function classifyResource(podDir: string, absPath: string, dek: Buffer): ResourceState {
+  const blob = readPodFile(podDir, absPath);
   try {
     decryptBytes(blob, dek);
     return 'encrypted';
@@ -195,7 +190,10 @@ export function classifyResource(absPath: string, dek: Buffer): ResourceState {
  *
  * `mode` sets the new file's permission bits (the process umask still
  * applies, so it can only narrow them); without it the process default is used.
+ *
+ * `podDir` is the root the path is resolved under (the pod path chokepoint,
+ * `pod-path.ts`): nothing is written through a symbolic link.
  */
-export function atomicWriteBytes(absPath: string, bytes: Buffer, mode?: number): void {
-  atomicWriteFile(absPath, bytes, mode === undefined ? {} : { mode });
+export function atomicWriteBytes(podDir: string, absPath: string, bytes: Buffer, mode?: number): void {
+  atomicWritePodFile(podDir, absPath, bytes, mode === undefined ? {} : { mode });
 }

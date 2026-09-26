@@ -23,6 +23,17 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { argon2id } from '@noble/hashes/argon2.js';
+import {
+  atomicWriteFile,
+  mkdirInPod,
+  readPodDir,
+  readPodFile,
+  removePodFile,
+  resolveInPod,
+  writePodFile,
+  PodPathError,
+  type AtomicWriteOptions,
+} from './pod-path.js';
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
@@ -422,7 +433,15 @@ function canonicalBase64Length(s: string): number | null {
   return bytes.toString('base64') === s ? bytes.length : null;
 }
 
-function checkKdf(kdf: unknown, kdfParams: unknown, where: string): KdfParams {
+/** Where a header's `kdfParams` sits, and how each number in it was written. */
+interface KdfLexemes {
+  /** Every number in the header, keyed by {@link lexemeKey} of its path. */
+  numbers: Map<string, string>;
+  /** Path of this `kdfParams` object: `["kdfParams"]` or `["wraps", i, "kdfParams"]`. */
+  at: Array<string | number>;
+}
+
+function checkKdf(kdf: unknown, kdfParams: unknown, where: string, lexemes?: KdfLexemes): KdfParams {
   if (kdf !== 'argon2id') throw outsideLimits(`${where}.kdf`);
   if (!isPlainObject(kdfParams)) throw malformed(`${where} kdfParams is missing`);
   const { salt, t, m, p } = kdfParams;
@@ -430,8 +449,81 @@ function checkKdf(kdf: unknown, kdfParams: unknown, where: string): KdfParams {
   if (canonicalBase64Length(salt) !== MANIFEST_LIMITS.saltBytes) {
     throw outsideLimits(`${where}.kdfParams.salt`);
   }
+  if (lexemes) {
+    for (const [name, value] of [['t', t], ['m', m], ['p', p]] as const) {
+      if (typeof value !== 'number') continue; // refused as not an integer below
+      const written = lexemes.numbers.get(lexemeKey([...lexemes.at, name]));
+      if (written === undefined || !PLAIN_DIGITS.test(written)) {
+        throw malformed(`${where} kdfParams.${name} must be written as plain decimal digits`);
+      }
+    }
+  }
   checkCosts(t, m, p, `${where}.kdfParams`);
   return { salt, t: t as number, m: m as number, p: p as number };
+}
+
+/**
+ * The only way a header may write `t`, `m` and `p`: decimal digits, no sign,
+ * fraction, exponent or leading zero (specification 4.5). `JSON.parse` reads
+ * `3.0`, `3e0` and `30e-1` all as the integer 3, so the rule has to be checked
+ * against the text.
+ */
+const PLAIN_DIGITS = /^(0|[1-9][0-9]*)$/;
+
+/** An unambiguous key for a JSON path: member names may contain any character. */
+function lexemeKey(p: Array<string | number>): string {
+  return JSON.stringify(p);
+}
+
+/**
+ * Every number token in a JSON text, as WRITTEN, keyed by {@link lexemeKey} of
+ * its path. Called only on text `JSON.parse` has already accepted, so it can
+ * assume valid JSON. With duplicate member names the last one wins, as it does
+ * for `JSON.parse`, so the text checked is the text whose value is used.
+ * Iterative, so nesting depth cannot exhaust the stack.
+ */
+function numberLexemes(text: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const frames: Array<{ kind: 'object' | 'array'; key: string | number | null }> = [];
+  const scalar = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null/y;
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === ':') {
+      i += 1;
+    } else if (c === '{') {
+      frames.push({ kind: 'object', key: null });
+      i += 1;
+    } else if (c === '[') {
+      frames.push({ kind: 'array', key: 0 });
+      i += 1;
+    } else if (c === '}' || c === ']') {
+      frames.pop();
+      i += 1;
+    } else if (c === ',') {
+      const top = frames[frames.length - 1];
+      top.key = top.kind === 'array' ? (top.key as number) + 1 : null;
+      i += 1;
+    } else if (c === '"') {
+      const start = i;
+      i += 1;
+      while (text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+      i += 1;
+      const top = frames[frames.length - 1];
+      if (top !== undefined && top.kind === 'object' && top.key === null) {
+        top.key = JSON.parse(text.slice(start, i)) as string;
+      }
+    } else {
+      scalar.lastIndex = i;
+      const m = scalar.exec(text);
+      if (m === null) break; // unreachable for text JSON.parse accepted
+      if (m[0] !== 'true' && m[0] !== 'false' && m[0] !== 'null') {
+        out.set(lexemeKey(frames.map((f) => f.key as string | number)), m[0]);
+      }
+      i += m[0].length;
+    }
+  }
+  return out;
 }
 
 /** Argon2id cost parameters inside {@link MANIFEST_LIMITS}, or a refusal naming the field. */
@@ -459,30 +551,52 @@ const HEADER_OPEN_FLAGS =
   fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0) | (fs.constants.O_NOFOLLOW ?? 0);
 
 /**
- * Is anything at all at the manifest path? `lstat`, not `stat`: a symbolic
- * link, dangling or not, counts as present, so it is refused as a header rather
- * than silently read as "this pod is not encrypted".
+ * Is anything at all at the header path, judged without following a link?
+ *
+ * A symbolic link at the header path, dangling or not, counts as present, and
+ * so does a `settings` folder that is itself a link, whatever it points at: a
+ * reader cannot look inside it without following it. Both are then refused as
+ * a header, so such a pod reads as locked and never as a plaintext pod a
+ * writer would store plaintext into (the pod encryption specification, 4.1).
  */
-function manifestPresent(file: string): boolean {
+function manifestPresent(podDir: string): boolean {
+  const settings = path.join(podDir, path.dirname(MANIFEST_RELATIVE_PATH));
   try {
-    fs.lstatSync(file);
+    if (fs.lstatSync(settings).isSymbolicLink()) return true;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+    throw e;
+  }
+  try {
+    fs.lstatSync(manifestPath(podDir));
     return true;
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    const code = (e as NodeJS.ErrnoException).code;
+    // ENOTDIR: `settings` is a file, so nothing can be at the header path.
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false;
     throw e;
   }
 }
 
+/** Header bytes decode as UTF-8 or not at all: no replacement characters. */
+const HEADER_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
 /**
- * Read the manifest's text. The header must be a REGULAR file reached without
- * a symbolic link, and at most {@link MANIFEST_LIMITS.maxHeaderBytes} bytes are
- * ever read from it.
+ * Read the header's text from a file path. The header must be a REGULAR file
+ * reached without a symbolic link in its last component, and at most
+ * {@link MANIFEST_LIMITS.maxHeaderBytes} bytes are ever read from it. The path
+ * above the last component is the caller's to have checked: a pod's header
+ * comes through {@link readPodManifestText}.
  *
  * The kind is judged with `fstat` on the handle that is then read, not with a
  * `stat` of the path, because a path's size says nothing useful about a device
  * (size 0, endless bytes) or a FIFO (size 0, blocks until a writer appears).
  * The read is bounded whatever the handle reports, so even a file that grows
  * while it is read cannot make this allocate more than the limit plus one byte.
+ *
+ * The bytes must be valid UTF-8 with no byte order mark: a decoder that
+ * repaired them would hand the parser a header no other reader sees.
  */
 function readManifestText(file: string): string {
   // The containing directory must not be a link either: a link there would
@@ -498,22 +612,47 @@ function readManifestText(file: string): string {
     if (code === 'ELOOP' || code === 'EMLINK' || code === 'EISDIR') throw notRegularFile();
     throw e;
   }
+  let buf: Buffer;
+  let filled = 0;
   try {
     const st = fs.fstatSync(fd);
     if (!st.isFile()) throw notRegularFile();
     if (st.size > MANIFEST_LIMITS.maxHeaderBytes) throw outsideLimits('header size');
-    const buf = Buffer.alloc(MANIFEST_LIMITS.maxHeaderBytes + 1);
-    let filled = 0;
+    buf = Buffer.alloc(MANIFEST_LIMITS.maxHeaderBytes + 1);
     while (filled < buf.length) {
       const n = fs.readSync(fd, buf, filled, buf.length - filled, null);
       if (n === 0) break;
       filled += n;
     }
     if (filled > MANIFEST_LIMITS.maxHeaderBytes) throw outsideLimits('header size');
-    return buf.toString('utf-8', 0, filled);
   } finally {
     fs.closeSync(fd);
   }
+  const bytes = buf.subarray(0, filled);
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    throw malformed('begins with a byte order mark');
+  }
+  try {
+    return HEADER_UTF8.decode(bytes);
+  } catch {
+    throw malformed('not valid UTF-8');
+  }
+}
+
+/**
+ * Read a pod's header text. The path goes through the pod path chokepoint
+ * first, so a `settings` folder or a header that is a symbolic link is refused
+ * as a malformed header without anything being read through it.
+ */
+function readPodManifestText(podDir: string): string {
+  let file: string;
+  try {
+    file = resolveInPod(podDir, MANIFEST_RELATIVE_PATH);
+  } catch (e) {
+    if (e instanceof PodPathError) throw notRegularFile();
+    throw e;
+  }
+  return readManifestText(file);
 }
 
 function checkWrappedDek(wrappedDek: unknown, where: string): string {
@@ -551,6 +690,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
     throw malformed('not valid JSON');
   }
   if (!isPlainObject(raw)) throw malformed('not a JSON object');
+  const numbers = numberLexemes(text);
 
   const version = raw.version;
   if (typeof version !== 'string') throw malformed('no version');
@@ -579,7 +719,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
   }
 
   if (version === '1.0') {
-    const kdfParams = checkKdf(raw.kdf, raw.kdfParams, 'top-level');
+    const kdfParams = checkKdf(raw.kdf, raw.kdfParams, 'top-level', { numbers, at: ['kdfParams'] });
     // A 1.0 wrap has no label on disk. The first passphrase wrap reads as
     // "primary" and every other wrap as null: exactly the labels
     // {@link migrateManifest} writes, so a 1.0 header reads the same before
@@ -616,7 +756,7 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
     if (w.by !== 'passphrase') {
       return { kind: 'unimplemented', by: w.by, label, createdAt };
     }
-    const kdfParams = checkKdf(w.kdf, w.kdfParams, `wraps[${i}]`);
+    const kdfParams = checkKdf(w.kdf, w.kdfParams, `wraps[${i}]`, { numbers, at: ['wraps', i, 'kdfParams'] });
     const wrappedDek = checkWrappedDek(w.wrappedDek, `wraps[${i}]`);
     return {
       kind: 'passphrase',
@@ -641,9 +781,8 @@ export function parseEncryptionManifest(text: string): ParsedEncryptionManifest 
  * @throws {EncryptionManifestError} when the manifest is malformed or newer.
  */
 export function readEncryptionManifest(podDir: string): NormalizedEncryptionManifest | null {
-  const p = manifestPath(podDir);
-  if (!manifestPresent(p)) return null;
-  return parseEncryptionManifest(readManifestText(p)).normalized;
+  if (!manifestPresent(podDir)) return null;
+  return parseEncryptionManifest(readPodManifestText(podDir)).normalized;
 }
 
 /**
@@ -658,21 +797,22 @@ export function writeEncryptionManifest(
   manifest: EncryptionManifestV10 | EncryptionManifestV11,
   options: { mode?: number } = {},
 ): void {
-  const p = manifestPath(podDir);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
   const text =
     manifest.version === '1.1'
       ? serializeEncryptionManifestV11(manifest)
       : JSON.stringify(manifest, null, 2) + '\n';
-  writeManifestFile(p, Buffer.from(text, 'utf-8'), options.mode === undefined ? {} : { mode: options.mode });
+  mkdirInPod(podDir, path.dirname(MANIFEST_RELATIVE_PATH));
+  writeManifestFile(podDir, Buffer.from(text, 'utf-8'), options.mode === undefined ? {} : { mode: options.mode });
 }
 
 /**
- * A pod is encrypted iff anything is at its manifest path. A symbolic link or
- * other non-regular file there still counts, and is then refused when read.
+ * A pod is encrypted iff anything is at its manifest path, judged without
+ * following a link. A symbolic link or other non-regular file there still
+ * counts, and so does a `settings` folder that is a link; each is then refused
+ * when read, so the pod reads as locked rather than as plaintext.
  */
 export function isPodEncrypted(podDir: string): boolean {
-  return manifestPresent(manifestPath(podDir));
+  return manifestPresent(podDir);
 }
 
 // ─── Manifest construction & DEK resolution ───────────────────────────────────
@@ -961,79 +1101,9 @@ export interface RewrapResult {
   replacedWrapIndex: number;
 }
 
-/**
- * fsync a directory, so a rename inside it survives a power cut. The one
- * helper for this: {@link atomicWriteFile} uses it after every rename.
- */
-export function fsyncDirectory(dir: string): void {
-  let fd: number | undefined;
-  try {
-    fd = fs.openSync(dir, 'r');
-    fs.fsyncSync(fd);
-  } catch (e) {
-    // Directories cannot be opened or fsynced on some platforms (Windows).
-    // The rename has already happened; this only narrows the crash window.
-    const code = (e as NodeJS.ErrnoException).code;
-    if (code !== 'EISDIR' && code !== 'EPERM' && code !== 'EINVAL' && code !== 'EBADF') throw e;
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
-  }
-}
-
-/** Options for {@link atomicWriteFile}. */
-export interface AtomicWriteOptions {
-  /** Permission bits for the new file. Defaults to the process default. */
-  mode?: number;
-  /** Writes the bytes into the open temporary file. Defaults to a full write. */
-  write?: (fd: number, bytes: Buffer) => void;
-  /**
-   * Runs after the temporary file is written, fsynced and closed, and before
-   * the rename. Throwing abandons the write: the temporary file is removed and
-   * the target is left as it was.
-   */
-  beforeRename?: (tempPath: string) => void;
-}
-
-/**
- * Write a file so it is never observed half-written, and so the new bytes
- * survive a power cut once this returns. The one helper for this: every
- * atomic write in the tool goes through it.
- *
- * The steps, in this order: create a NEW temporary file in the target's
- * directory (create-new, so it never opens a file or link already at that
- * name, and the same directory, so the rename cannot cross a filesystem),
- * write it, fsync it, close it, rename it over the target, fsync the
- * directory. Without the first fsync the rename can reach the disk before the
- * data, and a power cut leaves the target empty or partial; without the second
- * the rename itself can be lost. Any failure before the rename removes the
- * temporary file.
- */
-export function atomicWriteFile(absPath: string, bytes: Buffer, options: AtomicWriteOptions = {}): void {
-  const dir = path.dirname(absPath);
-  const tmp = path.join(dir, `.${path.basename(absPath)}.${randomBytes(6).toString('hex')}.tmp`);
-  let renamed = false;
-  try {
-    const fd = options.mode === undefined ? fs.openSync(tmp, 'wx') : fs.openSync(tmp, 'wx', options.mode);
-    try {
-      (options.write ?? ((f: number, b: Buffer) => fs.writeFileSync(f, b)))(fd, bytes);
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    options.beforeRename?.(tmp);
-    fs.renameSync(tmp, absPath);
-    renamed = true;
-    fsyncDirectory(dir);
-  } finally {
-    if (!renamed) {
-      try {
-        fs.rmSync(tmp, { force: true });
-      } catch {
-        /* best effort: the error that got us here is the one to report */
-      }
-    }
-  }
-}
+// `fsyncDirectory`, `atomicWriteFile` and `AtomicWriteOptions` live with the
+// path chokepoint (`pod-path.ts`) and are re-exported here for their callers.
+export { fsyncDirectory, atomicWriteFile, type AtomicWriteOptions } from './pod-path.js';
 
 /**
  * The temporary names {@link atomicWriteFile} gives the manifest. Only ever
@@ -1055,11 +1125,16 @@ export function isManifestTempName(name: string): boolean {
  * but it can hold a wrap of the key, so it is deleted rather than left beside
  * the real one.
  */
-function writeManifestFile(target: string, bytes: Buffer, options: AtomicWriteOptions = {}): void {
-  const dir = path.dirname(target);
-  for (const name of fs.readdirSync(dir)) {
-    if (MANIFEST_TEMP_NAME.test(name)) fs.rmSync(path.join(dir, name), { force: true });
+function writeManifestFile(podDir: string, bytes: Buffer, options: AtomicWriteOptions = {}): void {
+  const settings = path.dirname(MANIFEST_RELATIVE_PATH);
+  for (const entry of readPodDir(podDir, settings)) {
+    if (MANIFEST_TEMP_NAME.test(entry.name)) removePodFile(podDir, path.join(settings, entry.name));
   }
+  const target = resolveInPod(podDir, MANIFEST_RELATIVE_PATH);
+  // The rename replaces whatever is at the header's name; anything there but a
+  // regular file is refused instead, as a read of it would be.
+  const st = fs.lstatSync(target, { throwIfNoEntry: false });
+  if (st !== undefined && !st.isFile()) throw notRegularFile();
   atomicWriteFile(target, bytes, options);
 }
 
@@ -1093,8 +1168,7 @@ export function rewrapPassphrase(
   newPassphrase: string,
   options: RewrapOptions = {},
 ): RewrapResult {
-  const target = manifestPath(podDir);
-  if (!manifestPresent(target)) {
+  if (!manifestPresent(podDir)) {
     throw new Error(`Pod is not encrypted (no ${MANIFEST_RELATIVE_PATH}): ${podDir}`);
   }
   if (newPassphrase.length === 0) throw new Error('The new passphrase cannot be empty.');
@@ -1102,7 +1176,8 @@ export function rewrapPassphrase(
     throw new Error('The new passphrase is the same as the current one: nothing to change.');
   }
 
-  const parsed = parseEncryptionManifest(readManifestText(target));
+  const parsed = parseEncryptionManifest(readPodManifestText(podDir));
+  const target = manifestPath(podDir);
   const { dek, wrapIndex } = unlockManifest(parsed.normalized, currentPassphrase);
   try {
     const next: EncryptionManifestV11 =
@@ -1131,7 +1206,7 @@ export function rewrapPassphrase(
     kek.fill(0);
 
     const bytes = Buffer.from(serializeEncryptionManifestV11(next), 'utf-8');
-    writeManifestFile(target, bytes, {
+    writeManifestFile(podDir, bytes, {
       mode: fs.statSync(target).mode & 0o777,
       write: options.writeTemp,
       // Read back what is ON DISK, not what was meant to be written, and prove
@@ -1168,31 +1243,34 @@ export function rewrapPassphrase(
 }
 
 // ─── Transparent resource read/write ──────────────────────────────────────────
+//
+// Every one of these takes the pod root and resolves the path through the pod
+// path chokepoint (`pod-path.ts`): a link anywhere below the root, a path that
+// leaves the pod, or anything but a regular file is refused before a byte is
+// read or written.
 
 /**
  * Read a resource. If a DEK is supplied, the on-disk bytes are decrypted from
  * the combined layout; otherwise the file is read as plaintext UTF-8.
  *
+ * @param podDir the pod root.
+ * @param target the resource: pod-relative, or an absolute path under the pod.
  * @throws {PodDecryptError} on auth failure when a DEK is supplied.
+ * @throws {PodPathError} when the path is refused.
  */
-export function readResource(absPath: string, dek?: Buffer): string {
-  if (dek) {
-    const blob = fs.readFileSync(absPath);
-    return decryptResource(blob, dek);
-  }
-  return fs.readFileSync(absPath, 'utf-8');
+export function readResource(podDir: string, target: string, dek?: Buffer): string {
+  const blob = readPodFile(podDir, target);
+  return dek ? decryptResource(blob, dek) : blob.toString('utf-8');
 }
 
 /**
  * Write a resource. If a DEK is supplied, the content is encrypted to the
  * combined layout; otherwise it is written as plaintext UTF-8.
+ *
+ * @throws {PodPathError} when the path is refused.
  */
-export function writeResource(absPath: string, content: string, dek?: Buffer): void {
-  if (dek) {
-    fs.writeFileSync(absPath, encryptResource(content, dek));
-  } else {
-    fs.writeFileSync(absPath, content, 'utf-8');
-  }
+export function writeResource(podDir: string, target: string, content: string, dek?: Buffer): void {
+  writePodFile(podDir, target, dek ? encryptResource(content, dek) : Buffer.from(content, 'utf-8'));
 }
 
 /**
@@ -1202,16 +1280,19 @@ export function writeResource(absPath: string, content: string, dek?: Buffer): v
  * Byte-exact, so it is safe for the non-text resources a pod carries.
  *
  * @throws {PodDecryptError} on auth failure when a DEK is supplied.
+ * @throws {PodPathError} when the path is refused.
  */
-export function readResourceBytes(absPath: string, dek?: Buffer): Buffer {
-  const blob = fs.readFileSync(absPath);
+export function readResourceBytes(podDir: string, target: string, dek?: Buffer): Buffer {
+  const blob = readPodFile(podDir, target);
   return dek ? decryptBytes(blob, dek) : blob;
 }
 
 /**
  * Write a resource from BYTES. With a DEK the content is sealed into the
  * combined layout; without one the bytes are written verbatim.
+ *
+ * @throws {PodPathError} when the path is refused.
  */
-export function writeResourceBytes(absPath: string, content: Buffer, dek?: Buffer): void {
-  fs.writeFileSync(absPath, dek ? encryptBytes(content, dek) : content);
+export function writeResourceBytes(podDir: string, target: string, content: Buffer, dek?: Buffer): void {
+  writePodFile(podDir, target, dek ? encryptBytes(content, dek) : content);
 }

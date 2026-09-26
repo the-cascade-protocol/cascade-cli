@@ -21,7 +21,6 @@
  */
 
 import { Command } from 'commander';
-import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -30,6 +29,7 @@ import crypto from 'crypto';
 import { getProperties, CASCADE_NAMESPACES } from '../../lib/turtle-parser.js';
 import { resolvePodDir, fileExists } from './helpers.js';
 import { openPod, PodUnreadableError, type PodReader } from '../../lib/pod-read.js';
+import { appendPodFile, mkdirInPod, readPodFile, writePodFile } from '../../lib/pod-path.js';
 import { envWithoutPodSecrets } from '../../lib/passphrase.js';
 import { toJsonText } from '../../lib/json-output.js';
 import { readNarrativeText } from '../../lib/narrative-text.js';
@@ -155,10 +155,10 @@ function deterministicQueueId(section: string, narrativeText: string): string {
 
 // ── Pod index helper ──────────────────────────────────────────────────────────
 
-async function appendIndexContains(indexPath: string, relPath: string): Promise<boolean> {
-  const content = await fs.readFile(indexPath, 'utf-8');
+async function appendIndexContains(podDir: string, indexPath: string, relPath: string): Promise<boolean> {
+  const content = readPodFile(podDir, indexPath).toString('utf-8');
   if (content.includes(relPath)) return false;
-  await fs.appendFile(indexPath, `\n<> <http://www.w3.org/ns/ldp#contains> <${relPath}> .\n`, 'utf-8');
+  appendPodFile(podDir, indexPath, `\n<> <http://www.w3.org/ns/ldp#contains> <${relPath}> .\n`);
   return true;
 }
 
@@ -223,7 +223,7 @@ async function loadCompletedBlockIds(podDir: string): Promise<Set<string>> {
   const queuePath = path.join(podDir, 'analysis', 'review-queue.json');
   if (await fileExists(queuePath)) {
     try {
-      const raw = await fs.readFile(queuePath, 'utf-8');
+      const raw = readPodFile(podDir, queuePath).toString('utf-8');
       const items = JSON.parse(raw) as Array<{ id: string }>;
       for (const item of items) ids.add(item.id);
     } catch { /* non-fatal */ }
@@ -233,7 +233,7 @@ async function loadCompletedBlockIds(podDir: string): Promise<Set<string>> {
   const donePath = path.join(podDir, 'analysis', 'extraction-done.json');
   if (await fileExists(donePath)) {
     try {
-      const raw = await fs.readFile(donePath, 'utf-8');
+      const raw = readPodFile(podDir, donePath).toString('utf-8');
       const doneIds = JSON.parse(raw) as string[];
       for (const id of doneIds) ids.add(id);
     } catch { /* non-fatal */ }
@@ -628,8 +628,8 @@ export function registerExtractSubcommand(pod: Command): void {
 
       // ── 6. Write results to pod ───────────────────────────────────────────
 
-      await fs.mkdir(path.join(podDir, 'clinical'), { recursive: true });
-      await fs.mkdir(path.join(podDir, 'analysis'), { recursive: true });
+      mkdirInPod(podDir, 'clinical');
+      mkdirInPod(podDir, 'analysis');
 
       const indexTtlPath = path.join(podDir, 'index.ttl');
       const newFiles: string[] = [];
@@ -638,8 +638,8 @@ export function registerExtractSubcommand(pod: Command): void {
       if (autoAccepted.length > 0) {
         const extractedPath = path.join(podDir, 'clinical', 'ai-extracted.ttl');
         const isNew = !(await fileExists(extractedPath));
-        const existing = isNew ? '' : await fs.readFile(extractedPath, 'utf-8');
-        await fs.writeFile(extractedPath, buildAIExtractedTurtle(autoAccepted, existing), 'utf-8');
+        const existing = isNew ? '' : readPodFile(podDir, extractedPath).toString('utf-8');
+        writePodFile(podDir, extractedPath, buildAIExtractedTurtle(autoAccepted, existing));
         if (isNew) newFiles.push('clinical/ai-extracted.ttl');
       }
 
@@ -649,17 +649,13 @@ export function registerExtractSubcommand(pod: Command): void {
         let existing: ReviewQueueItem[] = [];
         if (await fileExists(queuePath)) {
           try {
-            existing = JSON.parse(await fs.readFile(queuePath, 'utf-8')) as ReviewQueueItem[];
+            existing = JSON.parse(readPodFile(podDir, queuePath).toString('utf-8')) as ReviewQueueItem[];
           } catch { /* start fresh */ }
         }
         const existingIds = new Set(existing.map((item) => item.id));
         const toAdd = needsReview.filter((item) => !existingIds.has(item.id));
         if (toAdd.length > 0) {
-          await fs.writeFile(
-            queuePath,
-            toJsonText([...existing, ...toAdd]),
-            'utf-8',
-          );
+          writePodFile(podDir, queuePath, toJsonText([...existing, ...toAdd]));
         }
       }
 
@@ -667,8 +663,8 @@ export function registerExtractSubcommand(pod: Command): void {
       if (discardedEntities.length > 0) {
         const discardPath = path.join(podDir, 'analysis', 'discarded-extractions.ttl');
         const isNew = !(await fileExists(discardPath));
-        const existing = isNew ? '' : await fs.readFile(discardPath, 'utf-8');
-        await fs.appendFile(discardPath, buildDiscardedTurtle(discardedEntities, existing), 'utf-8');
+        const existing = isNew ? '' : readPodFile(podDir, discardPath).toString('utf-8');
+        appendPodFile(podDir, discardPath, buildDiscardedTurtle(discardedEntities, existing));
         if (isNew) newFiles.push('analysis/discarded-extractions.ttl');
       }
 
@@ -677,12 +673,12 @@ export function registerExtractSubcommand(pod: Command): void {
         const donePath = path.join(podDir, 'analysis', 'extraction-done.json');
         let existing: string[] = [];
         if (await fileExists(donePath)) {
-          try { existing = JSON.parse(await fs.readFile(donePath, 'utf-8')) as string[]; } catch { /* fresh */ }
+          try { existing = JSON.parse(readPodFile(podDir, donePath).toString('utf-8')) as string[]; } catch { /* fresh */ }
         }
         const existingSet = new Set(existing);
         const newIds = succeededBlockIds.filter((id) => !existingSet.has(id));
         if (newIds.length > 0) {
-          await fs.writeFile(donePath, toJsonText([...existing, ...newIds]), 'utf-8');
+          writePodFile(podDir, donePath, toJsonText([...existing, ...newIds]));
         }
       }
 
@@ -692,21 +688,21 @@ export function registerExtractSubcommand(pod: Command): void {
         let existing: ExtractionError[] = [];
         if (await fileExists(errorsPath)) {
           try {
-            existing = JSON.parse(await fs.readFile(errorsPath, 'utf-8')) as ExtractionError[];
+            existing = JSON.parse(readPodFile(podDir, errorsPath).toString('utf-8')) as ExtractionError[];
           } catch { /* start fresh */ }
         }
         // Deduplicate by blockUri + section
         const existingKeys = new Set(existing.map((e) => `${e.blockUri}:${e.section}`));
         const newErrors = extractionErrors.filter((e) => !existingKeys.has(`${e.blockUri}:${e.section}`));
         if (newErrors.length > 0) {
-          await fs.writeFile(errorsPath, toJsonText([...existing, ...newErrors]), 'utf-8');
+          writePodFile(podDir, errorsPath, toJsonText([...existing, ...newErrors]));
         }
       }
 
       // 6e. Update pod index.ttl for any new files written this run
       if (newFiles.length > 0 && await fileExists(indexTtlPath)) {
         for (const relPath of newFiles) {
-          await appendIndexContains(indexTtlPath, relPath);
+          await appendIndexContains(podDir, indexTtlPath, relPath);
         }
       }
 

@@ -103,7 +103,7 @@ describe('atomicWriteBytes: durable ordering', () => {
     fs.writeFileSync(target, 'old bytes');
 
     rec.on = true;
-    atomicWriteBytes(target, Buffer.from('new bytes'));
+    atomicWriteBytes(path.dirname(target), target, Buffer.from('new bytes'));
     rec.on = false;
 
     expect(symbolic(rec.events, target)).toEqual([
@@ -126,7 +126,7 @@ describe('atomicWriteBytes: durable ordering', () => {
 
     rec.failRename = true;
     rec.on = true;
-    expect(() => atomicWriteBytes(target, Buffer.from('new bytes'))).toThrow(/injected rename failure/);
+    expect(() => atomicWriteBytes(path.dirname(target), target, Buffer.from('new bytes'))).toThrow(/injected rename failure/);
     rec.on = false;
 
     const seq = symbolic(rec.events, target);

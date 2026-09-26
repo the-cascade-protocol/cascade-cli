@@ -104,6 +104,7 @@ takes both passphrases from the environment only and reports a missing one as
 | `manifest-malformed` | `settings/encryption.json` is not valid JSON, breaks a strictness rule, asks for settings outside the reader limits (see `docs/pod-encryption.md`), or could not be read at all. No passphrase was tried. |
 | `manifest-version-unsupported` | `settings/encryption.json` is a version this tool does not read, or holds no wrap of a kind it implements: a newer tool wrote it. No passphrase was tried. |
 | `files-unreadable` | The pod opened, and one or more files inside it could not be decrypted, parsed or read. `files` names them. |
+| `symlink-in-pod` | `pod export`: the pod holds a symbolic link or special file, which is never followed or copied, so nothing was exported. `files` names them. Other commands report a link inside the pod as a file they could not read (see `docs/pod-encryption.md`). |
 
 The header is judged before a passphrase is asked for, so a pod whose header is
 malformed reports `manifest-malformed` even when no passphrase is set, never

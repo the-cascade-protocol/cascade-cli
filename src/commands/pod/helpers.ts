@@ -12,6 +12,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { CASCADE_NAMESPACES } from '../../lib/turtle-parser.js';
 import { openPod } from '../../lib/pod-read.js';
+import { PodPathError, readPodFile, walkPodTree, type PodTree } from '../../lib/pod-path.js';
 
 // ─── Re-exports ──────────────────────────────────────────────────────────────
 //
@@ -244,21 +245,17 @@ export function selectKeyProperties(
 // ─── Export Helpers ──────────────────────────────────────────────────────────
 
 /**
- * Recursively copy a directory.
+ * Copy a whole pod to a new directory, every file read through the pod path
+ * chokepoint. `tree` is the caller's {@link walkPodTree} of the pod, already
+ * checked to hold no symbolic link or special file: nothing is followed, so
+ * the copy holds exactly the pod's own files.
  */
-export async function copyDirectory(src: string, dest: string): Promise<void> {
+export async function copyDirectory(src: string, dest: string, tree: PodTree = walkPodTree(src)): Promise<void> {
+  if (tree.refused.length > 0) throw new PodPathError('symlink-in-pod', tree.refused[0]);
   await fs.mkdir(dest, { recursive: true });
-  const entries = await fs.readdir(src, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-
-    if (entry.isDirectory()) {
-      await copyDirectory(srcPath, destPath);
-    } else {
-      await fs.copyFile(srcPath, destPath);
-    }
+  for (const rel of tree.dirs) await fs.mkdir(path.join(dest, ...rel.split('/')), { recursive: true });
+  for (const rel of tree.files) {
+    await fs.writeFile(path.join(dest, ...rel.split('/')), readPodFile(src, rel));
   }
 }
 
@@ -274,11 +271,16 @@ export async function createZipArchive(
   sourceDir: string,
   outputPath: string,
   extraFiles: Array<{ name: string; content: string }> = [],
+  tree: PodTree = walkPodTree(sourceDir),
 ): Promise<void> {
   const AdmZip = (await import('adm-zip')).default;
   const zip = new AdmZip();
   const top = path.basename(sourceDir);
-  zip.addLocalFolder(sourceDir, top);
+  // Built from a walk that never follows a link, file by file through the pod
+  // path chokepoint, rather than `addLocalFolder`, which follows them.
+  if (tree.refused.length > 0) throw new PodPathError('symlink-in-pod', tree.refused[0]);
+  for (const rel of tree.dirs) zip.addFile(`${top}/${rel}/`, Buffer.alloc(0));
+  for (const rel of tree.files) zip.addFile(`${top}/${rel}`, readPodFile(sourceDir, rel));
   for (const extra of extraFiles) {
     zip.addFile(`${top}/${extra.name}`, Buffer.from(extra.content, 'utf-8'));
   }

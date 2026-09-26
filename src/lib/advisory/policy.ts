@@ -31,11 +31,11 @@
  * status === 'declined'). We don't re-evaluate declined entries.
  */
 
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CapAst } from './types.js';
 import { parseTurtle } from '../turtle-parser.js';
 import { Store } from 'n3';
+import { podPathExists, readPodFile } from '../pod-path.js';
 
 /** A single auto-apply policy declaration loaded from a pod. */
 export interface AutoApplyPolicy {
@@ -123,10 +123,10 @@ export function evaluatePolicy(
  */
 export function loadPolicies(podDir: string): AutoApplyPolicy[] {
   const filePath = path.join(podDir, 'policies', 'auto-apply.ttl');
-  if (!fs.existsSync(filePath)) return [];
   let ttl: string;
   try {
-    ttl = fs.readFileSync(filePath, 'utf8');
+    if (!podPathExists(podDir, filePath)) return [];
+    ttl = readPodFile(podDir, filePath).toString('utf8');
   } catch {
     return [];
   }

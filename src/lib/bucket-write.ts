@@ -28,12 +28,12 @@
  * comments. The boundary is the one `pod-data-types.ts` already draws.
  */
 
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { Parser, Writer, DataFactory } from 'n3';
 import type { Quad, Quad_Graph, Quad_Object, Quad_Predicate, Quad_Subject, Term } from 'n3';
 import { readResource, writeResource } from './pod-encryption.js';
+import { mkdirInPod, podPathExists, resolveInPod } from './pod-path.js';
 
 const { namedNode, blankNode, literal, quad: makeQuad } = DataFactory;
 
@@ -544,16 +544,22 @@ export interface BucketWriteResult {
  * Reads the existing file as a GRAPH, combines, and writes the whole document
  * back through one serializer that owns the prefix header.
  *
+ * `targetFile` is resolved under `podDir` through the pod path chokepoint
+ * (`pod-path.ts`): a record file or folder that is a symbolic link is refused,
+ * never read through or written through.
+ *
+ * @throws {PodPathError}     when the path is refused.
  * @throws {BucketParseError} when the existing file is not valid Turtle.
  * @throws {PodDecryptError}  when the existing file cannot be decrypted.
  */
 export async function mergeIntoBucket(
+  podDir: string,
   targetFile: string,
   newQuads: Quad[],
   dek: Buffer | undefined,
   options: MergeIntoBucketOptions = {},
 ): Promise<BucketWriteResult> {
-  const existedBefore = fs.existsSync(targetFile);
+  const existedBefore = podPathExists(podDir, targetFile);
 
   let existingQuads: Quad[] = [];
   let filePrefixes: Record<string, string> = {};
@@ -567,7 +573,7 @@ export async function mergeIntoBucket(
   if (existedBefore) {
     // A read failure (bad DEK, unreadable bytes) propagates untouched: it is
     // not a parse error and it must not be reported as one.
-    const existing = readResource(targetFile, dek);
+    const existing = readResource(podDir, targetFile, dek);
     relBaseUsed = relBaseFor(existing);
     try {
       const parsed = await parseBucketTurtle(existing, relBaseUsed);
@@ -597,7 +603,7 @@ export async function mergeIntoBucket(
     return { existedBefore, triplesBefore: existingQuads.length, triplesAfter: merged.length, turtle, written: false };
   }
 
-  await fs.promises.mkdir(path.dirname(targetFile), { recursive: true });
-  writeResource(targetFile, turtle, dek);
+  mkdirInPod(podDir, path.dirname(resolveInPod(podDir, targetFile)));
+  writeResource(podDir, targetFile, turtle, dek);
   return { existedBefore, triplesBefore: existingQuads.length, triplesAfter: merged.length, turtle, written: true };
 }

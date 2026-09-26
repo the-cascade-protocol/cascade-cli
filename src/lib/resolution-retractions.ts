@@ -29,11 +29,11 @@
  * records and the same `user-resolutions.ttl` gets the identical overlay.
  */
 
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DataFactory, Parser } from 'n3';
 import { deterministicUuid } from './fhir-converter/types.js';
 import { readResource } from './pod-encryption.js';
+import { podPathExists } from './pod-path.js';
 import { relBaseFor } from './bucket-write.js';
 import {
   ANNOTATIONS_DIR,
@@ -80,11 +80,11 @@ export function supersessionOverlay(s: Supersession): OverlaySpec {
 /** Subjects already present in the pod's retraction overlays. */
 function existingRetractionSubjects(podDir: string, dek: Buffer | undefined): Set<string> {
   const file = path.join(podDir, ANNOTATIONS_DIR, RETRACTIONS_FILE);
-  if (!fs.existsSync(file)) return new Set();
+  if (!podPathExists(podDir, file)) return new Set();
   // A file that exists and cannot be read or parsed throws: writing beside
   // overlays this run could not see would risk a duplicate, and the overlay
   // writer below refuses an unparseable file anyway.
-  const text = readResource(file, dek);
+  const text = readResource(podDir, file, dek);
   const subjects = new Set<string>();
   for (const q of new Parser({ format: 'Turtle', baseIRI: relBaseFor(text) }).parse(text)) {
     subjects.add(q.subject.value);

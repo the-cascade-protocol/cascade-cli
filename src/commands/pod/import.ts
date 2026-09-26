@@ -76,6 +76,7 @@ import {
 import { obtainPassphrase } from '../../lib/passphrase.js';
 import { classifyImportInput, isPathInsidePod } from '../../lib/import-input.js';
 import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket-write.js';
+import { readPodDir } from '../../lib/pod-path.js';
 import { toJsonText } from '../../lib/json-output.js';
 import { appendTier0Journal, TIER0_JOURNAL_RELATIVE_PATH } from '../../lib/tier0-journal.js';
 import { shellCommand } from '../../lib/shell-quote.js';
@@ -207,16 +208,19 @@ async function loadExistingPodData(
     const dirPath = path.join(podDir, dir);
     let files: string[];
     try {
-      files = await fs.readdir(dirPath);
-    } catch {
-      continue; // Directory doesn't exist yet
+      files = readPodDir(podDir, dir).map((entry) => entry.name);
+    } catch (e: unknown) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') continue; // Directory doesn't exist yet
+      // A folder that is a symbolic link is never followed (pod-path.ts).
+      unreadable.push(`${dir}/`);
+      continue;
     }
 
     for (const file of files) {
       if (!file.endsWith('.ttl')) continue;
       const filePath = path.join(dirPath, file);
       try {
-        const content = readResource(filePath, dek);
+        const content = readResource(podDir, filePath, dek);
         if (content.trim().length === 0) continue;
         // PARSE-CHECK here, not just read-check. The reconciler parses these
         // strings with no error handling of its own, so a bucket whose header
@@ -362,13 +366,14 @@ function typeIndexForInfo(info: typeof DATA_TYPES[string]): 'publicTypeIndex.ttl
 // ---------------------------------------------------------------------------
 
 export async function appendTypeRegistration(
+  podDir: string,
   indexPath: string,
   key: string,
   info: typeof DATA_TYPES[string],
   dryRun: boolean,
   dek?: Buffer,
 ): Promise<boolean> {
-  const content = readResource(indexPath, dek);
+  const content = readResource(podDir, indexPath, dek);
 
   // Check if already registered (by key name)
   if (content.includes(`<#${key}>`) || content.includes(`/${info.filename}`)) {
@@ -385,7 +390,7 @@ export async function appendTypeRegistration(
 
   if (!dryRun) {
     // Read-modify-write (encrypted resources cannot be appended to in place).
-    writeResource(indexPath, header + content + block, dek);
+    writeResource(podDir, indexPath, header + content + block, dek);
   }
   return true;
 }
@@ -395,12 +400,13 @@ export async function appendTypeRegistration(
 // ---------------------------------------------------------------------------
 
 async function appendIndexContains(
+  podDir: string,
   indexPath: string,
   relPath: string,
   dryRun: boolean,
   dek?: Buffer,
 ): Promise<boolean> {
-  const content = readResource(indexPath, dek);
+  const content = readResource(podDir, indexPath, dek);
 
   if (content.includes(relPath)) {
     return false; // already present
@@ -410,7 +416,7 @@ async function appendIndexContains(
   const line = `\n<> <http://www.w3.org/ns/ldp#contains> <${relPath}> .\n`;
   if (!dryRun) {
     // Read-modify-write (encrypted resources cannot be appended to in place).
-    writeResource(indexPath, content + line, dek);
+    writeResource(podDir, indexPath, content + line, dek);
   }
   return true;
 }
@@ -600,7 +606,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           let decrypted: string | undefined;
           if (dek && isPathInsidePod(absPath, podDir)) {
             try {
-              decrypted = readResource(absPath, dek);
+              decrypted = readResource(podDir, absPath, dek);
               printVerbose(`Input is a pod resource; decrypted with the pod DEK: ${filePath}`, globalOpts);
             } catch (e) {
               if (!(e instanceof PodDecryptError)) throw e;
@@ -1106,7 +1112,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             // represents the complete merged state (existing + new, deduped),
             // so the file's contents are REPLACED, not appended to.
             const priorSubjects = new Set<string>();
-            await mergeIntoBucket(targetFile, allNewQuads, dek, {
+            await mergeIntoBucket(podDir, targetFile, allNewQuads, dek, {
               dryRun,
               combine: (existing, incoming) => {
                 // Which subjects are genuinely new needs the pre-import file.
@@ -1126,7 +1132,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             // Additive merge: keep every subject the file already holds and add
             // only the ones it lacks (dedup by subject URI).
             let addedCount = 0;
-            await mergeIntoBucket(targetFile, allNewQuads, dek, {
+            await mergeIntoBucket(podDir, targetFile, allNewQuads, dek, {
               dryRun,
               combine: (existing) => {
                 const bySubject = new Map<string, Quad[]>();
@@ -1183,7 +1189,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         const indexPath = indexFile === 'publicTypeIndex.ttl' ? publicIndexPath : privateIndexPath;
 
         if (await fileExists(indexPath)) {
-          const appended = await appendTypeRegistration(indexPath, typeKey, info, dryRun, dek);
+          const appended = await appendTypeRegistration(podDir, indexPath, typeKey, info, dryRun, dek);
           if (appended) {
             printVerbose(`  ${dryRun ? '[dry-run] ' : ''}Added type registration for ${typeKey} to ${indexFile}`, globalOpts);
           }
@@ -1193,7 +1199,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
       // --- Step 9: Update index.ttl for new files ---
       for (const relPath of newFiles) {
         if (await fileExists(indexTtlPath)) {
-          const appended = await appendIndexContains(indexTtlPath, relPath, dryRun, dek);
+          const appended = await appendIndexContains(podDir, indexTtlPath, relPath, dryRun, dek);
           if (appended) {
             printVerbose(`  ${dryRun ? '[dry-run] ' : ''}Added ${relPath} to index.ttl`, globalOpts);
           }
@@ -1207,7 +1213,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         const profileFile = path.join(podDir, 'clinical', 'patient-profile.ttl');
         if (await fileExists(profileFile)) {
           try {
-            const profileTurtle = readResource(profileFile, dek);
+            const profileTurtle = readResource(podDir, profileFile, dek);
             const profileQuads = await parseTurtleToQuads(profileTurtle);
             // Find the PatientProfile subject
             const NS_CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
@@ -1246,9 +1252,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
               // Shared identity-block writer (also used by pod init --owner-name
               // and pod profile set-name) so all three stay byte-consistent.
               if (fullName || givenName || familyName) {
-                const cardTurtle = readResource(cardPath, dek);
+                const cardTurtle = readResource(podDir, cardPath, dek);
                 const updated = applyCardIdentityName(cardTurtle, { fullName, givenName, familyName });
-                writeResource(cardPath, updated, dek);
+                writeResource(podDir, cardPath, updated, dek);
                 printVerbose('  Populated profile/card.ttl with name from PatientProfile', globalOpts);
               }
 
@@ -1269,13 +1275,13 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
                   phiFields.push(`    cascade:address [\n${addrLines.join('\n')}\n    ] ;`);
                 }
 
-                const extTurtle = readResource(extendedPath, dek);
+                const extTurtle = readResource(podDir, extendedPath, dek);
                 // Replace the commented-out PHI block (from # ── Demographics to the trailing dot)
                 const updated = extTurtle.replace(
                   /    # ── Demographics ──\n[\s\S]*?\n    \./,
                   `    # ── Demographics ──\n${phiFields.join('\n')}\n    .`,
                 );
-                writeResource(extendedPath, updated, dek);
+                writeResource(podDir, extendedPath, updated, dek);
                 printVerbose('  Populated profile/extended.ttl with PHI from PatientProfile', globalOpts);
               }
             }
@@ -1456,7 +1462,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           try {
             const documentsPath = path.join(podDir, 'clinical', 'documents.ttl');
             if (await fileExists(documentsPath)) {
-              const docContent = readResource(documentsPath, dek);
+              const docContent = readResource(podDir, documentsPath, dek);
               const narrativeCount = (docContent.match(/cascade:requiresLLMExtraction/g) ?? []).length;
               if (narrativeCount > 0) {
                 console.log('');

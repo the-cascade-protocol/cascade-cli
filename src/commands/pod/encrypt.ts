@@ -52,7 +52,7 @@ import {
   type PodResource,
 } from '../../lib/pod-resources.js';
 import { obtainNewPassphrase, obtainPassphrase } from '../../lib/passphrase.js';
-import * as fs from 'node:fs/promises';
+import { removePodFile } from '../../lib/pod-path.js';
 
 /** How many offending paths a failure message names before it summarizes. */
 const MAX_LISTED_PATHS = 10;
@@ -100,7 +100,7 @@ export function registerEncryptSubcommand(pod: Command, program: Command): void 
         const unreadable: string[] = [];
         for (const r of resources) {
           try {
-            readResourceBytes(r.absPath);
+            readResourceBytes(podDir, r.absPath);
           } catch {
             unreadable.push(r.relPath);
           }
@@ -124,7 +124,7 @@ export function registerEncryptSubcommand(pod: Command, program: Command): void 
         // recoverable at any point in this loop.
         let encrypted = 0;
         for (const r of resources) {
-          atomicWriteBytes(r.absPath, encryptBytes(readResourceBytes(r.absPath), dek));
+          atomicWriteBytes(podDir, r.absPath, encryptBytes(readResourceBytes(podDir, r.absPath), dek));
           encrypted += 1;
           printVerbose(`  Encrypted ${r.relPath}`, globalOpts);
         }
@@ -194,7 +194,7 @@ export function registerEncryptSubcommand(pod: Command, program: Command): void 
         const alreadyPlaintext: PodResource[] = [];
         const unreadable: PodResource[] = [];
         for (const r of resources) {
-          switch (classifyResource(r.absPath, dek)) {
+          switch (classifyResource(podDir, r.absPath, dek)) {
             case 'encrypted':
               sealed.push(r);
               break;
@@ -226,11 +226,11 @@ export function registerEncryptSubcommand(pod: Command, program: Command): void 
         // ── Pass 2: write plaintext, then VERIFY each file landed. ──
         let decrypted = 0;
         for (const r of sealed) {
-          const plaintext = readResourceBytes(r.absPath, dek);
-          atomicWriteBytes(r.absPath, plaintext);
+          const plaintext = readResourceBytes(podDir, r.absPath, dek);
+          atomicWriteBytes(podDir, r.absPath, plaintext);
           // Read back. "Confirmed decrypted" has to mean the bytes on disk, not
           // the bytes we meant to write, because the manifest is about to go.
-          const onDisk = readResourceBytes(r.absPath);
+          const onDisk = readResourceBytes(podDir, r.absPath);
           if (!onDisk.equals(plaintext)) {
             printError(
               `Failed to decrypt pod: ${r.relPath} did not persist as plaintext. ` +
@@ -247,7 +247,7 @@ export function registerEncryptSubcommand(pod: Command, program: Command): void 
         // Only now: every resource is confirmed plaintext on disk (or was
         // deliberately left alone under --force), so the wrapped DEK is no
         // longer the last copy of anything recoverable.
-        await fs.rm(path.join(podDir, MANIFEST_RELATIVE_PATH), { force: true });
+        removePodFile(podDir, MANIFEST_RELATIVE_PATH);
 
         if (unreadable.length > 0) {
           printWarning(

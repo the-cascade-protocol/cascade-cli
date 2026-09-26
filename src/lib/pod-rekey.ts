@@ -69,6 +69,7 @@ import {
   PodDecryptError,
 } from './pod-encryption.js';
 import { atomicWriteBytes, isPlaintextByDesign } from './pod-resources.js';
+import { mkdirInPod, readPodFile } from './pod-path.js';
 
 const MANIFEST_REL = MANIFEST_RELATIVE_PATH.split(path.sep).join('/');
 
@@ -440,10 +441,12 @@ export function rotateDataKey(
     fs.mkdirSync(stagingPath, { mode: (podStat.mode & 0o7777) | 0o700 });
     staging = stagingPath;
     fsyncDirectory(parent);
-    for (const d of before.dirs) fs.mkdirSync(path.join(staging, d.rel), { mode: d.mode | 0o700 });
+    for (const d of before.dirs) mkdirInPod(stagingPath, d.rel, d.mode | 0o700);
 
     newDek = generateDek();
-    const write = options.writeStaged ?? ((abs: string, bytes: Buffer, mode: number) => atomicWriteBytes(abs, bytes, mode));
+    const write =
+      options.writeStaged ??
+      ((abs: string, bytes: Buffer, mode: number) => atomicWriteBytes(stagingPath, abs, bytes, mode));
     const planned: PlannedFile[] = [];
     const unreadable: string[] = [];
     for (const f of before.files) {
@@ -453,7 +456,7 @@ export function rotateDataKey(
       if (path.posix.dirname(f.rel) === 'settings' && isManifestTempName(path.posix.basename(f.rel))) continue;
       let bytes: Buffer;
       try {
-        bytes = fs.readFileSync(path.join(podPath, f.rel));
+        bytes = readPodFile(podPath, f.rel);
       } catch {
         unreadable.push(f.rel);
         continue;
@@ -625,7 +628,7 @@ function verifyCopy(
     for (const rel of found) if (!expected.has(rel)) throw fail(`${rel} is unexpected`);
 
     for (const f of planned) {
-      const bytes = fs.readFileSync(path.join(staging, f.rel));
+      const bytes = readPodFile(staging, f.rel);
       if (f.how === 'reseal') {
         let plain: Buffer;
         try {

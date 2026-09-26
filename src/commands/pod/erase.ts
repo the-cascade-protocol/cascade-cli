@@ -241,7 +241,7 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
       // through the chokepoint so the file keeps the prefixes it declared
       // rather than being flattened onto whichever set this command knows.
       try {
-        await mergeIntoBucket(foundFile, [], dek, { combine: () => remainingQuads });
+        await mergeIntoBucket(podDir, foundFile, [], dek, { combine: () => remainingQuads });
       } catch (e: unknown) {
         printError(e instanceof Error ? e.message : String(e), globalOpts);
         process.exitCode = 1;

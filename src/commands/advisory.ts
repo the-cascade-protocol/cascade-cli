@@ -53,6 +53,7 @@ import {
 } from '../lib/advisory/feed-client.js';
 import { parseTurtle } from '../lib/turtle-parser.js';
 import { toJsonText } from '../lib/json-output.js';
+import { podPathPresentOrRefused, readPodFile, walkPodTree, writePodFile } from '../lib/pod-path.js';
 
 const { namedNode } = DataFactory;
 
@@ -577,8 +578,8 @@ function loadPodStore(podDir: string): Store | null {
   }
   const store = new Store();
   const snapshot = path.join(podDir, 'state.ttl');
-  if (fs.existsSync(snapshot)) {
-    const ttl = fs.readFileSync(snapshot, 'utf8');
+  if (podPathPresentOrRefused(podDir, snapshot)) {
+    const ttl = readPodFile(podDir, snapshot).toString('utf8');
     const parsed = parseTurtle(ttl);
     if (!parsed.success) {
       console.error(`Pod snapshot ${snapshot} is malformed Turtle`);
@@ -588,10 +589,13 @@ function loadPodStore(podDir: string): Store | null {
     return store;
   }
   // Fall back: collect all .ttl files in the pod directory tree.
-  for (const f of walk(podDir)) {
-    if (!f.endsWith('.ttl')) continue;
-    if (f.includes(path.sep + 'policies' + path.sep)) continue; // policies are read separately
-    const ttl = fs.readFileSync(f, 'utf8');
+  // A walk that never follows a link (pod-path.ts); links and special files
+  // are skipped, and each file is read through the pod path chokepoint.
+  for (const rel of walkPodTree(podDir).files) {
+    if (rel.split('/').some((c) => c.startsWith('.'))) continue;
+    if (!rel.endsWith('.ttl')) continue;
+    if (rel.startsWith('policies/') || rel.includes('/policies/')) continue; // policies are read separately
+    const ttl = readPodFile(podDir, rel).toString('utf8');
     const parsed = parseTurtle(ttl);
     if (parsed.success) for (const qq of parsed.quads) store.addQuad(qq);
   }
@@ -607,7 +611,7 @@ async function writePodSnapshot(podDir: string, store: Store): Promise<void> {
       else resolve(result);
     });
   });
-  fs.writeFileSync(path.join(podDir, 'state.ttl'), ttl, 'utf8');
+  writePodFile(podDir, 'state.ttl', ttl);
 }
 
 function quadsToTurtle(quads: ReadonlyArray<{ subject: { value: string; termType: string }; predicate: { value: string }; object: { value: string; termType: string; datatype?: { value: string } } }>): string {
@@ -624,16 +628,4 @@ function quadsToTurtle(quads: ReadonlyArray<{ subject: { value: string; termType
     out = result ?? '';
   });
   return out;
-}
-
-function* walk(dir: string): Generator<string> {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue;
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      yield* walk(full);
-    } else {
-      yield full;
-    }
-  }
 }

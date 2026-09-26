@@ -11,8 +11,8 @@
  * implementation testable without spinning up an HTTP server.
  */
 
-import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { mkdirInPod, podPathExists, readPodDir, readPodFile, writePodFile } from '../pod-path.js';
 
 /** Status of an advisory in the local cache. */
 export type AdvisoryCacheStatus = 'pending' | 'applied' | 'declined';
@@ -132,8 +132,7 @@ export async function pullFeed(
   }
 
   // 3. Ensure the cache directory exists
-  const cacheDir = path.join(podDir, CACHE_DIR_NAME);
-  fs.mkdirSync(cacheDir, { recursive: true });
+  const cacheDir = mkdirInPod(podDir, CACHE_DIR_NAME);
 
   const newEntries: string[] = [];
   const skippedEntries: string[] = [];
@@ -142,7 +141,7 @@ export async function pullFeed(
   // 4. Process each entry
   for (const entry of feed.entries) {
     const recPath = recordPath(cacheDir, entry.id);
-    const existing = readCacheRecord(recPath);
+    const existing = readCacheRecord(podDir, recPath);
     if (existing && (existing.status === 'applied' || existing.status === 'declined')) {
       skippedEntries.push(entry.id);
       continue;
@@ -184,14 +183,14 @@ export async function pullFeed(
     }
 
     // Persist body + signature alongside the metadata
-    fs.writeFileSync(bodyPath(cacheDir, entry.id), body, 'utf8');
-    fs.writeFileSync(signaturePath(cacheDir, entry.id), sig, 'utf8');
+    writePodFile(podDir, bodyPath(cacheDir, entry.id), body);
+    writePodFile(podDir, signaturePath(cacheDir, entry.id), sig);
     const rec: AdvisoryCacheRecord = {
       status: 'pending',
       entry,
       fetchedAt: now,
     };
-    fs.writeFileSync(recPath, JSON.stringify(rec, null, 2), 'utf8');
+    writePodFile(podDir, recPath, JSON.stringify(rec, null, 2));
     newEntries.push(entry.id);
   }
 
@@ -207,10 +206,10 @@ export async function pullFeed(
 /**
  * Read a single cache record by advisory ID. Returns null if absent.
  */
-export function readCacheRecord(filePath: string): AdvisoryCacheRecord | null {
+export function readCacheRecord(podDir: string, filePath: string): AdvisoryCacheRecord | null {
   try {
-    if (!fs.existsSync(filePath)) return null;
-    const raw = fs.readFileSync(filePath, 'utf8');
+    if (!podPathExists(podDir, filePath)) return null;
+    const raw = readPodFile(podDir, filePath).toString('utf8');
     return JSON.parse(raw) as AdvisoryCacheRecord;
   } catch {
     return null;
@@ -223,11 +222,12 @@ export function listCacheRecords(
   filter?: AdvisoryCacheStatus,
 ): AdvisoryCacheRecord[] {
   const cacheDir = path.join(podDir, CACHE_DIR_NAME);
-  if (!fs.existsSync(cacheDir)) return [];
+  if (!podPathExists(podDir, cacheDir)) return [];
   const out: AdvisoryCacheRecord[] = [];
-  for (const f of fs.readdirSync(cacheDir)) {
-    if (!f.endsWith('.json')) continue;
-    const rec = readCacheRecord(path.join(cacheDir, f));
+  for (const entry of readPodDir(podDir, cacheDir)) {
+    const f = entry.name;
+    if (!f.endsWith('.json') || !entry.isFile()) continue;
+    const rec = readCacheRecord(podDir, path.join(cacheDir, f));
     if (rec && (!filter || rec.status === filter)) out.push(rec);
   }
   return out;
@@ -241,23 +241,23 @@ export function updateCacheStatus(
 ): AdvisoryCacheRecord | null {
   const cacheDir = path.join(podDir, CACHE_DIR_NAME);
   const recPath = recordPath(cacheDir, advisoryId);
-  const rec = readCacheRecord(recPath);
+  const rec = readCacheRecord(podDir, recPath);
   if (!rec) return null;
   Object.assign(rec, patch);
-  fs.writeFileSync(recPath, JSON.stringify(rec, null, 2), 'utf8');
+  writePodFile(podDir, recPath, JSON.stringify(rec, null, 2));
   return rec;
 }
 
 /** Resolve the cached body file for an advisory. Returns null if missing. */
 export function readCachedBody(podDir: string, advisoryId: string): string | null {
   const p = bodyPath(path.join(podDir, CACHE_DIR_NAME), advisoryId);
-  return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+  return podPathExists(podDir, p) ? readPodFile(podDir, p).toString('utf8') : null;
 }
 
 /** Resolve the cached signature file for an advisory. Returns null if missing. */
 export function readCachedSignature(podDir: string, advisoryId: string): string | null {
   const p = signaturePath(path.join(podDir, CACHE_DIR_NAME), advisoryId);
-  return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+  return podPathExists(podDir, p) ? readPodFile(podDir, p).toString('utf8') : null;
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */

@@ -83,9 +83,9 @@ export function registerProfileSubcommand(pod: Command, program: Command): void 
       try {
         // Strip any existing identity triples first so re-naming an
         // already-named pod replaces rather than duplicates them.
-        const cardTurtle = stripCardIdentityName(readResource(cardPath, dek));
+        const cardTurtle = stripCardIdentityName(readResource(podDir, cardPath, dek));
         const updated = applyCardIdentityName(cardTurtle, identity);
-        writeResource(cardPath, updated, dek);
+        writeResource(podDir, cardPath, updated, dek);
 
         if (globalOpts.json) {
           printResult(

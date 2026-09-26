@@ -102,7 +102,7 @@ function snapshot(dir: string, dek: Buffer): Map<string, string> {
       if (e.isDirectory()) { walk(p); continue; }
       let text: string;
       try {
-        text = readResource(p, dek);
+        text = readResource(path.dirname(p), p, dek);
       } catch {
         text = fs.readFileSync(p, 'utf-8');
       }

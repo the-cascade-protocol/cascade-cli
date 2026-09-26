@@ -494,7 +494,7 @@ describe('pod import: pod-internal resources on an encrypted pod', () => {
     const analysisDir = path.join(pod, 'analysis');
     fs.mkdirSync(analysisDir, { recursive: true });
     const bundlePath = path.join(analysisDir, 'run-0001.ttl');
-    writeResource(bundlePath, syntheticAnalysisBundle(), dek);
+    writeResource(path.dirname(bundlePath), bundlePath, syntheticAnalysisBundle(), dek);
 
     // It really is ciphertext on disk.
     const onDisk = fs.readFileSync(bundlePath).toString('utf-8');

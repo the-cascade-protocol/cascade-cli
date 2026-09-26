@@ -35,8 +35,9 @@ vi.mock('../src/lib/pod-resources.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/pod-resources.js')>();
   return {
     ...actual,
-    atomicWriteBytes: (absPath: string, bytes: Buffer): void => {
+    atomicWriteBytes: (podDir: string, absPath: string, bytes: Buffer): void => {
       actual.atomicWriteBytes(
+        podDir,
         absPath,
         corruptNextWrite.armed ? Buffer.from('this is not Turtle at all ;;; }{\n', 'utf-8') : bytes,
       );
