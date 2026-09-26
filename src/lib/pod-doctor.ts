@@ -674,7 +674,7 @@ export async function runPodDoctor(
     });
   }
 
-  findings.push(...podIdentifierFindings(reader, options.write));
+  for (const f of podIdentifierFindings(reader, options.write)) findings.push(f);
 
   const count = (status: DoctorStatus) => findings.filter((f) => f.status === status).length;
   return {
