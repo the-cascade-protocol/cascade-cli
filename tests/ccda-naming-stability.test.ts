@@ -54,6 +54,8 @@ interface Download {
   nestedEncounter: boolean;
   /** The problem list's clinical text. */
   problemText: string;
+  /** The shared-id medications' `statusCode`. */
+  medicationStatus?: string;
 }
 
 const A: Download = {
@@ -180,7 +182,7 @@ function sharedIdMedication(d: Download, n: number, rx: string, name: string): s
       <templateId root="2.16.840.1.113883.10.20.22.4.16"/>
       <id root="${OID}.6" extension="MED-SHARED"/>
       <text><reference value="#${d.idPrefix}med${n}"/></text>
-      <statusCode code="active"/>
+      <statusCode code="${d.medicationStatus ?? 'active'}"/>
       <effectiveTime xsi:type="IVL_TS"><low value="20300101"/></effectiveTime>
       <consumable><manufacturedProduct classCode="MANU"><manufacturedMaterial>
         <code code="${rx}" displayName="${name}" codeSystem="2.16.840.1.113883.6.88">
@@ -385,6 +387,15 @@ describe('the id-reuse disambiguator hashes stable clinical fields only', () => 
     const b = await names(download(B));
     const meds = (n: Named) => [...cls(n, 'health:MedicationRecord'), ...cls(n, 'clinical:Medication')].sort();
     expect(meds(a)).toHaveLength(2);
+    expect(meds(b)).toEqual(meds(a));
+  });
+
+  it('a status change alone does not rename a shared-id claimant', async () => {
+    // `statusCode` is lifecycle state: an active prescription becomes completed
+    // without becoming a different prescription.
+    const a = await names(download(A));
+    const b = await names(download({ ...B, medicationStatus: 'completed' }));
+    const meds = (n: Named) => [...cls(n, 'health:MedicationRecord'), ...cls(n, 'clinical:Medication')].sort();
     expect(meds(b)).toEqual(meds(a));
   });
 
