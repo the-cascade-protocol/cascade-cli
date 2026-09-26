@@ -249,9 +249,38 @@
 #     This sync also carried the same cleanup in src/shapes/workbench.ttl
 #     (draft, unrowed below per D-PATH). Re-synced because health 2.10's
 #     bundled shapes comments tripped tests/no-internal-references.test.ts.
+#
+# 2026-09-25 — clinical 1.19->1.20
+#   Synced from spec commit 2162718 (spec PR the-cascade-protocol/spec#72,
+#   tag vocab/clinical-v1.20) with scripts/sync-shapes-from-spec.sh; only
+#   clinical.ttl and clinical.shapes.ttl changed.
+#   - ONE new term: clinical:documentType, owl:DatatypeProperty, domain
+#     clinical:ClinicalDocument, range xsd:string. The human-readable label
+#     for the kind of document (FHIR R4 DocumentReference.type text, else the
+#     first coding's display; in C-CDA the displayName of
+#     ClinicalDocument/code). This repo already wrote this predicate from two
+#     write sites (src/lib/ccda-converter/narrative.ts,
+#     src/lib/fhir-converter/converters-clinical.ts) before any vocabulary
+#     declared it, so its entry in tests/fixtures/emitted-terms-baseline.json
+#     is removed: the undeclared-term gate (tests/emitted-terms-declared.test.ts)
+#     now finds it declared and fails on a baselined name it can no longer
+#     reproduce as undeclared. Baseline count: 63 -> 62.
+#   - clinical:narrativeText's rdfs:comment is restated to name both FHIR
+#     Narrative text.div and the C-CDA section text element as its source, and
+#     to state that cascade:narrativeText and clinical:content remain
+#     undeclared, permanently. No range, domain or term-identity change.
+#   - Three new SHACL shapes in clinical.shapes.ttl, all sh:Warning:
+#     clinical:NarrativeTextCountShape (the narrativeText sh:maxCount 1 check,
+#     relaxed off clinical:ClinicalDocumentShape where it was a Violation),
+#     clinical:DocumentTypeShape (binds the new term to one xsd:string), and
+#     clinical:NarrativeTextSpellingShape (warns on cascade:narrativeText and
+#     clinical:content, the two spellings the comment above rules undeclared).
+#   Strictly widening: the one severity change goes from sh:Violation to
+#   sh:Warning, so every graph that validated under clinical v1.19 validates
+#   under v1.20 unchanged.
 core=3.10
 health=2.11
-clinical=1.19
+clinical=1.20
 coverage=1.6
 checkup=3.3
 pots=1.4

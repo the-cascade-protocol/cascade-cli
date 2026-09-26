@@ -21,8 +21,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-09-06"^^xsd:date ;
-    owl:versionInfo "1.19" ;
+    dct:modified "2026-09-24"^^xsd:date ;
+    owl:versionInfo "1.20" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -479,15 +479,37 @@ clinical:displayName a owl:DatatypeProperty ;
     rdfs:domain clinical:ClinicalDocument ;
     rdfs:range xsd:string .
 
+clinical:documentType a owl:DatatypeProperty ;
+    rdfs:label "Document Type"@en ;
+    rdfs:comment """Human-readable label for the kind of document, as the source states it: for example "Progress Note", "Discharge Summary", "Summary of episode note". FHIR alignment: DocumentReference.type, "the particular kind of document referenced (e.g. History and Physical, Discharge Summary, Progress Note)", CodeableConcept 0..1 (https://hl7.org/fhir/R4/documentreference-definitions.html#DocumentReference.type). This property carries type.text, or, where the source gives no text, the display of the first coding. In a C-CDA document the same fact is the displayName of ClinicalDocument/code (a LOINC document type code), with ClinicalDocument/title as the fallback. On a record converted from one C-CDA section it names the type of the enclosing DOCUMENT, not the section's heading; the section is identified by cascade:sectionCode.
+
+A LABEL, NOT A SLUG. cascade:documentType (core) is a different property with a different value space: a short closed set of lowercase slugs (summarization, progress-note, discharge-summary and so on) that software branches on. This property is open-ended text for a person to read, and a source routinely states types no slug set anticipates ("ED Provider Note", "Nursing Shift Note"). The two are not two spellings of one fact, so neither is deprecated in favour of the other: write both where both are known, and never write a slug here or a label there. A producer SHOULD omit this property when the source states no type, rather than write a placeholder such as "Unknown Document".
+
+DECLARED IN v1.20, AFTER IT WAS WRITTEN. The reference import paths wrote this predicate before any vocabulary declared it: the FHIR path writes DocumentReference.type.text here, as defined above, and the C-CDA section path writes the cascade:documentType slug here. The second is a legal string but not the value this property means, and that writer is expected to move the slug to cascade:documentType and put the document's label here. clinical:DocumentTypeShape binds the datatype and a single value at sh:Warning."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/documentreference-definitions.html#DocumentReference.type> ;
+    rdfs:domain clinical:ClinicalDocument ;
+    rdfs:range xsd:string ;
+    owl:versionInfo "Added in clinical v1.20" .
+
 # ============================================================================
 # Data Properties - Narrative Content
 # ============================================================================
 
 clinical:narrativeText a owl:DatatypeProperty ;
     rdfs:label "Narrative Text"@en ;
-    rdfs:comment "Plain text extracted from FHIR text.div element (HTML tags stripped)"@en ;
+    rdfs:comment """Plain text of a clinical document's human-readable narrative, markup stripped. This is the CANONICAL and only defined spelling for that text, whichever format the document arrived in:
+
+- FHIR: the resource's Narrative, text.div (https://hl7.org/fhir/R4/narrative.html#Narrative), with the XHTML tags removed. The XHTML itself, where it is kept, is clinical:narrativeXHTML.
+- C-CDA: a section's text element, the narrative block "to be rendered" (HL7 CDA R2 Section.text, http://hl7.org/cda/stds/core/StructureDefinition/Section), with its markup (paragraph, list, table, content and similar elements) reduced to text. A record converted from one C-CDA section carries that section's narrative here.
+
+TWO UNDECLARED SPELLINGS ARE NOT SECOND SPELLINGS (v1.20). A C-CDA import path wrote section narrative to cascade:narrativeText, which the core vocabulary does not define, and wrote the same text a second time to clinical:content, which no Cascade vocabulary defines. So the section narrative, often the only note text a pod holds, sat on predicates that no shape constrained, while both JSON-LD contexts already mapped the short name narrativeText to this property. Neither spelling is declared, and neither will be.
+
+MIGRATION, and what a reader must re-query. The narrative is OPTIONAL at the shape level, so, as with clinical:startDate in v1.19, there is nothing for an sh:or to rescue and no pod fails for carrying a legacy spelling. clinical:NarrativeTextSpellingShape warns wherever cascade:narrativeText or clinical:content is present, and that warning is the whole window. Producers write clinical:narrativeText only, once per record. Existing data is not rewritten: until the window closes, a reader takes clinical:narrativeText first, then cascade:narrativeText, then clinical:content, and reads one text per record. The shape is removed in a later clinical version, once the warning is observably absent from conforming output.
+
+CARDINALITY. One value per record is the intent, and the sh:maxCount 1 stays, at sh:Warning from v1.20 (clinical:NarrativeTextCountShape). A record converted from a C-CDA section is keyed on the document, the section code and the source, so a document with two sections sharing one LOINC section code gives one record two narratives. That is an identity question for how sections are modelled, not an error in the data, and until it is settled a second value is reported rather than rejected."""@en ;
     rdfs:domain clinical:ClinicalDocument ;
-    rdfs:range xsd:string .
+    rdfs:range xsd:string ;
+    owl:versionInfo "Canonical spelling restated for FHIR and C-CDA, the undeclared spellings given a migration window, and the single-value constraint relaxed to sh:Warning, in clinical v1.20" .
 
 clinical:narrativeXHTML a owl:DatatypeProperty ;
     rdfs:label "Narrative XHTML"@en ;
@@ -1443,6 +1465,62 @@ clinical:isActive a owl:DatatypeProperty ;
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.20 (2026-09-24)
+# - ONE new term, clinical:documentType. No term removed, renamed or
+#   deprecated, and no rdfs:range or rdfs:domain changes. One rdfs:comment is
+#   rewritten (clinical:narrativeText); clinical.ttl otherwise changes only in
+#   this changelog, its dct:modified and its owl:versionInfo.
+# - THE GAP. A C-CDA import path writes one clinical:ClinicalDocument per
+#   section and put the section narrative on two predicates no ontology here
+#   declares: cascade:narrativeText, and the same text again on
+#   clinical:content. It also wrote clinical:documentType, which was likewise
+#   undeclared, and the FHIR import path writes that predicate too, from
+#   DocumentReference.type.text. clinical:narrativeText was declared all along,
+#   and both JSON-LD contexts already mapped the short name narrativeText to it.
+#   ClinicalDocumentShape is not closed, so all three passed validation
+#   unconstrained. This is the v1.15 clinical:procedureName defect and the
+#   v1.19 medication dates defect, once more.
+# - COMMENT REWRITTEN (1). clinical:narrativeText states that it is the
+#   canonical and only defined spelling of a document's narrative text, markup
+#   stripped, for FHIR Narrative (text.div) AND for the C-CDA section text
+#   element. Through v1.19 it named FHIR only. cascade:narrativeText and
+#   clinical:content are NOT declared, and will not be.
+# - NEW TERM (1). clinical:documentType, owl:DatatypeProperty, domain
+#   clinical:ClinicalDocument, range xsd:string: the human-readable label for
+#   the kind of document, FHIR R4 DocumentReference.type (text, else the first
+#   coding's display), and in C-CDA the displayName of ClinicalDocument/code.
+#   Declared as written rather than folded into cascade:documentType, because
+#   the two carry different values: cascade:documentType is a closed set of
+#   slugs, this is open-ended source text. Declaring the written predicate
+#   also keeps the FHIR export path, which reads it, reading a defined term.
+#   The C-CDA path currently writes the slug here; the comment says so and says
+#   where the slug belongs.
+# - SHACL (clinical.shapes.ttl). The sh:maxCount 1 on clinical:narrativeText
+#   moves from clinical:ClinicalDocumentShape, where it was a Violation, to the
+#   new clinical:NarrativeTextCountShape at sh:Warning. It had never fired,
+#   because the narrative was written under another spelling; once it is
+#   written correctly it would fire on a C-CDA document with two sections that
+#   share a LOINC section code, since the section record is keyed on that code.
+#   New clinical:DocumentTypeShape binds clinical:documentType to one xsd:string
+#   at sh:Warning. New clinical:NarrativeTextSpellingShape warns on
+#   cascade:narrativeText and clinical:content. All three new shapes reach
+#   their nodes by target, never by sh:node, per validation rule S5.
+# - CONTEXTS. contexts/v1/clinical.jsonld gains documentType
+#   (clinical:documentType, xsd:string). narrativeText was already mapped. No
+#   context maps cascade:documentType, so the key collides with nothing today.
+#   cascade.jsonld is not changed: D-CONTEXT-1 C3 retires it as a mapping, and
+#   documentType is a local name declared in two vocabularies, which is the
+#   collision that merged file cannot resolve.
+# - MIGRATION WINDOW. The narrative is optional at the shape level, so no pod
+#   fails for carrying a legacy spelling and none will; the warning shape is the
+#   whole window. It is removed in a later clinical version once the warning is
+#   observably absent from conforming output. Readers take clinical:narrativeText
+#   first, then cascade:narrativeText, then clinical:content, until then.
+# - COMPATIBILITY. Strictly widening. The one constraint that changes severity
+#   goes from sh:Violation to sh:Warning, and every new finding is at
+#   sh:Warning, so every graph that validated under v1.19 validates under v1.20.
+#   Nothing in any pod has to be rewritten.
 #
 # Version 1.19 (2026-09-06)
 # - NO new terms, no term removed, renamed or deprecated, and no rdfs:range
