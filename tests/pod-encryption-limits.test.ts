@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { conformancePath } from './helpers/conformance.js';
 
 const argonCalls = vi.hoisted(() => ({ count: 0 }));
 
@@ -410,8 +411,8 @@ describe('everything the writers produce passes the reader limits', () => {
     expect(resolveDek(pod, 'third passphrase').equals(DEK)).toBe(true);
   }, 60_000);
 
-  it('the committed 1.1 fixture still parses and opens', () => {
-    const pod = path.resolve(__dirname, 'fixtures', 'pod-encryption-v1.1', 'pod');
+  it('the 1.1 Pod fixture this tool wrote (conformance P-005) still parses and opens', () => {
+    const pod = conformancePath('pod-encryption', 'positive', 'ts-produced-v1.1', 'pod');
     expect(readEncryptionManifest(pod)!.version).toBe('1.1');
     expect(resolveDek(pod, 'birch meadow anchor violet copper lantern')).toHaveLength(32);
   }, 30_000);

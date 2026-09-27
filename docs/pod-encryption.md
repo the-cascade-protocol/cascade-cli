@@ -105,6 +105,16 @@ the value:
 The pod's encryption header asks for settings outside this tool's limits (field: wraps[0].kdfParams.m).
 ```
 
+A header in which any JSON object contains the same member name twice is
+malformed, and is refused before any key is derived (spec section 4.1). This
+holds in every object (the top level, a wrap, `kdfParams`, a member this tool
+does not know), and names are compared after their escapes are decoded, so
+`"label"` and `"lab\u0065l"` are the same name:
+
+```
+Malformed settings/encryption.json: an object has the same member name twice
+```
+
 Every writer in this tool stays inside the limits, and a test pins that;
 `buildPassphraseManifest` refuses parameters outside them rather than write a
 header a reader would refuse. Measured cost of the worst case the limits allow
@@ -144,6 +154,17 @@ The error names the pod-relative path and never where a link points.
 (`reason: "symlink-in-pod"`, exit 2), since the export would either leave the
 file out or copy another folder's contents into it; the encrypt, decrypt and
 record walks skip links, and a re-key refuses them.
+
+An input to `pod import` that names a path inside the destination pod (as
+written, before any link is resolved) is a pod path on any pod, encrypted or
+not, and is read through the same chokepoint: `pod import <pod>
+<pod>/notes/x.ttl` where `notes` links out of the pod is refused (exit 1), never
+read as an external document.
+
+The chokepoint checks a path and then opens it. A concurrent local process
+that replaces a folder inside the pod with a link between the check and the
+open is outside the threat model (spec section 8), which is a pod folder at
+rest, not a concurrent local attacker.
 
 ## Commands
 
@@ -333,3 +354,8 @@ tool built:
 ```bash
 python3 scripts/check_pod_encryption.py --cascade "node /path/to/cascade-cli/dist/index.js"
 ```
+
+This repository's own suite runs the same vectors against the code in the
+checkout (`tests/pod-encryption-conformance-vectors.test.ts`): every positive
+fixture, header vector and file system vector in `vectors.json`, each with its
+stated outcome.

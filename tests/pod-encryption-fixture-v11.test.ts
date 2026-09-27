@@ -1,9 +1,12 @@
 /**
- * The committed manifest 1.1 fixture (tests/fixtures/pod-encryption-v1.1) is a
- * pod re-wrapped by `pod passphrase set`. Other readers of manifest 1.1 test
- * against it, so it has to stay what its README says it is: version 1.1, open
- * with the current passphrase, closed to the old one, and every resource
- * sealed under the one data key.
+ * The manifest 1.1 Pod fixture written by this tool, `pod passphrase set`
+ * included, lives in the conformance repository as
+ * `pod-encryption/positive/ts-produced-v1.1/pod` (vector P-005), where other
+ * readers of manifest 1.1 test against it. The shared vectors suite
+ * (pod-encryption-conformance-vectors.test.ts) opens it with every key; this
+ * file pins what this tool WROTE there: version 1.1 in the fixed key order,
+ * one primary passphrase wrap, open with the current passphrase, closed to the
+ * old one, and every resource sealed under the one data key.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -16,9 +19,9 @@ import {
   decryptBytes,
   PodDecryptError,
 } from '../src/lib/pod-encryption.js';
+import { conformancePath } from './helpers/conformance.js';
 
-const FIXTURE = path.resolve(__dirname, 'fixtures', 'pod-encryption-v1.1');
-const POD = path.join(FIXTURE, 'pod');
+const POD = conformancePath('pod-encryption', 'positive', 'ts-produced-v1.1', 'pod');
 const CURRENT = 'birch meadow anchor violet copper lantern';
 const OLD = 'copper velvet orbit lantern mossy quartz';
 const PLAINTEXT_BY_DESIGN = ['README.md', 'settings/encryption.json'];

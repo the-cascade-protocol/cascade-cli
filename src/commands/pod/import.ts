@@ -79,9 +79,9 @@ import {
   PodDecryptError,
 } from '../../lib/pod-encryption.js';
 import { obtainPassphrase } from '../../lib/passphrase.js';
-import { classifyImportInput, isPathInsidePod } from '../../lib/import-input.js';
+import { classifyImportInput, isPathInsidePod, isPathInsidePodAsWritten } from '../../lib/import-input.js';
 import { mergeIntoBucket, derelativizeQuads, relBaseFor } from '../../lib/bucket-write.js';
-import { readPodDir } from '../../lib/pod-path.js';
+import { readPodDir, readPodFile, PodPathError } from '../../lib/pod-path.js';
 import { toJsonText } from '../../lib/json-output.js';
 import { appendTier0Journal, TIER0_JOURNAL_RELATIVE_PATH } from '../../lib/tier0-journal.js';
 import { shellCommand } from '../../lib/shell-quote.js';
@@ -703,10 +703,18 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         // must be read through the DEK we already resolved above.
         // Containment is decided by the filesystem, not by a flag, because a
         // flag would eventually be passed for a genuinely external file.
+        //
+        // A path that is inside the pod AS WRITTEN is a pod path on any pod,
+        // encrypted or not: it is read through the pod path chokepoint, so a
+        // link inside the pod (`<pod>/notes` linking out of it) is refused
+        // rather than followed to a file outside the pod.
+        const podPathAsWritten = isPathInsidePodAsWritten(absPath, podDir);
         let rawBytes: Buffer;
         try {
           let decrypted: string | undefined;
-          if (dek && isPathInsidePod(absPath, podDir)) {
+          let podBytes: Buffer | undefined;
+          if (!dek && podPathAsWritten) podBytes = readPodFile(podDir, absPath);
+          if (dek && (podPathAsWritten || isPathInsidePod(absPath, podDir))) {
             try {
               decrypted = readResource(podDir, absPath, dek);
               printVerbose(`Input is a pod resource; decrypted with the pod DEK: ${filePath}`, globalOpts);
@@ -732,9 +740,14 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
             }
           }
           rawBytes =
-            decrypted !== undefined ? Buffer.from(decrypted, 'utf-8') : await fs.readFile(absPath);
-        } catch {
-          printError(`Cannot read file: ${absPath}`, globalOpts);
+            decrypted !== undefined
+              ? Buffer.from(decrypted, 'utf-8')
+              : (podBytes ?? (await fs.readFile(absPath)));
+        } catch (e) {
+          printError(
+            e instanceof PodPathError ? `Cannot read file: ${absPath} (${e.message})` : `Cannot read file: ${absPath}`,
+            globalOpts,
+          );
           process.exitCode = 1;
           return;
         }
