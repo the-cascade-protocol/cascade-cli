@@ -21,8 +21,8 @@
     dct:description "Vocabulary for clinical documents, narratives, and structured notes imported from EHR systems via Apple HealthKit"@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2025-12-26"^^xsd:date ;
-    dct:modified "2026-09-24"^^xsd:date ;
-    owl:versionInfo "1.20" ;
+    dct:modified "2026-09-26"^^xsd:date ;
+    owl:versionInfo "1.21" ;
     rdfs:comment "Domain-specific vocabulary for clinical documentation and structured records imported from patient portals (MyChart, Epic, etc.). Contains EHR-verified clinical data."@en ;
     rdfs:seeAlso <https://cascadeprotocol.org/docs/clinical/v1.0/> .
 
@@ -1023,8 +1023,9 @@ clinical:deviceName a owl:DatatypeProperty ;
 
 clinical:measurementMethod a owl:DatatypeProperty ;
     rdfs:label "Measurement Method"@en ;
-    rdfs:comment "Method used for measurement"@en ;
-    rdfs:domain clinical:VitalSign ;
+    rdfs:comment """Method used for measurement. FHIR R4 Observation.method (https://hl7.org/fhir/R4/observation-definitions.html#Observation.method).
+
+DOMAIN DELIBERATELY ABSENT (v1.21). Through v1.20 this property declared rdfs:domain clinical:VitalSign. It is dropped rather than widened to a union, the v1.16 treatment of clinical:verificationStatus applied again in v1.18 and v1.19: a domain on a cross-class predicate makes a reasoner infer the record's class, and a per-class value set belongs in SHACL. From health v2.12 it is also the method of a wellness reading (a VO2 max estimate on health:VitalSignReading or health:DailyVitalReading), where health:MeasurementMethodShape binds it to a closed set of source method values; minting a health: spelling for the same fact would give one fact two predicates. On clinical:VitalSign it remains free text."""@en ;
     rdfs:range xsd:string .
 
 clinical:valueString a owl:DatatypeProperty ;
@@ -1465,6 +1466,27 @@ clinical:isActive a owl:DatatypeProperty ;
 # ============================================================================
 # Changelog
 # ============================================================================
+#
+# Version 1.21 (2026-09-26)
+# - NO new term, no term removed, renamed or deprecated, and no rdfs:range
+#   change. One rdfs:domain is dropped and its rdfs:comment rewritten;
+#   clinical.ttl otherwise changes only in this changelog, its dct:modified and
+#   its owl:versionInfo. Paired with health v2.12.
+# - DOMAIN DROPPED (1). clinical:measurementMethod loses rdfs:domain
+#   clinical:VitalSign. health v2.12 needs the method of a VO2 max reading
+#   (estimated or measured, FHIR Observation.method), and this predicate
+#   already names that fact; with the domain in place, writing it on a health:
+#   reading would make a reasoner infer the reading is a clinical:VitalSign.
+#   The v1.16 treatment of clinical:verificationStatus, applied again in v1.18
+#   and v1.19: dropped rather than widened, and the per-class value set lives
+#   in SHACL (health:MeasurementMethodShape, health.shapes.ttl v1.10).
+# - SHACL. No clinical shape changes; no clinical shape constrained this
+#   predicate before or after.
+# - CONTEXTS. Unchanged: clinical.jsonld and cascade.jsonld already map
+#   measurementMethod to this property with @type xsd:string.
+# - COMPATIBILITY. Strictly widening. Removing a domain removes an entailment
+#   and adds no constraint, so every graph that validated under v1.20
+#   validates under v1.21.
 #
 # Version 1.20 (2026-09-24)
 # - ONE new term, clinical:documentType. No term removed, renamed or

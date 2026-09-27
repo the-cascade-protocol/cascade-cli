@@ -9,7 +9,7 @@
 # ============================================================================
 # Cascade Protocol — Health & Wellness Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.9 (2026-09-25)
+# Version: 1.10 (2026-09-26)
 # Validates: health:SelfReport, health:VO2MaxStatistics, health:HRVStatistics,
 #            health:BPStatistics, health:MetricTrend, health:ActivitySnapshot,
 #            health:SleepSnapshot, health:HealthProfile,
@@ -19,16 +19,62 @@
 #            health:FamilyHistoryRecord,
 #            health:DailyVitalReading, health:DailyActivitySnapshot,
 #            health:DailySleepSnapshot, health:Workout, health:SleepSession,
-#            health:Device
+#            health:Device; and, by predicate, the subjects of
+#            health:systolic, health:diastolic, clinical:measurementMethod
 #
 # SEVERITY LEVELS:
 # - sh:Violation = Must fix (data invalid without) - e.g., missing required stats
 # - sh:Warning = Should address (important for completeness) - e.g., missing period
 # - sh:Info = Nice to have (suggested enrichment) - e.g., optional context fields
 #
-# Validates against: health.ttl v2.11 (2026-09-25), core.ttl v3.10
+# Validates against: health.ttl v2.12 (2026-09-26), core.ttl v3.11,
+#                    clinical.ttl v1.21
 #
 # CHANGELOG
+# v1.10 (2026-09-26): The deferred wellness metrics (health v2.12, clinical
+#     v1.21). Four new node shapes and one new property shape. Nothing that
+#     validated under v1.9 stops validating: every constraint added here is at
+#     sh:Warning, because every class it reaches existed in health v2.11.
+#
+#     1. health:AggregateReadingShape gains health:sourceIdSpace, sh:maxCount 1,
+#        sh:in the closed set ("healthkit" "google-health" "fitbit"), the same
+#        binding health:SessionSoftShape has, now that the property's domain
+#        covers the daily aggregates.
+#     2. NEW health:SleepSessionSoftShape: health:isMainSleep, one xsd:boolean.
+#        A separate shape rather than a line on health:SleepSessionShape,
+#        which carries sh:Violation and must not start rejecting a class that
+#        existed in v2.11.
+#     3. NEW health:DailyActivitySoftShape: health:basalEnergyKcal, one
+#        non-negative xsd:decimal. Kept off health:DailyActivitySnapshotShape
+#        for the same reason: that shape carries sh:Violation.
+#     4. NEW health:BloodPressureReadingShape: one paired reading per record.
+#        It targets the SUBJECTS OF health:systolic and of health:diastolic,
+#        so any node carrying either component must carry exactly one of
+#        each, as an xsd:double. A reading in the FHIR panel spelling of
+#        serialization section 12.4 carries neither and is not reached.
+#     5. NEW health:MeasurementMethodShape, targeting the SUBJECTS OF
+#        clinical:measurementMethod: on any node that is not a
+#        clinical:VitalSign, one value from a closed set of source-namespaced
+#        method values (the HealthKit HKVO2MaxTestType cases, the Health
+#        Connect Vo2MaxRecord measurement methods, the two Google Health daily
+#        series). health.ttl health:vo2Max maps each value to measured or
+#        estimated. On a clinical:VitalSign the predicate stays free text, as
+#        it always was; the sh:or exemption says so. The clinical: predicate
+#        is bound here, not in clinical.shapes.ttl, because the records that
+#        carry these values are health: readings (the v1.6
+#        clinical:allergyType precedent).
+#     WHY 4 AND 5 TARGET A PREDICATE, NOT A CLASS. Neither
+#     health:BloodPressureReading nor health:VitalSignReading had a shape.
+#     Targeting them by class would make the range of the existing JSON-LD
+#     terms bloodPressureHistory and vo2MaxHistory a newly shaped class, which
+#     check-context-agreement.py reports as an unscoped structured term, a
+#     baseline that may only shrink and whose cure is the JSON-LD 1.1 move
+#     health has not made. Targeting the predicate constrains exactly the
+#     nodes that carry the fact, including the untyped flat readings older
+#     serializers wrote, and grows no baseline.
+#     No shape added here is referenced by sh:node. clinical:VitalSign, the
+#     one sh:class used, has no subclass in any vocabulary here.
+#
 # v1.9 (2026-09-25): Comment hygiene: internal tracker references removed; no
 #     shape, target or constraint change.
 # v1.8 (2026-09-24): Wellness and fitness records (health v2.10, core v3.10).
@@ -2130,6 +2176,16 @@ health:AggregateReadingShape a sh:NodeShape ;
         sh:name "Device"@en ;
         sh:message "health:device should reference a health:Device by IRI, so the reading and the device can live in different files."@en ;
         sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:sourceIdSpace ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:in ("healthkit" "google-health" "fitbit") ;
+        sh:name "Source Id Space"@en ;
+        sh:message "health:sourceIdSpace on a daily aggregate (health v2.12) must be one of the id spaces this release declares: healthkit, google-health, fitbit."@en ;
+        sh:severity sh:Warning
     ] .
 
 # ----------------------------------------------------------------------------
@@ -2512,3 +2568,115 @@ health:SleepQualitySpellingShape a sh:NodeShape ;
         sh:message "health:sleepQuality is deprecated in health v2.10: a home-grown Excellent/Good/Fair/Poor enum with no standard behind it. Stop writing it. A score a source supplies is health:sleepScore on a health:SleepSession."@en ;
         sh:severity sh:Warning
     ] .
+
+# ============================================================================
+# Deferred Wellness Metrics Shapes (v1.10, health v2.12)
+# ============================================================================
+#
+# SEVERITY, STATED ONCE FOR THE SECTION. Every node reached below can occur in
+# a pod written before health v2.12, so every constraint here is sh:Warning
+# (the core v3.5 ratchet), and each sits on its own shape rather than on a
+# shape that already carries sh:Violation. No shape here is the target of an sh:node
+# reference, and none may become one while it carries a Warning
+# (validation/index.md S5).
+
+# ----------------------------------------------------------------------------
+# Sleep session: the main-sleep flag
+# ----------------------------------------------------------------------------
+
+health:SleepSessionSoftShape a sh:NodeShape ;
+    sh:targetClass health:SleepSession ;
+    rdfs:label "Sleep Session Soft Shape"@en ;
+    rdfs:comment "Soft constraints (sh:Warning only) that health v2.12 adds to health:SleepSession. health:isMainSleep is written only where the source supplies the flag, so its absence is never a finding."@en ;
+
+    sh:property [
+        sh:path health:isMainSleep ;
+        sh:datatype xsd:boolean ;
+        sh:maxCount 1 ;
+        sh:name "Is Main Sleep"@en ;
+        sh:message "health:isMainSleep must be a single xsd:boolean, written only where the source supplies it (IEEE 1752.1 is_main_sleep)."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ----------------------------------------------------------------------------
+# Daily activity: basal energy
+# ----------------------------------------------------------------------------
+
+health:DailyActivitySoftShape a sh:NodeShape ;
+    sh:targetClass health:DailyActivitySnapshot ;
+    rdfs:label "Daily Activity Soft Shape"@en ;
+    rdfs:comment "Soft constraints (sh:Warning only) that health v2.12 adds to health:DailyActivitySnapshot. Kept apart from health:DailyActivitySnapshotShape, which carries sh:Violation constraints, so each shape has one severity story."@en ;
+
+    sh:property [
+        sh:path health:basalEnergyKcal ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+        sh:name "Basal Energy (kcal)"@en ;
+        sh:message "health:basalEnergyKcal must be a single non-negative xsd:decimal: basal energy burned over the day, in kcal. A basal metabolic RATE is a different quantity and is not written here."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ----------------------------------------------------------------------------
+# Blood pressure: one paired reading per record
+# ----------------------------------------------------------------------------
+
+health:BloodPressureReadingShape a sh:NodeShape ;
+    sh:targetSubjectsOf health:systolic ;
+    sh:targetSubjectsOf health:diastolic ;
+    rdfs:label "Blood Pressure Reading Shape"@en ;
+    rdfs:comment "One paired reading per record (health v2.12). Reaches every node that carries health:systolic or health:diastolic, typed or not, and asks for exactly one of each: a systolic and a diastolic measured together. A reading written in the FHIR panel spelling (serialization section 12.4) holds its components in fhir:component and is not reached. sh:Warning, because readings written before v2.12 must keep validating. An average is a view, never a reading (health:BloodPressureReading)."@en ;
+
+    sh:property [
+        sh:path health:systolic ;
+        sh:datatype xsd:double ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Systolic"@en ;
+        sh:message "A blood pressure reading carries exactly one systolic value (mmHg, xsd:double) beside its diastolic value: one paired reading per record (FHIR panel 85354-9, component 8480-6). Several readings are several records."@en ;
+        sh:severity sh:Warning
+    ] ;
+
+    sh:property [
+        sh:path health:diastolic ;
+        sh:datatype xsd:double ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:name "Diastolic"@en ;
+        sh:message "A blood pressure reading carries exactly one diastolic value (mmHg, xsd:double) beside its systolic value: one paired reading per record (FHIR panel 85354-9, component 8462-4). Several readings are several records."@en ;
+        sh:severity sh:Warning
+    ] .
+
+# ----------------------------------------------------------------------------
+# Measurement method (VO2 max)
+# ----------------------------------------------------------------------------
+
+health:MeasurementMethodShape a sh:NodeShape ;
+    sh:targetSubjectsOf clinical:measurementMethod ;
+    rdfs:label "Measurement Method Shape"@en ;
+    rdfs:comment "Binds clinical:measurementMethod (FHIR Observation.method) on wellness readings (health v2.12) to a closed set of source-namespaced method values: the HealthKit HKVO2MaxTestType cases, the Health Connect Vo2MaxRecord measurement methods and the two Google Health daily series. health:vo2Max in health.ttl says which values are measured and which estimated. A clinical:VitalSign is exempt, and its method stays free text as it always was. A new value is added in a vocabulary release. sh:Warning, because the classes that carry it existed in health v2.11."@en ;
+
+    sh:or (
+        [ sh:class clinical:VitalSign ]
+        [ sh:property [
+            sh:path clinical:measurementMethod ;
+            sh:datatype xsd:string ;
+            sh:maxCount 1 ;
+            sh:in (
+                "healthkit:maxExercise"
+                "healthkit:predictionSubMaxExercise"
+                "healthkit:predictionNonExercise"
+                "healthkit:predictionStepTest"
+                "health-connect:metabolic_cart"
+                "health-connect:heart_rate_ratio"
+                "health-connect:cooper_test"
+                "health-connect:multistage_fitness_test"
+                "health-connect:rockport_fitness_test"
+                "health-connect:other"
+                "google-health:daily_vo2_max"
+                "google-health:demographic_vo2max"
+            )
+        ] ]
+    ) ;
+    sh:message "clinical:measurementMethod on a wellness reading must be a single source method value this release declares, written {namespace}:{source value} (health:vo2Max lists them and says which are measured or estimated). A clinical:VitalSign is exempt."@en ;
+    sh:severity sh:Warning .

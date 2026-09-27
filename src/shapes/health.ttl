@@ -23,8 +23,8 @@
     dct:description "Vocabulary for consumer-generated wellness observations from wearable devices and HealthKit. Maps Cascade wellness properties to established SNOMED CT and LOINC codes following the three-layer ontology architecture."@en ;
     dct:creator "Cascade Agentic Labs" ;
     dct:created "2026-01-29"^^xsd:date ;
-    dct:modified "2026-09-25"^^xsd:date ;
-    owl:versionInfo "2.11" ;
+    dct:modified "2026-09-26"^^xsd:date ;
+    owl:versionInfo "2.12" ;
     rdfs:comment """Three-layer ontology for wellness data:
         Layer 1 (Established standards): SNOMED CT concept IDs + LOINC observation codes
         Layer 2 (Cascade health vocabulary): health: namespace properties linking to Layer 1
@@ -32,6 +32,101 @@
     rdfs:seeAlso <https://cascadeprotocol.org/docs/health/v1/> .
 
 # Changelog:
+# v2.12 (2026-09-26): The deferred wellness metrics. Sleep sessions assembled
+#     from stage segments, blood pressure, VO2 max and basal energy, each
+#     checked against the ratified standards and the platforms' published
+#     models before an importer writes it, plus two LOINC annotations that
+#     claimed more than their codes mean. Paired with clinical v1.21, which
+#     drops one rdfs:domain so that an existing predicate is reused here rather
+#     than given a second spelling. Additive: nothing that validated under
+#     v2.11 stops validating, and every new finding is at sh:Warning
+#     (health.shapes.ttl v1.10).
+#
+#     1. health:sourceIdSpace's rdfs:domain widens from the two session
+#        classes to the union with the three daily aggregate classes
+#        (health:DailyVitalReading, health:DailyActivitySnapshot,
+#        health:DailySleepSnapshot). The D-WELLNESS-1 name seed carries the id
+#        space on every wellness record, including a computed aggregate that
+#        has no source record id, and the Apple Health importer writes it
+#        there. The range, the closed set "healthkit", "google-health",
+#        "fitbit", is unchanged; health:AggregateReadingShape binds the same
+#        set at sh:Warning.
+#     2. SLEEP. NEW health:isMainSleep (xsd:boolean; IEEE 1752.1 sleep-episode
+#        is_main_sleep, https://w3id.org/ieee/ieee-1752-schema/sleep-episode.json),
+#        written only where the source supplies the flag. health:SleepSession
+#        now states the session rules: a night is dated by the day of waking,
+#        in the session's recorded zone, falling back to the pod's
+#        cascade:dayZone; naps are separate sessions; a session a source
+#        already cut (Google, Fitbit, Health Connect) is never regrouped; Apple
+#        stage segments are grouped at a one-hour gap (Fitbit's published rule,
+#        the only published threshold found), and the raw segments are
+#        retained as the session's samples.
+#        THE GROUPING RULE IS RECORDED AS PROVENANCE, NOT AS A NEW TERM. An
+#        Apple session is prov:wasGeneratedBy one prov:Activity carrying
+#        cascade:version "{rule}/{version}", the form the computed daily
+#        aggregates already carry. Three alternatives were weighed and
+#        rejected. health:algorithmVersion is the SOURCE's algorithm, verbatim
+#        (Google's sleep_session_v2, Apple's HKAlgorithmVersion), and is what
+#        tells two source sessions apart; putting Cascade's grouping rule there
+#        would give one predicate two meanings and could displace what the
+#        source said. sosa:usedProcedure (deferred by v2.10) names the
+#        procedure by which an observation was MADE, the sensing method;
+#        grouping segments into a session is how a record was assembled from
+#        observations already made, which is provenance. prov:hadPlan is
+#        reached only through a qualified association (prov:qualifiedAssociation
+#        to a prov:Association), one more node per session for the same fact,
+#        while the daily aggregates already stamp their rule with
+#        cascade:version on the generating activity; one convention for every
+#        computed wellness record is kept.
+#     3. BLOOD PRESSURE. No new term. health:BloodPressureReading already
+#        models one paired reading per record: health:systolic (LOINC 8480-6)
+#        and health:diastolic (8462-4), the components of the FHIR vital signs
+#        panel 85354-9 (https://hl7.org/fhir/R4/bp.html). What was missing is
+#        now stated on the class: one reading per record, both components
+#        together, at its exact time, never bucketed by day; and an average (a
+#        7-day home protocol, for example) is a view, coded LOINC 96607-7 if
+#        one is ever stored, never 85354-9. health:BPStatistics says the same.
+#        NEW health:BloodPressureReadingShape (sh:Warning) reports a record
+#        that carries one component without the other, or more than one of
+#        either.
+#     4. VO2 MAX. health:vo2Max loses its health:loincCode 60842-2, which is
+#        "Oxygen consumption (VO2)", a volume rate in mL/min: neither a maximum
+#        nor per kilogram. No code is substituted: the nearest, 94122-9 (per
+#        body weight, peak during exercise), describes a measured peak, not the
+#        submaximal prediction consumer devices make, and no LOINC code for an
+#        estimated VO2 max was found. The SNOMED CT annotation is unchanged.
+#        THE METHOD IS REUSED, NOT MINTED. clinical:measurementMethod (FHIR
+#        Observation.method, https://hl7.org/fhir/R4/observation-definitions.html#Observation.method)
+#        already exists; clinical v1.21 drops its rdfs:domain clinical:VitalSign,
+#        the treatment clinical v1.16 and v1.18 gave other cross-class
+#        predicates, so that writing it on a health reading does not make a
+#        reasoner infer a clinical vital sign. NEW
+#        health:MeasurementMethodShape binds it, wherever it is written on
+#        anything other than a clinical:VitalSign, to a closed set of
+#        source-namespaced values
+#        (HealthKit HKVO2MaxTestType, Health Connect Vo2MaxRecord measurement
+#        methods, Google's two daily series), and health:vo2Max maps each value
+#        to measured or estimated.
+#     5. BASAL ENERGY. NEW health:basalEnergyKcal on
+#        health:DailyActivitySnapshot, the single-day sibling of
+#        health:activeEnergyKcal: resting energy burned over the day, summed
+#        per (source, device, day) from Apple's basal energy samples. A
+#        distinct property, because no LOINC code separates basal from active
+#        energy burned over an interval, and no LOINC annotation. It is energy,
+#        not a rate: a basal metabolic rate is never written here, and LOINC
+#        50042-1 "Basal metabolic rate index" is not a metabolic rate at all.
+#        health:activeEnergyBurnedKcal's 41981-2 annotation is corrected:
+#        41981-2 means "Calories burned", of any kind. It is kept as the
+#        nearest code and now stated to be broader than the property; active
+#        versus basal is carried by the property, never by the code.
+#
+#     NOT IN THIS RELEASE, stated so the absence is not read as an oversight:
+#     stage segments as triples (they are retained samples); a stored
+#     main-sleep judgement for Apple (the longest session of a date is a
+#     derived view); total energy burned (Google supplies total and active,
+#     and whether total is stored is a separate decision); body posture and
+#     cuff location on blood pressure.
+#
 # v2.11 (2026-09-25): Comment hygiene: internal tracker references removed; no
 #     term, range, shape or context change.
 # v2.10 (2026-09-24): Wellness and fitness records, measured before modelled.
@@ -548,14 +643,24 @@ health:respiratoryRate a owl:DatatypeProperty ;
 
 health:vo2Max a owl:DatatypeProperty ;
     rdfs:label "VO2 Max"@en ;
-    rdfs:comment "Estimated maximal oxygen consumption (cardiorespiratory fitness) A scalar: the value itself, never a link to a reading object. Where a writer also keeps a history, the latest reading is the newest entry of the matching *History list, which is a named individual (health v2.10, D-WELLNESS-1)."@en ;
+    rdfs:comment """Estimated maximal oxygen consumption (cardiorespiratory fitness), in mL/kg/min. A scalar: the value itself, never a link to a reading object. Where a writer also keeps a history, the latest reading is the newest entry of the matching *History list, which is a named individual (health v2.10, D-WELLNESS-1).
+
+NO LOINC ANNOTATION (removed in health v2.12). Through v2.11 this property carried LOINC 60842-2, which is "Oxygen consumption (VO2)", a volume rate in mL/min: not a maximum and not per kilogram of body weight. No code is substituted. The nearest found, 94122-9 (oxygen consumption per body weight, peak during exercise), describes a measured peak, not the submaximal prediction consumer devices make, and no LOINC code for an estimated VO2 max was found.
+
+HOW A VALUE WAS OBTAINED IS A METHOD, NOT A CODE. Each VO2 max reading (a health:VitalSignReading in health:vo2MaxHistory, or a health:DailyVitalReading for a source's daily series) carries clinical:measurementMethod (FHIR Observation.method): the source's own method value, verbatim, under a source namespace, from the closed set health:MeasurementMethodShape binds. Measured or estimated follows from the value:
+  measured    healthkit:maxExercise; health-connect:metabolic_cart
+  estimated   healthkit:predictionSubMaxExercise, healthkit:predictionNonExercise, healthkit:predictionStepTest; health-connect:heart_rate_ratio, health-connect:cooper_test, health-connect:multistage_fitness_test, health-connect:rockport_fitness_test; google-health:daily_vo2_max, google-health:demographic_vo2max
+  not stated  health-connect:other
+The healthkit values are the cases of HKVO2MaxTestType (https://developer.apple.com/documentation/healthkit/hkvo2maxtesttype), read from the HKMetadataKeyVO2MaxTestType metadata; the health-connect values are Vo2MaxRecord's measurement methods (https://developer.android.com/reference/kotlin/androidx/health/connect/client/records/Vo2MaxRecord); the google-health values name the two daily series the Google Health export writes, which are two methods and therefore two records per day, never merged. A reading with no method says nothing about how it was obtained and is not assumed measured. A source that reports a range (Fitbit's cardio fitness score) is written as two records, cascade:statistic "lowerBound" and "upperBound", never as a midpoint. A new method value is added in a vocabulary release."""@en ;
     rdfs:domain fhir:Observation ;
     rdfs:range xsd:double ;
     health:snomedCode sct:251880009 ;  # Aerobic capacity
-    health:loincCode loinc:60842-2 ;   # VO2 max
     health:unit "mL/kg/min" ;
     health:ucumCode "mL/kg/min" ;
-    health:trendPolarity "higher_is_better" .
+    health:trendPolarity "higher_is_better" ;
+    rdfs:seeAlso <https://developer.apple.com/documentation/healthkit/hkvo2maxtesttype> ,
+        <https://developer.android.com/reference/kotlin/androidx/health/connect/client/records/Vo2MaxRecord> ,
+        <https://hl7.org/fhir/R4/observation-definitions.html#Observation.method> .
 
 # ----------------------------------------------------------------------------
 # Walking Steadiness
@@ -681,11 +786,13 @@ health:averageDailySteps a owl:DatatypeProperty ;
 
 health:activeEnergyBurnedKcal a owl:DatatypeProperty ;
     rdfs:label "Active Energy Burned"@en ;
-    rdfs:comment "Active energy expenditure in kilocalories (excludes basal metabolic rate)"@en ;
+    rdfs:comment """Active energy expenditure in kilocalories (excludes basal metabolic rate), the 7-day aggregate form carried on health:ActivitySnapshot.
+
+THE LOINC ANNOTATION IS BROADER THAN THIS PROPERTY (corrected in health v2.12). LOINC 41981-2 means "Calories burned", of any kind: active, basal or both. It does not say active. It is kept as the nearest LOINC code, the one Open mHealth calories-burned (https://github.com/openmhealth/schemas/blob/main/schema/omh/calories-burned-3.0.json) and IEEE 1752.1 kcal_burned use, but it is not an equivalent. Active versus basal is carried by the property (health:activeEnergyKcal and health:basalEnergyKcal for the single-day forms), never by the code, so a reading coded with 41981-2 alone cannot be told apart from total or basal energy."""@en ;
     rdfs:domain health:ActivitySnapshot ;
     rdfs:range xsd:decimal ;
     health:snomedCode sct:251833007 ;  # Energy expenditure
-    health:loincCode loinc:41981-2 ;   # Calories burned
+    health:loincCode loinc:41981-2 ;   # Calories burned (any kind; broader than active)
     health:unit "kcal" ;
     health:ucumCode "kcal" .
 
@@ -756,7 +863,7 @@ health:HRVStatistics a owl:Class ;
 
 health:BPStatistics a owl:Class ;
     rdfs:label "Blood Pressure Statistics"@en ;
-    rdfs:comment "Statistical summary of blood pressure readings over a measurement period. Provides mean, min, max for systolic and diastolic values, plus AHA category classification."@en ;
+    rdfs:comment "Statistical summary of blood pressure readings over a measurement period. Provides mean, min, max for systolic and diastolic values, plus AHA category classification. It is a VIEW over health:BloodPressureReading records, never a reading (health v2.12): a clinical home average is defined by its protocol (which days count, whether the first day is dropped, whether morning and evening are averaged separately), so a summary states the protocol it applied, and a mean that is exported is coded LOINC 96607-7 (blood pressure panel, mean systolic and mean diastolic), never the single-reading panel 85354-9."@en ;
     rdfs:subClassOf prov:Entity .
 
 health:HealthProfile a owl:Class ;
@@ -766,7 +873,7 @@ health:HealthProfile a owl:Class ;
 
 health:DailyVitalReading a owl:Class ;
     rdfs:label "Daily Vital Reading"@en ;
-    rdfs:comment "A single period's aggregated vital sign reading with value, unit, date, and sample count. Used in 90-day and 30-day history containers. From health v2.10 an aggregate states the UTC interval it covers (health:periodStart, health:periodEnd), the statistic its value is (cascade:statistic), and the zone its day was cut in (health:timeZone); cascade:date is the display date in that zone. A mean and a maximum over the same samples are two records, not one. A Google daily rollup carries cascade:date only and no interval: its day boundary is not yet measured (tracked separately), so writing one would fabricate it, and the Warning health:AggregateReadingShape then reports is the honest state, not a defect."@en ;
+    rdfs:comment "A single period's aggregated vital sign reading with value, unit, date, and sample count. Used in 90-day and 30-day history containers. From health v2.10 an aggregate states the UTC interval it covers (health:periodStart, health:periodEnd), the statistic its value is (cascade:statistic), and the zone its day was cut in (health:timeZone); cascade:date is the display date in that zone. A mean and a maximum over the same samples are two records, not one. A Google daily rollup carries cascade:date only and no interval: its day boundary is not yet measured (tracked separately), so writing one would fabricate it, and the Warning health:AggregateReadingShape then reports is the honest state, not a defect. A daily VO2 max series states its method in clinical:measurementMethod (health v2.12; see health:vo2Max), since two series from two methods on one day are two records."@en ;
     rdfs:subClassOf fhir:Observation ;
     rdfs:subClassOf sosa:Observation .
 
@@ -778,13 +885,18 @@ health:HRVReading a owl:Class ;
 
 health:BloodPressureReading a owl:Class ;
     rdfs:label "Blood Pressure Reading"@en ;
-    rdfs:comment "A single blood pressure observation with systolic and diastolic components, timestamp, and optional source."@en ;
+    rdfs:comment """A single blood pressure observation with systolic and diastolic components, timestamp, and optional source.
+
+ONE PAIRED READING PER RECORD (stated in health v2.12; the model is unchanged). A systolic and a diastolic value measured together, at the reading's exact time, by one device, as the FHIR vital signs blood pressure profile (panel LOINC 85354-9, components 8480-6 systolic and 8462-4 diastolic, https://hl7.org/fhir/R4/bp.html), Open mHealth blood-pressure, HealthKit's blood pressure correlation and Health Connect's BloodPressureRecord all model it. Written flat, the components are health:systolic and health:diastolic, one of each, always together (health:BloodPressureReadingShape); written as the FHIR panel (serialization section 12.4), they are two fhir:component entries of the one record. A reading is never bucketed by day: a morning and an evening reading are two records (D-WELLNESS-1 Q2). From an Apple Health export a reading is built from the blood pressure correlation, never also from the systolic and diastolic records the export repeats at top level, which would count it twice.
+
+AN AVERAGE IS A VIEW, NOT A READING. A clinical home average (for example a 7-day home protocol of morning and evening readings) is defined by its protocol: which days count, whether the first day is dropped, whether morning and evening are averaged separately. It is computed as a view over the readings, stating its protocol (health:BPStatistics), and never written as a reading. A mean that is ever stored or exported is coded LOINC 96607-7 (blood pressure panel, mean systolic and mean diastolic), never 85354-9."""@en ;
+    rdfs:seeAlso <https://hl7.org/fhir/R4/bp.html> ;
     rdfs:subClassOf fhir:Observation ;
     rdfs:subClassOf sosa:Observation .
 
 health:VitalSignReading a owl:Class ;
     rdfs:label "Vital Sign Reading"@en ;
-    rdfs:comment "A single vital sign observation with value, unit, measurement period, timestamp, and source. Used for baseline readings and VO2 Max history entries."@en ;
+    rdfs:comment "A single vital sign observation with value, unit, measurement period, timestamp, and source. Used for baseline readings and VO2 Max history entries. A VO2 max entry states how its value was obtained in clinical:measurementMethod (health v2.12; the values and their measured or estimated reading are on health:vo2Max)."@en ;
     rdfs:subClassOf fhir:Observation ;
     rdfs:subClassOf sosa:Observation .
 
@@ -792,7 +904,7 @@ health:DailyActivitySnapshot a owl:Class ;
     rdfs:label "Daily Activity Snapshot"@en ;
     rdfs:comment """A single day's activity data: steps, active energy, exercise minutes, and stand hours.
 
-WHERE THE VALUES COME FROM (health v2.10). ONE RECORD PER (SOURCE, DAY); a snapshot never mixes values from different sources under one identity. Apple's <ActivitySummary> element, one per day, is a SOURCE in its own right: it carries Apple's own active energy, exercise minutes and stand hours, already de-duplicated across devices. Those three values form one snapshot whose source is the ActivitySummary (named as such in the source axis, the source name "ActivitySummary", and in its provenance label), written with cascade:statistic "sum" and no health:device, since the summary names none. The ring triple lives ONLY on that snapshot. Steps are not in ActivitySummary: a step snapshot is per device source (the watch, the phone), aggregated from step samples, carrying health:steps and its health:device. No source-priority logic applies at write time to either. Google Health supplies daily resting heart rate, HRV, SpO2, respiratory rate and VO2 max (health:DailyVitalReading), but no daily step, distance or energy total in either of its export formats. Like every aggregate, a snapshot states its UTC interval (health:periodStart, health:periodEnd) and cascade:statistic."""@en ;
+WHERE THE VALUES COME FROM (health v2.10). ONE RECORD PER (SOURCE, DAY); a snapshot never mixes values from different sources under one identity. Apple's <ActivitySummary> element, one per day, is a SOURCE in its own right: it carries Apple's own active energy, exercise minutes and stand hours, already de-duplicated across devices. Those three values form one snapshot whose source is the ActivitySummary (named as such in the source axis, the source name "ActivitySummary", and in its provenance label), written with cascade:statistic "sum" and no health:device, since the summary names none. The ring triple lives ONLY on that snapshot. Steps are not in ActivitySummary: a step snapshot is per device source (the watch, the phone), aggregated from step samples, carrying health:steps and its health:device. Basal energy (health:basalEnergyKcal, health v2.12) is likewise per device source, summed from that device's basal energy samples; ActivitySummary carries no basal value. No source-priority logic applies at write time to either. Google Health supplies daily resting heart rate, HRV, SpO2, respiratory rate and VO2 max (health:DailyVitalReading), but no daily step, distance or energy total in either of its export formats. Like every aggregate, a snapshot states its UTC interval (health:periodStart, health:periodEnd) and cascade:statistic."""@en ;
     rdfs:subClassOf prov:Entity ;
     rdfs:subClassOf sosa:Observation .
 
@@ -1295,13 +1407,19 @@ health:Unknown a health:WalkingSteadinessLevel ;
 # | Systolic BP           | (component)                  | 271649006   | 8480-6   |
 # | Diastolic BP          | (component)                  | 271650006   | 8462-4   |
 # | Respiratory Rate      | health:respiratoryRate       | 86290005    | 9279-1   |
-# | VO2 Max               | health:vo2Max                | 251880009   | 60842-2  |
+# | VO2 Max               | health:vo2Max                | 251880009   | --- (1)  |
 # | Walking Steadiness    | health:walkingSteadiness     | 364832000   | ---      |
 # | Average Daily Steps   | health:averageDailySteps     | 68130003    | 41950-7  |
-# | Active Energy Burned  | health:activeEnergyBurnedKcal| 251833007   | 41981-2  |
+# | Active Energy Burned  | health:activeEnergyBurnedKcal| 251833007   | 41981-2 (2) |
+# | Basal Energy (daily)  | health:basalEnergyKcal       | ---         | --- (3)  |
 # | Exercise Minutes      | health:exerciseMinutesWeekly | 68130003    | 73985-4  |
 # | Stand Hours           | health:standHoursDaily       | ---         | ---      |
 # | Sleep Duration        | health:averageDurationHours  | 248263006   | 93832-4  |
+#
+# (1) 60842-2 removed in v2.12: it is oxygen consumption in mL/min, not VO2
+#     max per kilogram. No code substituted; the method is on each reading.
+# (2) Broader than the property: 41981-2 is calories burned of any kind.
+# (3) No LOINC code separates basal from active energy over an interval.
 
 # ============================================================================
 # Social History (v2.4)
@@ -1828,10 +1946,24 @@ health:steps a owl:DatatypeProperty ;
 
 health:activeEnergyKcal a owl:DatatypeProperty ;
     rdfs:label "Active Energy (kcal)"@en ;
-    rdfs:comment "Active energy burned in kilocalories: for a single day on health:DailyActivitySnapshot, for the session on health:Workout. The domain widened to the union in health v2.10."@en ;
+    rdfs:comment "Active energy burned in kilocalories: for a single day on health:DailyActivitySnapshot, for the session on health:Workout. The domain widened to the union in health v2.10. No LOINC code says active (41981-2 means calories burned of any kind; see health:activeEnergyBurnedKcal): the property is what says active, and health:basalEnergyKcal (v2.12) is its basal sibling."@en ;
     rdfs:domain [ a owl:Class ; owl:unionOf ( health:DailyActivitySnapshot health:Workout ) ] ;
     rdfs:range xsd:decimal ;
     owl:versionInfo "Added in health v2.5" .
+
+health:basalEnergyKcal a owl:DatatypeProperty ;
+    rdfs:label "Basal Energy (kcal)"@en ;
+    rdfs:comment """Basal (resting) energy burned over a single day, in kilocalories: the energy the body spends to maintain itself at rest, which health:activeEnergyKcal excludes. HealthKit basalEnergyBurned (https://developer.apple.com/documentation/healthkit/hkquantitytypeidentifier/basalenergyburned), whose activeEnergyBurned counterpart must not include it. Carried on health:DailyActivitySnapshot with cascade:statistic "sum", one record per (source, device, day), summed from that device's basal energy samples, with its health:device. Apple's ActivitySummary carries no basal value, so it never sits on the ActivitySummary snapshot.
+
+A DISTINCT PROPERTY, NOT A CODE. No LOINC code separates basal from active energy burned over an interval: 41981-2 "Calories burned" covers any energy burned, so a reading coded with it alone cannot say which. Basal versus active is carried by the property, and no LOINC annotation is given.
+
+ENERGY, NOT A RATE. A basal metabolic rate (Health Connect BasalMetabolicRateRecord, kcal per day at an instant) is a different quantity and is never written here. LOINC 50042-1 "Basal metabolic rate index" is not a metabolic rate at all (its property is a concentration in arbitrary units) and is not this property's code. A source that supplies only total and active energy (Google Health) supplies no basal value; total minus active is a derived view, never written here."""@en ;
+    rdfs:domain health:DailyActivitySnapshot ;
+    rdfs:range xsd:decimal ;
+    health:unit "kcal" ;
+    health:ucumCode "kcal" ;
+    rdfs:seeAlso <https://developer.apple.com/documentation/healthkit/hkquantitytypeidentifier/basalenergyburned> ;
+    owl:versionInfo "Added in health v2.12" .
 
 health:exerciseMinutes a owl:DatatypeProperty ;
     rdfs:label "Exercise Minutes"@en ;
@@ -1938,16 +2070,18 @@ A "+00:00" from Fitbit is a PLACEHOLDER, not a zone: every measured 2021 sleep c
 
 health:sourceIdSpace a owl:DatatypeProperty ;
     rdfs:label "Source Id Space"@en ;
-    rdfs:comment """The id space health:sourceRecordId belongs to, written beside it on the session classes. A CLOSED SET PER RELEASE, declared in this property's range: "healthkit" (Apple HKExternalUUID or HKMetadataKeySyncIdentifier), "google-health" (the Google Health format's exercise_id and sleep_id), "fitbit" (the legacy Fitbit Global Export's logId). A new source adds its token in a vocabulary release.
+    rdfs:comment """The id space a record's source identifiers belong to. On a session it is written beside health:sourceRecordId and names the space that id is from. ON A DAILY AGGREGATE (health v2.12: health:DailyVitalReading, health:DailyActivitySnapshot, health:DailySleepSnapshot) it names the id space of the source whose samples or values the aggregate holds, and it is written even where the aggregate has no health:sourceRecordId, because the D-WELLNESS-1 name seed carries the id space as a component of every wellness record's name. A CLOSED SET PER RELEASE, declared in this property's range: "healthkit" (Apple HKExternalUUID or HKMetadataKeySyncIdentifier), "google-health" (the Google Health format's exercise_id and sleep_id), "fitbit" (the legacy Fitbit Global Export's logId). A new source adds its token in a vocabulary release.
 
 Needed because one source can carry two id spaces whose values never coincide: a Google Takeout holds the legacy Fitbit export and the Google Health format for largely the same sessions, with zero shared ids, so the raw id alone cannot say which space it is from.
 
 NOT cascade:sourceIdentity. That is the ORIGIN axis (core v3.5), one value per organization, and both Fitbit-family id spaces belong to one organization; its ns: scheme is reserved for records whose organization cannot be derived, which here it can.
 
 How the D-WELLNESS-1 identity seed uses health:sourceRecordId and health:sourceIdSpace is specified separately, with the seed's conformance vector, and is not decided by this property."""@en ;
-    rdfs:domain [ a owl:Class ; owl:unionOf ( health:Workout health:SleepSession ) ] ;
+    rdfs:domain [ a owl:Class ; owl:unionOf (
+        health:Workout health:SleepSession
+        health:DailyVitalReading health:DailyActivitySnapshot health:DailySleepSnapshot ) ] ;
     rdfs:range [ a rdfs:Datatype ; owl:oneOf ( "healthkit" "google-health" "fitbit" ) ] ;
-    owl:versionInfo "Added in health v2.10" .
+    owl:versionInfo "Added in health v2.10; domain widened to the daily aggregate classes in health v2.12" .
 
 # ----------------------------------------------------------------------------
 # Devices (FHIR Device; SOSA Platform)
@@ -2113,7 +2247,20 @@ health:SleepSession a owl:Class ;
 
 TWO SESSIONS FOR ONE NIGHT ARE TWO RECORDS. Google keeps a sleep_session_v1 and a sleep_session_v2 record for most nights (101 of 121 measured), each with its own id, stages and score. Both are what the source said; health:algorithmVersion tells them apart, and choosing one is a reader's or layer 2's rule, never a write-time merge.
 
-health:DailySleepSnapshot is the daily rollup; the session is what it is derived from. Per-stage segments are summarized as totals here; the segments themselves are not modelled in this release."""@en ;
+THE NIGHT A SESSION BELONGS TO (health v2.12) is the local date on which it ENDS, the day of waking, as Fitbit (dateOfSleep), Garmin (calendarDate) and Oura's sleep day agree. The date is read in the session's own recorded zone: health:timeZone where the source names one (Apple's HKTimeZone), else health:utcOffset where the source records only an offset (Google, Fitbit); where the source records neither, the pod's cascade:dayZone. health:DailySleepSnapshot's interval is that local day.
+
+NAPS ARE SEPARATE SESSIONS, never merged into the night. health:isMainSleep says which session is the main sleep only where the source says so.
+
+A SESSION A SOURCE ALREADY CUT IS NEVER REGROUPED. Google Health, Fitbit and Health Connect record sessions natively (sleep_id, logId, SleepSessionRecord); each is written as the source cut it, with its own stages, id and algorithm version.
+
+APPLE RECORDS NO SESSION, only stage segments (HKCategoryValueSleepAnalysis, https://developer.apple.com/documentation/healthkit/hkcategoryvaluesleepanalysis), so an Apple session is assembled from them by a published rule. Segments from one source are grouped into one session until a gap of one hour or more, and a run of awake segments lasting one hour or more counts as such a gap; the next segment starts a new session. One hour is Fitbit's published rule (https://dev.fitbit.com/build/reference/web-api/sleep/get-sleep-log-by-date/), the only published threshold found. Stage totals sum the segments within the session, excluding in bed, which overlaps them. Such a session:
+  - is prov:wasGeneratedBy one prov:Activity that carries cascade:version, the rule's identifier and version written "{rule}/{version}" (for example "apple-health-sleep-session/1"), the form the computed daily aggregates carry; a change to the grouping rule is a new version, never an edit;
+  - is derived from the raw stage segments, which are RETAINED in the pod as the session's samples, as the samples behind a computed daily aggregate are (D-WELLNESS-1, amendment of 2026-09-25), and linked to them by prov:wasDerivedFrom. The segments are kept as samples and are not modelled as triples;
+  - carries no health:isMainSleep, since Apple supplies none. Which Apple session is the main sleep of its date (for example the longest) is a derived view, never written on the session.
+health:algorithmVersion is not used for the grouping rule: it holds the source's own algorithm, verbatim.
+
+health:DailySleepSnapshot is the daily rollup; the session is what it is derived from."""@en ;
+    rdfs:seeAlso <https://w3id.org/ieee/ieee-1752-schema/sleep-episode.json> ;
     rdfs:subClassOf prov:Entity ;
     rdfs:subClassOf sosa:Observation ;
     owl:versionInfo "Added in health v2.10" .
@@ -2137,6 +2284,14 @@ health:sleepScore a owl:DatatypeProperty ;
     rdfs:domain health:SleepSession ;
     rdfs:range xsd:decimal ;
     owl:versionInfo "Added in health v2.10" .
+
+health:isMainSleep a owl:DatatypeProperty ;
+    rdfs:label "Is Main Sleep"@en ;
+    rdfs:comment "True when the SOURCE marks this session as the main sleep of its night, false when the source marks it as not the main sleep (a nap). IEEE 1752.1 sleep-episode is_main_sleep (https://w3id.org/ieee/ieee-1752-schema/sleep-episode.json). WRITTEN ONLY WHERE A SOURCE SUPPLIES IT: Fitbit's isMainSleep, verbatim; WHOOP's nap flag, negated. Absent when the source does not say, and absence is not false. Apple supplies no such flag, so an Apple session carries none: choosing the main sleep among a date's sessions is a derived view, never a value written on the session."@en ;
+    rdfs:domain health:SleepSession ;
+    rdfs:range xsd:boolean ;
+    rdfs:seeAlso <https://w3id.org/ieee/ieee-1752-schema/sleep-episode.json> ;
+    owl:versionInfo "Added in health v2.12" .
 
 health:inBedMinutes a owl:DatatypeProperty ;
     rdfs:label "In Bed (minutes)"@en ;

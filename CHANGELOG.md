@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+**Bundled vocabulary: health 2.11 to 2.12, clinical 1.20 to 1.21**, synced from spec. health adds `health:isMainSleep` and `health:basalEnergyKcal`, widens `health:sourceIdSpace` to the daily aggregate classes, removes the wrong LOINC annotation from `health:vo2Max`, and checks that a blood pressure record holds one systolic and one diastolic value (warning). clinical drops the `clinical:VitalSign` domain from `clinical:measurementMethod`. Additive: every graph that validated before still does. No converter change.
+
 ## [0.24.0] - 2026-09-26
 
 The Apple Health wellness import (daily records from `export.xml`, with each day's samples retained) and the pod identifier (`cascade:podIdentifier`, minted once and used to name records). Bundled vocabulary: core 3.11.
