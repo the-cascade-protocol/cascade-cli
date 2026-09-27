@@ -26,6 +26,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   outside the pod used to read the outside file as an external document; it
   is now refused, naming the refusal, and nothing is imported (pod encryption
   specification 8). Inputs outside the pod are unchanged.
+- **An identity-collision split keeps the pod's record on the minted IRI.**
+  When an arriving record shared its minted IRI with a different record the
+  pod already held, the record with the smaller content fingerprint kept the
+  IRI, so the pod's own record could be moved to a new subject during an
+  import. The pod's record now keeps it and the arrival moves; with no pod copy
+  involved the choice is by fingerprint as before, independent of input order.
 
 ### Changed
 
@@ -89,15 +95,6 @@ no longer counts as a contradicting claimant, so the cited record keeps its
 plain id name. A record whose id is unique in its document is not affected: a
 new test pins the name of every such record in every committed C-CDA fixture
 (165 records) against the build before this change.
-
-### Fixed
-
-- **An identity-collision split keeps the pod's record on the minted IRI.**
-  When an arriving record shared its minted IRI with a different record the
-  pod already held, the record with the smaller content fingerprint kept the
-  IRI, so the pod's own record could be moved to a new subject during an
-  import. The pod's record now keeps it and the arrival moves; with no pod copy
-  involved the choice is by fingerprint as before, independent of input order.
 
 ## [0.24.0] - 2026-09-26
 
