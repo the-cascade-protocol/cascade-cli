@@ -293,9 +293,22 @@
 #     sh:targetSubjectsOf): at most one value (sh:Violation) and the lowercase
 #     version 4 urn:uuid form (sh:Warning).
 #   Additive: every graph that validated under core v3.10 validates unchanged.
+#
+# 2026-09-27 — health 2.11->2.12, clinical 1.20->1.21
+#   Synced from spec aac3031 (spec PR the-cascade-protocol/spec#79, tags
+#   vocab/health-v2.12, vocab/clinical-v1.21) with
+#   scripts/sync-shapes-from-spec.sh; health.ttl, health.shapes.ttl and
+#   clinical.ttl changed. health v2.12: health:isMainSleep and the sleep
+#   session rules in the class comment; health:basalEnergyKcal;
+#   health:sourceIdSpace widened to the daily aggregate classes; the wrong
+#   LOINC annotation on health:vo2Max removed; blood pressure confirmed as one
+#   paired reading per record, with a warning-level shape. clinical v1.21 drops
+#   rdfs:domain clinical:VitalSign from clinical:measurementMethod so VO2 max
+#   can carry its method. Additive: every graph that validated before still
+#   does. No converter change in this sync.
 core=3.11
-health=2.11
-clinical=1.20
+health=2.12
+clinical=1.21
 coverage=1.6
 checkup=3.3
 pots=1.4
