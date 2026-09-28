@@ -222,7 +222,7 @@ describe('pod query --exclude-data-type', () => {
   });
 
   it('refuses an unknown key (exit 1) and names the known ones', async () => {
-    const r = await runCli(['--json', 'pod', 'query', podDir, '--all', '--exclude-data-type', 'wellness']);
+    const r = await runCli(['--json', 'pod', 'query', podDir, '--all', '--exclude-data-type', 'wellness-records']);
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('wellness-samples');
     expect(r.stderr).toContain('heart-rate');

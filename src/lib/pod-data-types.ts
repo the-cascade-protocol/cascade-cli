@@ -344,6 +344,43 @@ export function excludableDataFiles(): Array<{ key: string; file: string }> {
 }
 
 /**
+ * The one GROUP key `pod query --exclude-data-type` (and the MCP
+ * `cascade_pod_query` tool's `excludeDataTypes`) accepts: every data type whose
+ * file lives under `wellness/` except {@link WELLNESS_GROUP_KEEPS}, plus
+ * {@link WELLNESS_SAMPLES_KEY}. A reader
+ * asking a clinical question names this one key instead of six or seven.
+ */
+export const WELLNESS_GROUP_KEY = 'wellness';
+
+/**
+ * The keys {@link WELLNESS_GROUP_KEY} expands to, read off the registry
+ * (`directory === 'wellness'`) rather than listed, so a wellness data type
+ * added later joins the group without anyone remembering to. Sorted.
+ *
+ * Because it is the directory that decides, the group drops everything filed
+ * there: `supplements` (stored under `wellness/`), the heart-rate
+ * `health:VitalSignReading` records that share `wellness/heart-rate.ttl`
+ * (clinical ones included), and the VO2 max readings in
+ * `wellness/body-measurements.ttl`.
+ */
+/**
+ * Data types stored under `wellness/` that the `wellness` exclusion group
+ * deliberately KEEPS. The group exists to make a clinical read cheap, so it
+ * must never silently drop something a clinical question needs: supplements
+ * are inputs to drug-interaction checks and are a small file. A caller who
+ * wants them gone names `supplements` explicitly.
+ */
+export const WELLNESS_GROUP_KEEPS: readonly string[] = ['supplements'];
+
+export function wellnessGroupKeys(): string[] {
+  const keys = Object.entries(DATA_TYPES)
+    .filter(([key, info]) => info.directory === 'wellness' && !WELLNESS_GROUP_KEEPS.includes(key))
+    .map(([key]) => key);
+  keys.push(WELLNESS_SAMPLES_KEY);
+  return keys.sort();
+}
+
+/**
  * Subjects that are STRUCTURAL SUB-NODES of a record rather than records.
  *
  * A sub-node is stored in the pod, validated by its own shape, and routed into

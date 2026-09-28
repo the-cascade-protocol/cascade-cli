@@ -30,6 +30,12 @@ import { convert } from '../fhir-converter/index.js';
 import { writeAuditEntry, createAuditEntry } from './audit.js';
 import { appendPodFile, mkdirInPod, podPathExists, writePodFile } from '../pod-path.js';
 import { describeMcpTools } from './describe.js';
+import {
+  resolveExclusion,
+  exclusionContradiction,
+  readWellnessSeries,
+  wellnessSeriesPayload,
+} from '../pod-query-options.js';
 import { MCP_TOOL_ENRICHMENT } from '../capabilities/enrichment.js';
 import { CLI_VERSION, CLI_PACKAGE_NAME } from '../version.js';
 
@@ -242,10 +248,33 @@ async function buildPodReadResult(
 
 /**
  * The `cascade_pod_query` handler, exported for the read-conformance battery.
+ *
+ * `excludeDataTypes` and `wellnessSeries` are the CLI's `--exclude-data-type`
+ * and `--wellness-series`, resolved and read by the same functions
+ * (`lib/pod-query-options.ts`): an excluded file is never opened, and the
+ * series comes back with the same payload, `stale` flag and reasons included.
  */
 export const podQueryHandler = withPodHandler(async (absDir, args) => {
-  const dataType = args.dataType as string;
-  const typesToQuery = dataType === 'all' ? Object.keys(DATA_TYPES) : [dataType];
+  const dataType = args.dataType as string | undefined;
+  const wellnessSeries = args.wellnessSeries === true;
+  const excludeArg = (args.excludeDataTypes as string[] | undefined) ?? [];
+
+  if (dataType === undefined && !wellnessSeries) {
+    throw new Error('Pass a dataType (or "all"), or wellnessSeries: true, or both.');
+  }
+
+  const resolved = resolveExclusion(absDir, excludeArg, 'excludeDataTypes');
+  if (!resolved.ok) throw new Error(resolved.message);
+  const exclusion = resolved.value;
+
+  const requested = dataType === undefined ? [] : dataType === 'all' ? Object.keys(DATA_TYPES) : [dataType];
+  if (dataType !== undefined && dataType !== 'all') {
+    const contradiction = exclusionContradiction(requested, exclusion, 'excludeDataTypes entry');
+    if (contradiction !== undefined) throw new Error(contradiction);
+  }
+  const excludedKeys = new Set(exclusion.keys);
+  const typesToQuery = requested.filter((t) => !excludedKeys.has(t));
+
   const results: Record<string, { count: number; file: string; records: Array<{ id: string; type: string; label?: string; properties: Record<string, string> }> }> = {};
   let totalRecords = 0;
 
@@ -258,6 +287,7 @@ export const podQueryHandler = withPodHandler(async (absDir, args) => {
     if (!typeInfo) continue;
 
     const filePath = path.join(absDir, typeInfo.directory, typeInfo.filename);
+    if (exclusion.files.has(filePath)) continue;
     if (!(await fileExists(filePath))) continue;
 
     ledger.attempt();
@@ -285,15 +315,34 @@ export const podQueryHandler = withPodHandler(async (absDir, args) => {
   // A count drawn from the files that happened to open is not the pod's count.
   ledger.throwIfFatal(absDir);
 
+  // A series that exists and will not read is unknown, never `null`: always a
+  // typed error, as the CLI always exits 2 (the ledger would step over a parse
+  // failure in an unregistered file, which is the wrong rule for this one).
+  let series: ReturnType<typeof wellnessSeriesPayload> | undefined;
+  if (wellnessSeries) {
+    const read = readWellnessSeries(reader);
+    if (!read.ok) throw new PodFilesUnreadableError(absDir, [read.failure], 1);
+    series = wellnessSeriesPayload(read.value);
+  }
+
   await writeAuditEntry(absDir, createAuditEntry('pod_query', typesToQuery, totalRecords));
 
-  return { pod: absDir, dataType, dataTypes: results, totalRecords };
+  return {
+    pod: absDir,
+    ...(dataType !== undefined ? { dataType } : {}),
+    ...(exclusion.keys.length > 0 ? { excludedDataTypes: exclusion.keys } : {}),
+    dataTypes: results,
+    totalRecords,
+    ...(series !== undefined ? { wellnessDailySeries: series } : {}),
+  };
 });
 
 function registerPodQuery(server: McpServer): void {
   server.tool(
     'cascade_pod_query',
-    'Query records from a Cascade Pod by data type. Returns JSON array of matching records with their properties and provenance.',
+    'Query records from a Cascade Pod by data type. Returns JSON array of matching records with their properties and provenance. ' +
+      'A pod with wellness data is large: for a clinical question use excludeDataTypes: ["wellness"]; ' +
+      'for a wellness question read wellnessSeries (one small file) rather than the wellness records.',
     {
       path: z.string().optional().describe('Path to the Pod directory. Uses CASCADE_POD_PATH if omitted.'),
       dataType: z
@@ -303,7 +352,23 @@ function registerPodQuery(server: McpServer): void {
           'patient-profile', 'heart-rate', 'blood-pressure',
           'activity', 'sleep', 'all',
         ])
-        .describe('Data type to query, or "all" for everything.'),
+        .optional()
+        .describe('Data type to query, or "all" for everything. Optional when wellnessSeries is true.'),
+      excludeDataTypes: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Data types whose files are never read (keys as for `pod query --exclude-data-type`). ' +
+            '"wellness" = every wellness/ file plus the retained-sample descriptors; it also drops ' +
+            'supplements, heart-rate vital signs (clinical ones included) and VO2 max, which share those files.',
+        ),
+      wellnessSeries: z
+        .boolean()
+        .optional()
+        .describe(
+          'Add wellnessDailySeries: one reading per type, statistic and day, each citing its record, ' +
+            'with stale and staleReasons (stale: true means rebuild with `pod reconcile --apply`). Null when the pod has none.',
+        ),
     },
     podQueryHandler,
   );

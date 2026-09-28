@@ -63,15 +63,14 @@ import {
 } from '../../lib/pod-read.js';
 import { expandCurie } from '../../lib/turtle-parser.js';
 import { loadPodGraph, recordEdges, neighborhood, podPlumbingPaths } from './graph.js';
-import { excludableDataFiles } from '../../lib/pod-data-types.js';
 import {
-  readStoredDailySeries,
-  dailySeriesFreshness,
-  type StoredDailySeries,
-} from '../../lib/apple-health-wellness/daily-series.js';
-
-/** A stored series as read, with whether it still matches the pod's records. */
-type SeriesRead = StoredDailySeries & { stale: boolean; staleReasons: string[] };
+  resolveExclusion,
+  exclusionContradiction,
+  readWellnessSeries,
+  staleSeriesWarning,
+  wellnessSeriesPayload,
+  type SeriesRead,
+} from '../../lib/pod-query-options.js';
 import { appendAll } from '../../lib/append-all.js';
 
 /**
@@ -184,12 +183,13 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
     .option(
       '--exclude-data-type <key>',
       'Leave out one data type: its file is never read, decrypted or parsed, by the record ' +
-        'sweep, --edges or --neighbors (repeatable). A key is a data type (heart-rate, activity, ' +
-        'hrv, sleep, body-measurements, wellness-devices, ...) or wellness-samples, the ' +
-        'retained-sample descriptors. A key excludes its whole FILE, so it also drops the ' +
-        'other records the router files there: heart-rate drops health:VitalSignReading ' +
-        'records coded with a heart-rate LOINC code (clinical ones included), and ' +
-        'body-measurements drops VO2 max readings. An unknown key is a usage error that lists the keys',
+        'sweep, --edges or --neighbors (repeatable). A key is a data type (heart-rate, sleep, ' +
+        '...), wellness-samples (the retained-sample descriptors), or wellness: every file ' +
+        'under wellness/ except supplements, plus wellness-samples, the cheap way to ask a clinical question. A ' +
+        'key excludes its whole FILE: heart-rate and wellness also drop ' +
+        'health:VitalSignReading records coded with a heart-rate LOINC code, clinical ones ' +
+        'included; body-measurements and wellness drop VO2 max; wellness keeps supplements. ' +
+        'An unknown key is a usage error that lists the keys',
       (val: string, acc: string[]) => {
         acc.push(val);
         return acc;
@@ -257,26 +257,18 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           return;
         }
 
-        // --exclude-data-type: every key must name a file this command knows,
-        // so a misspelled key is an error rather than a filter that does nothing.
-        const excludable = excludableDataFiles();
-        const excludeKeys = options.excludeDataType ?? [];
-        const unknownKeys = excludeKeys.filter((k) => !excludable.some((e) => e.key === k));
-        if (unknownKeys.length > 0) {
-          printError(
-            `Unknown data type${unknownKeys.length > 1 ? 's' : ''} for --exclude-data-type: ` +
-              `${unknownKeys.join(', ')}. Known: ${excludable.map((e) => e.key).join(', ')}.`,
-            globalOpts,
-          );
+        // --exclude-data-type: every key must name a file this command knows
+        // (or the `wellness` group), so a misspelled key is an error rather
+        // than a filter that does nothing. Shared with the MCP query tool.
+        const resolved = resolveExclusion(absDir, options.excludeDataType ?? [], '--exclude-data-type');
+        if (!resolved.ok) {
+          printError(resolved.message, globalOpts);
           process.exitCode = 1;
           return;
         }
-        const excludedKeys = new Set(excludeKeys);
-        const excludedFiles = new Set(
-          excludable
-            .filter((e) => excludedKeys.has(e.key))
-            .map((e) => path.join(absDir, ...e.file.split('/'))),
-        );
+        const exclusion = resolved.value;
+        const excludedKeys = new Set(exclusion.keys);
+        const excludedFiles = exclusion.files;
 
         // Open the pod ONCE: resolves the DEK when it is encrypted, and fails
         // here rather than letting a keyless read report ciphertext as nothing.
@@ -347,13 +339,9 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           // a type and excluding it in one call is a contradiction, and is
           // named as one rather than reported as "no filter".
           if (!options.all) {
-            const contradicted = requestedTypes.filter((t) => excludedKeys.has(t));
-            if (contradicted.length > 0) {
-              printError(
-                `Asked for and excluded in the same call: ${contradicted.join(', ')}. ` +
-                  'Drop the --exclude-data-type, or the filter it cancels.',
-                globalOpts,
-              );
+            const contradiction = exclusionContradiction(requestedTypes, exclusion, '--exclude-data-type');
+            if (contradiction !== undefined) {
+              printError(contradiction, globalOpts);
               process.exitCode = 1;
               return;
             }
@@ -551,13 +539,13 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
               pod: string;
               dataTypes: typeof queryResults;
               edges?: ReturnType<typeof recordEdges>;
-              wellnessDailySeries?: ReturnType<typeof seriesPayload>;
+              wellnessDailySeries?: ReturnType<typeof wellnessSeriesPayload>;
             } = {
               pod: podDir,
               dataTypes: queryResults,
             };
             if (edges !== undefined) payload.edges = edges;
-            if (series !== undefined) payload.wellnessDailySeries = seriesPayload(series);
+            if (series !== undefined) payload.wellnessDailySeries = wellnessSeriesPayload(series);
             printResult(payload, globalOpts);
           } else {
             // Human-readable output
@@ -703,59 +691,28 @@ async function runNeighborsQuery(
 
 /**
  * Read the stored daily series, or fail the command with exit 2. A view that
- * exists and cannot be read (a descriptor that does not parse, bytes that do
- * not match their digest) is unknown, and unknown is not "none": only a pod
- * with no view at all answers `null`.
+ * exists and cannot be read is unknown, and unknown is not "none": only a pod
+ * with no view at all answers `null`. A stale view is returned with a warning.
  */
 function readSeriesOrFail(
   absDir: string,
   reader: PodReader,
   globalOpts: OutputOptions,
 ): SeriesRead | null | undefined {
-  const read = readStoredDailySeries(reader);
+  const read = readWellnessSeries(reader);
   if (!read.ok) {
     printError(unreadableFilesMessage(absDir, [read.failure], 1), globalOpts);
     process.exitCode = 2;
     return undefined;
   }
-  if (read.value === null) return null;
-  // Freshness is checked on every read: a writer that did not rebuild the view
-  // (an older release, another tool, an interrupted import) leaves it serving
-  // values the pod may no longer hold. Returned, but never as current.
-  const fresh = dailySeriesFreshness(reader, read.value);
-  if (!fresh.ok) {
-    printError(unreadableFilesMessage(absDir, [fresh.failure], 1), globalOpts);
-    process.exitCode = 2;
-    return undefined;
-  }
-  if (fresh.value.stale) {
-    printWarning(
-      `The stored daily wellness series is STALE: ${fresh.value.reasons.join('; ')}. ` +
-        'It is returned with stale: true. Run `cascade pod reconcile <pod> --apply` to rebuild it.',
-      globalOpts,
-    );
-  }
-  return { ...read.value, stale: fresh.value.stale, staleReasons: fresh.value.reasons };
-}
-
-/** The view as `pod query` returns it: where it lives, then the view itself. */
-function seriesPayload(series: SeriesRead | null): Record<string, unknown> | null {
-  if (series === null) return null;
-  return {
-    stale: series.stale,
-    staleReasons: series.staleReasons,
-    descriptor: series.descriptor,
-    attachment: series.attachment,
-    contentHash: series.contentHash,
-    byteSize: series.byteSize,
-    generatedBy: series.generatedBy,
-    ...series.view,
-  };
+  const warning = staleSeriesWarning(read.value);
+  if (warning !== undefined) printWarning(warning, globalOpts);
+  return read.value;
 }
 
 function printSeries(podDir: string, series: SeriesRead | null, globalOpts: OutputOptions): void {
   if (globalOpts.json) {
-    printResult({ pod: podDir, wellnessDailySeries: seriesPayload(series) }, globalOpts);
+    printResult({ pod: podDir, wellnessDailySeries: wellnessSeriesPayload(series) }, globalOpts);
     return;
   }
   printSeriesText(series);
