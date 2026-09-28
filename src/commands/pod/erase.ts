@@ -61,6 +61,7 @@ import {
   type PodReadFailure,
 } from '../../lib/pod-read.js';
 import { mergeIntoBucket, derelativizeQuads, relBase, relBaseFor } from '../../lib/bucket-write.js';
+import { refreshWellnessDailySeriesAfterWrite } from '../../lib/apple-health-wellness/daily-series.js';
 
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 
@@ -247,6 +248,11 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
         process.exitCode = 1;
         return;
       }
+
+      // An erased wellness record's value must not survive in the stored daily
+      // series: the view is rebuilt from what is left, or removed if it cannot be.
+      const series = await refreshWellnessDailySeriesAfterWrite(podDir, dek);
+      if (series.warning) printWarning(series.warning, globalOpts);
 
       // Write the content-free Tombstone overlay (the erasure audit event).
       const tombstoneUri = mintUri();

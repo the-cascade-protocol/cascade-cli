@@ -1,0 +1,90 @@
+{
+  "rule": "wellness-daily-series",
+  "ruleVersion": "1",
+  "about": "The read rule behind the stored daily wellness series: which reading a day shows when several sources recorded the same metric that day. Watch before phone before third-party. Changing anything below changes what the rule computes and needs a new ruleVersion in the same edit.",
+  "inputs": ["heart-rate", "hrv", "body-measurements", "activity", "sleep", "wellness-devices"],
+  "tiers": [
+    {
+      "label": "watch",
+      "manufacturer": "^apple\\b",
+      "hardware": "^watch",
+      "nameWhenUnstated": "\\bapple watch\\b"
+    },
+    {
+      "label": "phone",
+      "manufacturer": "^apple\\b",
+      "hardware": "^iphone",
+      "nameWhenUnstated": "\\biphone\\b"
+    }
+  ],
+  "otherTier": "third-party",
+  "patternFlags": "i",
+  "tierRule": {
+    "device": "A device is tiered by its manufacturer and hardware model when it states both: a manufacturer matching no tier's pattern is third-party. Only a device stating neither falls back to its name and model.",
+    "reading": "A reading naming a device the pod describes takes that device's tier. A reading naming none takes its source's tier.",
+    "source": "A source's tier is the tier its device-bearing records predominantly name; a tie goes to the better tier. A source with no device-bearing record is third-party, whatever it is called."
+  },
+  "tieBreak": ["tier", "sampleCount descending", "source name", "record IRI"],
+  "readingTypes": [
+    {
+      "class": "health:DailyVitalReading",
+      "keyFrom": "cascade:loincCode",
+      "value": "health:value",
+      "unitFrom": "health:unit",
+      "day": "health:periodStart",
+      "series": true
+    },
+    {
+      "class": "health:DailyActivitySnapshot",
+      "key": "steps",
+      "value": "health:steps",
+      "unit": "steps",
+      "day": "health:periodStart",
+      "series": true
+    },
+    {
+      "class": "health:DailyActivitySnapshot",
+      "key": "activeEnergyKcal",
+      "value": "health:activeEnergyKcal",
+      "unit": "kcal",
+      "day": "health:periodStart",
+      "series": true
+    },
+    {
+      "class": "health:DailyActivitySnapshot",
+      "key": "basalEnergyKcal",
+      "value": "health:basalEnergyKcal",
+      "unit": "kcal",
+      "day": "health:periodStart",
+      "series": true
+    },
+    {
+      "class": "health:DailyActivitySnapshot",
+      "key": "exerciseMinutes",
+      "value": "health:exerciseMinutes",
+      "unit": "min",
+      "day": "health:periodStart",
+      "series": true
+    },
+    {
+      "class": "health:DailyActivitySnapshot",
+      "key": "standHours",
+      "value": "health:standHours",
+      "unit": "h",
+      "day": "health:periodStart",
+      "series": true
+    },
+    {
+      "class": "health:SleepSession",
+      "key": "sleep",
+      "day": "cascade:date",
+      "series": false
+    },
+    {
+      "class": "health:Workout",
+      "key": "workout",
+      "day": "health:periodStart",
+      "series": false
+    }
+  ]
+}

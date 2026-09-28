@@ -184,7 +184,8 @@ describe('pod import of an Apple Health export folder: wellness', () => {
   it('validates with zero violations and zero warnings', () => {
     const out = JSON.parse(cli(['validate', podDir, '--json'])) as Array<{ file: string; valid: boolean; results: unknown[] }>;
     const wellnessFiles = out.filter((r) => r.file.includes(`${path.sep}wellness${path.sep}`));
-    expect(wellnessFiles.length).toBe(8);
+    // Eight record files and descriptors, plus the stored daily series' descriptor.
+    expect(wellnessFiles.length).toBe(9);
     for (const r of out) {
       expect(r.valid, r.file).toBe(true);
       expect(r.results, r.file).toEqual([]);
@@ -219,10 +220,11 @@ describe('pod import of an Apple Health export into an ENCRYPTED pod', () => {
     cli(['pod', 'import', podDir, FIXTURE], { CASCADE_POD_PASSPHRASE: PASSPHRASE });
     const dir = path.join(podDir, 'attachments', 'sha-256');
     const names = fs.readdirSync(dir);
-    expect(names.length).toBe(3);
+    // Three sample packs and the stored daily series.
+    expect(names.length).toBe(4);
     for (const n of names) {
       // The name is the digest of the PLAINTEXT; the bytes on disk are sealed.
-      expect(fs.readFileSync(path.join(dir, n)).toString('utf8')).not.toContain('cascade-wellness-samples');
+      expect(fs.readFileSync(path.join(dir, n)).toString('utf8')).not.toContain('cascade-wellness-');
     }
     expect(fs.readFileSync(path.join(podDir, 'wellness', 'heart-rate.ttl')).toString('utf8')).not.toContain('DailyVitalReading');
     const out = JSON.parse(cli(['validate', podDir, '--json'], { CASCADE_POD_PASSPHRASE: PASSPHRASE })) as Array<{

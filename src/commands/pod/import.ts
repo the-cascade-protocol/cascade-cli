@@ -45,6 +45,10 @@ import {
   type WellnessImportReport,
 } from '../../lib/apple-health-wellness/import-export.js';
 import {
+  refreshWellnessDailySeriesAfterWrite,
+  type DailySeriesRefresh,
+} from '../../lib/apple-health-wellness/daily-series.js';
+import {
   DATA_TYPES,
   isStructuralSubNode,
   resolvePodDir,
@@ -200,6 +204,13 @@ interface ImportReport {
    * no such export.
    */
   wellness?: WellnessImportReport[];
+  /**
+   * The stored daily wellness series after this import: rebuilt when the
+   * wellness files it is built from changed, left alone when they did not.
+   * Absent when the pod holds neither wellness records nor a series, and on a
+   * dry run, which writes nothing.
+   */
+  wellnessDailySeries?: DailySeriesRefresh;
   warnings: string[];
   dryRun: boolean;
 }
@@ -1510,6 +1521,20 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         }
       }
 
+      // --- Step 9d: the stored daily wellness series ---
+      // After every write, clinical and wellness alike: a clinical record can be
+      // routed into a wellness file too. A derived view, rebuilt only when the
+      // files it is built from changed (compared by digest, never parsed).
+      let seriesRefresh: DailySeriesRefresh | undefined;
+      if (!dryRun) {
+        const r = await refreshWellnessDailySeriesAfterWrite(podDir, dek);
+        if (r.warning) allWarnings.push(r.warning);
+        if (r.refresh && r.refresh.status !== 'absent') seriesRefresh = r.refresh;
+        if (r.refresh?.status === 'built') {
+          printVerbose(`  Built ${r.refresh.attachment} (daily wellness series, ${r.refresh.days} day rows)`, globalOpts);
+        }
+      }
+
       // --- Step 10: Summary and report ---
       const totalRecordsImported = Object.values(typeCounts).reduce((a, b) => a + b, 0);
       const recordsNew = filesWritten.reduce((a, f) => a + f.recordsNew, 0);
@@ -1545,6 +1570,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         literalLifting,
         sectionCensus,
         ...(wellnessReports.length > 0 ? { wellness: wellnessReports } : {}),
+        ...(seriesRefresh ? { wellnessDailySeries: seriesRefresh } : {}),
         warnings: allWarnings,
         dryRun,
       };

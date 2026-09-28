@@ -62,7 +62,12 @@ import {
   type PodRecord,
 } from '../../lib/pod-read.js';
 import { expandCurie } from '../../lib/turtle-parser.js';
-import { loadPodGraph, recordEdges, neighborhood } from './graph.js';
+import { loadPodGraph, recordEdges, neighborhood, podPlumbingPaths } from './graph.js';
+import { excludableDataFiles } from '../../lib/pod-data-types.js';
+import {
+  readStoredDailySeries,
+  type StoredDailySeries,
+} from '../../lib/apple-health-wellness/daily-series.js';
 import { appendAll } from '../../lib/append-all.js';
 
 /**
@@ -173,6 +178,25 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
     )
     .option('--edges', 'With --all, add a record-to-record edge projection to the output')
     .option(
+      '--exclude-data-type <key>',
+      'Leave out one data type: its file is never read, decrypted or parsed, by the record ' +
+        'sweep, --edges or --neighbors (repeatable). A key is a data type (heart-rate, activity, ' +
+        'hrv, sleep, body-measurements, wellness-devices, ...) or wellness-samples, the ' +
+        'retained-sample descriptors. An unknown key is a usage error that lists the keys',
+      (val: string, acc: string[]) => {
+        acc.push(val);
+        return acc;
+      },
+      [] as string[],
+    )
+    .option(
+      '--wellness-series',
+      "Add the pod's stored daily wellness series (one reading per reading type, statistic " +
+        'and local day, chosen by source priority, each citing its record) and its per-source ' +
+        'summary, under `wellnessDailySeries` (null when the pod holds none). Reads one small ' +
+        'file, not the wellness records. Alone, or beside any other filter',
+    )
+    .option(
       '--include-bookkeeping',
       "Also return the pod's own bookkeeping subjects (cascade:PendingConflict, " +
         'cascade:UserResolution, solid:TypeIndex, solid:TypeRegistration, ' +
@@ -206,6 +230,8 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           hops?: string;
           edge?: string[];
           edges?: boolean;
+          excludeDataType?: string[];
+          wellnessSeries?: boolean;
           includeBookkeeping?: boolean;
         },
       ) => {
@@ -221,6 +247,27 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           process.exitCode = 1;
           return;
         }
+
+        // --exclude-data-type: every key must name a file this command knows,
+        // so a misspelled key is an error rather than a filter that does nothing.
+        const excludable = excludableDataFiles();
+        const excludeKeys = options.excludeDataType ?? [];
+        const unknownKeys = excludeKeys.filter((k) => !excludable.some((e) => e.key === k));
+        if (unknownKeys.length > 0) {
+          printError(
+            `Unknown data type${unknownKeys.length > 1 ? 's' : ''} for --exclude-data-type: ` +
+              `${unknownKeys.join(', ')}. Known: ${excludable.map((e) => e.key).join(', ')}.`,
+            globalOpts,
+          );
+          process.exitCode = 1;
+          return;
+        }
+        const excludedKeys = new Set(excludeKeys);
+        const excludedFiles = new Set(
+          excludable
+            .filter((e) => excludedKeys.has(e.key))
+            .map((e) => path.join(absDir, ...e.file.split('/'))),
+        );
 
         // Open the pod ONCE: resolves the DEK when it is encrypted, and fails
         // here rather than letting a keyless read report ciphertext as nothing.
@@ -242,7 +289,7 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
         try {
           // ─── Graph traversal: --neighbors <iri> ──────────────────────────
           if (options.neighbors !== undefined) {
-            await runNeighborsQuery(absDir, podDir, options, globalOpts, reader);
+            await runNeighborsQuery(absDir, podDir, options, globalOpts, reader, excludedFiles);
             return;
           }
 
@@ -281,7 +328,18 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             if (options.fhirPassthrough) requestedTypes.push('fhir-passthrough');
           }
 
-          if (requestedTypes.length === 0) {
+          // A data type the caller excluded is never read: dropped here, before
+          // its file is opened, rather than filtered out of a parse.
+          requestedTypes = requestedTypes.filter((t) => !excludedKeys.has(t));
+
+          if (requestedTypes.length === 0 && options.wellnessSeries && !options.all) {
+            const series = readSeriesOrFail(absDir, reader, globalOpts);
+            if (series === undefined) return;
+            printSeries(podDir, series, globalOpts);
+            return;
+          }
+
+          if (requestedTypes.length === 0 && !options.all) {
             printError(
               'No query filter specified. Use --medications, --conditions, --procedures, --all, etc.',
               globalOpts,
@@ -322,16 +380,12 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
                 path.join(absDir, dt.directory, dt.filename),
               ),
             );
-            // Also exclude index.ttl, manifest.ttl, profile/card.ttl, type indexes
-            const excludePaths = new Set([
-              path.join(absDir, 'index.ttl'),
-              path.join(absDir, 'manifest.ttl'),
-              path.join(absDir, 'profile', 'card.ttl'),
-              path.join(absDir, 'settings', 'publicTypeIndex.ttl'),
-              path.join(absDir, 'settings', 'privateTypeIndex.ttl'),
-            ]);
+            // Also exclude the pod plumbing (index.ttl, manifest.ttl,
+            // profile/card.ttl, the type indexes, a derived view's descriptor),
+            // and every file the caller excluded by key.
+            const excludePaths = podPlumbingPaths(absDir);
             for (const f of allTtlFiles) {
-              if (!knownPaths.has(f) && !excludePaths.has(f)) {
+              if (!knownPaths.has(f) && !excludePaths.has(f) && !excludedFiles.has(f)) {
                 extraFiles.push(f);
               }
             }
@@ -447,7 +501,7 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           // built exactly as before, so existing consumers see no change.
           let edges: ReturnType<typeof recordEdges> | undefined;
           if (options.all && options.edges) {
-            const graph = await loadPodGraph(reader);
+            const graph = await loadPodGraph(reader, { exclude: excludedFiles });
             // `loadPodGraph` collects its read failures instead of throwing, so
             // an unread file would otherwise become "this record has no edges".
             // Same split as above: a file that will not decrypt is fatal, a file
@@ -456,17 +510,26 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
             edges = recordEdges(graph);
           }
 
+          // --wellness-series beside a record query: additive, like --edges.
+          let series: StoredDailySeries | null | undefined;
+          if (options.wellnessSeries) {
+            series = readSeriesOrFail(absDir, reader, globalOpts);
+            if (series === undefined) return;
+          }
+
           // Output results
           if (globalOpts.json) {
             const payload: {
               pod: string;
               dataTypes: typeof queryResults;
               edges?: ReturnType<typeof recordEdges>;
+              wellnessDailySeries?: ReturnType<typeof seriesPayload>;
             } = {
               pod: podDir,
               dataTypes: queryResults,
             };
             if (edges !== undefined) payload.edges = edges;
+            if (series !== undefined) payload.wellnessDailySeries = seriesPayload(series);
             printResult(payload, globalOpts);
           } else {
             // Human-readable output
@@ -504,6 +567,8 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
               }
             }
 
+            if (series !== undefined) printSeriesText(series);
+
             if (edges !== undefined) {
               console.log(`\n=== Edges (${edges.length} record-to-record) ===\n`);
               for (const e of edges) {
@@ -535,6 +600,7 @@ async function runNeighborsQuery(
   options: { neighbors?: string; hops?: string; edge?: string[] },
   globalOpts: OutputOptions,
   reader: PodReader,
+  excludedFiles: ReadonlySet<string>,
 ): Promise<void> {
   const seedIri = options.neighbors as string;
 
@@ -568,7 +634,7 @@ async function runNeighborsQuery(
     return;
   }
 
-  const graph = await loadPodGraph(reader);
+  const graph = await loadPodGraph(reader, { exclude: excludedFiles });
   // Before "no record found with that IRI": over a graph with files that would
   // not decrypt, that sentence is a guess dressed as an answer.
   if (!reportGraphReadFailures(absDir, graph, globalOpts)) return;
@@ -601,6 +667,66 @@ async function runNeighborsQuery(
   for (const n of result.neighbors) {
     const arrow = n.direction === 'out' ? `--${n.edge}-->` : `<--${n.edge}--`;
     console.log(`  [hop ${n.hop}] ${arrow} ${n.iri} (${n.type})`);
+  }
+  console.log('');
+}
+
+// ─── --wellness-series ────────────────────────────────────────────────────────
+
+/**
+ * Read the stored daily series, or fail the command with exit 2. A view that
+ * exists and cannot be read (a descriptor that does not parse, bytes that do
+ * not match their digest) is unknown, and unknown is not "none": only a pod
+ * with no view at all answers `null`.
+ */
+function readSeriesOrFail(
+  absDir: string,
+  reader: PodReader,
+  globalOpts: OutputOptions,
+): StoredDailySeries | null | undefined {
+  const read = readStoredDailySeries(reader);
+  if (!read.ok) {
+    printError(unreadableFilesMessage(absDir, [read.failure], 1), globalOpts);
+    process.exitCode = 2;
+    return undefined;
+  }
+  return read.value;
+}
+
+/** The view as `pod query` returns it: where it lives, then the view itself. */
+function seriesPayload(series: StoredDailySeries | null): Record<string, unknown> | null {
+  if (series === null) return null;
+  return {
+    descriptor: series.descriptor,
+    attachment: series.attachment,
+    contentHash: series.contentHash,
+    byteSize: series.byteSize,
+    generatedBy: series.generatedBy,
+    ...series.view,
+  };
+}
+
+function printSeries(podDir: string, series: StoredDailySeries | null, globalOpts: OutputOptions): void {
+  if (globalOpts.json) {
+    printResult({ pod: podDir, wellnessDailySeries: seriesPayload(series) }, globalOpts);
+    return;
+  }
+  printSeriesText(series);
+}
+
+function printSeriesText(series: StoredDailySeries | null): void {
+  if (series === null) {
+    console.log('\nNo daily wellness series is stored in this pod.');
+    return;
+  }
+  const v = series.view;
+  console.log(`\n=== Daily wellness series (${series.generatedBy}) ===`);
+  console.log(`  File: ${series.attachment}`);
+  console.log(`  Sources: ${v.sources.length}; devices: ${v.devices.length}`);
+  for (const s of v.series) {
+    const label = s.statistic ? `${s.key} (${s.statistic})` : s.key;
+    const span = s.date.length > 0 ? `${s.date[0]} to ${s.date[s.date.length - 1]}` : 'no days';
+    console.log(`  ${label}: ${s.date.length} day(s), ${span}`);
   }
   console.log('');
 }

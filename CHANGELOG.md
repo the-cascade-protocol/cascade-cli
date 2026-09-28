@@ -9,6 +9,40 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`pod query --exclude-data-type <key>`** (repeatable). An excluded data
+  type's file is never read, decrypted or parsed, by the `--all` sweep, by
+  `--edges` or by `--neighbors`. A key is a data type or `wellness-samples`, the
+  retained-sample descriptors; an unknown key is a usage error that lists the
+  known ones. Without the flag, output is unchanged. On a pod holding a real
+  Apple Health import, `--all` excluding the wellness files falls from about
+  3.5 s and 1.3 GB resident to about 0.3 s and 0.2 GB, and `--all --edges` from
+  about 6.7 s and 3.3 GB to about 0.4 s and 0.4 GB.
+- **A stored daily wellness series.** For each reading type and statistic, one
+  value per local day, chosen by a published source-priority rule (watch, then
+  phone, then third-party; `src/data/wellness-daily-series-rules.json`, rule
+  `wellness-daily-series/1`), each day citing the daily record it was taken
+  from, plus a per-source summary (devices, and per reading type the days, first
+  and last date). A derived view: a content-addressed JSON attachment described
+  by `wellness/series/daily-series.ttl` (provisional location), stamped with its
+  rule version, and rebuilt byte for byte from the records. Written at the end
+  of `pod import`; `pod import`, `pod reconcile --apply`, `pod add-record` and
+  `pod erase` rebuild it when a wellness file it reads changed (compared by
+  digest, not parsed), and a pod imported before this release gets one on its
+  next `pod reconcile --apply`. The import and reconcile reports carry
+  `wellnessDailySeries` when the pod has one.
+- **`pod query --wellness-series`** returns that view under
+  `wellnessDailySeries`, alone or beside `--all` in the same call, after checking
+  its bytes against the digest its descriptor states (exit 2 when they differ;
+  `null` when the pod has none). About 3 MB and 0.25 s on a real pod.
+
+### Changed
+
+- `pod query --all` and the graph behind `--edges` and `--neighbors` no longer
+  read `wellness/series/daily-series.ttl`: it describes a derived view, not
+  records. Pods without it are unaffected.
+
 ## [0.26.0] - 2026-09-28
 
 Apple Health sleep sessions, blood pressure, VO2 max and basal energy; per-device active energy moves onto the daily activity snapshot, and computed aggregates from an older rule version are replaced in place on the next import. Bundled vocabulary: core 3.12.

@@ -104,7 +104,10 @@ additive:** without `--edges` the output is byte-identical to before this slice.
 
 The graph loads exactly the file set `query --all` reads: every `*.ttl` under the
 pod **except** `index.ttl`, `manifest.ttl`, `profile/card.ttl`,
-`settings/publicTypeIndex.ttl`, and `settings/privateTypeIndex.ttl`. Recursive
+`settings/publicTypeIndex.ttl`, `settings/privateTypeIndex.ttl`, the stored daily
+wellness series' descriptor (`wellness/series/daily-series.ttl`, a derived view, not
+records), and any file the caller excluded with `--exclude-data-type <key>`, which is
+never read at all. Recursive
 discovery means `clinical/`, `wellness/`, and any additional containers a future
 slice adds (for example `notes/`, `investigations/`, `annotations/`) are covered
 automatically the moment they hold `.ttl` records: their typed subjects become

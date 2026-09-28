@@ -30,7 +30,8 @@ import type { Command } from 'commander';
 import * as path from 'node:path';
 import { DataFactory } from 'n3';
 import type { Quad } from 'n3';
-import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
+import { printResult, printError, printVerbose, printWarning, type OutputOptions } from '../../lib/output.js';
+import { refreshWellnessDailySeriesAfterWrite } from '../../lib/apple-health-wellness/daily-series.js';
 import { DATA_TYPES, resolvePodDir, fileExists, type DataTypeInfo } from './helpers.js';
 import { resolvePodDek, mintUri } from '../../lib/annotations.js';
 import { mergeIntoBucket, KNOWN_PREFIXES, assertWritableIri } from '../../lib/bucket-write.js';
@@ -255,6 +256,11 @@ export function registerAddRecordSubcommand(pod: Command, program: Command): voi
         process.exitCode = 1;
         return;
       }
+
+      // A record filed into a wellness file changes what the stored daily
+      // series was built from; rebuilt only when it did.
+      const series = await refreshWellnessDailySeriesAfterWrite(podDir, dek);
+      if (series.warning) printWarning(series.warning, globalOpts);
 
       const result = { added: true, recordUri, type: options.type };
 

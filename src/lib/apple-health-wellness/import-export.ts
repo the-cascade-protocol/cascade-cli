@@ -27,7 +27,7 @@ import path from 'node:path';
 import type { Quad } from 'n3';
 import { mergeIntoBucket } from '../bucket-write.js';
 import { readResource, writeResource, writeResourceBytes, readResourceBytes } from '../pod-encryption.js';
-import { DATA_TYPES } from '../pod-data-types.js';
+import { DATA_TYPES, WELLNESS_SAMPLES_DESCRIPTOR } from '../pod-data-types.js';
 import { PodReader } from '../pod-read.js';
 import { mkdirInPod, podPathExists } from '../pod-path.js';
 import { ensurePodIdentifier, readUsablePodIdentifier } from '../pod-identifier.js';
@@ -49,9 +49,10 @@ const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
  * the rule activity every aggregate names. A nested container under
  * `wellness/` (pod-structure.md section 4.2 permits nested containers there)
  * rather than a top-level bucket, because these are provenance for the
- * records, not records, and no registered data type claims them.
+ * records, not records, and no registered data type claims them. Declared in
+ * `pod-data-types.ts`, beside the registered files, so `pod query` can name it.
  */
-export const WELLNESS_SAMPLES_DESCRIPTOR = 'wellness/samples/samples.ttl';
+export { WELLNESS_SAMPLES_DESCRIPTOR };
 
 /** Which rule of the day-zone default chain applied. */
 export type DayZoneRule = 'pod' | 'HKTimeZone majority' | 'importing machine' | 'UTC fallback';
