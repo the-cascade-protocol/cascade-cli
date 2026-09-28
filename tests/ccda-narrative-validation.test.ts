@@ -82,11 +82,12 @@ describe('every conformance C-CDA fixture converts with zero ClinicalDocument vi
 });
 
 describe('the narrative cardinality constraint is live', () => {
-  // Two sections with the same LOINC code in one document share a narrative
-  // IRI (it is keyed on section code, document and source), so the subject
-  // gets two texts. No corpus fixture has this shape; real exports can. This is
-  // the positive control that the constraint above is really being applied. It
-  // asserts only that the shape reports the collision, not at which severity.
+  // Two sections with the same LOINC code in one document used to share a
+  // narrative IRI (it was keyed on section code, document and import label), so
+  // the subject got two texts. A narrative's name now includes a digest of its
+  // text, so the converter no longer produces that collision; the constraint is
+  // still checked here, on a second text written onto one converted subject.
+  // It asserts only that the shape reports it, not at which severity.
   const DUPLICATE_SECTION_CODE = `<?xml version="1.0" encoding="UTF-8"?>
 <ClinicalDocument xmlns="urn:hl7-org:v3">
   <templateId root="2.16.840.1.113883.10.20.22.1.1"/>
@@ -106,12 +107,22 @@ describe('the narrative cardinality constraint is live', () => {
   </structuredBody></component>
 </ClinicalDocument>`;
 
-  it('two same-code sections put two texts on one subject, and the shape reports it', async () => {
-    const { report, sectionNarratives, narrativeValues } =
+  it('two same-code sections with different text are two subjects, one text each', async () => {
+    const { sectionNarratives, narrativeValues } =
       await convertAndValidate(DUPLICATE_SECTION_CODE, 'duplicate-section-code');
-    expect(sectionNarratives.size).toBe(1);
-    const [subject] = [...sectionNarratives];
-    expect(narrativeValues.get(subject)).toBe(2);
+    expect(sectionNarratives.size).toBe(2);
+    for (const s of sectionNarratives) expect(narrativeValues.get(s), s).toBe(1);
+  });
+
+  it('a subject carrying two texts is reported by the shape', async () => {
+    const result = await convertCcda(DUPLICATE_SECTION_CODE, {
+      sourceSystem: 'Fixture',
+      importedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const quads = new Parser().parse(result.output);
+    const subject = quads.find((q) => q.predicate.value === SECTION_CODE)!.subject.value;
+    const doubled = `${result.output}\n<${subject}> <${CLINICAL_NARRATIVE_TEXT}> "A second text." .\n`;
+    const report = validateTurtle(doubled, shapes, shapeFiles, 'doubled-narrative');
     const onNarrative = report.results.filter(
       (r) => r.focusNode === subject && r.property.endsWith('narrativeText'),
     );

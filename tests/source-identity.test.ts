@@ -551,18 +551,21 @@ describe('golden pins: no record IRI moves when the source axes do', () => {
   });
 
   it('mints the pre-change IRIs for the C-CDA half, section documents included', async () => {
-    // The section ClinicalDocument nodes are the ones worth naming: their key is
-    // built from the section code, the document id and the INGESTION label, and
-    // the label axis is passed into the same function for a different purpose.
-    // If it ever reached the key, these two are what would move.
+    // The section ClinicalDocument nodes are the ones worth naming: the label
+    // axis is passed into the same function for a different purpose, and if it
+    // ever reached the key, these two are what would move. Their key is the
+    // section code, the document set (else the document id) and a digest of the
+    // canonical narrative; the two values below were re-pinned when that key
+    // replaced (section code, document id, import label), a deliberate rename of
+    // section narratives for future imports. Every other subject is unchanged.
     const input = readFileSync(path.join(FIXTURES, 'p01-dual-label-ccda.xml'), 'utf-8');
     const result = await convertCcda(input, {
       sourceSystem: 'p01-ccda',
       importedAt: '2026-01-01T00:00:00Z',
     });
     expect(typedSubjects(result.output)).toEqual([
-      'ClinicalDocument urn:uuid:068d7478-b123-50f8-b0fe-e14cbc21d092',
-      'ClinicalDocument urn:uuid:ac0b69f8-dc7a-5843-8093-03b09c5b7cb8',
+      'ClinicalDocument urn:uuid:17de8c22-b5e9-572c-8f5f-dc65b72742fb',
+      'ClinicalDocument urn:uuid:7226189c-8e03-5106-a6a7-b561f753e2ff',
       'ConditionRecord urn:uuid:bfac17d9-5034-5902-ac10-de00ba6d0fdf',
       'LabResultRecord urn:uuid:aa7622d6-9e51-51ca-9026-a6c6c7991cab',
       'LaboratoryReport urn:uuid:d3e74e76-7a77-5cf4-8482-4a8eb2dd5dcc',

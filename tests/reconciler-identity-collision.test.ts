@@ -601,3 +601,43 @@ describe('pod import surfaces a collision to the user', () => {
     expect(fs.existsSync(path.join(podDir, 'settings', 'pending-conflicts.ttl'))).toBe(true);
   });
 });
+
+describe('a split never renames the record the pod already holds', () => {
+  // Which colliding record keeps the minted IRI used to be decided by the
+  // smaller content fingerprint alone. When the record already written to the
+  // pod had the larger one, the split moved IT to a new subject and gave its
+  // name to the record that had just arrived, so a name the pod had published
+  // changed under every edge and annotation pointing at it. A written name is
+  // never rewritten: the pod's copy keeps the IRI and the arrival moves.
+  const valueAt = (ttl: string, uri: string): string | undefined =>
+    new Parser({ format: 'Turtle' }).parse(ttl)
+      .find(q => q.subject.value === uri && q.predicate.value === RESULT_VALUE)?.object.value;
+
+  for (const [held, arriving, label] of [
+    [FASTING, POST_PRANDIAL, 'the pod holds the fasting result'],
+    [POST_PRANDIAL, FASTING, 'the pod holds the post-prandial result'],
+  ] as const) {
+    it(`${label}: its record keeps the minted IRI`, async () => {
+      const heldValue = held === FASTING ? '95' : '310';
+      const result = await runReconciliation([
+        { content: held, systemName: 'existing-pod', existingPod: true },
+        { content: arriving, systemName: 'lab-b' },
+      ]);
+      expect(result.report.summary.identityCollisionsSplit).toBe(1);
+      expect(resultValues(result.turtle)).toEqual(['310', '95']);
+      expect(valueAt(result.turtle, COLLIDING_IRI)).toBe(heldValue);
+    });
+  }
+
+  it('without a pod copy the choice is still by content, not by input order', async () => {
+    const forward = await runReconciliation([
+      { content: FASTING, systemName: 'lab-a' },
+      { content: POST_PRANDIAL, systemName: 'lab-b' },
+    ]);
+    const reversed = await runReconciliation([
+      { content: POST_PRANDIAL, systemName: 'lab-b' },
+      { content: FASTING, systemName: 'lab-a' },
+    ]);
+    expect(valueAt(reversed.turtle, COLLIDING_IRI)).toBe(valueAt(forward.turtle, COLLIDING_IRI));
+  });
+});

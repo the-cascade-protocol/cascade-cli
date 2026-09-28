@@ -82,11 +82,12 @@
  */
 
 import {
+  compareCodePoints,
   contentHashedUri,
   deterministicUuid,
   medicationUri,
 } from '../fhir-converter/types.js';
-import { contentFingerprint, EMPTY_SEED } from '../identity.js';
+import { contentFingerprint, EMPTY_SEED, stableStringify } from '../identity.js';
 
 /**
  * The single medication identity type, shared by every importer. Medication
@@ -220,7 +221,10 @@ function str(value: unknown): string {
  * So the source's id is still believed — but only as far as the source's own
  * content lets it be. When one id is claimed by entries whose content
  * CONTRADICTS, the id has stopped identifying anything, and each claimant gets
- * `{type}:{id}#{fingerprint}` instead of `{type}:{id}`.
+ * `{type}:{id}#{fingerprint}` instead of `{type}:{id}`. "Content" here is the
+ * claimant's stable clinical content (see "WHAT THE DISAMBIGUATOR HASHES"
+ * below), never its narrative pointers, addresses or authorship, which an EHR
+ * regenerates on every download.
  *
  * WHY A PRE-SCAN AND NOT A RUNNING REGISTRY
  * -----------------------------------------
@@ -238,8 +242,8 @@ function str(value: unknown): string {
  *
  * WHAT IT DOES NOT DO
  * -------------------
- * It does not disambiguate entries that share an id and are content-identical:
- * those are one act restated, they mint one subject as they always have, and
+ * It does not disambiguate entries that share an id and are clinically
+ * identical: those are one act restated, they mint one subject as they always have, and
  * splitting them would recreate the duplicate-on-every-import defect.
  *
  * It does not look across documents. Two documents that reuse one id are a
@@ -251,9 +255,195 @@ function str(value: unknown): string {
  */
 let contradictedIds: ReadonlySet<string> = new Set<string>();
 
+// ---------------------------------------------------------------------------
+// What the disambiguator hashes: stable clinical fields only
+// ---------------------------------------------------------------------------
+
 /**
- * Collect every (sourceId, content fingerprint) pair in a parsed C-CDA, at any
- * depth. Keyed on the id alone rather than on (type, id): a caller's `type` is
+ * WHAT THE DISAMBIGUATOR HASHES, AND WHY NOT THE WHOLE ELEMENT
+ * ------------------------------------------------------------
+ * The disambiguator's first version hashed the whole claimant element. Measured
+ * on two downloads of the same document set from one EHR, 22 of the 344 records
+ * it named were renamed between the downloads while their clinical content was
+ * unchanged, because the element also carries things the EHR regenerates on
+ * every download: narrative reference pointers (`text/reference/@value`,
+ * `code/originalText/reference/@value`), author and organisation addresses, and
+ * visit wrappers nested inside lab panels that are present in one download and
+ * not the next. A disambiguator exists to tell two claimants of one id apart,
+ * and what tells two clinical statements apart is what they say clinically.
+ *
+ * So the disambiguator hashes a PROJECTION of the claimant: the fields below,
+ * taken from the statement itself and from the clinical statements nested in it
+ * (a concern act's problem and its status, a panel's results), with pointers,
+ * identifiers, addresses and template versions stripped inside them.
+ * Authorship, performers and the statement's own `text` are never read at all.
+ *
+ * Status IS in it (`statusCode`, and a problem's nested status observation):
+ * two statements under one id that agree on everything but status are two
+ * claims about the patient, active or resolved, taking or finished, and folding
+ * them gives one subject two status values. The cost is that a status change
+ * between downloads renames a claimant of a reused id; the name of a record
+ * whose id is unique never depends on any of this.
+ *
+ * WHAT IT COSTS, STATED
+ * ---------------------
+ * Two claimants of one id that agree on every field here and differ only in
+ * something outside it (a performer, a free-text note) are now one record
+ * rather than two. That is the merge direction, and it is taken on
+ * purpose: the source gave them one id and they agree on everything clinical,
+ * so the source's own word is the better reading. Claimants that disagree
+ * clinically, the case the disambiguator exists for, still split.
+ *
+ * An element whose projection is empty (a medication's bare `<encounter>` link
+ * to its visit, carrying only the visit's id) claims nothing, so it can no
+ * longer make the record it cites look contradicted.
+ *
+ * It changes no name outside the disambiguator. An id is contradicted only when
+ * its claimants' projections differ, and a projection is a function of the
+ * element, so every id that was uncontradicted before is uncontradicted now:
+ * records whose ids are unique keep their tier-1 names byte for byte
+ * (`tests/ccda-tier1-names-unmoved.test.ts` pins every one in the committed
+ * fixtures).
+ */
+/**
+ * Deliberately absent: `text`, which holds a narrative pointer or free text the
+ * EHR re-renders, and `author`, `performer` and `informant`, which say who
+ * rather than what.
+ */
+const STABLE_CLINICAL_FIELDS: ReadonlySet<string> = new Set([
+  '@_negationInd',
+  'code',
+  'statusCode',
+  'effectiveTime',
+  'value',
+  'priorityCode',
+  'interpretationCode',
+  'methodCode',
+  'targetSiteCode',
+  'approachSiteCode',
+  'routeCode',
+  'doseQuantity',
+  'rateQuantity',
+  'maxDoseQuantity',
+  'administrationUnitCode',
+  'consumable',
+  'product',
+  'participant',
+  'subject',
+  'playingDevice',
+  'playingEntity',
+  'scopingEntity',
+]);
+
+/**
+ * Stripped at every depth inside a kept field: narrative pointers
+ * (`originalText/reference`), identifiers of the things a statement names (a
+ * location's id, a product's), template versions, and addresses and contact
+ * points. Each is pinned by a test that moves it between two downloads.
+ */
+const UNSTABLE_KEYS: ReadonlySet<string> = wordSet('reference templateId id addr telecom');
+
+/** Clinical statements a claimant can be, or be wrapped in (`<entry>`). */
+const STATEMENT_KINDS: readonly string[] = [
+  ...wordSet('act observation organizer procedure substanceAdministration supply encounter observationMedia'),
+];
+
+/**
+ * Clinical statements NESTED in a claimant whose content counts as the
+ * claimant's. Not `encounter`: a lab panel restates its visit as a nested
+ * encounter in one download and not the next. Not `supply`: a medication's
+ * nested order carries fill and refill counts that change over its life.
+ */
+const NESTED_KINDS: readonly string[] = [...wordSet('act observation organizer procedure substanceAdministration')];
+
+/**
+ * A set of element names, written as one space-separated string. These lists
+ * choose which parts of a statement count for identity; they are not array-shape
+ * lists, which `multivalued.ts` alone declares (and which
+ * `tests/ccda-multivalued-shape.test.ts` guards by rejecting any array literal of
+ * three or more repeatable element names outside that module).
+ */
+function wordSet(words: string): ReadonlySet<string> {
+  return new Set(words.split(' '));
+}
+
+function listOf(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : value == null ? [] : [value];
+}
+
+/** Strip {@link UNSTABLE_KEYS} at every depth, pruning what becomes empty. */
+function scrub(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    const items = value.map(scrub).filter((v) => v !== undefined);
+    return items.length > 0 ? items : undefined;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (UNSTABLE_KEYS.has(k)) continue;
+    const kept = scrub(v);
+    if (kept !== undefined) out[k] = kept;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function projectStatement(stmt: unknown): Record<string, unknown> | undefined {
+  if (stmt == null || typeof stmt !== 'object' || Array.isArray(stmt)) return undefined;
+  const obj = stmt as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const field of STABLE_CLINICAL_FIELDS) {
+    if (!(field in obj)) continue;
+    const kept = scrub(obj[field]);
+    if (kept !== undefined) out[field] = kept;
+  }
+  // Nested statements as a sorted multiset, so a download that lists a
+  // concern's observations or a panel's results in another order names the
+  // claimant the same.
+  const nested: string[] = [];
+  for (const rel of ['entryRelationship', 'component']) {
+    for (const wrapper of listOf(obj[rel])) {
+      if (wrapper == null || typeof wrapper !== 'object') continue;
+      for (const kind of NESTED_KINDS) {
+        for (const child of listOf((wrapper as Record<string, unknown>)[kind])) {
+          const p = projectStatement(child);
+          if (p !== undefined) nested.push(stableStringify({ [kind]: p }));
+        }
+      }
+    }
+  }
+  if (nested.length > 0) out['nested'] = nested.sort(compareCodePoints);
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * The stable clinical content of one claimant: the element that carries the
+ * id, or the `<entry>` a section handler passes, which is unwrapped to the
+ * statement(s) inside it. `undefined` when it states nothing clinical.
+ */
+export function stableClinicalContent(element: unknown): unknown {
+  if (element == null || typeof element !== 'object' || Array.isArray(element)) return undefined;
+  const obj = element as Record<string, unknown>;
+  const ownFields = [...STABLE_CLINICAL_FIELDS].some((f) => f in obj);
+  const wrapped = STATEMENT_KINDS.filter((k) => k in obj);
+  if (!ownFields && wrapped.length > 0) {
+    const out: Record<string, unknown> = {};
+    for (const kind of wrapped) {
+      const items = listOf(obj[kind]).map(projectStatement).filter((p) => p !== undefined);
+      if (items.length > 0) out[kind] = items;
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  }
+  return projectStatement(obj);
+}
+
+/**
+ * Collect every (sourceId, clinical-content fingerprint) pair in a parsed
+ * C-CDA, at any depth. The fingerprint is of {@link stableClinicalContent}, the
+ * same projection the disambiguator hashes, so an element that states no
+ * clinical content (a bare citation of a record by its id) claims nothing and
+ * cannot contradict the record it cites.
+ *
+ * Keyed on the id alone rather than on (type, id): a caller's `type` is
  * not knowable here, and treating a cross-type id clash as contradicted splits
  * rather than merges, which is the recoverable direction.
  */
@@ -269,7 +459,7 @@ function collectIdClaims(node: unknown, into: Map<string, Set<string>>, seen: Se
   if ('id' in obj) {
     const sourceId = ccdaSourceId(obj);
     if (sourceId) {
-      const fingerprint = contentFingerprint(obj);
+      const fingerprint = contentFingerprint(stableClinicalContent(obj));
       // An element with no hashable content cannot be told apart from another
       // one, so recording it would claim a contradiction nothing can resolve.
       if (fingerprint !== EMPTY_SEED) {
@@ -314,7 +504,7 @@ export function endCcdaIdScope(): void {
  */
 function idDisambiguator(sourceId: string, source: unknown): string {
   if (!contradictedIds.has(sourceId)) return '';
-  const fingerprint = contentFingerprint(source);
+  const fingerprint = contentFingerprint(stableClinicalContent(source));
   // Nothing distinguishes this claimant from the others, so splitting it would
   // mint an identity out of nothing. Fall back to the shared subject and let the
   // shape violations stand: they are true.
