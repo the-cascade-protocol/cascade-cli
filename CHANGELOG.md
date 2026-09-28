@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-09-28
+
+Reading a pod with wellness data cheaply: `pod query --exclude-data-type` (with a `wellness` group that keeps supplements) skips excluded files entirely, `--wellness-series` returns the stored daily series (freshness-checked), and the MCP `cascade_pod_query` tool takes the same options.
+
 ### Added
 
 - **`pod query --exclude-data-type <key>`** (repeatable). An excluded data
