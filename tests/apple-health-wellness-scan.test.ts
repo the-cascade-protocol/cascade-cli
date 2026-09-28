@@ -92,10 +92,10 @@ describe('the Correlation rule: a nested record is a copy of a top-level one', (
       expect(scan.samplesSpilled).toBe(1);
       expect(scan.correlationRecordsSkipped).toBe(1);
       const agg = aggregate(scan, spill, { podSubject: 'urn:uuid:5b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8', dayZone: 'America/Los_Angeles' });
-      const steps = agg.records.filter((r) => r.kind === 'stepSnapshot');
+      const steps = agg.records.filter((r) => r.kind === 'activitySnapshot' && r.property === 'steps');
       expect(steps).toHaveLength(1);
-      expect(steps[0].kind === 'stepSnapshot' && steps[0].steps).toBe(1200);
-      expect(steps[0].kind === 'stepSnapshot' && steps[0].sampleCount).toBe(1);
+      expect(steps[0].kind === 'activitySnapshot' && steps[0].value).toBe(1200);
+      expect(steps[0].kind === 'activitySnapshot' && steps[0].sampleCount).toBe(1);
     } finally {
       spill.close();
     }

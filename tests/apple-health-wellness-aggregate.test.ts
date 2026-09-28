@@ -86,6 +86,7 @@ async function run(xml: string, zone = LA): Promise<AggregationResult> {
 const urn = (seed: string): string => `urn:uuid:${deterministicUuid(seed)}`;
 const of = <K extends WellnessRecord['kind']>(r: AggregationResult, kind: K): Extract<WellnessRecord, { kind: K }>[] =>
   r.records.filter((x) => x.kind === kind) as Extract<WellnessRecord, { kind: K }>[];
+const steps = (r: AggregationResult) => of(r, 'activitySnapshot').filter((x) => x.property === 'steps');
 
 describe('closed days, cut in the pod zone across a DST change', () => {
   // 2026-03-08 is the spring-forward day in America/Los_Angeles: 23 hours long,
@@ -193,8 +194,8 @@ describe('the rules table drives what is computed', () => {
 describe('no merging across sources', () => {
   it('the watch and the phone counting steps on one day are two records, and neither wins', async () => {
     const r = await run(fs.readFileSync(FIXTURE, 'utf8'));
-    const mar8 = of(r, 'stepSnapshot').filter((s) => s.periodStart === '2026-03-08T08:00:00Z');
-    expect(mar8.map((s) => [s.sourceName, s.steps]).sort()).toEqual([
+    const mar8 = steps(r).filter((s) => s.periodStart === '2026-03-08T08:00:00Z');
+    expect(mar8.map((s) => [s.sourceName, s.value]).sort()).toEqual([
       ['Alex’s Apple Watch', 3600],
       ['Alex’s iPhone', 1950],
     ]);
@@ -208,10 +209,10 @@ describe('no merging across sources', () => {
       record({ type: 'StepCount', source: 'Pedometer App', device: PHONE, unit: 'count', start: '2026-03-08T17:00:00Z', value: '100' }),
     ].join('\n');
     const r = await run(exportXml('2026-03-12T00:00:00Z', body));
-    const steps = of(r, 'stepSnapshot');
-    expect(steps).toHaveLength(2);
-    expect(steps[0].iri).not.toBe(steps[1].iri);
-    expect(steps[0].deviceIri).toBe(steps[1].deviceIri);
+    const s = steps(r);
+    expect(s).toHaveLength(2);
+    expect(s[0].iri).not.toBe(s[1].iri);
+    expect(s[0].deviceIri).toBe(s[1].deviceIri);
   });
 });
 
@@ -297,7 +298,7 @@ describe('retained samples', () => {
     const bytes = packBytes.get(r)!;
     const packOf = new Map<string, SampleFile>();
     for (const f of r.sampleFiles) for (const g of f.groups) packOf.set(g.iri, f);
-    for (const a of [...of(r, 'vitalReading'), ...of(r, 'stepSnapshot')]) {
+    for (const a of [...of(r, 'vitalReading'), ...of(r, 'activitySnapshot')]) {
       const f = packOf.get(a.derivedFrom);
       expect(f, a.iri).toBeDefined();
       const group = f!.groups.find((g) => g.iri === a.derivedFrom)!;
@@ -339,7 +340,7 @@ describe('retained samples', () => {
 
     const triples = (r: AggregationResult): Map<string, string> =>
       new Map(
-        [...of(r, 'vitalReading'), ...of(r, 'stepSnapshot')].map((x) => [
+        [...of(r, 'vitalReading'), ...of(r, 'activitySnapshot')].map((x) => [
           x.iri,
           recordQuads(x)
             .map((q) => `${q.predicate.value} ${q.object.termType === 'Literal' ? JSON.stringify(q.object.value) : q.object.value}`)
@@ -350,7 +351,7 @@ describe('retained samples', () => {
     const ta = triples(a);
     const tb = triples(b);
     const phone = (r: AggregationResult): Set<string> =>
-      new Set(of(r, 'stepSnapshot').filter((x) => x.sourceName === 'Alex iPhone').map((x) => x.iri));
+      new Set(of(r, 'activitySnapshot').filter((x) => x.sourceName === 'Alex iPhone').map((x) => x.iri));
     const untouchedA = [...ta.keys()].filter((k) => !phone(a).has(k));
     expect(untouchedA.length).toBe(ta.size - phone(a).size);
     expect(untouchedA.length).toBeGreaterThanOrEqual(4);
@@ -374,7 +375,7 @@ describe('retained samples', () => {
     const ga = groupTriples(a);
     const gb = groupTriples(b);
     for (const iri of untouchedA) {
-      const g = [...of(a, 'vitalReading'), ...of(a, 'stepSnapshot')].find((x) => x.iri === iri)!.derivedFrom;
+      const g = [...of(a, 'vitalReading'), ...of(a, 'activitySnapshot')].find((x) => x.iri === iri)!.derivedFrom;
       expect(gb.get(g), g).toBe(ga.get(g));
     }
   });

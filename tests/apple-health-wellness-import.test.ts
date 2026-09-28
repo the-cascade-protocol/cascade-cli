@@ -87,8 +87,12 @@ describe('pod import of an Apple Health export folder: wellness', () => {
     expect(count('wellness/heart-rate.ttl', 'DailyVitalReading')).toBe(13);
     expect(count('wellness/hrv.ttl', 'DailyVitalReading')).toBe(1);
     expect(count('wellness/body-measurements.ttl', 'DailyVitalReading')).toBe(3);
-    expect(count('wellness/activity.ttl', 'DailyVitalReading')).toBe(1);
-    expect(count('wellness/activity.ttl', 'DailyActivitySnapshot')).toBe(6);
+    // Per-device active energy is a snapshot beside basal energy, never a reading coded 41981-2.
+    expect(count('wellness/activity.ttl', 'DailyVitalReading')).toBe(0);
+    expect(count('wellness/activity.ttl', 'DailyActivitySnapshot')).toBe(8);
+    expect(count('wellness/body-measurements.ttl', 'VitalSignReading')).toBe(1);
+    expect(count('wellness/blood-pressure.ttl', 'BloodPressureReading')).toBe(1);
+    expect(count('wellness/sleep.ttl', 'SleepSession')).toBe(2);
     expect(count('wellness/activity.ttl', 'Workout')).toBe(2);
     expect(count('wellness/devices.ttl', 'Device')).toBe(2);
     // The clinical half of the export is imported as before.
@@ -111,7 +115,8 @@ describe('pod import of an Apple Health export folder: wellness', () => {
     const activities = new Set(
       descriptors.filter((q) => q.predicate.value === RDF_TYPE && q.object.value === PROV + 'Activity').map((q) => q.subject.value),
     );
-    expect(activities.size).toBe(1);
+    // The daily aggregation rule, and the sleep grouping rule.
+    expect(activities.size).toBe(2);
     // group -> the pack that lists it, and the group's sample digest
     const packOfGroup = new Map(
       descriptors.filter((q) => q.predicate.value === DCT + 'hasPart').map((q) => [q.object.value, q.subject.value]),
@@ -120,7 +125,7 @@ describe('pod import of an Apple Health export folder: wellness', () => {
       descriptors.filter((q) => q.predicate.value === DCT + 'identifier').map((q) => [q.subject.value, q.object.value]),
     );
     let aggregates = 0;
-    for (const rel of ['heart-rate.ttl', 'hrv.ttl', 'body-measurements.ttl', 'activity.ttl']) {
+    for (const rel of ['heart-rate.ttl', 'hrv.ttl', 'body-measurements.ttl', 'activity.ttl', 'sleep.ttl']) {
       const qs = quadsOf(path.join(podDir, 'wellness', rel));
       for (const q of qs.filter((x) => x.predicate.value === PROV + 'wasDerivedFrom')) {
         aggregates++;
@@ -136,7 +141,8 @@ describe('pod import of an Apple Health export folder: wellness', () => {
         expect(activities.has(generatedBy!.object.value)).toBe(true);
       }
     }
-    expect(aggregates).toBe(21);
+    // 21 daily aggregates, the basal energy snapshot, and two sleep sessions.
+    expect(aggregates).toBe(24);
   });
 
   it('registers every class each wellness file holds in the private type index, and lists each file in index.ttl', () => {
@@ -154,7 +160,7 @@ describe('pod import of an Apple Health export folder: wellness', () => {
       parse('index.ttl').filter((q) => q.predicate.value === 'http://www.w3.org/ns/ldp#contains').map((q) => q.object.value),
     );
     const held: Array<[string, string]> = [];
-    for (const f of ['heart-rate.ttl', 'hrv.ttl', 'body-measurements.ttl', 'activity.ttl', 'devices.ttl']) {
+    for (const f of ['heart-rate.ttl', 'hrv.ttl', 'body-measurements.ttl', 'activity.ttl', 'devices.ttl', 'blood-pressure.ttl', 'sleep.ttl']) {
       const rel = `wellness/${f}`;
       expect(contained.has(base + rel), rel).toBe(true);
       const classes = new Set(parse(rel).filter((q) => q.predicate.value === RDF_TYPE).map((q) => q.object.value));
@@ -162,7 +168,15 @@ describe('pod import of an Apple Health export folder: wellness', () => {
     }
     // Every class the files hold, including the four the brief names.
     expect(new Set(held.map(([c]) => c))).toEqual(
-      new Set([H + 'DailyVitalReading', H + 'DailyActivitySnapshot', H + 'Workout', H + 'Device']),
+      new Set([
+        H + 'DailyVitalReading',
+        H + 'DailyActivitySnapshot',
+        H + 'Workout',
+        H + 'Device',
+        H + 'VitalSignReading',
+        H + 'BloodPressureReading',
+        H + 'SleepSession',
+      ]),
     );
     for (const [cls, rel] of held) expect(lookup(cls), `${cls} -> ${rel}`).toContain(base + rel);
   });
@@ -170,7 +184,7 @@ describe('pod import of an Apple Health export folder: wellness', () => {
   it('validates with zero violations and zero warnings', () => {
     const out = JSON.parse(cli(['validate', podDir, '--json'])) as Array<{ file: string; valid: boolean; results: unknown[] }>;
     const wellnessFiles = out.filter((r) => r.file.includes(`${path.sep}wellness${path.sep}`));
-    expect(wellnessFiles.length).toBe(6);
+    expect(wellnessFiles.length).toBe(8);
     for (const r of out) {
       expect(r.valid, r.file).toBe(true);
       expect(r.results, r.file).toEqual([]);

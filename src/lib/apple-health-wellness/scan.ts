@@ -8,6 +8,11 @@
  *     version, unit, device) are kept once, in a series table;
  *   - every top-level `<Workout>` and every `<ActivitySummary>`, in memory
  *     (thousands, not millions);
+ *   - every sleep stage segment, every reading of a type written one record
+ *     per sample (VO2 max), and every blood pressure `<Correlation>` with the
+ *     records nested in it, in memory (thousands: a large export
+ *     holds about 8,400 sleep segments, 1,050 VO2 max estimates and 222
+ *     blood pressure correlations);
  *   - the `<ExportDate>`, which is the export's coverage end, and a count of
  *     each `HKTimeZone` value, the default for the pod's day zone.
  *
@@ -16,12 +21,17 @@
  * document." A reader that takes both double counts (the measured case: 251
  * blood-pressure readings reported as 473). So only TOP-LEVEL records are
  * read, and a `<Record>` anywhere inside a `<Correlation>` is skipped and
- * counted.
+ * counted. The one exception is the blood pressure correlation, which is how
+ * HealthKit pairs a systolic and a diastolic value into one reading: its nested
+ * records are read AS ITS COMPONENTS (never as records of their own), and the
+ * top-level systolic and diastolic records are kept aside: a copy of a
+ * correlation's component is counted and skipped, and a pair at an instant no
+ * correlation covers is paired by a rule of its own (`aggregate.ts`).
  */
 
 import { detach, detachAll, scanXml, type XmlEvent } from './xml-scanner.js';
 import { parseAppleTimestamp, utcDayNumber } from './time.js';
-import { metricRuleFor } from './rules.js';
+import { metricRuleFor, readingRuleFor, wellnessRules } from './rules.js';
 import { stripDeviceAddress } from './device.js';
 import type { SampleSpill } from './spill.js';
 
@@ -44,12 +54,27 @@ export interface SpilledSample {
   syncIdentifier: string | null;
   syncVersion: string | null;
   externalUuid: string | null;
+  /** The `HKTimeZone` the source recorded on the sample, when it did (sleep segments only; never spilled). */
+  timeZone?: string | null;
 }
 
 export interface WorkoutElement {
   attrs: Record<string, string>;
   metadata: Record<string, string>;
   statistics: Array<Record<string, string>>;
+}
+
+/** A `<Record>` of a reading type, or one nested in a blood pressure correlation: its attributes and metadata. */
+export interface RecordElement {
+  attrs: Record<string, string>;
+  metadata: Record<string, string>;
+}
+
+/** A top-level blood pressure `<Correlation>` and the records nested in it. */
+export interface CorrelationElement {
+  attrs: Record<string, string>;
+  metadata: Record<string, string>;
+  records: RecordElement[];
 }
 
 export interface ScanResult {
@@ -60,6 +85,17 @@ export interface ScanResult {
   maxSampleEnd?: number;
   workouts: WorkoutElement[];
   activitySummaries: Array<Record<string, string>>;
+  /** Sleep stage segments (the sleep rule's type), with their series in `series`. */
+  sleepSegments: SpilledSample[];
+  /** Records of a reading type (VO2 max), one record per sample. */
+  readings: RecordElement[];
+  /** Top-level blood pressure correlations. */
+  bloodPressureCorrelations: CorrelationElement[];
+  /**
+   * Top-level systolic and diastolic records. Most repeat a correlation's
+   * components; the aggregator decides which (see `bloodPressurePairs`).
+   */
+  bloodPressureComponents: RecordElement[];
   /** `HKTimeZone` metadata values and how often each appears. */
   timeZoneCounts: Map<string, number>;
   /** Top-level `<Record>` elements read, of any type. */
@@ -107,6 +143,10 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
     series,
     workouts: [],
     activitySummaries: [],
+    sleepSegments: [],
+    readings: [],
+    bloodPressureCorrelations: [],
+    bloodPressureComponents: [],
     timeZoneCounts: new Map(),
     recordsRead: 0,
     samplesSpilled: 0,
@@ -119,6 +159,11 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
   let correlationDepth = 0;
   let record: OpenRecord | undefined;
   let workout: WorkoutElement | undefined;
+  let correlation: CorrelationElement | undefined;
+  let nested: RecordElement | undefined;
+  const rules = wellnessRules();
+  const bp = rules.bloodPressure;
+  const sleepType = rules.sleep.hkType;
 
   const countZone = (meta: Record<string, string>): void => {
     const z = meta.HKTimeZone;
@@ -134,7 +179,18 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
     countZone(r.metadata);
     const a = r.attrs;
     const type = a.type ?? '';
-    if (!metricRuleFor(type)) {
+    if (type === bp.systolicType || type === bp.diastolicType) {
+      // Usually a copy of a blood pressure correlation's component, which the
+      // reading is built from; kept so a pair with no correlation is not lost.
+      result.bloodPressureComponents.push({ attrs: detachAll(a), metadata: detachAll(r.metadata) });
+      return;
+    }
+    if (readingRuleFor(type)) {
+      result.readings.push({ attrs: detachAll(a), metadata: detachAll(r.metadata) });
+      return;
+    }
+    const isSleep = type === sleepType;
+    if (!isSleep && !metricRuleFor(type)) {
       result.unreadRecordTypes.set(type, (result.unreadRecordTypes.get(type) ?? 0) + 1);
       return;
     }
@@ -165,20 +221,31 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
       seriesIndex.set(k, idx);
     }
     const creation = parseAppleTimestamp(a.creationDate);
-    spill.add(
-      utcDayNumber(start),
-      encodeSample({
-        series: idx,
-        start,
-        end,
-        creation: creation ?? null,
-        value: a.value,
-        syncIdentifier: r.metadata.HKMetadataKeySyncIdentifier ?? null,
-        syncVersion: r.metadata.HKMetadataKeySyncVersion ?? null,
-        externalUuid: r.metadata.HKExternalUUID ?? null,
-      }),
-    );
-    result.samplesSpilled++;
+    const sample: SpilledSample = {
+      series: idx,
+      start,
+      end,
+      creation: creation ?? null,
+      value: a.value,
+      syncIdentifier: r.metadata.HKMetadataKeySyncIdentifier ?? null,
+      syncVersion: r.metadata.HKMetadataKeySyncVersion ?? null,
+      externalUuid: r.metadata.HKExternalUUID ?? null,
+    };
+    if (isSleep) {
+      // Sessions span days, so segments are grouped over the whole export, not per day.
+      const detached = (v: string | null): string | null => (v === null ? null : detach(v));
+      result.sleepSegments.push({
+        ...sample,
+        value: detach(sample.value),
+        syncIdentifier: detached(sample.syncIdentifier),
+        syncVersion: detached(sample.syncVersion),
+        externalUuid: detached(sample.externalUuid),
+        timeZone: detached(r.metadata.HKTimeZone ?? null),
+      });
+    } else {
+      spill.add(utcDayNumber(start), encodeSample(sample));
+      result.samplesSpilled++;
+    }
     if (result.maxSampleEnd === undefined || end > result.maxSampleEnd) result.maxSampleEnd = end;
   };
 
@@ -189,6 +256,9 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
       switch (e.name) {
         case 'Correlation':
           correlationDepth++;
+          if (parent === 'HealthData' && e.attrs.type === bp.correlationType) {
+            correlation = { attrs: detachAll(e.attrs), metadata: {}, records: [] };
+          }
           return;
         case 'ExportDate':
           result.exportDate = parseAppleTimestamp(e.attrs.value);
@@ -198,6 +268,8 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
           // inside a <Correlation>, where it is a copy of a top-level one.
           if (correlationDepth > 0) {
             result.correlationRecordsSkipped++;
+            // A blood pressure correlation's own records are its components.
+            if (correlation && parent === 'Correlation') nested = { attrs: detachAll(e.attrs), metadata: {} };
             return;
           }
           record = { attrs: e.attrs, metadata: {} };
@@ -210,7 +282,9 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
           return;
         case 'MetadataEntry':
           if (e.attrs.key === undefined || e.attrs.value === undefined) return;
-          if (record && parent === 'Record') record.metadata[e.attrs.key] = e.attrs.value;
+          if (nested && parent === 'Record') nested.metadata[detach(e.attrs.key)] = detach(e.attrs.value);
+          else if (correlation && parent === 'Correlation') correlation.metadata[detach(e.attrs.key)] = detach(e.attrs.value);
+          else if (record && parent === 'Record') record.metadata[e.attrs.key] = e.attrs.value;
           else if (workout && parent === 'Workout') workout.metadata[detach(e.attrs.key)] = detach(e.attrs.value);
           return;
         case 'ActivitySummary':
@@ -224,6 +298,13 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
     stack.pop();
     if (e.name === 'Correlation') {
       correlationDepth = Math.max(0, correlationDepth - 1);
+      if (correlation && correlationDepth === 0) {
+        result.bloodPressureCorrelations.push(correlation);
+        correlation = undefined;
+      }
+    } else if (e.name === 'Record' && nested) {
+      correlation?.records.push(nested);
+      nested = undefined;
     } else if (e.name === 'Record' && record) {
       finishRecord(record);
       record = undefined;
