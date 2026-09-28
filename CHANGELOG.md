@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-28
+
+Apple Health sleep sessions, blood pressure, VO2 max and basal energy; per-device active energy moves onto the daily activity snapshot, and computed aggregates from an older rule version are replaced in place on the next import. Bundled vocabulary: core 3.12.
+
 ### Added
 
 - **Apple sleep sessions.** `pod import` of an Apple Health export now writes
