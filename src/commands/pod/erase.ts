@@ -1,5 +1,5 @@
 /**
- * cascade pod erase <pod-dir> --record <uri> --confirm [--reason <r>] [--by <actorIri>]
+ * cascade pod erase <pod-dir> --record <uri> [--record <uri> ...] --confirm [--reason <r>] [--by <actorIri>]
  *
  * HARD delete: locate the record's subject in its bucket file, remove that
  * subject from the bucket file (read-merge-write minus the subject,
@@ -32,6 +32,9 @@
  *
  * --json result:
  *   { erased: true, tombstoneUri, recordUri, action }
+ *   With several --record: { erased: <all of them?>, records: [ { ... }, ... ] }, in
+ *   the order given; the first failure stops the run, and the erasures before it
+ *   stand. The stored daily wellness series is rebuilt once, after the last.
  */
 
 import type { Command } from 'commander';
@@ -93,13 +96,18 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
     .command('erase')
     .description('Hard-delete a record from its bucket file and write a Tombstone audit marker')
     .argument('<pod-dir>', 'Path to the Cascade Pod directory')
-    .requiredOption('--record <uri>', 'IRI of the record to erase')
+    .requiredOption(
+      '--record <uri>',
+      'IRI of a record to erase (repeatable: several records are erased in one command, ' +
+        'and the stored daily wellness series is rebuilt once, after the last)',
+      (val: string, acc?: string[]) => (acc ?? []).concat(val),
+    )
     .option('--confirm', 'Required confirmation for the destructive hard delete')
     .option('--reason <r>', 'Optional rationale for the erasure')
     .option('--by <actorIri>', 'Optional actor IRI (prov:wasAttributedTo)')
     .action(async (
       podDirArg: string,
-      options: { record: string; confirm?: boolean; reason?: string; by?: string },
+      options: { record: string[]; confirm?: boolean; reason?: string; by?: string },
     ) => {
       const globalOpts = program.opts() as OutputOptions;
       const podDir = resolvePodDir(podDirArg);
@@ -137,173 +145,201 @@ export function registerEraseSubcommand(pod: Command, program: Command): void {
       }
       const dek = reader.dek;
 
-      // Find the bucket file that contains the subject. Search data + extra
-      // ttl files, excluding overlays, indexes, profile, and settings.
-      const allTtl = await discoverTtlFiles(podDir);
-      const excludeDirs = new Set([
-        path.join(podDir, 'annotations'),
-        path.join(podDir, 'settings'),
-        path.join(podDir, 'profile'),
-      ]);
-      const excludeFiles = new Set([
-        path.join(podDir, 'index.ttl'),
-        path.join(podDir, 'manifest.ttl'),
-      ]);
+      // One search-and-erase per record. The stored daily wellness series is
+      // rebuilt ONCE, after the last erasure, not once per record: an erased
+      // wellness record's value must not survive in it, and each rebuild reads
+      // every wellness file.
+      let erasedAny = false;
+      const eraseOne = async (
+        record: string,
+      ): Promise<{ result: { erased: true; tombstoneUri: string; recordUri: string; action: string }; file: string } | undefined> => {
+        // Find the bucket file that contains the subject. Search data + extra
+        // ttl files, excluding overlays, indexes, profile, and settings.
+        const allTtl = await discoverTtlFiles(podDir);
+        const excludeDirs = new Set([
+          path.join(podDir, 'annotations'),
+          path.join(podDir, 'settings'),
+          path.join(podDir, 'profile'),
+        ]);
+        const excludeFiles = new Set([
+          path.join(podDir, 'index.ttl'),
+          path.join(podDir, 'manifest.ttl'),
+        ]);
 
-      let foundFile: string | undefined;
-      let subjectQuads: Quad[] = [];
-      let remainingQuads: Quad[] = [];
-      // Every file the search could not open. ANY failure counts here, not just
-      // the ones the read layer calls fatal elsewhere: a file this command
-      // could not parse might be the file holding the record, and "I did not
-      // look there" is not "it is not there".
-      const unreadable: PodReadFailure[] = [];
+        let foundFile: string | undefined;
+        let subjectQuads: Quad[] = [];
+        let remainingQuads: Quad[] = [];
+        // Every file the search could not open. ANY failure counts here, not just
+        // the ones the read layer calls fatal elsewhere: a file this command
+        // could not parse might be the file holding the record, and "I did not
+        // look there" is not "it is not there".
+        const unreadable: PodReadFailure[] = [];
 
-      for (const file of allTtl) {
-        if (excludeFiles.has(file)) continue;
-        if ([...excludeDirs].some((d) => file.startsWith(d + path.sep))) continue;
+        for (const file of allTtl) {
+          if (excludeFiles.has(file)) continue;
+          if ([...excludeDirs].some((d) => file.startsWith(d + path.sep))) continue;
 
-        // A SENTINEL base, not the file URL and not '': the surviving quads are
-        // re-serialized back to this same file, so a relative IRI must come out
-        // exactly as it went in. The file URL would rewrite it absolutely; ''
-        // leaves N3's _baseRoot undefined and silently turns
-        // </profile/card.ttl#me> into "undefined/profile/card.ttl#me".
-        // derelativizeQuads strips the sentinel straight back off, so the
-        // subject match below compares the IRI the user typed.
-        //
-        // relBaseFor sees this file's decrypted text and guarantees the base is
-        // not already in it, so an IRI a third party wrote to LOOK like the
-        // sentinel is left alone rather than rewritten into another resource.
-        const parsed = reader.parseFile(file, { baseIri: relBaseFor });
-        if (!parsed.ok) {
-          unreadable.push(parsed.failure);
-          continue;
+          // A SENTINEL base, not the file URL and not '': the surviving quads are
+          // re-serialized back to this same file, so a relative IRI must come out
+          // exactly as it went in. The file URL would rewrite it absolutely; ''
+          // leaves N3's _baseRoot undefined and silently turns
+          // </profile/card.ttl#me> into "undefined/profile/card.ttl#me".
+          // derelativizeQuads strips the sentinel straight back off, so the
+          // subject match below compares the IRI the user typed.
+          //
+          // relBaseFor sees this file's decrypted text and guarantees the base is
+          // not already in it, so an IRI a third party wrote to LOOK like the
+          // sentinel is left alone rather than rewritten into another resource.
+          const parsed = reader.parseFile(file, { baseIri: relBaseFor });
+          if (!parsed.ok) {
+            unreadable.push(parsed.failure);
+            continue;
+          }
+          // Keep walking after a hit. Only the FIRST match is erased (unchanged),
+          // but the loop no longer stops there, because whether the user is told
+          // about an unreadable file must not depend on where it happens to sort
+          // relative to the file the record was found in.
+          if (foundFile) continue;
+
+          // relBaseFor has just made that base the active one, so it is the base
+          // this file was parsed under.
+          const quads = derelativizeQuads(parsed.value.quads, relBase());
+          const match = quads.filter((q) => q.subject.value === record);
+          if (match.length > 0) {
+            foundFile = file;
+            subjectQuads = match;
+            remainingQuads = quads.filter((q) => q.subject.value !== record);
+          }
         }
-        // Keep walking after a hit. Only the FIRST match is erased (unchanged),
-        // but the loop no longer stops there, because whether the user is told
-        // about an unreadable file must not depend on where it happens to sort
-        // relative to the file the record was found in.
-        if (foundFile) continue;
 
-        // relBaseFor has just made that base the active one, so it is the base
-        // this file was parsed under.
-        const quads = derelativizeQuads(parsed.value.quads, relBase());
-        const match = quads.filter((q) => q.subject.value === options.record);
-        if (match.length > 0) {
-          foundFile = file;
-          subjectQuads = match;
-          remainingQuads = quads.filter((q) => q.subject.value !== options.record);
+        if (!foundFile) {
+          // "Not found" is only honest when everything was actually searched.
+          if (unreadable.length > 0) {
+            printErrorDetail(
+              `Could not read ${unreadable.length} file(s) while searching ${podDir} for ` +
+                `${record}: ${listFiles(unreadable)}. The record was not found in the ` +
+                `files that COULD be read, which is not the same as the record not existing. ` +
+                `Nothing was erased.`,
+              {
+                readable: false,
+                reason: 'files-unreadable',
+                erased: false,
+                files: unreadable.map((f) => f.file),
+              },
+              globalOpts,
+            );
+            process.exitCode = 2;
+            return undefined;
+          }
+          printError(`Record not found in any bucket file: ${record}`, globalOpts);
+          process.exitCode = 1;
+          return undefined;
         }
-      }
 
-      if (!foundFile) {
-        // "Not found" is only honest when everything was actually searched.
+        // Found it, but the sweep still stepped over files. The erasure below is
+        // correct; the claim "this record is now gone from the pod" is only as
+        // good as the files that were searched, so say which were not.
         if (unreadable.length > 0) {
-          printErrorDetail(
-            `Could not read ${unreadable.length} file(s) while searching ${podDir} for ` +
-              `${options.record}: ${listFiles(unreadable)}. The record was not found in the ` +
-              `files that COULD be read, which is not the same as the record not existing. ` +
-              `Nothing was erased.`,
-            {
-              readable: false,
-              reason: 'files-unreadable',
-              erased: false,
-              files: unreadable.map((f) => f.file),
-            },
+          printWarning(
+            `Erasing ${record}, but ${unreadable.length} file(s) could not be read and ` +
+              `were not searched: ${listFiles(unreadable)}. If a copy of this record is in one of ` +
+              `them it was NOT erased.`,
             globalOpts,
           );
-          process.exitCode = 2;
-          return;
         }
-        printError(`Record not found in any bucket file: ${options.record}`, globalOpts);
-        process.exitCode = 1;
-        return;
-      }
 
-      // Found it, but the sweep still stepped over files. The erasure below is
-      // correct; the claim "this record is now gone from the pod" is only as
-      // good as the files that were searched, so say which were not.
-      if (unreadable.length > 0) {
-        printWarning(
-          `Erasing ${options.record}, but ${unreadable.length} file(s) could not be read and ` +
-            `were not searched: ${listFiles(unreadable)}. If a copy of this record is in one of ` +
-            `them it was NOT erased.`,
-          globalOpts,
-        );
-      }
+        // Capture the erased type (category only, if present). We deliberately do
+        // NOT hash the erased content: a hash of low-entropy health triples is
+        // still pseudonymised personal data and would defeat the erasure.
+        const typeQuad = subjectQuads.find((q) => q.predicate.value === RDF_TYPE);
+        const erasedType = typeQuad ? shortenType(typeQuad.object.value) : undefined;
 
-      // Capture the erased type (category only, if present). We deliberately do
-      // NOT hash the erased content: a hash of low-entropy health triples is
-      // still pseudonymised personal data and would defeat the erasure.
-      const typeQuad = subjectQuads.find((q) => q.predicate.value === RDF_TYPE);
-      const erasedType = typeQuad ? shortenType(typeQuad.object.value) : undefined;
+        // Re-serialize the bucket WITHOUT the erased subject and write it back,
+        // through the chokepoint so the file keeps the prefixes it declared
+        // rather than being flattened onto whichever set this command knows.
+        try {
+          await mergeIntoBucket(podDir, foundFile, [], dek, { combine: () => remainingQuads });
+        } catch (e: unknown) {
+          printError(e instanceof Error ? e.message : String(e), globalOpts);
+          process.exitCode = 1;
+          return undefined;
+        }
 
-      // Re-serialize the bucket WITHOUT the erased subject and write it back,
-      // through the chokepoint so the file keeps the prefixes it declared
-      // rather than being flattened onto whichever set this command knows.
-      try {
-        await mergeIntoBucket(podDir, foundFile, [], dek, { combine: () => remainingQuads });
-      } catch (e: unknown) {
-        printError(e instanceof Error ? e.message : String(e), globalOpts);
-        process.exitCode = 1;
-        return;
-      }
+        erasedAny = true;
 
-      // An erased wellness record's value must not survive in the stored daily
-      // series: the view is rebuilt from what is left, or removed if it cannot be.
-      const series = await refreshWellnessDailySeriesAfterWrite(podDir, dek);
-      if (series.warning) printWarning(series.warning, globalOpts);
+        // Write the content-free Tombstone overlay (the erasure audit event).
+        const tombstoneUri = mintUri();
+        const createdIso = new Date().toISOString();
 
-      // Write the content-free Tombstone overlay (the erasure audit event).
-      const tombstoneUri = mintUri();
-      const createdIso = new Date().toISOString();
+        const lines: OverlayLine[] = [
+          { predicate: 'workbench:erasedRecord', object: iriRef(record) },
+          { predicate: 'workbench:erasureAction', object: strLit(ERASE_ACTION) },
+        ];
+        if (erasedType) {
+          lines.push({ predicate: 'workbench:erasedType', object: strLit(erasedType) });
+        }
+        if (options.reason) {
+          lines.push({ predicate: 'workbench:erasureReason', object: strLit(options.reason) });
+        }
 
-      const lines: OverlayLine[] = [
-        { predicate: 'workbench:erasedRecord', object: iriRef(options.record) },
-        { predicate: 'workbench:erasureAction', object: strLit(ERASE_ACTION) },
-      ];
-      if (erasedType) {
-        lines.push({ predicate: 'workbench:erasedType', object: strLit(erasedType) });
-      }
-      if (options.reason) {
-        lines.push({ predicate: 'workbench:erasureReason', object: strLit(options.reason) });
-      }
+        try {
+          await appendOverlay(
+            podDir,
+            {
+              fileName: 'tombstones.ttl',
+              subjectUri: tombstoneUri,
+              rdfType: 'workbench:Tombstone',
+              lines,
+              // Always attribute the erasure so the audit event records WHO; the
+              // tombstone is then id + actor + timestamp + action (content-free).
+              actorIri: options.by ?? PATIENT_WEBID,
+              createdIso,
+            },
+            dek,
+          );
+        } catch (e: unknown) {
+          printError(e instanceof Error ? e.message : String(e), globalOpts);
+          process.exitCode = 1;
+          return undefined;
+        }
 
-      try {
-        await appendOverlay(
-          podDir,
-          {
-            fileName: 'tombstones.ttl',
-            subjectUri: tombstoneUri,
-            rdfType: 'workbench:Tombstone',
-            lines,
-            // Always attribute the erasure so the audit event records WHO; the
-            // tombstone is then id + actor + timestamp + action (content-free).
-            actorIri: options.by ?? PATIENT_WEBID,
-            createdIso,
-          },
-          dek,
-        );
-      } catch (e: unknown) {
-        printError(e instanceof Error ? e.message : String(e), globalOpts);
-        process.exitCode = 1;
-        return;
-      }
-
-      const result = {
-        erased: true,
-        tombstoneUri,
-        recordUri: options.record,
-        action: ERASE_ACTION,
+        return { result: { erased: true, tombstoneUri, recordUri: record, action: ERASE_ACTION }, file: foundFile };
       };
+
+      const done: Array<{ result: { erased: true; tombstoneUri: string; recordUri: string; action: string }; file: string }> = [];
+      for (const record of options.record) {
+        const one = await eraseOne(record);
+        if (!one) break;
+        done.push(one);
+      }
+      if (erasedAny) {
+        const series = await refreshWellnessDailySeriesAfterWrite(podDir, dek);
+        if (series.warning) printWarning(series.warning, globalOpts);
+      }
+      if (done.length === 0) return;
+
+      if (options.record.length > 1) {
+        // Several records: one entry each, in the order given. A failure above
+        // stopped the run and set the exit code; the erasures before it stand.
+        if (globalOpts.json) {
+          printResult({ erased: done.length === options.record.length, records: done.map((d) => d.result) }, globalOpts);
+        } else {
+          for (const d of done) {
+            console.log(`Record erased: ${d.result.recordUri}`);
+            console.log(`  Tombstone: ${d.result.tombstoneUri}`);
+          }
+        }
+        return;
+      }
+      const { result, file: foundFile } = done[0];
 
       if (globalOpts.json) {
         printResult(result, globalOpts);
       } else {
-        printVerbose(`Removed ${options.record} from ${path.relative(podDir, foundFile)}`, globalOpts);
-        console.log(`Record erased: ${options.record}`);
+        printVerbose(`Removed ${result.recordUri} from ${path.relative(podDir, foundFile)}`, globalOpts);
+        console.log(`Record erased: ${result.recordUri}`);
         console.log(`  Action:    ${ERASE_ACTION}`);
-        console.log(`  Tombstone: ${tombstoneUri}`);
+        console.log(`  Tombstone: ${result.tombstoneUri}`);
       }
     });
 }

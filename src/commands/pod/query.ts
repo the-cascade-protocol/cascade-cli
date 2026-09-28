@@ -66,8 +66,12 @@ import { loadPodGraph, recordEdges, neighborhood, podPlumbingPaths } from './gra
 import { excludableDataFiles } from '../../lib/pod-data-types.js';
 import {
   readStoredDailySeries,
+  dailySeriesFreshness,
   type StoredDailySeries,
 } from '../../lib/apple-health-wellness/daily-series.js';
+
+/** A stored series as read, with whether it still matches the pod's records. */
+type SeriesRead = StoredDailySeries & { stale: boolean; staleReasons: string[] };
 import { appendAll } from '../../lib/append-all.js';
 
 /**
@@ -182,7 +186,10 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
       'Leave out one data type: its file is never read, decrypted or parsed, by the record ' +
         'sweep, --edges or --neighbors (repeatable). A key is a data type (heart-rate, activity, ' +
         'hrv, sleep, body-measurements, wellness-devices, ...) or wellness-samples, the ' +
-        'retained-sample descriptors. An unknown key is a usage error that lists the keys',
+        'retained-sample descriptors. A key excludes its whole FILE, so it also drops the ' +
+        'other records the router files there: heart-rate drops health:VitalSignReading ' +
+        'records coded with a heart-rate LOINC code (clinical ones included), and ' +
+        'body-measurements drops VO2 max readings. An unknown key is a usage error that lists the keys',
       (val: string, acc: string[]) => {
         acc.push(val);
         return acc;
@@ -194,7 +201,9 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
       "Add the pod's stored daily wellness series (one reading per reading type, statistic " +
         'and local day, chosen by source priority, each citing its record) and its per-source ' +
         'summary, under `wellnessDailySeries` (null when the pod holds none). Reads one small ' +
-        'file, not the wellness records. Alone, or beside any other filter',
+        'file and hashes (never parses) the files it was built from: a series they no ' +
+        'longer match comes back with `stale: true` and the reasons. Alone, or beside any ' +
+        'filter except --neighbors',
     )
     .option(
       '--include-bookkeeping',
@@ -289,6 +298,11 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
         try {
           // ─── Graph traversal: --neighbors <iri> ──────────────────────────
           if (options.neighbors !== undefined) {
+            if (options.wellnessSeries) {
+              printError('--wellness-series cannot be combined with --neighbors; ask for it in its own call.', globalOpts);
+              process.exitCode = 1;
+              return;
+            }
             await runNeighborsQuery(absDir, podDir, options, globalOpts, reader, excludedFiles);
             return;
           }
@@ -329,7 +343,21 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           }
 
           // A data type the caller excluded is never read: dropped here, before
-          // its file is opened, rather than filtered out of a parse.
+          // its file is opened, rather than filtered out of a parse. Asking for
+          // a type and excluding it in one call is a contradiction, and is
+          // named as one rather than reported as "no filter".
+          if (!options.all) {
+            const contradicted = requestedTypes.filter((t) => excludedKeys.has(t));
+            if (contradicted.length > 0) {
+              printError(
+                `Asked for and excluded in the same call: ${contradicted.join(', ')}. ` +
+                  'Drop the --exclude-data-type, or the filter it cancels.',
+                globalOpts,
+              );
+              process.exitCode = 1;
+              return;
+            }
+          }
           requestedTypes = requestedTypes.filter((t) => !excludedKeys.has(t));
 
           if (requestedTypes.length === 0 && options.wellnessSeries && !options.all) {
@@ -511,7 +539,7 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
           }
 
           // --wellness-series beside a record query: additive, like --edges.
-          let series: StoredDailySeries | null | undefined;
+          let series: SeriesRead | null | undefined;
           if (options.wellnessSeries) {
             series = readSeriesOrFail(absDir, reader, globalOpts);
             if (series === undefined) return;
@@ -683,20 +711,39 @@ function readSeriesOrFail(
   absDir: string,
   reader: PodReader,
   globalOpts: OutputOptions,
-): StoredDailySeries | null | undefined {
+): SeriesRead | null | undefined {
   const read = readStoredDailySeries(reader);
   if (!read.ok) {
     printError(unreadableFilesMessage(absDir, [read.failure], 1), globalOpts);
     process.exitCode = 2;
     return undefined;
   }
-  return read.value;
+  if (read.value === null) return null;
+  // Freshness is checked on every read: a writer that did not rebuild the view
+  // (an older release, another tool, an interrupted import) leaves it serving
+  // values the pod may no longer hold. Returned, but never as current.
+  const fresh = dailySeriesFreshness(reader, read.value);
+  if (!fresh.ok) {
+    printError(unreadableFilesMessage(absDir, [fresh.failure], 1), globalOpts);
+    process.exitCode = 2;
+    return undefined;
+  }
+  if (fresh.value.stale) {
+    printWarning(
+      `The stored daily wellness series is STALE: ${fresh.value.reasons.join('; ')}. ` +
+        'It is returned with stale: true. Run `cascade pod reconcile <pod> --apply` to rebuild it.',
+      globalOpts,
+    );
+  }
+  return { ...read.value, stale: fresh.value.stale, staleReasons: fresh.value.reasons };
 }
 
 /** The view as `pod query` returns it: where it lives, then the view itself. */
-function seriesPayload(series: StoredDailySeries | null): Record<string, unknown> | null {
+function seriesPayload(series: SeriesRead | null): Record<string, unknown> | null {
   if (series === null) return null;
   return {
+    stale: series.stale,
+    staleReasons: series.staleReasons,
     descriptor: series.descriptor,
     attachment: series.attachment,
     contentHash: series.contentHash,
@@ -706,7 +753,7 @@ function seriesPayload(series: StoredDailySeries | null): Record<string, unknown
   };
 }
 
-function printSeries(podDir: string, series: StoredDailySeries | null, globalOpts: OutputOptions): void {
+function printSeries(podDir: string, series: SeriesRead | null, globalOpts: OutputOptions): void {
   if (globalOpts.json) {
     printResult({ pod: podDir, wellnessDailySeries: seriesPayload(series) }, globalOpts);
     return;
@@ -714,13 +761,13 @@ function printSeries(podDir: string, series: StoredDailySeries | null, globalOpt
   printSeriesText(series);
 }
 
-function printSeriesText(series: StoredDailySeries | null): void {
+function printSeriesText(series: SeriesRead | null): void {
   if (series === null) {
     console.log('\nNo daily wellness series is stored in this pod.');
     return;
   }
   const v = series.view;
-  console.log(`\n=== Daily wellness series (${series.generatedBy}) ===`);
+  console.log(`\n=== Daily wellness series (${series.generatedBy})${series.stale ? ' [STALE]' : ''} ===`);
   console.log(`  File: ${series.attachment}`);
   console.log(`  Sources: ${v.sources.length}; devices: ${v.devices.length}`);
   for (const s of v.series) {

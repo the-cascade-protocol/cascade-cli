@@ -35,7 +35,9 @@ import { SampleSpill } from './spill.js';
 import { scanExport } from './scan.js';
 import { aggregate, majorityTimeZone, ruleActivityIri, type SampleFile, type WellnessRecord } from './aggregate.js';
 import { appendAll } from '../append-all.js';
-import { recordQuads, sampleFileQuads, ruleActivityQuads, sleepActivityQuads, bpPairingActivityQuads, sampleFilePath } from './quads.js';
+import { recordQuads, sampleFileQuads, ruleActivityQuads, sleepActivityQuads, bpPairingActivityQuads, sampleFilePath, exportQuads } from './quads.js';
+import { wellnessSupportSeed } from '../identity.js';
+import { deterministicUuid } from '../fhir-converter/types.js';
 import { fileTextChunks } from './xml-scanner.js';
 import { canonicalZone, isKnownZone, isoUtc, machineZone } from './time.js';
 import { wellnessRules } from './rules.js';
@@ -519,8 +521,17 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
         activities++;
       }
       for (const f of agg.sampleFiles) appendAll(quads, sampleFileQuads(f));
+      // The export itself, dated by its own ExportDate and listing every pack
+      // it produced: how a reader tells which import is the most recent.
+      let exports = 0;
+      if (scan.exportDate !== undefined && agg.sampleFiles.length > 0) {
+        const exportDate = isoUtc(scan.exportDate);
+        const iri = `urn:uuid:${deterministicUuid(wellnessSupportSeed({ podSubject, kind: 'export', key: exportDate }))}`;
+        appendAll(quads, exportQuads(iri, exportDate, agg.sampleFiles.map((f) => f.iri)));
+        exports++;
+      }
       files.push(
-        await writeFile(podDir, WELLNESS_SAMPLES_DESCRIPTOR, 'wellness-samples', quads, agg.sampleFiles.length + activities, dek, dryRun, collisions),
+        await writeFile(podDir, WELLNESS_SAMPLES_DESCRIPTOR, 'wellness-samples', quads, agg.sampleFiles.length + activities + exports, dek, dryRun, collisions),
       );
     }
 

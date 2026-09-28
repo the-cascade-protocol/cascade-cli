@@ -45,8 +45,10 @@
 
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import type { Quad } from 'n3';
 import {
   parseTurtle,
+  streamTurtle,
   getProperties,
   shortenIRI,
   extractLabel,
@@ -343,6 +345,26 @@ export class PodReader {
       return { ok: false, failure: this.failure(absPath, 'parse', result.errors.join('; ')) };
     }
     return { ok: true, value: result };
+  }
+
+  /**
+   * Read one resource and hand its triples to `onQuad` one at a time, keeping
+   * none of them: the same read, decrypt and failure rule as {@link parseFile},
+   * without the store and quad array a whole-file parse builds. For a caller
+   * that reduces a large file to a few predicates.
+   */
+  async streamFile(
+    absPath: string,
+    onQuad: (quad: Quad) => void,
+    opts: { baseIri: string },
+  ): Promise<PodReadResult<{ quadCount: number }>> {
+    const text = this.readText(absPath);
+    if (!text.ok) return text;
+    try {
+      return { ok: true, value: { quadCount: await streamTurtle(text.value, opts.baseIri, onQuad) } };
+    } catch (e: unknown) {
+      return { ok: false, failure: this.failure(absPath, 'parse', errText(e)) };
+    }
   }
 
   /**

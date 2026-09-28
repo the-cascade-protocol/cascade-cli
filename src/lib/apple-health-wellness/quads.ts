@@ -302,3 +302,23 @@ export function sleepActivityQuads(a: RuleActivity, gapMinutes: number): Quad[] 
     )
     .str(CASCADE + 'version', `${a.rule}/${a.ruleVersion}`).quads;
 }
+
+/**
+ * One source export, dated by the date the export itself states (Apple's
+ * `<ExportDate>`), listing (`dct:hasPart`) the sample pack of every closed day
+ * it held. Named from that date, so importing one export again adds nothing.
+ *
+ * This is what lets a reader apply D-WELLNESS-1's "most recent import" rule
+ * without a clock: an aggregate points at its sample group, a pack lists the
+ * group, and an export lists the pack, so the newest export listing a group
+ * dates the aggregate. Every triple is a function of the name except the packs,
+ * and those are the export's own content.
+ */
+export function exportQuads(iri: string, exportDate: string, packs: readonly string[]): Quad[] {
+  const b = new QuadBuilder(iri)
+    .type(PROV + 'Entity')
+    .typed(PROV + 'generatedAtTime', exportDate, 'dateTime')
+    .str(PROV + 'label', `An Apple Health export, dated by its own ExportDate; dct:hasPart lists the sample pack of every closed day it held`);
+  for (const p of [...packs].sort()) b.iri(DCT + 'hasPart', p);
+  return b.quads;
+}

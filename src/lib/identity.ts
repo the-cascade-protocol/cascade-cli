@@ -571,11 +571,13 @@ export function wellnessDeviceSeed(opts: { podSubject: string; deviceIdentity: s
  * file (`kind` "attachment", `key` its digest), the group of samples one set
  * of aggregates was computed from (`kind` "sample-group", `key` the group's
  * {@link wellnessSampleDigest}, the same digest those aggregates' seeds carry),
- * or the activity that names a derivation rule and its version (`kind` "rule").
+ * the activity that names a derivation rule and its version (`kind` "rule"),
+ * or one source export, named by the date the export itself states (`kind`
+ * "export", `key` that date as a UTC instant).
  */
 export function wellnessSupportSeed(opts: {
   podSubject: string;
-  kind: 'attachment' | 'sample-group' | 'rule';
+  kind: 'attachment' | 'sample-group' | 'rule' | 'export';
   key: string;
 }): string {
   return lengthPrefixed([`wellness-${opts.kind}`, opts.podSubject, opts.key]);

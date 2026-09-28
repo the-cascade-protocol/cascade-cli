@@ -40,7 +40,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { DataFactory, type Quad } from 'n3';
 import seriesRulesAsset from '../../data/wellness-daily-series-rules.json' with { type: 'json' };
-import { DATA_TYPES, WELLNESS_DAILY_SERIES_DESCRIPTOR } from '../pod-data-types.js';
+import { WELLNESS_DAILY_SERIES_DESCRIPTOR, excludableDataFiles } from '../pod-data-types.js';
 import { PodReader, type PodReadFailure, type PodReadResult } from '../pod-read.js';
 import { writeResource, writeResourceBytes, readResourceBytes } from '../pod-encryption.js';
 import { mkdirInPod, podPathExists, removePodFile } from '../pod-path.js';
@@ -57,6 +57,7 @@ const XSD = 'http://www.w3.org/2001/XMLSchema#';
 const CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
 const HEALTH = 'https://ns.cascadeprotocol.org/health/v1#';
 const PROV = 'http://www.w3.org/ns/prov#';
+const DCT = 'http://purl.org/dc/terms/';
 
 const PREFIXES: Record<string, string> = { cascade: CASCADE, health: HEALTH };
 
@@ -138,8 +139,9 @@ export function dailySeriesRules(): DailySeriesRules {
       series: boolean;
     }>;
   };
+  const known = new Set(excludableDataFiles().map((e) => e.key));
   for (const key of raw.inputs) {
-    if (!DATA_TYPES[key]) throw new Error(`wellness daily series rules: unknown input data type "${key}"`);
+    if (!known.has(key)) throw new Error(`wellness daily series rules: unknown input data type "${key}"`);
   }
   const readingTypes = raw.readingTypes.map((t): ReadingTypeRule => {
     if ((t.key === undefined) === (t.keyFrom === undefined)) {
@@ -175,9 +177,15 @@ export function dailySeriesRules(): DailySeriesRules {
   return cachedRules;
 }
 
+/** The files the view is built from, by data-type key and pod-relative path, in the table's order. */
+export function dailySeriesInputs(): Array<{ key: string; file: string }> {
+  const files = new Map(excludableDataFiles().map((e) => [e.key, e.file]));
+  return dailySeriesRules().inputs.map((key) => ({ key, file: files.get(key)! }));
+}
+
 /** Pod-relative paths of the files the view is built from, in the table's order. */
 export function dailySeriesInputFiles(): string[] {
-  return dailySeriesRules().inputs.map((key) => `${DATA_TYPES[key].directory}/${DATA_TYPES[key].filename}`);
+  return dailySeriesInputs().map((i) => i.file);
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +270,7 @@ const COLUMN_DOC: Record<string, string> = {
   tier: 'index into tiers: the tier that won the day',
   zone: 'index into zones: the zone the day was cut in',
   record: 'IRI of the daily record the value was taken from; cite this, never the view',
-  alternatives: 'how many other records of the same type and statistic that day were not chosen',
+  alternatives: 'how many other sources (source and device) reported the same type and statistic that day; a source\'s older versions of the day are not counted',
   units: 'present only when the rows of one series differ in unit',
 };
 
@@ -287,6 +295,10 @@ function neededPredicates(rules: DailySeriesRules): Set<string> {
     HEALTH + 'deviceModel',
     HEALTH + 'hardwareVersion',
     HEALTH + 'deviceManufacturer',
+    // How a record is dated by import: record -> sample group -> pack -> export.
+    PROV + 'wasDerivedFrom',
+    PROV + 'generatedAtTime',
+    DCT + 'hasPart',
   ]);
   for (const t of rules.readingTypes) {
     for (const p of [t.keyFrom, t.value, t.unitFrom, t.day]) if (p) s.add(p);
@@ -316,27 +328,27 @@ export class DailySeriesBuilder {
    * records each file holds without a reader opening it.
    */
   addQuads(quads: Iterable<Quad>, dataTypeKey?: string): void {
+    const sink = this.sink(dataTypeKey);
+    for (const q of quads) sink(q);
+  }
+
+  /** {@link addQuads} one triple at a time, for a streamed parse. */
+  sink(dataTypeKey?: string): (q: Quad) => void {
     let counted: Set<string> | undefined;
     if (dataTypeKey !== undefined) {
       counted = this.recordsByFile.get(dataTypeKey);
       if (!counted) this.recordsByFile.set(dataTypeKey, (counted = new Set()));
     }
-    for (const q of quads) {
-      if (
-        counted &&
-        q.subject.termType === 'NamedNode' &&
-        q.predicate.value === RDF_TYPE &&
-        !q.object.value.startsWith(PROV)
-      ) {
-        counted.add(q.subject.value);
-      }
-      if (q.subject.termType !== 'NamedNode' || !this.needed.has(q.predicate.value)) continue;
+    return (q: Quad): void => {
+      if (q.subject.termType !== 'NamedNode') return;
+      if (counted && q.predicate.value === RDF_TYPE && !q.object.value.startsWith(PROV)) counted.add(q.subject.value);
+      if (!this.needed.has(q.predicate.value)) return;
       let props = this.subjects.get(q.subject.value);
       if (!props) this.subjects.set(q.subject.value, (props = new Map()));
       const values = props.get(q.predicate.value);
       if (values) values.push(q.object.value);
       else props.set(q.predicate.value, [q.object.value]);
-    }
+    };
   }
 
   /**
@@ -396,7 +408,30 @@ export class DailySeriesBuilder {
       source: string;
       device?: string;
       sampleCount: number;
+      /** Epoch ms of the newest export reaching the record's sample group; -Infinity when none does. */
+      imported: number;
     }
+
+    // Import dates: export -> packs -> groups, the newest export per group.
+    const groupImported = new Map<string, number>();
+    for (const props of this.subjects.values()) {
+      const when = first(props, PROV + 'generatedAtTime');
+      const packs = props.get(DCT + 'hasPart');
+      if (when === undefined || !packs) continue;
+      const ms = Date.parse(when);
+      if (!Number.isFinite(ms)) continue;
+      for (const pack of packs) {
+        for (const group of this.subjects.get(pack)?.get(DCT + 'hasPart') ?? []) {
+          if (ms > (groupImported.get(group) ?? -Infinity)) groupImported.set(group, ms);
+        }
+      }
+    }
+    const importedOf = (props: Map<string, string[]>): number => {
+      let best = -Infinity;
+      for (const g of props.get(PROV + 'wasDerivedFrom') ?? []) best = Math.max(best, groupImported.get(g) ?? -Infinity);
+      return best;
+    };
+
     const entries: Entry[] = [];
     const recordSource = new Map<string, { source: string; device?: string }>();
     for (const [iri, props] of this.subjects) {
@@ -430,6 +465,7 @@ export class DailySeriesBuilder {
           source,
           device: deviceIri !== undefined && devicesByIri.has(deviceIri) ? deviceIri : undefined,
           sampleCount: Number.isFinite(sc) ? sc : 0,
+          imported: importedOf(props),
         });
         recordSource.set(iri, { source, device: deviceIri !== undefined && devicesByIri.has(deviceIri) ? deviceIri : undefined });
       }
@@ -500,11 +536,21 @@ export class DailySeriesBuilder {
       if (g) g.push(e);
       else groups.set(k, [e]);
     }
+    // Within one source and device, the most recent import wins (D-WELLNESS-1,
+    // amendment of 2026-09-25, item 4); across sources, the tier rule.
+    const newer = (a: Entry, b: Entry): number =>
+      (a.imported === b.imported ? 0 : a.imported > b.imported ? -1 : 1) || b.sampleCount - a.sampleCount || cmpStr(a.iri, b.iri);
     const better = (a: Entry, b: Entry): number =>
       tierOf(a) - tierOf(b) || b.sampleCount - a.sampleCount || cmpStr(a.source, b.source) || cmpStr(a.iri, b.iri);
     const chosenBySeries = new Map<string, Array<{ e: Entry; alternatives: number }>>();
-    for (const g of groups.values()) {
-      g.sort(better);
+    for (const all of groups.values()) {
+      const bySource = new Map<string, Entry>();
+      for (const e of all) {
+        const k = `${e.source}\u0000${e.device ?? ''}`;
+        const held = bySource.get(k);
+        if (!held || newer(e, held) < 0) bySource.set(k, e);
+      }
+      const g = [...bySource.values()].sort(better);
       const e = g[0];
       const sk = `${e.key}\u0000${e.statistic}`;
       let rows = chosenBySeries.get(sk);
@@ -657,6 +703,59 @@ function sameInputs(a: DailySeriesView['inputs'], b: DailySeriesView['inputs']):
   return a.length === b.length && a.every((x, i) => x.path === b[i].path && x.sha256 === b[i].sha256);
 }
 
+/**
+ * SHA-256 of each input file's plaintext, sorted by path: what a view built
+ * now would record. Read, never parsed (about 60 ms for a year of wellness).
+ */
+export function hashDailySeriesInputs(
+  reader: PodReader,
+): PodReadResult<{ present: string[]; inputs: DailySeriesView['inputs'] }> {
+  const present = dailySeriesInputFiles().filter((rel) => podPathExists(reader.podDir, rel));
+  const inputs: DailySeriesView['inputs'] = [];
+  for (const rel of present) {
+    const text = reader.readText(path.join(reader.podDir, ...rel.split('/')));
+    if (!text.ok) return text;
+    inputs.push({ path: rel, sha256: createHash('sha256').update(text.value, 'utf8').digest('hex') });
+  }
+  inputs.sort((a, b) => cmpStr(a.path, b.path));
+  return { ok: true, value: { present, inputs } };
+}
+
+/** Why a stored view is not what this rule would build from the pod now; empty when it is. */
+function staleReasons(held: StoredDailySeries, inputs: DailySeriesView['inputs'], dayZone: string | undefined): string[] {
+  const rules = dailySeriesRules();
+  const reasons: string[] = [];
+  if (
+    held.view.formatVersion !== DAILY_SERIES_FORMAT_VERSION ||
+    held.view.ruleVersion !== rules.ruleVersion ||
+    held.generatedBy !== `${rules.rule}/${rules.ruleVersion}`
+  ) {
+    reasons.push(`it was built by ${held.generatedBy}, and this release applies ${rules.rule}/${rules.ruleVersion}`);
+  }
+  if ((held.view.dayZone ?? undefined) !== dayZone) reasons.push("the pod's day zone changed since it was built");
+  if (!sameInputs(held.view.inputs, inputs)) {
+    const was = new Map(held.view.inputs.map((i) => [i.path, i.sha256]));
+    const now = new Map(inputs.map((i) => [i.path, i.sha256]));
+    const changed = [...new Set([...was.keys(), ...now.keys()])].filter((k) => was.get(k) !== now.get(k)).sort(cmpStr);
+    reasons.push(`the wellness files it was built from changed since (${changed.join(', ')})`);
+  }
+  return reasons;
+}
+
+/**
+ * Is a stored view still what the pod's records say? Checked on every read,
+ * because a writer that does not rebuild it (an older release, another tool,
+ * an import stopped between its writes and the rebuild) leaves it describing
+ * records the pod no longer holds. A stale view is still returned, marked, so
+ * a reader can choose; it is never presented as current.
+ */
+export function dailySeriesFreshness(reader: PodReader, held: StoredDailySeries): PodReadResult<{ stale: boolean; reasons: string[] }> {
+  const hashed = hashDailySeriesInputs(reader);
+  if (!hashed.ok) return hashed;
+  const reasons = staleReasons(held, hashed.value.inputs, podDayZone(reader));
+  return { ok: true, value: { stale: reasons.length > 0, reasons } };
+}
+
 function urn(seed: string): string {
   return `urn:uuid:${deterministicUuid(seed)}`;
 }
@@ -704,15 +803,9 @@ export async function refreshWellnessDailySeries(reader: PodReader, opts: { forc
   const rules = dailySeriesRules();
   const podDir = reader.podDir;
   const dek = reader.dek;
-  const present = dailySeriesInputFiles().filter((rel) => podPathExists(podDir, rel));
-
-  const inputs: Array<{ path: string; sha256: string }> = [];
-  for (const rel of present) {
-    const text = reader.readText(path.join(podDir, ...rel.split('/')));
-    if (!text.ok) throw new Error(`could not read ${rel}: ${text.failure.reason}`);
-    inputs.push({ path: rel, sha256: createHash('sha256').update(text.value, 'utf8').digest('hex') });
-  }
-  inputs.sort((a, b) => cmpStr(a.path, b.path));
+  const hashed = hashDailySeriesInputs(reader);
+  if (!hashed.ok) throw new Error(`could not read ${hashed.failure.file}: ${hashed.failure.reason}`);
+  const { present, inputs } = hashed.value;
 
   // A stored view that cannot be read is replaced, never trusted: it is a
   // cache, and the records it came from are all still here.
@@ -732,24 +825,18 @@ export async function refreshWellnessDailySeries(reader: PodReader, opts: { forc
   }
 
   const dayZone = podDayZone(reader);
-  if (
-    !opts.force &&
-    held &&
-    held.view.formatVersion === DAILY_SERIES_FORMAT_VERSION &&
-    held.view.ruleVersion === rules.ruleVersion &&
-    held.generatedBy === `${rules.rule}/${rules.ruleVersion}` &&
-    (held.view.dayZone ?? undefined) === dayZone &&
-    sameInputs(held.view.inputs, inputs)
-  ) {
+  if (!opts.force && held && staleReasons(held, inputs, dayZone).length === 0) {
     return summary('current', held.view, held.descriptor, held.attachment, held.byteSize);
   }
 
+  // Streamed, one triple at a time, into a builder that keeps only the
+  // predicates the rule reads: no file's triples are ever held whole.
   const builder = new DailySeriesBuilder(rules);
-  const keyOf = new Map(rules.inputs.map((key) => [`${DATA_TYPES[key].directory}/${DATA_TYPES[key].filename}`, key]));
+  const keyOf = new Map(dailySeriesInputs().map((i) => [i.file, i.key]));
   for (const rel of present) {
-    const parsed = reader.parseFile(path.join(podDir, ...rel.split('/')), { baseIri: `${LOCAL_ORIGIN}/${rel}` });
-    if (!parsed.ok) throw new Error(`could not read ${rel}: ${parsed.failure.reason}`);
-    builder.addQuads(parsed.value.quads, keyOf.get(rel));
+    const sink = builder.sink(keyOf.get(rel));
+    const streamed = await reader.streamFile(path.join(podDir, ...rel.split('/')), sink, { baseIri: `${LOCAL_ORIGIN}/${rel}` });
+    if (!streamed.ok) throw new Error(`could not read ${rel}: ${streamed.failure.reason}`);
   }
   const view = builder.finish({ dayZone, inputs });
   const bytes = dailySeriesBytes(view);

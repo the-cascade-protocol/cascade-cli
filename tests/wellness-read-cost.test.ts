@@ -70,6 +70,29 @@ async function runCli(args: string[]): Promise<{ stdout: string; stderr: string;
   return { stdout: out.join('\n'), stderr: err.join('\n'), exitCode };
 }
 
+/** Pod-relative paths of every file the read layer PARSED (whole or streamed) during `fn`. */
+async function filesParsed(podDir: string, fn: () => Promise<unknown>): Promise<Set<string>> {
+  const parsed = new Set<string>();
+  const rel = (abs: string): string => path.relative(podDir, abs).split(path.sep).join('/');
+  const parseFile = PodReader.prototype.parseFile;
+  const streamFile = PodReader.prototype.streamFile;
+  const a = vi.spyOn(PodReader.prototype, 'parseFile').mockImplementation(function (this: PodReader, abs: string, opts?: Parameters<PodReader['parseFile']>[1]) {
+    parsed.add(rel(abs));
+    return parseFile.call(this, abs, opts);
+  });
+  const b = vi.spyOn(PodReader.prototype, 'streamFile').mockImplementation(function (this: PodReader, abs: string, onQuad, opts) {
+    parsed.add(rel(abs));
+    return streamFile.call(this, abs, onQuad, opts);
+  });
+  try {
+    await fn();
+  } finally {
+    a.mockRestore();
+    b.mockRestore();
+  }
+  return parsed;
+}
+
 /** Pod-relative paths of every file the read layer opened during `fn`. */
 async function filesRead(podDir: string, fn: () => Promise<unknown>): Promise<Set<string>> {
   const read = new Set<string>();
@@ -120,7 +143,7 @@ const EXCLUDE = [
 interface QueryPayload {
   dataTypes: Record<string, { count: number; records: Array<{ id: string; type: string }> }>;
   edges?: Array<{ subject: string; object: string }>;
-  wellnessDailySeries?: (DailySeriesView & { attachment: string; generatedBy: string }) | null;
+  wellnessDailySeries?: (DailySeriesView & { attachment: string; generatedBy: string; stale: boolean; staleReasons: string[] }) | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,17 +228,19 @@ describe('pod query --exclude-data-type', () => {
     expect(r.stderr).toContain('heart-rate');
   });
 
-  it('--wellness-series alone reads the descriptor and the view, and no record file', async () => {
+  it('--wellness-series alone parses the descriptor and the profile, and no record file (it only hashes them)', async () => {
     let payload: QueryPayload | undefined;
-    const read = await filesRead(podDir, async () => {
+    const parsed = await filesParsed(podDir, async () => {
       const r = await runCli(['--json', 'pod', 'query', podDir, '--wellness-series']);
       expect(r.exitCode, r.stderr).toBe(0);
       payload = JSON.parse(r.stdout) as QueryPayload;
     });
     const series = payload!.wellnessDailySeries!;
-    expect([...read].sort()).toEqual([series.attachment, 'wellness/series/daily-series.ttl'].sort());
-    expect(series.generatedBy).toBe('wellness-daily-series/1');
-    expect(series.ruleVersion).toBe('1');
+    expect([...parsed].sort()).toEqual(['profile/extended.ttl', 'wellness/series/daily-series.ttl']);
+    expect(series.stale).toBe(false);
+    expect(series.staleReasons).toEqual([]);
+    expect(series.generatedBy).toBe('wellness-daily-series/2');
+    expect(series.ruleVersion).toBe('2');
     const rhr = series.series.find((s) => s.key === '40443-4' && s.statistic === 'average')!;
     expect(rhr.date.length).toBe(3);
     // The shelf summary: sources, their devices and per reading type the days.
