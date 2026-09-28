@@ -315,7 +315,8 @@ a real pod, so the choice is made once and stored, as a derived view.
   `wellness/body-measurements.ttl` holds the VO2 max readings; excluding either
   key drops those too. The group key `wellness` (every data type filed under
   `wellness/`, read off the registry, plus `wellness-samples`) drops all of
-  them, and `supplements`, which live under `wellness/` as well.
+  them. It deliberately keeps `supplements`, which live under `wellness/` as
+  well but are inputs to drug-interaction checks.
 - **Through MCP.** `cascade_pod_query` takes `excludeDataTypes` (the same keys)
   and `wellnessSeries`, resolved and read by the same code as the CLI flags, so
   the records, the files left unread and the series payload (`stale` and

@@ -183,8 +183,9 @@ Without the flag, output is unchanged. A key excludes its whole file, and some
 files hold more than one kind of record: `heart-rate` also drops every
 `health:VitalSignReading` the router files there by a heart-rate LOINC code
 (clinical ones included), and `body-measurements` drops the VO2 max readings.
-`wellness` drops all of those, and `supplements`, which are stored under
-`wellness/` too; ask for supplements in a separate call if you need them.
+`wellness` drops all of those. It deliberately keeps `supplements`, which are
+stored under `wellness/` too but are inputs to drug-interaction checks; exclude
+`supplements` by name if you really want them gone.
 
 `--wellness-series` adds `wellnessDailySeries` to the output (alone, or beside
 `--all` in the same call): for each reading type and statistic, one reading per

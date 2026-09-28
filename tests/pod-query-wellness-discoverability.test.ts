@@ -29,7 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { registerPodCommand } from '../src/commands/pod/index.js';
 import { PodReader } from '../src/lib/pod-read.js';
-import { DATA_TYPES, excludableDataFiles, wellnessGroupKeys } from '../src/lib/pod-data-types.js';
+import { DATA_TYPES, excludableDataFiles, wellnessGroupKeys, WELLNESS_GROUP_KEEPS } from '../src/lib/pod-data-types.js';
 import { resolveExclusion } from '../src/lib/pod-query-options.js';
 import { podQueryHandler, registerTools } from '../src/lib/mcp/tools.js';
 import { describeMcpTools } from '../src/lib/mcp/describe.js';
@@ -134,17 +134,22 @@ afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 // ---------------------------------------------------------------------------
 
 describe('the wellness group key for --exclude-data-type', () => {
-  it('expands to exactly the registry wellness data types plus wellness-samples', () => {
-    const expected = Object.keys(DATA_TYPES).filter((k) => DATA_TYPES[k].directory === 'wellness');
+  it('expands to the registry wellness data types, less the ones it keeps, plus wellness-samples', () => {
+    const expected = Object.keys(DATA_TYPES).filter(
+      (k) => DATA_TYPES[k].directory === 'wellness' && !WELLNESS_GROUP_KEEPS.includes(k),
+    );
     expect(expected.length).toBeGreaterThan(0);
+    expect(WELLNESS_GROUP_KEEPS).toContain('supplements');
+    expect(wellnessGroupKeys()).not.toContain('supplements');
     expect(wellnessGroupKeys()).toEqual([...expected, 'wellness-samples'].sort());
 
     // And the files it resolves to are every excludable file under wellness/.
     const resolved = resolveExclusion(podDir, ['wellness'], '--exclude-data-type');
     expect(resolved.ok).toBe(true);
     if (!resolved.ok) return;
+    const keptFiles = new Set(WELLNESS_GROUP_KEEPS.map((k) => `${DATA_TYPES[k].directory}/${DATA_TYPES[k].filename}`));
     const underWellness = excludableDataFiles()
-      .filter((e) => e.file.startsWith('wellness/'))
+      .filter((e) => e.file.startsWith('wellness/') && !keptFiles.has(e.file))
       .map((e) => path.join(podDir, ...e.file.split('/')))
       .sort();
     expect([...resolved.value.files].sort()).toEqual(underWellness);
@@ -177,10 +182,14 @@ describe('the wellness group key for --exclude-data-type', () => {
     expect(group.stdout).toBe(byHand.stdout);
   });
 
-  it('names a type asked for and excluded through the group as a contradiction', async () => {
+  it('keeps supplements: asking for them beside the group is not a contradiction, and the group never excludes their file', async () => {
     const r = await runCli(['--json', 'pod', 'query', podDir, '--supplements', '--exclude-data-type', 'wellness']);
-    expect(r.exitCode).toBe(1);
-    expect(r.stderr).toContain('supplements (in the wellness group)');
+    expect(r.exitCode, r.stderr).toBe(0);
+    const resolved = resolveExclusion(podDir, ['wellness'], '--exclude-data-type');
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    const supplementsFile = path.join(podDir, DATA_TYPES.supplements.directory, DATA_TYPES.supplements.filename);
+    expect([...resolved.value.files]).not.toContain(supplementsFile);
   });
 
   it('still refuses a misspelled key, and lists wellness among the known ones', async () => {

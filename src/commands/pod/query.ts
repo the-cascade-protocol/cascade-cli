@@ -185,10 +185,10 @@ export function registerQuerySubcommand(pod: Command, program: Command): void {
       'Leave out one data type: its file is never read, decrypted or parsed, by the record ' +
         'sweep, --edges or --neighbors (repeatable). A key is a data type (heart-rate, sleep, ' +
         '...), wellness-samples (the retained-sample descriptors), or wellness: every file ' +
-        'under wellness/ plus wellness-samples, the cheap way to ask a clinical question. A ' +
+        'under wellness/ except supplements, plus wellness-samples, the cheap way to ask a clinical question. A ' +
         'key excludes its whole FILE: heart-rate and wellness also drop ' +
         'health:VitalSignReading records coded with a heart-rate LOINC code, clinical ones ' +
-        'included; body-measurements and wellness drop VO2 max; wellness drops supplements. ' +
+        'included; body-measurements and wellness drop VO2 max; wellness keeps supplements. ' +
         'An unknown key is a usage error that lists the keys',
       (val: string, acc: string[]) => {
         acc.push(val);
