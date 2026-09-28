@@ -180,14 +180,19 @@ cascade --json pod query ./my-pod --wellness-series
 `--all` returns) or `wellness-samples`, the retained-sample descriptors; an
 unknown key is a usage error that lists the known ones. An excluded file is never
 read, decrypted or parsed, by the record sweep, by `--edges` or by `--neighbors`.
-Without the flag, output is unchanged.
+Without the flag, output is unchanged. A key excludes its whole file, and some
+files hold more than one kind of record: `heart-rate` also drops every
+`health:VitalSignReading` the router files there by a heart-rate LOINC code
+(clinical ones included), and `body-measurements` drops the VO2 max readings.
 
 `--wellness-series` adds `wellnessDailySeries` to the output (alone, or beside
 `--all` in the same call): for each reading type and statistic, one reading per
 local day, chosen by the source-priority rule (watch, then phone, then
-third-party), each day citing the record it was taken from; and per source, its
-devices and the days it covers per reading type. It is a derived view the write
-verbs keep current. See
+third-party; within one source, the most recent import), each day citing the
+record it was taken from; and per source, its devices and the days it covers per
+reading type. It is a derived view the write verbs keep current, and every read
+checks it against the files it was built from: a view they no longer match
+comes back with `stale: true` and the reasons. See
 [docs/2026-09-25-apple-health-wellness-import.md](docs/2026-09-25-apple-health-wellness-import.md#the-stored-daily-series-provisional-location).
 
 ## Exit codes

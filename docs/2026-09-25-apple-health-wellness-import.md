@@ -22,7 +22,10 @@ once that file is written) and, while each wellness file is written, that
 file's triples (about 300,000 for a year of heart rate). Measured on a real
 4.6 GB export: about 70 seconds; peak RSS about 1.1 GB with the default heap,
 where V8 collects lazily, and it completes with the heap capped at 384 MB
-(peak RSS about 0.6 GB).
+(peak RSS about 0.6 GB). The stored daily series is rebuilt at the end of the
+import, in the same process (see below): measured, that raises the peak to
+about 1.4 GB (1.65 GB when re-importing an export the pod already holds); the
+rebuild alone, streamed, peaks at about 0.5 GB.
 
 - Only top-level `<Record>` elements are read as records. A `<Record>` inside a
   `<Correlation>` is a copy of a top-level one (the export's DTD says so) and is
@@ -209,8 +212,13 @@ kept in the pod, and written before the aggregate is.
 - **Descriptors**, in **`wellness/samples/samples.ttl` (provisional)**: a
   `cascade:Attachment` for each pack, which lists its groups with `dct:hasPart`;
   a node per group (`prov:Entity`, `dct:identifier` its sample digest), named
-  from that digest alone; and the `prov:Activity` that names the aggregation
-  rule and its version.
+  from that digest alone; the `prov:Activity` that names the aggregation
+  rule and its version; and one node per export imported (`prov:Entity`,
+  `prov:generatedAtTime` the export's own `<ExportDate>`, named from that date),
+  listing with `dct:hasPart` the pack of every closed day the export held. An
+  export imported again adds nothing. This is what dates an aggregate by import
+  without a clock: aggregate, group, the packs listing the group, the exports
+  listing those packs.
 - **Links:** each computed aggregate carries `prov:wasDerivedFrom` its GROUP and
   `prov:wasGeneratedBy` the rule activity. A reader goes aggregate, group, the
   pack that lists the group, the pack entry with that `sampleDigest`.
@@ -239,8 +247,8 @@ a real pod, so the choice is made once and stored, as a derived view.
   by the source-priority read rule in `src/data/wellness-daily-series-rules.json`
   (rule `wellness-daily-series`, version in the table). Each day carries the
   chosen value, the source and the device it came from, the zone the day was cut
-  in, the tier that won, how many other records of that type and statistic the
-  day held, and the IRI of the daily record it was taken from: a reader cites
+  in, the tier that won, how many other sources (source and device) reported
+  that type and statistic that day, and the IRI of the daily record it was taken from: a reader cites
   that record, never the view. Beside it, one summary row per source: its tier,
   its devices, its record count and, per reading type, the days it covers and
   the first and last of them.
@@ -250,8 +258,19 @@ a real pod, so the choice is made once and stored, as a derived view.
   a device takes that device's tier; one naming none (Apple writes resting heart
   rate with no device) takes its source's tier, which is the tier its
   device-bearing records predominantly name. A source with no device-bearing
-  record is third-party whatever it is called: "Sleep Watch" is an app. Ties go
-  to more samples, then source name, then record IRI.
+  record is third-party whatever it is called: "Sleep Watch" is an app. Ties
+  across sources go to more samples, then source name, then record IRI.
+- **Within one source (rule version 2):** when one source and device has more
+  than one record of a type, statistic and day (a later export deleted or added
+  a sample to a closed day), the one from the most recent import wins, per
+  D-WELLNESS-1's amendment of 2026-09-25, item 4. An import is dated by the
+  export's own `<ExportDate>` (the export nodes above), so importing an older
+  export after a newer one does not bring its numbers back. A record no dated
+  export reaches (a pod imported before this release) ranks below every dated
+  one; between two undated ones, more samples wins. A source's older versions of
+  a day are not counted as alternatives. Version 1 kept the record with more
+  samples, which kept the pre-deletion aggregate; a view stamped version 1 is
+  rebuilt on the next write verb, and reads as stale until then.
 - **Reading types:** daily vital readings by LOINC code; steps, active and basal
   energy, exercise minutes and stand hours from daily activity snapshots
   (Apple's own ActivitySummary days compete as a device-less, third-party
@@ -270,7 +289,9 @@ a real pod, so the choice is made once and stored, as a derived view.
   --apply`, `pod add-record`, `pod erase`). The check hashes each input file's
   plaintext and compares the digests, the pod's day zone and the rule version
   with what the stored view records; only a difference rebuilds it, and the old
-  attachment is deleted. A view that cannot be rebuilt is deleted rather than
+  attachment is deleted. A rebuild streams each input file, keeping only the
+  predicates the rule reads. `pod erase` takes several `--record` and rebuilds
+  once, after the last. A view that cannot be rebuilt is deleted rather than
   left stale (an erased record's value must not survive in it). A pod imported
   before the view existed gets one on its next `pod reconcile --apply` or
   import.
@@ -280,7 +301,19 @@ a real pod, so the choice is made once and stored, as a derived view.
 - **Read it:** `pod query <pod> --wellness-series` returns it under
   `wellnessDailySeries` (null when the pod holds none), after checking the bytes
   against the digest the descriptor states; a view that does not match exits 2.
-  It combines with `--all` and `--exclude-data-type` in one call.
+  **Freshness is checked on every read:** the input files are hashed (never
+  parsed) and compared, with the day zone and the rule version, against what the
+  view records. A view built from other inputs (an older release or another tool
+  wrote without rebuilding it, or an import stopped between its writes and the
+  rebuild) is still returned, with `stale: true` and `staleReasons`, and a
+  warning on stderr; it is never presented as current. `pod reconcile --apply`
+  rebuilds it. It combines with `--all` and `--exclude-data-type` in one call,
+  and not with `--neighbors`.
+- **Excluding a file excludes all of it.** `--exclude-data-type` works on files.
+  `wellness/heart-rate.ttl` also holds every `health:VitalSignReading` the router
+  files there by a heart-rate LOINC code, clinical ones included, and
+  `wellness/body-measurements.ttl` holds the VO2 max readings; excluding either
+  key drops those too.
 
 ## Type index and reconciliation
 
