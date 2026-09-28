@@ -8,7 +8,7 @@
 # ============================================================================
 # Cascade Protocol -- Core Vocabulary SHACL Validation Shapes
 # ============================================================================
-# Version: 1.10 (2026-09-26)
+# Version: 1.11 (2026-09-28)
 # Validates: cascade:PatientProfile, cascade:Address, cascade:EmergencyContact,
 #            cascade:PharmacyInfo, cascade:AdvanceDirectives, cascade:ProxyAgent,
 #            cascade:ExportManifest, cascade:RecordSummary,
@@ -19,6 +19,12 @@
 #            wherever they appear
 #
 # CHANGELOG
+#   1.11 (2026-09-28) -- cascade:ExportManifestShape gains dct:identifier for
+#                       core v3.12 (D-EXPORT-1): at most one (Violation: two
+#                       would identify one export two ways); present, and a
+#                       lowercase version 4 urn:uuid typed xsd:anyURI
+#                       (Warning, because manifests written before v3.12
+#                       carry none).
 #   1.10 (2026-09-26) -- Added cascade:PodIdentifierShape for core v3.11:
 #                       at most one cascade:podIdentifier (Violation: two
 #                       would name the same thing two ways) and a lowercase
@@ -1198,6 +1204,31 @@ cascade:ExportManifestShape a sh:NodeShape ;
         sh:name "Created"@en ;
         sh:message "Export manifest must carry exactly one dct:created timestamp"@en ;
         sh:severity sh:Violation
+    ] ;
+
+    # IDENTIFIER (core v3.12, D-EXPORT-1). A random version 4 urn:uuid, new for
+    # every export, minted by its publication event; it becomes the IPS
+    # Bundle.identifier. Two values would identify one export two ways, so the
+    # cap is a Violation. Presence and form are Warnings: every manifest
+    # written before core v3.12 has none, and a new required field must not
+    # turn an existing export invalid. New writers MUST emit one
+    # (pod-structure.md section 9.4).
+    sh:property [
+        sh:path dct:identifier ;
+        sh:maxCount 1 ;
+        sh:name "Identifier (cardinality)"@en ;
+        sh:message "Export manifest must not carry more than one dct:identifier: an export has one identifier."@en ;
+        sh:severity sh:Violation
+    ] ;
+
+    sh:property [
+        sh:path dct:identifier ;
+        sh:minCount 1 ;
+        sh:datatype xsd:anyURI ;
+        sh:pattern "^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" ;
+        sh:name "Identifier"@en ;
+        sh:message "Export manifest should carry one dct:identifier: a random lowercase version 4 UUID in urn:uuid form, typed xsd:anyURI, new for every export."@en ;
+        sh:severity sh:Warning
     ] ;
 
     # REQUIRED: schema version, so a consumer can refuse an export it cannot read
