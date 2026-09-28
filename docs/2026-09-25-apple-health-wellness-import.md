@@ -22,9 +22,11 @@ file's triples (about 300,000 for a year of heart rate). Measured on a real
 4.6 GB export: about a minute, peak RSS under 0.9 GB, and it completes with the
 heap capped at 384 MB.
 
-- Only top-level `<Record>` elements are read. A `<Record>` inside a
+- Only top-level `<Record>` elements are read as records. A `<Record>` inside a
   `<Correlation>` is a copy of a top-level one (the export's DTD says so) and is
-  skipped and counted.
+  skipped and counted. The blood pressure correlation is the one place its
+  records are read, as the two components of one reading; the top-level copies
+  of those components are then the ones skipped.
 - The memory address Apple prints inside the `device` attribute
   (`<<HKDevice: 0x...>`) changes on every export; it is removed before anything
   is digested or retained.
@@ -38,8 +40,10 @@ heap capped at 384 MB.
 | Daily heart rate (min, average, max), resting HR, walking HR average | `health:DailyVitalReading` | `wellness/heart-rate.ttl` | digest seed |
 | Daily HRV (SDNN, average) | `health:DailyVitalReading` | `wellness/hrv.ttl` | digest seed |
 | Daily respiratory rate, blood oxygen, body mass (average) | `health:DailyVitalReading` | `wellness/body-measurements.ttl` | digest seed |
-| Daily active energy (sum, per device) | `health:DailyVitalReading` | `wellness/activity.ttl` | digest seed |
-| Daily steps (sum, per device) | `health:DailyActivitySnapshot` | `wellness/activity.ttl` | digest seed |
+| Daily steps, active energy, basal energy (sum, per device, one snapshot per metric) | `health:DailyActivitySnapshot` | `wellness/activity.ttl` | digest seed |
+| Sleep session (stage segments grouped by the sleep rule) | `health:SleepSession` | `wellness/sleep.ttl` | digest seed over its segments |
+| Blood pressure reading (one per `<Correlation>`) | `health:BloodPressureReading` | `wellness/blood-pressure.ttl` | sync identifier or `HKExternalUUID` (tier 1), else a digest of the correlation |
+| VO2 max estimate (one per sample) | `health:VitalSignReading` | `wellness/body-measurements.ttl` | sync identifier or `HKExternalUUID` (tier 1), else a digest of the sample |
 | Apple's `<ActivitySummary>` day (active energy, exercise minutes, stand hours) | `health:DailyActivitySnapshot` | `wellness/activity.ttl` | its date (tier 1) |
 | `<Workout>` (no route) | `health:Workout` | `wellness/activity.ttl` | `HKExternalUUID` or sync identifier (tier 1), else a digest of the element |
 | The devices those records name | `health:Device` | `wellness/devices.ttl` **(provisional)** | normalized name + hardware model |
@@ -51,9 +55,73 @@ winner is picked, so choosing between the watch's and the phone's step count is
 a reader's rule, not an import rule.
 
 A `health:DailyVitalReading` is filed by its `cascade:loincCode`, from the
-rules table. `pod import` and `pod reconcile` route every record through one
+rules table. A reading with no LOINC code (a VO2 max estimate: health v2.12
+removed its wrong code and substituted none) is filed by its SNOMED CT
+`fhir:code`. Per-device active energy was written before this release as a
+`health:DailyVitalReading` coded only LOINC 41981-2; the table lists that code
+as retired, so such a reading stays filed in `wellness/activity.ttl`. `pod import` and `pod reconcile` route every record through one
 function (`dataTypeKeyForSubject` in `src/lib/pod-data-types.ts`), so a later
 import or reconcile rewrites each record into the file it was written to.
+
+## Sleep sessions
+
+Apple records no sleep session, only stage segments
+(`HKCategoryTypeIdentifierSleepAnalysis`), so a session is a derivation with a
+rule of its own (the `sleep` block of the rules table, stamped as
+`cascade:version "apple-health-sleep-session/1"` on the activity every session
+names with `prov:wasGeneratedBy`):
+
+1. Per source (its name and device), segments sorted by start are one group
+   until the next one starts an hour or more after the latest end so far. 59
+   minutes apart is one session; 60 or more is two.
+2. Inside a group, a run of consecutive awake segments spanning an hour or
+   more counts as such a gap: the segments before it and after it are two
+   sessions, and the run belongs to neither.
+3. A piece holding only awake segments is not a session.
+
+So a nap is its own session whenever an hour separates it from the night.
+Stage minutes are summed into the totals the vocabulary names: Core into
+`health:lightSleepMinutes`, Deep, REM, Awake, and Unspecified (and the older
+Asleep value) into `health:asleepUnspecifiedMinutes`. In bed goes to
+`health:inBedMinutes` and into no stage. `health:isMainSleep` is never
+written: Apple supplies no such flag.
+
+A session is dated by the day it ends, the day of waking: `cascade:date` is
+local midnight of that day, as a UTC instant, read in the zone the source
+recorded on the segments (`HKTimeZone`, written as `health:timeZone`), or in
+the pod's day zone when the source recorded none (and then no
+`health:timeZone` is written). A group of segments is written only once it is
+closed: the export's coverage ends at least one grouping gap after the group
+ends, since a segment the export could not yet hold could otherwise still
+join it. An open group waits, whole, for a later export.
+
+The segments are retained as the session's sample group, in the pack of the
+pod-zone day the session ends in, and the session points at that group with
+`prov:wasDerivedFrom`. A pack is written for such a day even when the day is
+still open for aggregation; a later export then gives the day a new pack that
+lists the same group. Segments that are in no session (an awake run counted
+as a gap, a group with no sleep in it, a value the table does not map) are
+retained under the pack's `unaggregated`. Each sleep segment carries its
+`timeZone` column, and a segment that began the day before its pack's day has
+a negative `start`.
+
+## Blood pressure and VO2 max
+
+A blood pressure reading is paired by the source: HealthKit's blood pressure
+`<Correlation>` holds one systolic and one diastolic record, and one reading
+record is written from them, flat (`health:systolic`, `health:diastolic`),
+coded as the panel (SNOMED CT 75367002, LOINC 85354-9), at the correlation's
+start. The export also repeats both values as top-level records; those are
+counted (`bloodPressure.componentCopies`) and never read, so a reading is never
+counted twice. A correlation without exactly one of each, in mmHg, is not a
+reading and is counted as `unpaired`. Readings are never averaged: a home
+average is a view over the readings, stated with its protocol.
+
+A VO2 max estimate is one record per sample, never a daily series: a
+`health:VitalSignReading` coded SNOMED CT 251880009, in mL/kg/min, with
+`clinical:measurementMethod` mapped from `HKVO2MaxTestType` (1 maxExercise,
+2 predictionSubMaxExercise, 3 predictionNonExercise, 4 predictionStepTest). An
+unmapped method value writes no method and is counted.
 
 ## The pod subject in every name
 
@@ -125,7 +193,8 @@ always give the same bytes and the same name.
 
 Each wellness file is registered in `settings/privateTypeIndex.ttl` under every
 class its records carry (`health:DailyVitalReading`, `health:DailyActivitySnapshot`,
-`health:Workout`, `health:Device`), and listed in `index.ttl`. Both files are
+`health:Workout`, `health:Device`, `health:SleepSession`,
+`health:BloodPressureReading`, `health:VitalSignReading`), and listed in `index.ttl`. Both files are
 read by parsing, never by searching their text.
 
 Wellness buckets are not reconciled records: a clinical import and
@@ -148,8 +217,6 @@ next import.
 
 ## Not yet built
 
-Sleep sessions and the nightly sleep rollup (the export has sleep stage
-segments but no session element, so a session is itself a derivation that needs
-a rule of its own), blood pressure readings, basal energy (no declared code or
-property tells it apart from active energy), VO2 max, and every other sample
-type. Workout routes are not read.
+The nightly sleep rollup (`health:DailySleepSnapshot`), the source's own
+`HKAlgorithmVersion` on a sleep session, and every other sample type. Workout
+routes are not read.

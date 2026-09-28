@@ -35,7 +35,7 @@ import { SampleSpill } from './spill.js';
 import { scanExport } from './scan.js';
 import { aggregate, majorityTimeZone, type SampleFile, type WellnessRecord } from './aggregate.js';
 import { appendAll } from '../append-all.js';
-import { recordQuads, sampleFileQuads, ruleActivityQuads, sampleFilePath } from './quads.js';
+import { recordQuads, sampleFileQuads, ruleActivityQuads, sleepActivityQuads, sampleFilePath } from './quads.js';
 import { fileTextChunks } from './xml-scanner.js';
 import { canonicalZone, isKnownZone, isoUtc, machineZone } from './time.js';
 import { wellnessRules } from './rules.js';
@@ -91,6 +91,23 @@ export interface WellnessImportReport {
   /** Distinct workouts (a workout the export lists more than once is counted once; see `duplicateRecords`). */
   workouts: number;
   devices: number;
+  /** Apple sleep sessions (see `aggregate.ts` for the grouping rule). */
+  sleep: {
+    sessions: number;
+    openSkipped: number;
+    segments: number;
+    unassignedSegments: number;
+    unknownValues: Record<string, number>;
+  };
+  /**
+   * Blood pressure readings, one per paired correlation. `componentCopies` are
+   * the top-level systolic and diastolic records the export repeats from its
+   * correlations, skipped; `unpaired` are correlations that did not hold exactly
+   * one of each in an accepted unit.
+   */
+  bloodPressure: { readings: number; unpaired: number; componentCopies: number };
+  /** Types written one record per sample (VO2 max), by HealthKit type. */
+  readings: Record<string, { written: number; skipped: number; unknownMethods: number }>;
   /**
    * Records the export yielded more than once with identical content, by kind:
    * written once, counted here and nowhere else. The same name with DIFFERENT
@@ -434,12 +451,22 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
     const deduped = dedupeRecords(agg.records);
     for (const iri of deduped.collisions) collisions.push(`(this export): ${iri}`);
     const files: WellnessFileReport[] = [];
-    const hasAggregates = deduped.unique.some((r) => r.record.kind === 'vitalReading' || r.record.kind === 'stepSnapshot');
-    if (hasAggregates) {
-      const quads = ruleActivityQuads(agg.activity);
+    const hasAggregates = deduped.unique.some((r) => r.record.kind === 'vitalReading' || r.record.kind === 'activitySnapshot');
+    const hasSessions = deduped.unique.some((r) => r.record.kind === 'sleepSession');
+    if (agg.sampleFiles.length > 0) {
+      const quads: Quad[] = [];
+      let activities = 0;
+      if (hasAggregates) {
+        appendAll(quads, ruleActivityQuads(agg.activity));
+        activities++;
+      }
+      if (hasSessions) {
+        appendAll(quads, sleepActivityQuads(agg.sleepActivity, rules.sleep.gapMinutes));
+        activities++;
+      }
       for (const f of agg.sampleFiles) appendAll(quads, sampleFileQuads(f));
       files.push(
-        await writeFile(podDir, WELLNESS_SAMPLES_DESCRIPTOR, 'wellness-samples', quads, agg.sampleFiles.length + 1, dek, dryRun, collisions),
+        await writeFile(podDir, WELLNESS_SAMPLES_DESCRIPTOR, 'wellness-samples', quads, agg.sampleFiles.length + activities, dek, dryRun, collisions),
       );
     }
 
@@ -496,13 +523,21 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
       activitySummaries: { imported: count('activitySummary'), ...agg.activitySummariesSkipped },
       workouts: count('workout'),
       devices: count('device'),
+      sleep: agg.sleep,
+      bloodPressure: { ...agg.bloodPressure, componentCopies: scan.bloodPressureComponentCopies },
+      readings: agg.readings,
       duplicateRecords: deduped.duplicates,
       unreadRecordTypes: Object.fromEntries([...scan.unreadRecordTypes.entries()].sort((a, b) => cmpStr(a[0], b[0]))),
       sampleFiles: { total: agg.sampleFiles.length, new: newSampleFiles },
       files,
       collisions,
       warnings,
-      built: rules.metrics.map((m) => m.hkType),
+      built: [
+        ...rules.metrics.map((m) => m.hkType),
+        ...rules.readings.map((x) => x.hkType),
+        rules.bloodPressure.correlationType,
+        rules.sleep.hkType,
+      ],
     };
   } finally {
     spill.close();

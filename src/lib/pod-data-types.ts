@@ -15,7 +15,7 @@
  */
 
 import { CASCADE_NAMESPACES } from './turtle-parser.js';
-import { readingLoincCodesForFile } from './apple-health-wellness/rules.js';
+import { readingLoincCodesForFile, readingSnomedCodesForFile } from './apple-health-wellness/rules.js';
 
 /**
  * Known data file types and the rdf:type IRIs that identify records in them.
@@ -37,10 +37,20 @@ export interface DataTypeInfo {
    * reading and every verb that later rewrites the file agree on where it lives.
    */
   readingLoincCodes?: readonly string[];
+  /**
+   * The same refinement for a reading that carries NO `cascade:loincCode` (a
+   * VO2 max estimate, whose wrong LOINC code health v2.12 removed and did not
+   * replace): a `health:DailyVitalReading` or `health:VitalSignReading` whose
+   * `fhir:code` is one of these (full SNOMED CT IRIs) belongs in THIS file.
+   * Also derived from the wellness rules table.
+   */
+  readingSnomedCodes?: readonly string[];
 }
 
 const LOINC_NS = 'http://loinc.org/rdf#';
+const SNOMED_NS = 'http://snomed.info/sct/';
 const loincIris = (fileKey: string): string[] => readingLoincCodesForFile(fileKey).map((c) => LOINC_NS + c);
+const snomedIris = (fileKey: string): string[] => readingSnomedCodesForFile(fileKey).map((c) => SNOMED_NS + c);
 
 export const DATA_TYPES: Record<string, DataTypeInfo> = {
   medications: {
@@ -102,6 +112,8 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
     rdfTypes: [
       'http://hl7.org/fhir/Observation',
       CASCADE_NAMESPACES.health + 'BloodPressureData',
+      // One paired reading per record, written flat (health v2.12).
+      CASCADE_NAMESPACES.health + 'BloodPressureReading',
     ],
     directory: 'wellness',
     filename: 'blood-pressure.ttl',
@@ -132,6 +144,7 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
     directory: 'wellness',
     filename: 'body-measurements.ttl',
     readingLoincCodes: loincIris('body-measurements'),
+    readingSnomedCodes: snomedIris('body-measurements'),
   },
   // PROVISIONAL placement. pod-structure.md section 4.2 does not yet place
   // health:Device (health v2.10). One file beside the readings that reference
@@ -145,7 +158,11 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
   },
   sleep: {
     label: 'Sleep',
-    rdfTypes: [CASCADE_NAMESPACES.health + 'DailySleepSnapshot', CASCADE_NAMESPACES.health + 'SleepData'],
+    rdfTypes: [
+      CASCADE_NAMESPACES.health + 'DailySleepSnapshot',
+      CASCADE_NAMESPACES.health + 'SleepData',
+      CASCADE_NAMESPACES.health + 'SleepSession',
+    ],
     directory: 'wellness',
     filename: 'sleep.ttl',
   },
@@ -323,7 +340,9 @@ export function isStructuralSubNode(quads: ReadonlyArray<{ predicate: { value: s
 
 const RDF_TYPE_IRI = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const DAILY_VITAL_READING = CASCADE_NAMESPACES.health + 'DailyVitalReading';
+const VITAL_SIGN_READING = CASCADE_NAMESPACES.health + 'VitalSignReading';
 const LOINC_CODE_PREDICATE = CASCADE_NAMESPACES.cascade + 'loincCode';
+const FHIR_CODE_PREDICATE = 'http://hl7.org/fhir/code';
 
 /**
  * Whether the records of a data type go through the reconciler.
@@ -348,19 +367,26 @@ export function isReconciledDataType(info: DataTypeInfo): boolean {
  * Every verb that files or re-files records (`pod import`, `pod reconcile` and
  * its undo, `pod add-record`) asks this one function, so a record is always
  * rewritten into the file it was written to. Routing by the first `rdf:type`,
- * with one refinement: a `health:DailyVitalReading` is filed by its
- * `cascade:loincCode` where a data type claims that code
- * ({@link DataTypeInfo.readingLoincCodes}).
+ * with one refinement: a `health:DailyVitalReading` or `health:VitalSignReading`
+ * is filed by its `cascade:loincCode` where a data type claims that code
+ * ({@link DataTypeInfo.readingLoincCodes}); a reading with no LOINC code a
+ * data type claims is filed by its `fhir:code` where one claims that
+ * ({@link DataTypeInfo.readingSnomedCodes}).
  */
 export function registeredDataTypeKeyForSubject(
   quads: ReadonlyArray<{ predicate: { value: string }; object: { value: string } }>,
 ): string | undefined {
   const typeIri = quads.find((q) => q.predicate.value === RDF_TYPE_IRI)?.object.value ?? '';
-  if (typeIri === DAILY_VITAL_READING) {
+  if (typeIri === DAILY_VITAL_READING || typeIri === VITAL_SIGN_READING) {
     const code = quads.find((q) => q.predicate.value === LOINC_CODE_PREDICATE)?.object.value;
     if (code) {
       for (const [key, info] of Object.entries(DATA_TYPES)) {
         if (info.readingLoincCodes?.includes(code)) return key;
+      }
+    } else {
+      const codes = quads.filter((q) => q.predicate.value === FHIR_CODE_PREDICATE).map((q) => q.object.value);
+      for (const [key, info] of Object.entries(DATA_TYPES)) {
+        if (codes.some((c) => info.readingSnomedCodes?.includes(c))) return key;
       }
     }
   }

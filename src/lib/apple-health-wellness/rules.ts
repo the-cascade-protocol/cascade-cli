@@ -24,11 +24,11 @@ export interface WellnessMetricRule {
   /**
    * `vitalReading` writes a `health:DailyVitalReading` (health:value + health:unit,
    * coded with fhir:code and cascade:loincCode); `activitySnapshot` writes a
-   * `health:DailyActivitySnapshot` carrying `property`.
+   * `health:DailyActivitySnapshot` carrying `property`, one snapshot per metric.
    */
   record: 'vitalReading' | 'activitySnapshot';
   /** Only for `activitySnapshot`: the health: property the value is written to. */
-  property?: 'steps';
+  property?: ActivitySnapshotProperty;
   /** SNOMED CT concept id, for `vitalReading`. */
   snomed?: string;
   /** LOINC code, for `vitalReading`. Also routes the reading to its pod file. */
@@ -43,6 +43,81 @@ export interface WellnessMetricRule {
   file: string;
 }
 
+/** The health: properties a per-device `health:DailyActivitySnapshot` carries, one per snapshot. */
+export type ActivitySnapshotProperty = 'steps' | 'activeEnergyKcal' | 'basalEnergyKcal';
+const SNAPSHOT_PROPERTIES: ReadonlySet<string> = new Set(['steps', 'activeEnergyKcal', 'basalEnergyKcal']);
+
+/**
+ * A HealthKit type whose samples are individual readings, one record each, never
+ * a daily series (VO2 max). Written as a `health:VitalSignReading` coded with
+ * `fhir:code` (SNOMED CT) and, where the rule has one, `cascade:loincCode`.
+ */
+export interface WellnessReadingRule {
+  hkType: string;
+  record: 'vitalSignReading';
+  snomed: string;
+  /** LOINC code, when one exists. VO2 max has none (health v2.12 removed a wrong one). */
+  loinc?: string;
+  unit: string;
+  sourceUnits: Record<string, number>;
+  file: string;
+  /**
+   * How the source says the value was obtained: the metadata key it is read
+   * from, and each source value's `clinical:measurementMethod` value. A source
+   * value not listed writes no method (and is counted), since a reading with no
+   * method says nothing about how it was obtained.
+   */
+  method?: { metadataKey: string; values: Record<string, string> };
+}
+
+/** A blood pressure reading, paired from HealthKit's blood pressure correlation. */
+export interface WellnessBloodPressureRule {
+  correlationType: string;
+  systolicType: string;
+  diastolicType: string;
+  snomed: string;
+  loinc: string;
+  unit: string;
+  sourceUnits: Record<string, number>;
+  file: string;
+}
+
+/** The health:SleepSession stage totals an Apple sleep value is summed into. */
+export type SleepStageProperty =
+  | 'inBedMinutes'
+  | 'awakeMinutes'
+  | 'lightSleepMinutes'
+  | 'deepSleepMinutes'
+  | 'remSleepMinutes'
+  | 'asleepUnspecifiedMinutes';
+const SLEEP_STAGE_PROPERTIES: ReadonlySet<string> = new Set([
+  'inBedMinutes',
+  'awakeMinutes',
+  'lightSleepMinutes',
+  'deepSleepMinutes',
+  'remSleepMinutes',
+  'asleepUnspecifiedMinutes',
+]);
+
+/**
+ * The rule that assembles Apple sleep stage segments into sessions. Apple
+ * records no session, so the grouping is a derivation, stamped with `rule` and
+ * `ruleVersion` on the activity every session names. Changing a parameter here
+ * changes what the rule computes and needs a new `ruleVersion` in the same edit.
+ */
+export interface WellnessSleepRule {
+  hkType: string;
+  rule: string;
+  ruleVersion: string;
+  /** A gap between segments of at least this many minutes starts a new session. */
+  gapMinutes: number;
+  /** A run of consecutive awake segments spanning at least this many minutes counts as such a gap. */
+  awakeRunMinutes: number;
+  file: string;
+  /** Apple's sleep value -> the stage total it is summed into. A value not listed is retained but never totalled. */
+  stages: Record<string, SleepStageProperty>;
+}
+
 export interface WellnessRules {
   rule: string;
   ruleVersion: string;
@@ -50,6 +125,9 @@ export interface WellnessRules {
   /** Decimal places a computed value is rounded to. */
   valueDecimals: number;
   metrics: WellnessMetricRule[];
+  readings: WellnessReadingRule[];
+  bloodPressure: WellnessBloodPressureRule;
+  sleep: WellnessSleepRule;
   activitySummary: {
     file: string;
     sourceName: string;
@@ -64,6 +142,12 @@ export interface WellnessRules {
     energyUnits: Record<string, number>;
   };
   devices: { file: string };
+  /**
+   * LOINC codes no rule writes any more, with the file readings carrying them
+   * were written to. The pod router keeps filing such a reading there, so a
+   * later rewrite never moves it.
+   */
+  retiredReadingCodes: Array<{ loinc: string; file: string; why: string }>;
 }
 
 const STATISTICS: ReadonlySet<string> = new Set(['sum', 'average', 'minimum', 'maximum']);
@@ -87,13 +171,42 @@ export function wellnessRules(): WellnessRules {
     if (m.record === 'vitalReading' && (!m.snomed || !m.loinc)) {
       throw new Error(`wellness rules: ${m.hkType} is a vital reading without a SNOMED and LOINC code`);
     }
-    if (m.record === 'activitySnapshot' && m.property !== 'steps') {
+    if (m.record === 'activitySnapshot' && !SNAPSHOT_PROPERTIES.has(m.property ?? '')) {
       throw new Error(`wellness rules: ${m.hkType} is an activity snapshot without a known property`);
     }
     if (Object.keys(m.sourceUnits).length === 0) {
       throw new Error(`wellness rules: ${m.hkType} accepts no source unit`);
     }
   }
+  for (const x of r.readings) {
+    if (seen.has(x.hkType)) throw new Error(`wellness rules: ${x.hkType} is listed twice`);
+    seen.add(x.hkType);
+    if (!x.snomed) throw new Error(`wellness rules: reading ${x.hkType} has no SNOMED code`);
+    if (Object.keys(x.sourceUnits).length === 0) throw new Error(`wellness rules: ${x.hkType} accepts no source unit`);
+  }
+  if (seen.has(r.sleep.hkType)) throw new Error(`wellness rules: ${r.sleep.hkType} is listed twice`);
+  if (!(r.sleep.gapMinutes > 0) || !(r.sleep.awakeRunMinutes > 0)) {
+    throw new Error('wellness rules: the sleep grouping gap and awake run must be positive minutes');
+  }
+  for (const [value, prop] of Object.entries(r.sleep.stages)) {
+    if (!SLEEP_STAGE_PROPERTIES.has(prop)) throw new Error(`wellness rules: sleep value ${value} maps to unknown stage ${prop}`);
+  }
+  if (!Object.values(r.sleep.stages).includes('awakeMinutes')) {
+    throw new Error('wellness rules: no sleep value maps to awakeMinutes, so the awake-run rule cannot apply');
+  }
+  // A code routes a reading to exactly one file, whichever rule states it.
+  const fileOfCode = new Map<string, string>();
+  const claim = (code: string, file: string, who: string): void => {
+    const prior = fileOfCode.get(code);
+    if (prior !== undefined && prior !== file) throw new Error(`wellness rules: code ${code} (${who}) is filed in both ${prior} and ${file}`);
+    fileOfCode.set(code, file);
+  };
+  for (const m of r.metrics) if (m.record === 'vitalReading') claim(`loinc:${m.loinc}`, m.file, m.hkType);
+  for (const x of r.readings) {
+    if (x.loinc) claim(`loinc:${x.loinc}`, x.file, x.hkType);
+    claim(`snomed:${x.snomed}`, x.file, x.hkType);
+  }
+  for (const c of r.retiredReadingCodes) claim(`loinc:${c.loinc}`, c.file, 'retired');
   cached = r;
   return r;
 }
@@ -110,7 +223,27 @@ export function metricRuleFor(hkType: string): WellnessMetricRule | undefined {
  * instead of moving it.
  */
 export function readingLoincCodesForFile(fileKey: string): string[] {
+  const r = wellnessRules();
+  return [
+    ...r.metrics.filter((m) => m.record === 'vitalReading' && m.file === fileKey && m.loinc).map((m) => m.loinc as string),
+    ...r.readings.filter((x) => x.file === fileKey && x.loinc).map((x) => x.loinc as string),
+    ...r.retiredReadingCodes.filter((c) => c.file === fileKey).map((c) => c.loinc),
+  ];
+}
+
+/**
+ * SNOMED CT codes (`fhir:code`) of readings that carry NO LOINC code and
+ * belong in the pod file of `fileKey` (a VO2 max estimate, whose wrong LOINC
+ * code health v2.12 removed). The router files a reading by its LOINC code
+ * where it has one a file claims, and by this code otherwise.
+ */
+export function readingSnomedCodesForFile(fileKey: string): string[] {
   return wellnessRules()
-    .metrics.filter((m) => m.record === 'vitalReading' && m.file === fileKey && m.loinc)
-    .map((m) => m.loinc as string);
+    .readings.filter((x) => x.file === fileKey && !x.loinc)
+    .map((x) => x.snomed);
+}
+
+/** The rule for one HealthKit reading type (a type written one record per sample), or undefined. */
+export function readingRuleFor(hkType: string): WellnessReadingRule | undefined {
+  return wellnessRules().readings.find((x) => x.hkType === hkType);
 }

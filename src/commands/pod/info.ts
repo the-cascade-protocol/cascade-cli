@@ -213,10 +213,18 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
           // Daily vital readings filed here by their LOINC code (the wellness
           // rules route, e.g. active energy into activity.ttl) are this file's
           // records too, though their class is not one of its rdfTypes.
-          if (typeInfo.readingLoincCodes?.length) {
-            for (const s of getSubjectsByType(result.store, CASCADE_NAMESPACES.health + 'DailyVitalReading')) {
-              const codes = getProperties(result.store, s)[CASCADE_NAMESPACES.cascade + 'loincCode'] ?? [];
-              if (codes.some((c) => typeInfo.readingLoincCodes!.includes(c))) recordCount++;
+          // Readings with no LOINC code are filed by their SNOMED fhir:code
+          // (a VO2 max estimate into body-measurements.ttl).
+          if (typeInfo.readingLoincCodes?.length || typeInfo.readingSnomedCodes?.length) {
+            for (const readingClass of ['DailyVitalReading', 'VitalSignReading']) {
+              for (const s of getSubjectsByType(result.store, CASCADE_NAMESPACES.health + readingClass)) {
+                const props = getProperties(result.store, s);
+                const loinc = props[CASCADE_NAMESPACES.cascade + 'loincCode'] ?? [];
+                const snomed = props['http://hl7.org/fhir/code'] ?? [];
+                if (loinc.length > 0 ? loinc.some((c) => typeInfo.readingLoincCodes?.includes(c)) : snomed.some((c) => typeInfo.readingSnomedCodes?.includes(c))) {
+                  recordCount++;
+                }
+              }
             }
           }
 

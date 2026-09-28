@@ -2,7 +2,7 @@
  * Wellness records as triples.
  *
  * Every predicate and class written here is declared in the vocabularies this
- * CLI ships (`src/shapes/*.ttl`, health v2.11 and core v3.10), and
+ * CLI ships (`src/shapes/*.ttl`, health v2.12, clinical v1.21 and core v3.11), and
  * `tests/emitted-terms-declared.test.ts` holds it to that. No blank nodes: a
  * pod bucket carries none (see `bucket-write.ts`), so the value of a vital
  * reading is the flat `health:value` + `health:unit` pair the
@@ -12,12 +12,15 @@
 
 import { DataFactory, type Quad } from 'n3';
 import type {
+  ActivitySnapshotRecord,
   ActivitySummaryRecord,
+  BloodPressureRecord,
   DeviceRecord,
   RuleActivity,
   SampleFile,
-  StepSnapshotRecord,
+  SleepSessionRecord,
   VitalReadingRecord,
+  VitalSignReadingRecord,
   WellnessRecord,
   WorkoutRecord,
 } from './aggregate.js';
@@ -28,6 +31,7 @@ const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
 const CASCADE = 'https://ns.cascadeprotocol.org/core/v1#';
 const HEALTH = 'https://ns.cascadeprotocol.org/health/v1#';
+const CLINICAL = 'https://ns.cascadeprotocol.org/clinical/v1#';
 const FHIR = 'http://hl7.org/fhir/';
 const PROV = 'http://www.w3.org/ns/prov#';
 const DCT = 'http://purl.org/dc/terms/';
@@ -67,7 +71,7 @@ function decimal(v: number): string {
   return /e/i.test(s) ? v.toFixed(10).replace(/0+$/, '').replace(/\.$/, '') : s;
 }
 
-function aggregateCommon(b: QuadBuilder, r: VitalReadingRecord | StepSnapshotRecord): void {
+function aggregateCommon(b: QuadBuilder, r: VitalReadingRecord | ActivitySnapshotRecord): void {
   b.typed(CASCADE + 'date', r.periodStart, 'dateTime')
     .typed(HEALTH + 'periodStart', r.periodStart, 'dateTime')
     .typed(HEALTH + 'periodEnd', r.periodEnd, 'dateTime')
@@ -93,11 +97,69 @@ function vitalQuads(r: VitalReadingRecord): Quad[] {
   return b.quads;
 }
 
-function stepQuads(r: StepSnapshotRecord): Quad[] {
+/** A per-device snapshot carries one metric: steps (xsd:integer) or an energy total (xsd:decimal, kcal). */
+function activitySnapshotQuads(r: ActivitySnapshotRecord): Quad[] {
   const b = new QuadBuilder(r.iri).type(HEALTH + 'DailyActivitySnapshot');
-  b.typed(HEALTH + 'steps', r.steps, 'integer');
+  if (r.property === 'steps') b.typed(HEALTH + 'steps', r.value, 'integer');
+  else b.typed(HEALTH + r.property, decimal(r.value), 'decimal');
   aggregateCommon(b, r);
   return b.quads;
+}
+
+/**
+ * An Apple sleep session. health:timeZone is written only when the source
+ * recorded one; cascade:date is the day of waking, read in that zone or, when
+ * the source recorded none, in the pod's day zone. No health:isMainSleep: Apple
+ * supplies none, and choosing the main sleep of a date is a derived view.
+ */
+function sleepSessionQuads(r: SleepSessionRecord): Quad[] {
+  const b = new QuadBuilder(r.iri)
+    .type(HEALTH + 'SleepSession')
+    .typed(CASCADE + 'date', r.date, 'dateTime')
+    .typed(HEALTH + 'periodStart', r.periodStart, 'dateTime')
+    .typed(HEALTH + 'periodEnd', r.periodEnd, 'dateTime')
+    .str(HEALTH + 'timeZone', r.recordedZone);
+  for (const p of Object.keys(r.stages).sort()) {
+    b.typed(HEALTH + p, decimal(r.stages[p as keyof typeof r.stages]!), 'decimal');
+  }
+  return b
+    .str(HEALTH + 'sourceIdSpace', 'healthkit')
+    .str(CASCADE + 'sourceDeviceName', r.sourceName)
+    .iri(HEALTH + 'device', r.deviceIri)
+    .str(CASCADE + 'sourceType', SOURCE_TYPE)
+    .iri(CASCADE + 'dataProvenance', CASCADE + 'DeviceGenerated')
+    .iri(PROV + 'wasDerivedFrom', r.derivedFrom)
+    .iri(PROV + 'wasGeneratedBy', r.generatedBy).quads;
+}
+
+/** One paired reading, flat: one health:systolic and one health:diastolic on the record (health v2.12). */
+function bloodPressureQuads(r: BloodPressureRecord): Quad[] {
+  return new QuadBuilder(r.iri)
+    .type(HEALTH + 'BloodPressureReading')
+    .iri(FHIR + 'code', SCT + r.snomed)
+    .iri(CASCADE + 'loincCode', LOINC + r.loinc)
+    .typed(HEALTH + 'systolic', r.systolic, 'double')
+    .typed(HEALTH + 'diastolic', r.diastolic, 'double')
+    .typed(CASCADE + 'date', r.date, 'dateTime')
+    .str(CASCADE + 'sourceDeviceName', r.sourceName)
+    .iri(HEALTH + 'device', r.deviceIri)
+    .str(CASCADE + 'sourceType', SOURCE_TYPE)
+    .iri(CASCADE + 'dataProvenance', CASCADE + 'DeviceGenerated').quads;
+}
+
+/** One reading at its own instant (a VO2 max estimate), with the source's method where it gave one. */
+function vitalSignReadingQuads(r: VitalSignReadingRecord): Quad[] {
+  const b = new QuadBuilder(r.iri).type(HEALTH + 'VitalSignReading').iri(FHIR + 'code', SCT + r.snomed);
+  if (r.loinc) b.iri(CASCADE + 'loincCode', LOINC + r.loinc);
+  return b
+    .typed(HEALTH + 'value', r.value, 'double')
+    .str(HEALTH + 'unit', r.unit)
+    .typed(CASCADE + 'date', r.date, 'dateTime')
+    .str(CLINICAL + 'measurementMethod', r.method)
+    .str(CASCADE + 'sourceDeviceName', r.sourceName)
+    .iri(HEALTH + 'device', r.deviceIri)
+    .str(CASCADE + 'sourceType', SOURCE_TYPE)
+    .iri(CASCADE + 'dataProvenance', CASCADE + 'DeviceGenerated').quads;
 }
 
 function summaryQuads(r: ActivitySummaryRecord): Quad[] {
@@ -156,8 +218,14 @@ export function recordQuads(r: WellnessRecord): Quad[] {
   switch (r.kind) {
     case 'vitalReading':
       return vitalQuads(r);
-    case 'stepSnapshot':
-      return stepQuads(r);
+    case 'activitySnapshot':
+      return activitySnapshotQuads(r);
+    case 'sleepSession':
+      return sleepSessionQuads(r);
+    case 'bloodPressure':
+      return bloodPressureQuads(r);
+    case 'vitalSignReading':
+      return vitalSignReadingQuads(r);
     case 'activitySummary':
       return summaryQuads(r);
     case 'workout':
@@ -194,10 +262,11 @@ export function sampleFileQuads(f: SampleFile): Quad[] {
   for (const g of f.groups) b.iri(DCT + 'hasPart', g.iri);
   const out = b.quads;
   for (const g of f.groups) {
+    const what = g.derived === 'sleep-session' ? 'Apple Health sleep stage segments one sleep session was grouped from' : 'Apple Health samples one set of daily aggregates was computed from';
     const gb = new QuadBuilder(g.iri)
       .type(PROV + 'Entity')
       .str(DCT + 'identifier', g.sampleDigest)
-      .str(PROV + 'label', 'Apple Health samples one set of daily aggregates was computed from; dct:identifier is the sampleDigest of their group in a pack that lists this node with dct:hasPart');
+      .str(PROV + 'label', `${what}; dct:identifier is the sampleDigest of their group in a pack that lists this node with dct:hasPart`);
     for (const q of gb.quads) out.push(q);
   }
   return out;
@@ -208,5 +277,16 @@ export function ruleActivityQuads(a: RuleActivity): Quad[] {
   return new QuadBuilder(a.iri)
     .type(PROV + 'Activity')
     .str(PROV + 'label', `Daily wellness aggregation of an Apple Health export (${a.rule}, rule version ${a.ruleVersion})`)
+    .str(CASCADE + 'version', `${a.rule}/${a.ruleVersion}`).quads;
+}
+
+/** The activity every Apple sleep session names: the grouping rule, its version and its gap. */
+export function sleepActivityQuads(a: RuleActivity, gapMinutes: number): Quad[] {
+  return new QuadBuilder(a.iri)
+    .type(PROV + 'Activity')
+    .str(
+      PROV + 'label',
+      `Apple Health sleep session grouping: stage segments from one source, split at a gap of ${gapMinutes} minutes or more (${a.rule}, rule version ${a.ruleVersion})`,
+    )
     .str(CASCADE + 'version', `${a.rule}/${a.ruleVersion}`).quads;
 }

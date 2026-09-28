@@ -85,15 +85,69 @@
     },
     {
       "hkType": "HKQuantityTypeIdentifierActiveEnergyBurned",
-      "record": "vitalReading",
-      "snomed": "251833007",
-      "loinc": "41981-2",
+      "record": "activitySnapshot",
+      "property": "activeEnergyKcal",
+      "unit": "kcal",
+      "sourceUnits": { "kcal": 1, "Cal": 1, "kJ": 0.2390057361 },
+      "statistics": ["sum"],
+      "file": "activity"
+    },
+    {
+      "hkType": "HKQuantityTypeIdentifierBasalEnergyBurned",
+      "record": "activitySnapshot",
+      "property": "basalEnergyKcal",
       "unit": "kcal",
       "sourceUnits": { "kcal": 1, "Cal": 1, "kJ": 0.2390057361 },
       "statistics": ["sum"],
       "file": "activity"
     }
   ],
+  "readings": [
+    {
+      "hkType": "HKQuantityTypeIdentifierVO2Max",
+      "record": "vitalSignReading",
+      "snomed": "251880009",
+      "unit": "mL/kg/min",
+      "sourceUnits": { "mL/min·kg": 1, "mL/kg/min": 1, "mL/(kg·min)": 1 },
+      "file": "body-measurements",
+      "method": {
+        "metadataKey": "HKVO2MaxTestType",
+        "values": {
+          "1": "healthkit:maxExercise",
+          "2": "healthkit:predictionSubMaxExercise",
+          "3": "healthkit:predictionNonExercise",
+          "4": "healthkit:predictionStepTest"
+        }
+      }
+    }
+  ],
+  "bloodPressure": {
+    "correlationType": "HKCorrelationTypeIdentifierBloodPressure",
+    "systolicType": "HKQuantityTypeIdentifierBloodPressureSystolic",
+    "diastolicType": "HKQuantityTypeIdentifierBloodPressureDiastolic",
+    "snomed": "75367002",
+    "loinc": "85354-9",
+    "unit": "mmHg",
+    "sourceUnits": { "mmHg": 1 },
+    "file": "blood-pressure"
+  },
+  "sleep": {
+    "hkType": "HKCategoryTypeIdentifierSleepAnalysis",
+    "rule": "apple-health-sleep-session",
+    "ruleVersion": "1",
+    "gapMinutes": 60,
+    "awakeRunMinutes": 60,
+    "file": "sleep",
+    "stages": {
+      "HKCategoryValueSleepAnalysisInBed": "inBedMinutes",
+      "HKCategoryValueSleepAnalysisAwake": "awakeMinutes",
+      "HKCategoryValueSleepAnalysisAsleepCore": "lightSleepMinutes",
+      "HKCategoryValueSleepAnalysisAsleepDeep": "deepSleepMinutes",
+      "HKCategoryValueSleepAnalysisAsleepREM": "remSleepMinutes",
+      "HKCategoryValueSleepAnalysisAsleepUnspecified": "asleepUnspecifiedMinutes",
+      "HKCategoryValueSleepAnalysisAsleep": "asleepUnspecifiedMinutes"
+    }
+  },
   "activitySummary": {
     "file": "activity",
     "sourceName": "ActivitySummary",
@@ -108,5 +162,12 @@
   },
   "devices": {
     "file": "wellness-devices"
-  }
+  },
+  "retiredReadingCodes": [
+    {
+      "loinc": "41981-2",
+      "file": "activity",
+      "why": "Before per-device active energy moved to health:activeEnergyKcal on a DailyActivitySnapshot it was written as a DailyVitalReading coded only with this code. A reading written that way stays filed where it was written."
+    }
+  ]
 }
