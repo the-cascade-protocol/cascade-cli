@@ -306,7 +306,16 @@
 #   rdfs:domain clinical:VitalSign from clinical:measurementMethod so VO2 max
 #   can carry its method. Additive: every graph that validated before still
 #   does. No converter change in this sync.
-core=3.11
+#
+# 2026-09-28 — core 3.11->3.12
+#   Synced from spec f830205 (spec PR the-cascade-protocol/spec#82, D-EXPORT-1)
+#   with scripts/sync-shapes-from-spec.sh; only core.ttl and core.shapes.ttl
+#   changed. No new term: cascade:ExportManifest now carries dct:identifier, a
+#   random version 4 urn:uuid minted per export (the IPS Bundle.identifier);
+#   core.shapes.ttl 1.11 adds it to cascade:ExportManifestShape (at most one,
+#   Violation; presence and form, Warning, since earlier manifests lack it).
+#   Additive. No converter change in this sync.
+core=3.12
 health=2.12
 clinical=1.21
 coverage=1.6
