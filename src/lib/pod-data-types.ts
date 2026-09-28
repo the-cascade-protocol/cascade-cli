@@ -106,6 +106,9 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
     rdfTypes: [CASCADE_NAMESPACES.health + 'DailyVitalReading', CASCADE_NAMESPACES.health + 'HeartRateData'],
     directory: 'wellness',
     filename: 'heart-rate.ttl',
+    // Its daily readings also reach it by class; the codes are what file a
+    // health:VitalSignReading coded with a heart-rate LOINC code here.
+    readingLoincCodes: loincIris('heart-rate'),
   },
   'blood-pressure': {
     label: 'Blood Pressure',

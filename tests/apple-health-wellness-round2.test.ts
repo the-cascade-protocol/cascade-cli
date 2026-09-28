@@ -16,7 +16,7 @@ import { stringChunks } from '../src/lib/apple-health-wellness/xml-scanner.js';
 import { scanExport } from '../src/lib/apple-health-wellness/scan.js';
 import { SampleSpill } from '../src/lib/apple-health-wellness/spill.js';
 import { aggregate, type AggregationResult, type WellnessRecord } from '../src/lib/apple-health-wellness/aggregate.js';
-import { recordQuads, sampleFileQuads, sleepActivityQuads } from '../src/lib/apple-health-wellness/quads.js';
+import { bpPairingActivityQuads, recordQuads, sampleFileQuads, sleepActivityQuads } from '../src/lib/apple-health-wellness/quads.js';
 import { wellnessRules } from '../src/lib/apple-health-wellness/rules.js';
 import { importAppleHealthWellness } from '../src/lib/apple-health-wellness/import-export.js';
 import { dataTypeKeyForSubject } from '../src/lib/pod-data-types.js';
@@ -207,11 +207,30 @@ describe('sleep sessions: the one-hour grouping rule', () => {
 
   it('never groups across sources', async () => {
     const body = [
-      segment(NIGHT_START, plus(NIGHT_START, 450), 'InBed', { source: 'Alex iPhone' }),
+      segment(NIGHT_START, plus(NIGHT_START, 450), 'AsleepUnspecified', { source: 'Alex iPhone' }),
       segment(plus(NIGHT_START, 10), plus(NIGHT_START, 440), 'AsleepCore'),
     ].join('\n');
     const sessions = of(await run(exportXml(LATE_EXPORT, body)), 'sleepSession');
     expect(sessions.map((s) => s.sourceName).sort()).toEqual(['Alex Watch', 'Alex iPhone']);
+  });
+
+  it('a group with no asleep segment (only in bed, or in bed and awake) is not a session, and its segments are retained', async () => {
+    const napStart = plus(NIGHT_START, 450 + 6 * 60);
+    const body = [
+      segment(NIGHT_START, plus(NIGHT_START, 450), 'InBed', { source: 'Alex iPhone' }),
+      segment(napStart, plus(napStart, 30), 'InBed'),
+      segment(plus(napStart, 30), plus(napStart, 40), 'Awake'),
+    ].join('\n');
+    const r = await run(exportXml(LATE_EXPORT, body));
+    expect(of(r, 'sleepSession')).toHaveLength(0);
+    expect(r.sleep.unassignedSegments).toBe(3);
+    // Retained all the same, in a pack, as unassigned samples.
+    expect(r.samplesRetained).toBe(3);
+    // In bed beside real sleep still counts toward that session's in-bed total.
+    const withSleep = await run(
+      exportXml(LATE_EXPORT, [segment(NIGHT_START, plus(NIGHT_START, 450), 'InBed'), segment(plus(NIGHT_START, 20), plus(NIGHT_START, 400), 'AsleepCore')].join('\n')),
+    );
+    expect(of(withSleep, 'sleepSession').map((x) => x.stages)).toEqual([{ inBedMinutes: 450, lightSleepMinutes: 380 }]);
   });
 
   it('writes only closed sessions: the export must cover at least one grouping gap past the session end', async () => {
@@ -270,12 +289,61 @@ describe('blood pressure: one record per paired reading', () => {
     ]);
     // No daily record of any kind for blood pressure.
     expect(of(r, 'vitalReading').filter((x) => x.hkType.includes('BloodPressure'))).toHaveLength(0);
-    expect(r.bloodPressure).toEqual({ readings: 2, unpaired: 0 });
+    // The top-level values at the morning instant repeat the correlated reading: counted, never a second reading.
+    expect(r.bloodPressure).toEqual({
+      readings: 2,
+      unpaired: 0,
+      componentCopies: 0,
+      componentRepeats: 2,
+      uncorrelatedComponents: 0,
+      pairedFromComponents: 0,
+      uncorrelatedDropped: { lone: 0, ambiguous: 0, invalid: 0 },
+    });
     // Flat form: one systolic and one diastolic on the one record.
     const q = recordQuads(readings[0]);
     expect(q.filter((x) => x.predicate.value === H + 'systolic').map((x) => x.object.value)).toEqual(['124']);
     expect(q.filter((x) => x.predicate.value === H + 'diastolic').map((x) => x.object.value)).toEqual(['79']);
     expect(dataTypeKeyForSubject(q)).toBe('blood-pressure');
+  });
+
+  it('pairs top-level components no correlation covers, stamps the pairing rule, and skips a redundant repeat', async () => {
+    const LONE = '2026-03-13T15:00:00Z';
+    const body = [
+      // A correlated reading, its exact copies, and a repeat created earlier.
+      bpCorrelation(MORNING, '124', '79'),
+      bpComponent('Systolic', MORNING, '124'),
+      bpComponent('Diastolic', MORNING, '79'),
+      bpComponent('Systolic', MORNING, '124').replace(/creationDate="[^"]*"/, `creationDate="${render(plus(MORNING, -5))}"`),
+      bpComponent('Diastolic', MORNING, '79').replace(/creationDate="[^"]*"/, `creationDate="${render(plus(MORNING, -5))}"`),
+      // A real reading written with no correlation.
+      bpComponent('Systolic', EVENING, '131'),
+      bpComponent('Diastolic', EVENING, '84'),
+      // A lone half.
+      bpComponent('Systolic', LONE, '140'),
+    ].join('\n');
+    const r = await run(exportXml(LATE_EXPORT, body));
+    const readings = of(r, 'bloodPressure').sort((a, b) => a.date.localeCompare(b.date));
+    expect(readings.map((x) => [x.date, x.systolic, x.diastolic, x.generatedBy === undefined])).toEqual([
+      [MORNING, 124, 79, true],
+      [EVENING, 131, 84, false],
+    ]);
+    expect(readings[1].generatedBy).toBe(r.bpPairingActivity.iri);
+    expect(r.bloodPressure).toEqual({
+      readings: 2,
+      unpaired: 0,
+      componentCopies: 2,
+      componentRepeats: 2,
+      uncorrelatedComponents: 3,
+      pairedFromComponents: 1,
+      uncorrelatedDropped: { lone: 1, ambiguous: 0, invalid: 0 },
+    });
+    const versions = bpPairingActivityQuads(r.bpPairingActivity).filter((q) => q.predicate.value === C + 'version').map((q) => q.object.value);
+    expect(versions).toEqual(['apple-health-bp-pairing/1']);
+    expect(recordQuads(readings[1]).find((q) => q.predicate.value === PROV + 'wasGeneratedBy')!.object.value).toBe(r.bpPairingActivity.iri);
+    expect(predicates(readings[0])).not.toContain(PROV + 'wasGeneratedBy');
+    // The same pair in a later export has the same name.
+    const again = of(await run(exportXml('2026-04-01T00:00:00Z', body)), 'bloodPressure').find((x) => x.date === EVENING)!;
+    expect(again.iri).toBe(readings[1].iri);
   });
 
   it('a correlation without both components is not a reading', async () => {
@@ -329,6 +397,16 @@ describe('VO2 max: individual estimates with their method', () => {
     for (const x of wellnessRules().readings) {
       for (const v of Object.values(x.method?.values ?? {})) expect(allowed.has(v), v).toBe(true);
     }
+  });
+
+  it('a VitalSignReading carrying a wellness LOINC code is filed in that code\'s wellness file', () => {
+    const reading = (loinc: string) => [
+      { predicate: { value: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type' }, object: { value: H + 'VitalSignReading' } },
+      { predicate: { value: C + 'loincCode' }, object: { value: `http://loinc.org/rdf#${loinc}` } },
+    ];
+    expect(dataTypeKeyForSubject(reading('8867-4'))).toBe('heart-rate');
+    expect(dataTypeKeyForSubject(reading('80404-7'))).toBe('hrv');
+    expect(dataTypeKeyForSubject(reading('2708-6'))).toBe('body-measurements');
   });
 
   it('a reading without a LOINC code is filed by its SNOMED code in the shared router', async () => {
@@ -401,6 +479,8 @@ describe('cascade validate on a synthetic export of every new type', () => {
       bpComponent('Diastolic', '2026-03-11T14:30:00Z', '79'),
       bpCorrelation('2026-03-11T14:30:00Z', '124', '79'),
       bpCorrelation('2026-03-12T02:45:00Z', '131', '84'),
+      bpComponent('Systolic', '2026-03-13T02:45:00Z', '129'),
+      bpComponent('Diastolic', '2026-03-13T02:45:00Z', '83'),
       vo2('2026-03-11T01:12:00Z', '41.7', '2'),
       vo2('2026-03-11T19:40:00Z', '43.2', '9'),
       energy('Basal', '2026-03-11T16:00:00Z', '33.1'),
@@ -413,7 +493,7 @@ describe('cascade validate on a synthetic export of every new type', () => {
       machineZoneOverride: LA,
     });
     expect(report.sleep.sessions).toBe(2);
-    expect(report.bloodPressure).toEqual({ readings: 2, unpaired: 0, componentCopies: 2 });
+    expect(report.bloodPressure).toMatchObject({ readings: 3, unpaired: 0, componentCopies: 2, uncorrelatedComponents: 2, pairedFromComponents: 1 });
     const out = JSON.parse(execFileSync('node', [CLI, 'validate', podDir, '--json'], { encoding: 'utf-8' })) as Array<{
       file: string;
       valid: boolean;
@@ -432,8 +512,125 @@ describe('cascade validate on a synthetic export of every new type', () => {
       fs.readFileSync(path.join(podDir, 'wellness', 'samples', 'samples.ttl'), 'utf8'),
     );
     expect(desc.filter((q) => q.predicate.value === C + 'version').map((q) => q.object.value).sort()).toEqual([
-      'apple-health-daily-aggregate/1',
+      'apple-health-bp-pairing/1',
+      'apple-health-daily-aggregate/2',
       'apple-health-sleep-session/1',
     ]);
   }, 120_000);
+});
+
+describe('a computed aggregate from a superseded rule version is replaced in place, never kept beside', () => {
+  const FIXTURE_XML = fs.readFileSync(path.resolve(__dirname, '../test-fixtures/apple-health-wellness/export.xml'), 'utf8');
+  const RECORD_FILES = ['heart-rate.ttl', 'hrv.ttl', 'body-measurements.ttl', 'activity.ttl'];
+  const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
+  const XSD = 'http://www.w3.org/2001/XMLSchema#';
+
+  function newPod(): string {
+    const podDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wellness-migrate-'));
+    fs.mkdirSync(path.join(podDir, 'profile'));
+    fs.writeFileSync(
+      path.join(podDir, 'profile', 'extended.ttl'),
+      `<#me> <${C}podIdentifier> "${POD}"^^<${XSD}anyURI> .\n<#me> <${C}dayZone> "${LA}" .\n`,
+    );
+    return podDir;
+  }
+  const importFixture = (podDir: string) =>
+    importAppleHealthWellness({ podDir, exportXmlPath: 'export.xml', chunks: stringChunks(FIXTURE_XML, 4093), machineZoneOverride: LA });
+  const read = (podDir: string, f: string): string => fs.readFileSync(path.join(podDir, 'wellness', f), 'utf8');
+
+  /**
+   * Rewrite a pod as the previous release left it: every computed aggregate
+   * stamped with rule version 1, per-device active energy as a daily vital
+   * reading coded only LOINC 41981-2, and no basal energy.
+   */
+  async function asPreviousRelease(podDir: string, v1: string, v2: string): Promise<number> {
+    const { DataFactory, Writer } = await import('n3');
+    const { namedNode, literal, quad } = DataFactory;
+    let stamped = 0;
+    for (const f of RECORD_FILES) {
+      const quads = new Parser({ format: 'Turtle', baseIRI: 'https://pod.invalid/x' }).parse(read(podDir, f));
+      const bySubject = new Map<string, typeof quads>();
+      for (const q of quads) {
+        const a = bySubject.get(q.subject.value) ?? [];
+        a.push(q);
+        bySubject.set(q.subject.value, a);
+      }
+      const out: typeof quads = [];
+      for (const [subject, qs] of bySubject) {
+        const has = (p: string): boolean => qs.some((q) => q.predicate.value === p);
+        if (has(H + 'basalEnergyKcal')) continue;
+        const aggregate = qs.some((q) => q.predicate.value === PROV + 'wasGeneratedBy' && q.object.value === v2);
+        if (aggregate) stamped++;
+        // A computed per-device snapshot (a workout also carries active energy and a device, and is a source record).
+        const activeOnDevice = aggregate && has(H + 'activeEnergyKcal') && has(H + 'device');
+        for (const q of qs) {
+          if (q.predicate.value === PROV + 'wasGeneratedBy' && q.object.value === v2) {
+            out.push(quad(q.subject, q.predicate, namedNode(v1)));
+          } else if (activeOnDevice && q.predicate.value === RDF) {
+            out.push(quad(q.subject, q.predicate, namedNode(H + 'DailyVitalReading')));
+          } else if (activeOnDevice && q.predicate.value === H + 'activeEnergyKcal') {
+            const s = namedNode(subject);
+            out.push(quad(s, namedNode('http://hl7.org/fhir/code'), namedNode('http://snomed.info/sct/251833007')));
+            out.push(quad(s, namedNode(C + 'loincCode'), namedNode('http://loinc.org/rdf#41981-2')));
+            out.push(quad(s, namedNode(H + 'value'), literal(q.object.value, namedNode(XSD + 'double'))));
+            out.push(quad(s, namedNode(H + 'unit'), literal('kcal')));
+          } else {
+            out.push(q);
+          }
+        }
+      }
+      const text = await new Promise<string>((resolve, reject) => {
+        const w = new Writer();
+        w.addQuads(out);
+        w.end((e, r) => (e ? reject(e) : resolve(r)));
+      });
+      fs.writeFileSync(path.join(podDir, 'wellness', f), text);
+    }
+    return stamped;
+  }
+
+  it('re-importing leaves only the new shape, with no collision, and a further import changes nothing', async () => {
+    const rules = wellnessRules();
+    const fresh = newPod();
+    await importFixture(fresh);
+    const expected = new Map(RECORD_FILES.map((f) => [f, read(fresh, f)]));
+
+    const pod = newPod();
+    await importFixture(pod);
+    const v1 = urn(wellnessSupportSeed({ podSubject: POD, kind: 'rule', key: `${rules.rule}/1` }));
+    const v2 = urn(wellnessSupportSeed({ podSubject: POD, kind: 'rule', key: `${rules.rule}/${rules.ruleVersion}` }));
+    expect(rules.ruleVersion).not.toBe('1');
+    const stamped = await asPreviousRelease(pod, v1, v2);
+    expect(read(pod, 'activity.ttl')).toContain('41981-2');
+
+    const migrated = await importFixture(pod);
+    expect(migrated.collisions, JSON.stringify(migrated.collisions)).toEqual([]);
+    // Every aggregate the previous rule wrote except the dropped basal ones was replaced.
+    expect(migrated.migratedAggregates).toBe(stamped);
+    expect(stamped).toBeGreaterThan(20);
+    for (const f of RECORD_FILES) {
+      expect(read(pod, f), f).toBe(expected.get(f));
+      expect(read(pod, f)).not.toContain('41981-2');
+    }
+
+    const again = await importFixture(pod);
+    expect(again.collisions).toEqual([]);
+    expect(again.migratedAggregates).toBe(0);
+    for (const f of RECORD_FILES) expect(read(pod, f), f).toBe(expected.get(f));
+  });
+
+  it('never replaces a record a source supplied, or one no superseded rule version stamped', async () => {
+    const pod = newPod();
+    await importFixture(pod);
+    // Alter an ActivitySummary day (a source record) and an aggregate still stamped with the current version.
+    const text = read(pod, 'activity.ttl').replace('health:exerciseMinutes 41', 'health:exerciseMinutes 40');
+    expect(text).not.toBe(read(pod, 'activity.ttl'));
+    fs.writeFileSync(path.join(pod, 'wellness', 'activity.ttl'), text);
+    const hr = read(pod, 'heart-rate.ttl').replace(/cascade:sampleCount (\d+)/, (_m, n) => `cascade:sampleCount ${Number(n) + 1}`);
+    fs.writeFileSync(path.join(pod, 'wellness', 'heart-rate.ttl'), hr);
+    const r = await importFixture(pod);
+    expect(r.migratedAggregates).toBe(0);
+    expect(r.collisions).toHaveLength(2);
+    expect(read(pod, 'activity.ttl')).toContain('health:exerciseMinutes 40');
+  });
 });

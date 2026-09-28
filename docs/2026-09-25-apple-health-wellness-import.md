@@ -16,11 +16,13 @@ its amendment that a computed aggregate is a derived view.
 scratch directory, partitioned by UTC day, and each day is processed on its
 own, so the samples never sit in memory together. The scratch key exists only
 in the importing process and the directory is deleted when the import ends.
-What memory does hold is the day's records until the end (tens of thousands of
-small objects on a real export) and, while each wellness file is written, that
+What memory does hold is the records until they are written (tens of
+thousands of small objects on a real export; each file's records are released
+once that file is written) and, while each wellness file is written, that
 file's triples (about 300,000 for a year of heart rate). Measured on a real
-4.6 GB export: about a minute, peak RSS under 0.9 GB, and it completes with the
-heap capped at 384 MB.
+4.6 GB export: about 70 seconds; peak RSS about 1.1 GB with the default heap,
+where V8 collects lazily, and it completes with the heap capped at 384 MB
+(peak RSS about 0.6 GB).
 
 - Only top-level `<Record>` elements are read as records. A `<Record>` inside a
   `<Correlation>` is a copy of a top-level one (the export's DTD says so) and is
@@ -42,7 +44,7 @@ heap capped at 384 MB.
 | Daily respiratory rate, blood oxygen, body mass (average) | `health:DailyVitalReading` | `wellness/body-measurements.ttl` | digest seed |
 | Daily steps, active energy, basal energy (sum, per device, one snapshot per metric) | `health:DailyActivitySnapshot` | `wellness/activity.ttl` | digest seed |
 | Sleep session (stage segments grouped by the sleep rule) | `health:SleepSession` | `wellness/sleep.ttl` | digest seed over its segments |
-| Blood pressure reading (one per `<Correlation>`) | `health:BloodPressureReading` | `wellness/blood-pressure.ttl` | sync identifier or `HKExternalUUID` (tier 1), else a digest of the correlation |
+| Blood pressure reading (one per `<Correlation>`, or per uncorrelated pair) | `health:BloodPressureReading` | `wellness/blood-pressure.ttl` | sync identifier or `HKExternalUUID` on the correlation (tier 1), else a digest of the correlation or of the pair |
 | VO2 max estimate (one per sample) | `health:VitalSignReading` | `wellness/body-measurements.ttl` | sync identifier or `HKExternalUUID` (tier 1), else a digest of the sample |
 | Apple's `<ActivitySummary>` day (active energy, exercise minutes, stand hours) | `health:DailyActivitySnapshot` | `wellness/activity.ttl` | its date (tier 1) |
 | `<Workout>` (no route) | `health:Workout` | `wellness/activity.ttl` | `HKExternalUUID` or sync identifier (tier 1), else a digest of the element |
@@ -77,7 +79,9 @@ names with `prov:wasGeneratedBy`):
 2. Inside a group, a run of consecutive awake segments spanning an hour or
    more counts as such a gap: the segments before it and after it are two
    sessions, and the run belongs to neither.
-3. A piece holding only awake segments is not a session.
+3. A piece with no asleep segment (only awake, only in bed, or both) is not a
+   session: a sleep episode runs from sleep onset to final waking (IEEE
+   1752.1). Its segments are still retained.
 
 So a nap is its own session whenever an hour separates it from the night.
 Stage minutes are summed into the totals the vocabulary names: Core into
@@ -100,28 +104,63 @@ pod-zone day the session ends in, and the session points at that group with
 `prov:wasDerivedFrom`. A pack is written for such a day even when the day is
 still open for aggregation; a later export then gives the day a new pack that
 lists the same group. Segments that are in no session (an awake run counted
-as a gap, a group with no sleep in it, a value the table does not map) are
+as a gap, a piece with no asleep segment, a value the table does not map) are
 retained under the pack's `unaggregated`. Each sleep segment carries its
 `timeZone` column, and a segment that began the day before its pack's day has
 a negative `start`.
 
 ## Blood pressure and VO2 max
 
-A blood pressure reading is paired by the source: HealthKit's blood pressure
-`<Correlation>` holds one systolic and one diastolic record, and one reading
-record is written from them, flat (`health:systolic`, `health:diastolic`),
-coded as the panel (SNOMED CT 75367002, LOINC 85354-9), at the correlation's
-start. The export also repeats both values as top-level records; those are
-counted (`bloodPressure.componentCopies`) and never read, so a reading is never
-counted twice. A correlation without exactly one of each, in mmHg, is not a
-reading and is counted as `unpaired`. Readings are never averaged: a home
-average is a view over the readings, stated with its protocol.
+A blood pressure reading is normally paired by the source: HealthKit's blood
+pressure `<Correlation>` holds one systolic and one diastolic record, and one
+reading record is written from them, flat (`health:systolic`,
+`health:diastolic`), coded as the panel (SNOMED CT 75367002, LOINC 85354-9), at
+the correlation's start. A correlation without exactly one of each, in mmHg, is
+not a reading and is counted as `unpaired`.
+
+The export also repeats each component as a top-level record, and a source can
+write a systolic and a diastolic record with no correlation at all. Top-level
+components are grouped by (source, start, end):
+
+- Where a correlation component from that source sits at that instant, they
+  are skipped and counted: `componentCopies` when identical to it (type,
+  value, unit, times), `componentRepeats` when they repeat the same reading
+  with another creation time or value. The correlation is the reading, so it
+  is never counted twice.
+- Elsewhere (`uncorrelatedComponents`), exactly one systolic and one diastolic
+  is one reading (`pairedFromComponents`), named by a digest of the two
+  records and generated by an activity carrying
+  `cascade:version "apple-health-bp-pairing/1"`. A lone half, or more than one
+  of either, is not paired and is counted by reason (`uncorrelatedDropped`).
+
+Readings are never averaged: a home average is a view over the readings,
+stated with its protocol.
 
 A VO2 max estimate is one record per sample, never a daily series: a
 `health:VitalSignReading` coded SNOMED CT 251880009, in mL/kg/min, with
 `clinical:measurementMethod` mapped from `HKVO2MaxTestType` (1 maxExercise,
 2 predictionSubMaxExercise, 3 predictionNonExercise, 4 predictionStepTest). An
 unmapped method value writes no method and is counted.
+
+## A new version of the aggregation rule
+
+A computed aggregate is a derived view, stored as a cache stamped with the
+version of the rule that produced it (`prov:wasGeneratedBy` an activity whose
+`cascade:version` is `apple-health-daily-aggregate/{version}`). When this
+import computes an aggregate whose name the pod already holds, and the held
+record was generated by a superseded version of that rule (listed in the rules
+table's `supersededRuleVersions`), the held record is replaced in place and
+counted (`migratedAggregates`, and `recordsMigrated` per file), instead of
+being kept as a collision. Names do not change, so nothing is counted twice.
+
+Nothing else is ever replaced: a record a source supplied (an ActivitySummary
+day, a workout, a blood pressure reading, anything named tier 1), a record
+generated by the current version, and anything not generated by this rule in
+this pod keep the collision rule above. Version 2 of the rule writes a
+device's own active energy as `health:activeEnergyKcal` on a per-device
+snapshot; version 1 wrote it as a `health:DailyVitalReading` coded only LOINC
+41981-2, and a pod imported with version 1 is migrated by importing an export
+again.
 
 ## The pod subject in every name
 

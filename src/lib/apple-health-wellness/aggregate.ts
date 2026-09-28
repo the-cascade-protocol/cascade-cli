@@ -150,6 +150,8 @@ export interface BloodPressureRecord {
   sourceRecordId?: string;
   sourceName: string;
   deviceIri?: string;
+  /** Set only on a reading this importer paired (no correlation): the pairing rule's activity. */
+  generatedBy?: string;
 }
 
 /** One reading of a type written one record per sample (a VO2 max estimate), never a daily series. */
@@ -262,6 +264,8 @@ export interface AggregationResult {
   activity: RuleActivity;
   /** The activity every Apple sleep session names: the grouping rule and its version. */
   sleepActivity: RuleActivity;
+  /** The activity every blood pressure reading this importer paired (no correlation) names. */
+  bpPairingActivity: RuleActivity;
   coverageEnd?: number;
   closedDays: number;
   openDaysSkipped: number;
@@ -286,9 +290,20 @@ export interface AggregationResult {
     unknownValues: Record<string, number>;
   };
   bloodPressure: {
+    /** Readings written: from correlations, plus `pairedFromComponents`. */
     readings: number;
     /** Correlations without exactly one systolic and one diastolic value in an accepted unit. */
     unpaired: number;
+    /** Top-level components identical to a correlation's component, skipped. */
+    componentCopies: number;
+    /** Top-level components at a correlated instant that repeat that reading with another creation time or value, skipped. */
+    componentRepeats: number;
+    /** Top-level components at an instant no correlation from their source covers. */
+    uncorrelatedComponents: number;
+    /** Readings the pairing rule made from those. */
+    pairedFromComponents: number;
+    /** Uncorrelated components not paired, by reason (components, not readings). */
+    uncorrelatedDropped: { lone: number; ambiguous: number; invalid: number };
   };
   readings: {
     /** Per reading type: records written, and how many carried a method value the rules table does not map. */
@@ -305,6 +320,11 @@ const cmpStr = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 function urn(seed: string): string {
   return `urn:uuid:${deterministicUuid(seed)}`;
+}
+
+/** The IRI of the activity naming a derivation rule at one version, in one pod. */
+export function ruleActivityIri(podSubject: string, rule: string, ruleVersion: string): string {
+  return urn(wellnessSupportSeed({ podSubject, kind: 'rule', key: `${rule}/${ruleVersion}` }));
 }
 
 function round(v: number, decimals: number): number {
@@ -496,9 +516,20 @@ export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateO
   const zone = opts.dayZone;
   const devices = new DeviceRegistry(opts.podSubject, rules.devices.file);
   const activity: RuleActivity = {
-    iri: urn(wellnessSupportSeed({ podSubject: opts.podSubject, kind: 'rule', key: `${rules.rule}/${rules.ruleVersion}` })),
+    iri: ruleActivityIri(opts.podSubject, rules.rule, rules.ruleVersion),
     rule: rules.rule,
     ruleVersion: rules.ruleVersion,
+  };
+  const bpPairingActivity: RuleActivity = {
+    iri: urn(
+      wellnessSupportSeed({
+        podSubject: opts.podSubject,
+        kind: 'rule',
+        key: `${rules.bloodPressure.pairing.rule}/${rules.bloodPressure.pairing.ruleVersion}`,
+      }),
+    ),
+    rule: rules.bloodPressure.pairing.rule,
+    ruleVersion: rules.bloodPressure.pairing.ruleVersion,
   };
   const sleepActivity: RuleActivity = {
     iri: urn(wellnessSupportSeed({ podSubject: opts.podSubject, kind: 'rule', key: `${rules.sleep.rule}/${rules.sleep.ruleVersion}` })),
@@ -510,6 +541,7 @@ export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateO
     sampleFiles: [],
     activity,
     sleepActivity,
+    bpPairingActivity,
     coverageEnd: scan.exportDate ?? scan.maxSampleEnd,
     closedDays: 0,
     openDaysSkipped: 0,
@@ -519,7 +551,15 @@ export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateO
     nonNumericSamples: 0,
     activitySummariesSkipped: { sentinel: 0, openDay: 0, empty: 0 },
     sleep: { sessions: 0, openSkipped: 0, segments: scan.sleepSegments.length, unassignedSegments: 0, unknownValues: {} },
-    bloodPressure: { readings: 0, unpaired: 0 },
+    bloodPressure: {
+      readings: 0,
+      unpaired: 0,
+      componentCopies: 0,
+      componentRepeats: 0,
+      uncorrelatedComponents: 0,
+      pairedFromComponents: 0,
+      uncorrelatedDropped: { lone: 0, ambiguous: 0, invalid: 0 },
+    },
     readings: {},
     warnings: [],
   };
@@ -786,6 +826,18 @@ export function aggregate(scan: ScanResult, spill: SampleSpill, opts: AggregateO
       result.bloodPressure.unpaired++;
     }
   }
+  for (const rec of uncorrelatedBloodPressure(scan, opts.podSubject, idSpace, devices, result, bpPairingActivity)) {
+    result.records.push(rec);
+    result.bloodPressure.readings++;
+  }
+  const dropped = result.bloodPressure.uncorrelatedDropped;
+  const droppedTotal = dropped.lone + dropped.ambiguous + dropped.invalid;
+  if (droppedTotal > 0) {
+    result.warnings.push(
+      `${droppedTotal} top-level blood pressure component(s) with no correlation could not be paired ` +
+        `(${dropped.lone} with no other half, ${dropped.ambiguous} with more than one of a half, ${dropped.invalid} not a number in an accepted unit) and were not imported.`,
+    );
+  }
   if (result.bloodPressure.unpaired > 0) {
     result.warnings.push(
       `${result.bloodPressure.unpaired} blood pressure correlation(s) did not hold exactly one systolic and one diastolic value ` +
@@ -857,6 +909,7 @@ function bloodPressureRecord(
   idSpace: WellnessIdSpace,
   devices: DeviceRegistry,
   result: AggregationResult,
+  pairedBy?: RuleActivity,
 ): BloodPressureRecord | undefined {
   const rules = wellnessRules();
   const bp = rules.bloodPressure;
@@ -881,12 +934,13 @@ function bloodPressureRecord(
   const end = parseAppleTimestamp(c.attrs.endDate);
   if (systolic === undefined || diastolic === undefined || start === undefined || end === undefined) return undefined;
 
-  const sourceId = sourceIdOf(c.metadata);
+  // A pair this importer made has no identifier of its own: its two records are its fields.
+  const sourceId = pairedBy ? undefined : sourceIdOf(c.metadata);
   let iri: string;
   if (sourceId) {
     iri = urn(wellnessSourceRecordSeed({ podSubject, idSpace, sourceId }));
   } else {
-    const fields = elementFields(c.attrs, c.metadata);
+    const fields = pairedBy ? [] : elementFields(c.attrs, c.metadata);
     const nested = c.records.map((r) => elementFields(r.attrs, r.metadata).join('\u0000')).sort(cmpStr);
     for (const n of nested) fields.push(`records:${n}`);
     iri = urn(
@@ -915,7 +969,90 @@ function bloodPressureRecord(
     deviceIri: devices.note(c.attrs.device),
   };
   if (sourceId) rec.sourceRecordId = sourceId;
+  if (pairedBy) rec.generatedBy = pairedBy.iri;
   return rec;
+}
+
+/**
+ * THE UNCORRELATED BLOOD PRESSURE PAIRING RULE (`bloodPressure.pairing` in the
+ * rules table, stamped on every reading it makes through its generating
+ * activity). The export repeats each correlation's components as top-level
+ * records, and a source can also write a systolic and a diastolic record with
+ * no correlation at all. Top-level components are grouped by (source, start,
+ * end):
+ *
+ *   - At an instant where a correlation component from that source sits, they
+ *     are a copy of it (identical type, value, times) or a repeat of the same
+ *     reading, and are counted and skipped: the correlation is the reading.
+ *   - Elsewhere, exactly one systolic and one diastolic is one reading (FHIR
+ *     panel 85354-9, Open mHealth blood-pressure: one paired measurement).
+ *     A lone half, or more than one of either, is not paired, and is counted.
+ */
+function uncorrelatedBloodPressure(
+  scan: ScanResult,
+  podSubject: string,
+  idSpace: WellnessIdSpace,
+  devices: DeviceRegistry,
+  result: AggregationResult,
+  activity: RuleActivity,
+): BloodPressureRecord[] {
+  const bp = wellnessRules().bloodPressure;
+  const t = (v: string | undefined): string => {
+    const ms = parseAppleTimestamp(v);
+    return ms === undefined ? `raw:${v ?? ''}` : isoUtc(ms);
+  };
+  const instant = (a: Record<string, string>): string => JSON.stringify([a.sourceName ?? '', t(a.startDate), t(a.endDate)]);
+  const identical = (a: Record<string, string>): string =>
+    JSON.stringify([instant(a), a.type ?? '', a.value ?? '', a.unit ?? '', t(a.creationDate)]);
+  const covered = new Set<string>();
+  const copies = new Set<string>();
+  for (const c of scan.bloodPressureCorrelations) {
+    for (const r of c.records) {
+      covered.add(instant(r.attrs));
+      copies.add(identical(r.attrs));
+    }
+  }
+  const groups = new Map<string, RecordElement[]>();
+  for (const r of scan.bloodPressureComponents) {
+    const k = instant(r.attrs);
+    let g = groups.get(k);
+    if (!g) groups.set(k, (g = []));
+    g.push(r);
+  }
+  const out: BloodPressureRecord[] = [];
+  const tally = result.bloodPressure;
+  for (const k of [...groups.keys()].sort(cmpStr)) {
+    const g = groups.get(k)!;
+    if (covered.has(k)) {
+      for (const r of g) {
+        if (copies.has(identical(r.attrs))) tally.componentCopies++;
+        else tally.componentRepeats++;
+      }
+      continue;
+    }
+    tally.uncorrelatedComponents += g.length;
+    const sys = g.filter((r) => r.attrs.type === bp.systolicType);
+    const dia = g.filter((r) => r.attrs.type === bp.diastolicType);
+    if (sys.length !== 1 || dia.length !== 1) {
+      if (sys.length === 0 || dia.length === 0) tally.uncorrelatedDropped.lone += g.length;
+      else tally.uncorrelatedDropped.ambiguous += g.length;
+      continue;
+    }
+    const a = sys[0].attrs;
+    const pair = {
+      attrs: { sourceName: a.sourceName ?? '', startDate: a.startDate ?? '', endDate: a.endDate ?? '', ...(a.device ? { device: a.device } : {}) },
+      metadata: {},
+      records: [sys[0], dia[0]],
+    };
+    const rec = bloodPressureRecord(pair, podSubject, idSpace, devices, result, activity);
+    if (rec) {
+      out.push(rec);
+      tally.pairedFromComponents++;
+    } else {
+      tally.uncorrelatedDropped.invalid += g.length;
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -1027,7 +1164,9 @@ function vitalSignReadingRecord(
  *      no other segment between them) spanning `awakeRunMinutes` or more
  *      counts as such a gap: the segments before it are one session, the
  *      segments after it the next, and the run itself belongs to neither.
- *   3. A piece holding only awake segments is not a session.
+ *   3. A piece holding no asleep segment (only awake, only in bed, or both) is
+ *      not a session: a sleep episode runs from sleep onset to final waking
+ *      (IEEE 1752.1), and such a piece holds neither.
  *
  * Naps are therefore separate sessions whenever an hour separates them from
  * the night. Returns the sessions and the segments no session holds.
@@ -1035,6 +1174,7 @@ function vitalSignReadingRecord(
 export function groupSleepSegments(
   segments: SpilledSample[],
   isAwake: (s: SpilledSample) => boolean,
+  isAsleep: (s: SpilledSample) => boolean,
   rule: Pick<WellnessSleepRule, 'gapMinutes' | 'awakeRunMinutes'>,
 ): { groups: SpilledSample[][]; sessions: SpilledSample[][]; unassigned: SpilledSample[] } {
   const gapMs = rule.gapMinutes * 60_000;
@@ -1081,7 +1221,7 @@ export function groupSleepSegments(
     pieces.push(piece);
     for (const p of pieces) {
       if (p.length === 0) continue;
-      if (p.every(isAwake)) appendAll(unassigned, p);
+      if (!p.some(isAsleep)) appendAll(unassigned, p);
       else sessions.push(p);
     }
   }
@@ -1133,9 +1273,13 @@ function sleepSessionsOf(
     a.push(seg);
   }
   const isAwake = (seg: SpilledSample): boolean => rule.stages[seg.value] === 'awakeMinutes';
+  const isAsleep = (seg: SpilledSample): boolean => {
+    const stage = rule.stages[seg.value];
+    return stage !== 'awakeMinutes' && stage !== 'inBedMinutes';
+  };
 
   for (const key of [...bySource.keys()].sort(cmpStr)) {
-    const grouped = groupSleepSegments(bySource.get(key)!, isAwake, rule);
+    const grouped = groupSleepSegments(bySource.get(key)!, isAwake, isAsleep, rule);
     const closedGroup = new Set<SpilledSample>();
     for (const g of grouped.groups) {
       const end = Math.max(...g.map((x) => x.end));

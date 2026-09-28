@@ -144,7 +144,8 @@ function bloodPressureQuads(r: BloodPressureRecord): Quad[] {
     .str(CASCADE + 'sourceDeviceName', r.sourceName)
     .iri(HEALTH + 'device', r.deviceIri)
     .str(CASCADE + 'sourceType', SOURCE_TYPE)
-    .iri(CASCADE + 'dataProvenance', CASCADE + 'DeviceGenerated').quads;
+    .iri(CASCADE + 'dataProvenance', CASCADE + 'DeviceGenerated')
+    .iri(PROV + 'wasGeneratedBy', r.generatedBy).quads;
 }
 
 /** One reading at its own instant (a VO2 max estimate), with the source's method where it gave one. */
@@ -277,6 +278,17 @@ export function ruleActivityQuads(a: RuleActivity): Quad[] {
   return new QuadBuilder(a.iri)
     .type(PROV + 'Activity')
     .str(PROV + 'label', `Daily wellness aggregation of an Apple Health export (${a.rule}, rule version ${a.ruleVersion})`)
+    .str(CASCADE + 'version', `${a.rule}/${a.ruleVersion}`).quads;
+}
+
+/** The activity every blood pressure reading paired by this importer (no correlation) names. */
+export function bpPairingActivityQuads(a: RuleActivity): Quad[] {
+  return new QuadBuilder(a.iri)
+    .type(PROV + 'Activity')
+    .str(
+      PROV + 'label',
+      `Apple Health blood pressure pairing: one systolic and one diastolic record from one source with the same start and end, where no correlation covers that instant (${a.rule}, rule version ${a.ruleVersion})`,
+    )
     .str(CASCADE + 'version', `${a.rule}/${a.ruleVersion}`).quads;
 }
 

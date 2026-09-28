@@ -1,6 +1,7 @@
 {
   "rule": "apple-health-daily-aggregate",
-  "ruleVersion": "1",
+  "ruleVersion": "2",
+  "supersededRuleVersions": ["1"],
   "idSpace": "healthkit",
   "valueDecimals": 4,
   "metrics": [
@@ -129,7 +130,8 @@
     "loinc": "85354-9",
     "unit": "mmHg",
     "sourceUnits": { "mmHg": 1 },
-    "file": "blood-pressure"
+    "file": "blood-pressure",
+    "pairing": { "rule": "apple-health-bp-pairing", "ruleVersion": "1" }
   },
   "sleep": {
     "hkType": "HKCategoryTypeIdentifierSleepAnalysis",

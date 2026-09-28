@@ -16,7 +16,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stage segments, so a session is assembled by a published rule: one source's
   segments are one session until a gap of an hour or more, and a run of awake
   segments lasting an hour or more counts as such a gap. Naps are therefore
-  separate sessions. Stage minutes are summed into the AASM-named totals (Core
+  separate sessions. A piece with no asleep stage (only in bed, or in bed and
+  awake) is not a session; its segments are retained all the same. Stage minutes are summed into the AASM-named totals (Core
   is light, Deep, REM, Awake, Unspecified; in bed is kept apart). A session is
   dated by the day of waking (`cascade:date`), read in the zone the source
   recorded (`HKTimeZone`, then written as `health:timeZone`), else in the
@@ -27,12 +28,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "apple-health-sleep-session/1"`. No `health:isMainSleep` is written, since
   Apple supplies none. The rule's parameters live in the wellness rules table.
 - **Blood pressure readings.** One `health:BloodPressureReading` per paired
-  reading, with flat `health:systolic` and `health:diastolic`, built from the
-  export's blood pressure `<Correlation>` (never from the top-level copies it
-  repeats, which are counted and skipped) and written to
-  `wellness/blood-pressure.ttl`. Never averaged by day. Named by the source's
-  identifier on the correlation when it has one, else by a digest of the
-  correlation's own fields.
+  reading, with flat `health:systolic` and `health:diastolic`, written to
+  `wellness/blood-pressure.ttl` and never averaged by day. A reading is built
+  from the export's blood pressure `<Correlation>`; the top-level components
+  it repeats are counted and skipped (identical copies and repeats at the same
+  instant apart). A systolic and a diastolic record from one source with the
+  same start and end and no correlation at that instant are paired into one
+  reading by a rule of their own, stamped `cascade:version
+  "apple-health-bp-pairing/1"` on its generating activity; a lone half is
+  counted and not imported. Named by the source's identifier on the
+  correlation when it has one, else by a digest of its own fields.
 - **VO2 max estimates.** One `health:VitalSignReading` per estimate, never a
   daily series, filed in `wellness/body-measurements.ttl`, with
   `clinical:measurementMethod` mapped from HealthKit's `HKVO2MaxTestType`
@@ -40,19 +45,33 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   carries no LOINC code by its SNOMED CT `fhir:code`.
 - **Basal energy.** A daily sum per device of basal energy burned, as
   `health:basalEnergyKcal` on a per-device `health:DailyActivitySnapshot`.
-- The `--report` JSON's `wellness[]` gains `sleep`, `bloodPressure` and
-  `readings` counts.
+- The `--report` JSON's `wellness[]` gains `sleep`, `bloodPressure`,
+  `readings` and `migratedAggregates` counts, and each file entry
+  `recordsMigrated`.
+- The pod router files a `health:VitalSignReading` coded with a heart-rate
+  LOINC code in `wellness/heart-rate.ttl`, as it already did for HRV and body
+  measurement codes.
 
 ### Changed
 
 - **Per-device active energy is written as `health:activeEnergyKcal` on a
   per-device `health:DailyActivitySnapshot`,** beside basal energy, instead of
   a `health:DailyVitalReading` coded only LOINC 41981-2, which health v2.12
-  says means energy burned of any kind. This changes existing output. The
-  record keeps its name, so a pod that already holds the old reading keeps it
-  and reports a collision when the same export is imported again; recreate
-  such a pod (only scratch pods are expected to carry it). A reading written
-  the old way is still filed in `wellness/activity.ttl`.
+  says means energy burned of any kind. This changes existing output, so the
+  daily aggregation rule goes to version 2 (`apple-health-daily-aggregate/2`).
+  The record keeps its name.
+- **A computed aggregate from a superseded rule version is replaced in
+  place.** Computed aggregates are a rebuildable cache stamped with their rule
+  version, so when an import computes an aggregate at a name the pod holds
+  from an older version of the same rule, it replaces it and counts it
+  (`migratedAggregates` in the report) instead of reporting a collision. A pod
+  imported with 0.24 or 0.25 is therefore migrated by importing an export
+  again; nothing needs recreating. Records a source supplied (ActivitySummary
+  days, workouts, blood pressure readings, anything named by a source
+  identifier) are never replaced. A reading written the old way that is not
+  re-imported stays filed in `wellness/activity.ttl`.
+- Each wellness file's records are released once that file is written, which
+  keeps a large export within a 384 MB heap.
 - A retained sample pack whose day holds no computed aggregate but does hold a
   closed sleep session is now written, and `wellness/samples/samples.ttl` now
   describes every pack written.

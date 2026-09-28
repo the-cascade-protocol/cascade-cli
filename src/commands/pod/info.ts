@@ -217,6 +217,8 @@ export function registerInfoSubcommand(pod: Command, program: Command): void {
           // (a VO2 max estimate into body-measurements.ttl).
           if (typeInfo.readingLoincCodes?.length || typeInfo.readingSnomedCodes?.length) {
             for (const readingClass of ['DailyVitalReading', 'VitalSignReading']) {
+              // A class this file already counted by type is not counted twice.
+              if (typeInfo.rdfTypes.includes(CASCADE_NAMESPACES.health + readingClass)) continue;
               for (const s of getSubjectsByType(result.store, CASCADE_NAMESPACES.health + readingClass)) {
                 const props = getProperties(result.store, s);
                 const loinc = props[CASCADE_NAMESPACES.cascade + 'loincCode'] ?? [];

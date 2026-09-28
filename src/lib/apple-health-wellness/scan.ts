@@ -10,8 +10,8 @@
  *     (thousands, not millions);
  *   - every sleep stage segment, every reading of a type written one record
  *     per sample (VO2 max), and every blood pressure `<Correlation>` with the
- *     records nested in it, in memory (thousands: a real export of twelve
- *     years holds about 8,400 sleep segments, 1,050 VO2 max estimates and 222
+ *     records nested in it, in memory (thousands: a large export
+ *     holds about 8,400 sleep segments, 1,050 VO2 max estimates and 222
  *     blood pressure correlations);
  *   - the `<ExportDate>`, which is the export's coverage end, and a count of
  *     each `HKTimeZone` value, the default for the pod's day zone.
@@ -24,7 +24,9 @@
  * counted. The one exception is the blood pressure correlation, which is how
  * HealthKit pairs a systolic and a diastolic value into one reading: its nested
  * records are read AS ITS COMPONENTS (never as records of their own), and the
- * top-level systolic and diastolic copies are skipped and counted instead.
+ * top-level systolic and diastolic records are kept aside: a copy of a
+ * correlation's component is counted and skipped, and a pair at an instant no
+ * correlation covers is paired by a rule of its own (`aggregate.ts`).
  */
 
 import { detach, detachAll, scanXml, type XmlEvent } from './xml-scanner.js';
@@ -89,8 +91,11 @@ export interface ScanResult {
   readings: RecordElement[];
   /** Top-level blood pressure correlations. */
   bloodPressureCorrelations: CorrelationElement[];
-  /** Top-level systolic and diastolic records: copies of correlation components, skipped. */
-  bloodPressureComponentCopies: number;
+  /**
+   * Top-level systolic and diastolic records. Most repeat a correlation's
+   * components; the aggregator decides which (see `bloodPressurePairs`).
+   */
+  bloodPressureComponents: RecordElement[];
   /** `HKTimeZone` metadata values and how often each appears. */
   timeZoneCounts: Map<string, number>;
   /** Top-level `<Record>` elements read, of any type. */
@@ -141,7 +146,7 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
     sleepSegments: [],
     readings: [],
     bloodPressureCorrelations: [],
-    bloodPressureComponentCopies: 0,
+    bloodPressureComponents: [],
     timeZoneCounts: new Map(),
     recordsRead: 0,
     samplesSpilled: 0,
@@ -175,8 +180,9 @@ export async function scanExport(chunks: AsyncIterable<string>, spill: SampleSpi
     const a = r.attrs;
     const type = a.type ?? '';
     if (type === bp.systolicType || type === bp.diastolicType) {
-      // A copy of a blood pressure correlation's component; the reading is built from the correlation.
-      result.bloodPressureComponentCopies++;
+      // Usually a copy of a blood pressure correlation's component, which the
+      // reading is built from; kept so a pair with no correlation is not lost.
+      result.bloodPressureComponents.push({ attrs: detachAll(a), metadata: detachAll(r.metadata) });
       return;
     }
     if (readingRuleFor(type)) {

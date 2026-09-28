@@ -80,6 +80,14 @@ export interface WellnessBloodPressureRule {
   unit: string;
   sourceUnits: Record<string, number>;
   file: string;
+  /**
+   * The rule that pairs top-level systolic and diastolic records no
+   * correlation covers: one of each from one source with the same start and
+   * end is one reading. Stamped on each reading it makes, through its
+   * generating activity. A reading paired by the source (a correlation) is
+   * not derived and carries no such stamp.
+   */
+  pairing: { rule: string; ruleVersion: string };
 }
 
 /** The health:SleepSession stage totals an Apple sleep value is summed into. */
@@ -121,6 +129,16 @@ export interface WellnessSleepRule {
 export interface WellnessRules {
   rule: string;
   ruleVersion: string;
+  /**
+   * Earlier versions of the daily aggregation rule. A computed aggregate is a
+   * rebuildable cache stamped with the rule version that produced it, so an
+   * aggregate a superseded version wrote is REPLACED in place when this
+   * version computes the same name (and counted as migrated), never kept
+   * beside it as a collision. Version 1 wrote per-device active energy as a
+   * daily vital reading coded LOINC 41981-2; version 2 writes it on a
+   * per-device activity snapshot.
+   */
+  supersededRuleVersions: string[];
   idSpace: WellnessIdSpace;
   /** Decimal places a computed value is rounded to. */
   valueDecimals: number;
@@ -183,6 +201,9 @@ export function wellnessRules(): WellnessRules {
     seen.add(x.hkType);
     if (!x.snomed) throw new Error(`wellness rules: reading ${x.hkType} has no SNOMED code`);
     if (Object.keys(x.sourceUnits).length === 0) throw new Error(`wellness rules: ${x.hkType} accepts no source unit`);
+  }
+  if (r.supersededRuleVersions.includes(r.ruleVersion)) {
+    throw new Error(`wellness rules: rule version ${r.ruleVersion} is listed as superseded`);
   }
   if (seen.has(r.sleep.hkType)) throw new Error(`wellness rules: ${r.sleep.hkType} is listed twice`);
   if (!(r.sleep.gapMinutes > 0) || !(r.sleep.awakeRunMinutes > 0)) {
