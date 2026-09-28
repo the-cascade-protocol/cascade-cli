@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-27
+
+C-CDA record names stay the same across re-downloads, encryption headers with a repeated member name are refused, and the bundled vocabulary moves to health 2.12 and clinical 1.21.
+
 ### Fixed
 
 - **A header with a repeated member name is refused.** A header in which any
