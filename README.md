@@ -166,24 +166,25 @@ descriptor per retained sample pack. A reader that does not show them can leave
 their files unread, not just unreturned:
 
 ```bash
-# Every record except the wellness aggregates and the sample-pack descriptors
-cascade --json pod query ./my-pod --all \
-  --exclude-data-type heart-rate --exclude-data-type hrv \
-  --exclude-data-type activity --exclude-data-type sleep \
-  --exclude-data-type wellness-devices --exclude-data-type wellness-samples
+# Every record except the wellness files and the sample-pack descriptors
+cascade --json pod query ./my-pod --all --exclude-data-type wellness
 
 # The stored daily wellness series and its per-source summary (one small file)
 cascade --json pod query ./my-pod --wellness-series
 ```
 
 `--exclude-data-type <key>` is repeatable. A key is a data type (the bucket keys
-`--all` returns) or `wellness-samples`, the retained-sample descriptors; an
-unknown key is a usage error that lists the known ones. An excluded file is never
+`--all` returns), `wellness-samples` (the retained-sample descriptors), or the
+group key `wellness`: every data type whose file lives under `wellness/`, plus
+`wellness-samples`. The group is read off the data-type registry, so it follows
+the files, not a list. An unknown key is a usage error that lists the known ones. An excluded file is never
 read, decrypted or parsed, by the record sweep, by `--edges` or by `--neighbors`.
 Without the flag, output is unchanged. A key excludes its whole file, and some
 files hold more than one kind of record: `heart-rate` also drops every
 `health:VitalSignReading` the router files there by a heart-rate LOINC code
 (clinical ones included), and `body-measurements` drops the VO2 max readings.
+`wellness` drops all of those, and `supplements`, which are stored under
+`wellness/` too; ask for supplements in a separate call if you need them.
 
 `--wellness-series` adds `wellnessDailySeries` to the output (alone, or beside
 `--all` in the same call): for each reading type and statistic, one reading per
@@ -194,6 +195,13 @@ reading type. It is a derived view the write verbs keep current, and every read
 checks it against the files it was built from: a view they no longer match
 comes back with `stale: true` and the reasons. See
 [docs/2026-09-25-apple-health-wellness-import.md](docs/2026-09-25-apple-health-wellness-import.md#the-stored-daily-series-provisional-location).
+
+The MCP server's `cascade_pod_query` tool takes the same options:
+`excludeDataTypes` (an array of the same keys, `wellness` included) and
+`wellnessSeries` (a boolean; the series comes back with its `stale` flag and
+reasons). `dataType` is optional when `wellnessSeries` is true. An agent asking a
+clinical question should pass `excludeDataTypes: ["wellness"]`; one asking a
+wellness question should read the series rather than the records.
 
 ## Exit codes
 

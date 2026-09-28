@@ -70,6 +70,7 @@ export const COMMAND_ENRICHMENT: EnrichmentTable = {
       'cascade pod query ./my-pod --medications --json',
       'cascade pod query ./my-pod --encounters --conditions --json',
       'cascade pod query ./my-pod --all --json',
+      'cascade pod query ./my-pod --all --exclude-data-type wellness --wellness-series --json',
     ],
     outputSchema: {
       description: 'JSON output structure for --json flag',

@@ -53,6 +53,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   they no longer match (written around by an older release or another tool) is
   returned with `stale: true` and `staleReasons`, never as current. Refused
   with `--neighbors`.
+- **`--exclude-data-type wellness`**, a group key: every data type whose file
+  lives under `wellness/` (read off the data-type registry, not listed), plus
+  `wellness-samples`. One key for a clinical question instead of six. It drops
+  whatever those files hold, including the heart-rate `health:VitalSignReading`
+  records in `wellness/heart-rate.ttl` (clinical ones included), the VO2 max
+  readings in `wellness/body-measurements.ttl`, and `supplements`, which are
+  stored under `wellness/`. A type asked for by name and excluded through the
+  group is named as a contradiction.
+- **MCP `cascade_pod_query` takes `excludeDataTypes` and `wellnessSeries`**, the
+  same options as `--exclude-data-type` and `--wellness-series`, resolved and
+  read by the same code: the same keys (`wellness` included), the same files
+  left unread, the same errors, and the same `wellnessDailySeries` payload with
+  its `stale` flag and `staleReasons`. `dataType` is now optional when
+  `wellnessSeries` is true, and the response lists the expanded
+  `excludedDataTypes`. The tool description tells an agent when to use each.
+  Existing calls are unchanged: `dataType: "all"` still reads only the
+  registered data types, so it has never read the retained-sample descriptors.
+  Both capabilities documents describe the new parameters.
 
 ### Changed
 
