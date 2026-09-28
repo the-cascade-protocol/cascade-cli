@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+**Bundled vocabulary: core 3.11 to 3.12**, synced from spec. No new term: `cascade:ExportManifest` now carries `dct:identifier`, a random version 4 `urn:uuid` minted for each export, and `cascade:ExportManifestShape` checks it (at most one is a Violation; presence and form are Warnings, since earlier manifests lack it). Additive; no converter change.
+
 ## [0.25.0] - 2026-09-27
 
 C-CDA record names stay the same across re-downloads, encryption headers with a repeated member name are refused, and the bundled vocabulary moves to health 2.12 and clinical 1.21.
