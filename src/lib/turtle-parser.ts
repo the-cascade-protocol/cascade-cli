@@ -105,6 +105,32 @@ export function parseTurtle(input: string, baseIRI?: string): ParseResult {
 }
 
 /**
+ * Parse Turtle quad by quad, handing each to `onQuad` and keeping none: no
+ * store, no quad array. For a reader that reduces a large file to a few
+ * predicates, the parse's own copy of every triple is the peak it pays for.
+ * Resolves with the number of quads, or rejects with the parse error.
+ */
+export function streamTurtle(input: string, baseIRI: string, onQuad: (quad: Quad) => void): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let count = 0;
+    let settled = false;
+    new Parser({ baseIRI }).parse(input, (error, quad) => {
+      if (settled) return;
+      if (error) {
+        settled = true;
+        reject(error);
+      } else if (quad) {
+        count++;
+        onQuad(quad);
+      } else {
+        settled = true;
+        resolve(count);
+      }
+    });
+  });
+}
+
+/**
  * Extract all subjects with their rdf:type values from a store.
  */
 function extractSubjectsWithTypes(store: Store): SubjectInfo[] {

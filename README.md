@@ -159,6 +159,42 @@ A pod holding no bookkeeping produces byte-identical output with the flag and
 without it. `pod conflicts`, `pod resolve`, `pod reconcile` and `validate` read the
 settings files directly and are unaffected either way.
 
+### Reading a pod with wellness data cheaply
+
+An Apple Health import writes tens of thousands of daily wellness records and a
+descriptor per retained sample pack. A reader that does not show them can leave
+their files unread, not just unreturned:
+
+```bash
+# Every record except the wellness aggregates and the sample-pack descriptors
+cascade --json pod query ./my-pod --all \
+  --exclude-data-type heart-rate --exclude-data-type hrv \
+  --exclude-data-type activity --exclude-data-type sleep \
+  --exclude-data-type wellness-devices --exclude-data-type wellness-samples
+
+# The stored daily wellness series and its per-source summary (one small file)
+cascade --json pod query ./my-pod --wellness-series
+```
+
+`--exclude-data-type <key>` is repeatable. A key is a data type (the bucket keys
+`--all` returns) or `wellness-samples`, the retained-sample descriptors; an
+unknown key is a usage error that lists the known ones. An excluded file is never
+read, decrypted or parsed, by the record sweep, by `--edges` or by `--neighbors`.
+Without the flag, output is unchanged. A key excludes its whole file, and some
+files hold more than one kind of record: `heart-rate` also drops every
+`health:VitalSignReading` the router files there by a heart-rate LOINC code
+(clinical ones included), and `body-measurements` drops the VO2 max readings.
+
+`--wellness-series` adds `wellnessDailySeries` to the output (alone, or beside
+`--all` in the same call): for each reading type and statistic, one reading per
+local day, chosen by the source-priority rule (watch, then phone, then
+third-party; within one source, the most recent import), each day citing the
+record it was taken from; and per source, its devices and the days it covers per
+reading type. It is a derived view the write verbs keep current, and every read
+checks it against the files it was built from: a view they no longer match
+comes back with `stale: true` and the reasons. See
+[docs/2026-09-25-apple-health-wellness-import.md](docs/2026-09-25-apple-health-wellness-import.md#the-stored-daily-series-provisional-location).
+
 ## Exit codes
 
 Every command answers with one of three codes: `0` success, `1` user or input

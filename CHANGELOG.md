@@ -9,6 +9,57 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`pod query --exclude-data-type <key>`** (repeatable). An excluded data
+  type's file is never read, decrypted or parsed, by the `--all` sweep, by
+  `--edges` or by `--neighbors`. A key is a data type or `wellness-samples`, the
+  retained-sample descriptors; an unknown key is a usage error that lists the
+  known ones, and a type both asked for and excluded is named as a
+  contradiction. Without the flag, output is unchanged. A key excludes its whole
+  file: `heart-rate` also drops the `health:VitalSignReading` records filed
+  there by a heart-rate LOINC code (clinical ones included), and
+  `body-measurements` the VO2 max readings. On a pod holding a real
+  Apple Health import, `--all` excluding the six wellness keys falls from about
+  3.2 s and 1.4 to 1.6 GB resident to about 0.5 s and 0.43 GB, and
+  `--all --edges` from about 6.7 s and 2.8 to 3.0 GB to about 0.8 s and 0.53 GB.
+- **A stored daily wellness series.** For each reading type and statistic, one
+  value per local day, chosen by a published rule (watch, then phone, then
+  third-party; within one source and device, the most recent import, dated by
+  the export's own ExportDate; `src/data/wellness-daily-series-rules.json`, rule
+  `wellness-daily-series/2`), each day citing the daily record it was taken
+  from, plus a per-source summary (devices, and per reading type the days, first
+  and last date). A derived view: a content-addressed JSON attachment described
+  by `wellness/series/daily-series.ttl` (provisional location), stamped with its
+  rule version, and rebuilt byte for byte from the records. Written at the end
+  of `pod import`; `pod import`, `pod reconcile --apply`, `pod add-record` and
+  `pod erase` rebuild it when a wellness file it reads changed (compared by
+  digest, not parsed), and a pod imported before this release gets one on its
+  next `pod reconcile --apply`. The import and reconcile reports carry
+  `wellnessDailySeries` when the pod has one. A rebuild streams the input files:
+  about 1.2 s and 0.5 GB resident on its own for a real export. Run at the end
+  of an import it raises that import's measured peak from about 1.0 to 1.1 GB to
+  about 1.4 GB (1.65 GB when re-importing into a pod that already holds it).
+- **An Apple Health import records the export it read**: a `prov:Entity` in
+  `wellness/samples/samples.ttl`, dated by the export's own `<ExportDate>`,
+  listing the sample pack of every closed day it held. Importing the same export
+  again adds nothing.
+- **`pod erase` takes several `--record`** and rebuilds the daily series once,
+  after the last. A single `--record` gives the same output as before.
+- **`pod query --wellness-series`** returns that view under
+  `wellnessDailySeries`, alone or beside `--all` in the same call, after checking
+  its bytes against the digest its descriptor states (exit 2 when they differ;
+  `null` when the pod has none), and hashing the files it was built from: a view
+  they no longer match (written around by an older release or another tool) is
+  returned with `stale: true` and `staleReasons`, never as current. Refused
+  with `--neighbors`.
+
+### Changed
+
+- `pod query --all` and the graph behind `--edges` and `--neighbors` no longer
+  read `wellness/series/daily-series.ttl`: it describes a derived view, not
+  records. Pods without it are unaffected.
+
 ## [0.26.0] - 2026-09-28
 
 Apple Health sleep sessions, blood pressure, VO2 max and basal energy; per-device active energy moves onto the daily activity snapshot, and computed aggregates from an older rule version are replaced in place on the next import. Bundled vocabulary: core 3.12.

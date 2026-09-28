@@ -27,7 +27,7 @@ import path from 'node:path';
 import type { Quad } from 'n3';
 import { mergeIntoBucket } from '../bucket-write.js';
 import { readResource, writeResource, writeResourceBytes, readResourceBytes } from '../pod-encryption.js';
-import { DATA_TYPES } from '../pod-data-types.js';
+import { DATA_TYPES, WELLNESS_SAMPLES_DESCRIPTOR } from '../pod-data-types.js';
 import { PodReader } from '../pod-read.js';
 import { mkdirInPod, podPathExists } from '../pod-path.js';
 import { ensurePodIdentifier, readUsablePodIdentifier } from '../pod-identifier.js';
@@ -35,7 +35,9 @@ import { SampleSpill } from './spill.js';
 import { scanExport } from './scan.js';
 import { aggregate, majorityTimeZone, ruleActivityIri, type SampleFile, type WellnessRecord } from './aggregate.js';
 import { appendAll } from '../append-all.js';
-import { recordQuads, sampleFileQuads, ruleActivityQuads, sleepActivityQuads, bpPairingActivityQuads, sampleFilePath } from './quads.js';
+import { recordQuads, sampleFileQuads, ruleActivityQuads, sleepActivityQuads, bpPairingActivityQuads, sampleFilePath, exportQuads } from './quads.js';
+import { wellnessSupportSeed } from '../identity.js';
+import { deterministicUuid } from '../fhir-converter/types.js';
 import { fileTextChunks } from './xml-scanner.js';
 import { canonicalZone, isKnownZone, isoUtc, machineZone } from './time.js';
 import { wellnessRules } from './rules.js';
@@ -49,9 +51,10 @@ const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
  * the rule activity every aggregate names. A nested container under
  * `wellness/` (pod-structure.md section 4.2 permits nested containers there)
  * rather than a top-level bucket, because these are provenance for the
- * records, not records, and no registered data type claims them.
+ * records, not records, and no registered data type claims them. Declared in
+ * `pod-data-types.ts`, beside the registered files, so `pod query` can name it.
  */
-export const WELLNESS_SAMPLES_DESCRIPTOR = 'wellness/samples/samples.ttl';
+export { WELLNESS_SAMPLES_DESCRIPTOR };
 
 /** Which rule of the day-zone default chain applied. */
 export type DayZoneRule = 'pod' | 'HKTimeZone majority' | 'importing machine' | 'UTC fallback';
@@ -518,8 +521,17 @@ export async function importAppleHealthWellness(opts: WellnessImportOptions): Pr
         activities++;
       }
       for (const f of agg.sampleFiles) appendAll(quads, sampleFileQuads(f));
+      // The export itself, dated by its own ExportDate and listing every pack
+      // it produced: how a reader tells which import is the most recent.
+      let exports = 0;
+      if (scan.exportDate !== undefined && agg.sampleFiles.length > 0) {
+        const exportDate = isoUtc(scan.exportDate);
+        const iri = `urn:uuid:${deterministicUuid(wellnessSupportSeed({ podSubject, kind: 'export', key: exportDate }))}`;
+        appendAll(quads, exportQuads(iri, exportDate, agg.sampleFiles.map((f) => f.iri)));
+        exports++;
+      }
       files.push(
-        await writeFile(podDir, WELLNESS_SAMPLES_DESCRIPTOR, 'wellness-samples', quads, agg.sampleFiles.length + activities, dek, dryRun, collisions),
+        await writeFile(podDir, WELLNESS_SAMPLES_DESCRIPTOR, 'wellness-samples', quads, agg.sampleFiles.length + activities + exports, dek, dryRun, collisions),
       );
     }
 

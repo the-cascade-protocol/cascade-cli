@@ -313,6 +313,37 @@ export const DATA_TYPES: Record<string, DataTypeInfo> = {
 };
 
 /**
+ * PROVISIONAL location of the descriptors of the retained wellness sample
+ * packs, and of the rule activities the wellness records name. Provenance for
+ * the records, not records, so no registered data type claims the file; `pod
+ * query --all` sweeps it into its `other` bucket unless the caller excludes it
+ * by its key, {@link WELLNESS_SAMPLES_KEY}.
+ */
+export const WELLNESS_SAMPLES_DESCRIPTOR = 'wellness/samples/samples.ttl';
+
+/** The key that names {@link WELLNESS_SAMPLES_DESCRIPTOR} (also its key in the import report). */
+export const WELLNESS_SAMPLES_KEY = 'wellness-samples';
+
+/**
+ * PROVISIONAL location of the descriptor of the stored daily wellness series
+ * (`apple-health-wellness/daily-series.ts`): a derived view over the wellness
+ * records, rebuilt whenever they change. Pod plumbing like `index.ttl`, never a
+ * record, so the record verbs do not sweep it.
+ */
+export const WELLNESS_DAILY_SERIES_DESCRIPTOR = 'wellness/series/daily-series.ttl';
+
+/**
+ * Every key `pod query --exclude-data-type` accepts, with the pod-relative file
+ * it names: each registered data type's file, and the one unregistered file a
+ * reader has asked to skip, the sample-pack descriptors. Sorted by key.
+ */
+export function excludableDataFiles(): Array<{ key: string; file: string }> {
+  const out = Object.entries(DATA_TYPES).map(([key, info]) => ({ key, file: `${info.directory}/${info.filename}` }));
+  out.push({ key: WELLNESS_SAMPLES_KEY, file: WELLNESS_SAMPLES_DESCRIPTOR });
+  return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+}
+
+/**
  * Subjects that are STRUCTURAL SUB-NODES of a record rather than records.
  *
  * A sub-node is stored in the pod, validated by its own shape, and routed into

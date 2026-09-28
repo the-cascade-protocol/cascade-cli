@@ -56,7 +56,11 @@ import * as fsSync from 'node:fs';
 import * as path from 'node:path';
 import { Parser, DataFactory } from 'n3';
 import type { Quad } from 'n3';
-import { printResult, printError, printVerbose, type OutputOptions } from '../../lib/output.js';
+import { printResult, printError, printVerbose, printWarning, type OutputOptions } from '../../lib/output.js';
+import {
+  refreshWellnessDailySeriesAfterWrite,
+  type DailySeriesRefresh,
+} from '../../lib/apple-health-wellness/daily-series.js';
 import { toJsonText } from '../../lib/json-output.js';
 import { runReconciliation, type ReconcilerInput, type Tier0Merge } from '../../lib/reconciler.js';
 import { DATA_TYPES, resolvePodDir } from './helpers.js';
@@ -253,6 +257,13 @@ export interface ReconcileReport {
   /** What the owner's recorded judgements did to this run. */
   userResolutions: UserResolutionReport;
   filesWritten: string[];
+  /**
+   * The stored daily wellness series after an `--apply` run: rebuilt when the
+   * wellness files it is built from changed or it was missing (a pod imported
+   * before the series existed gets one here), left alone otherwise. Absent on
+   * a dry run and on a pod with neither wellness records nor a series.
+   */
+  wellnessDailySeries?: DailySeriesRefresh;
 }
 
 /** A disposition for a pod where nothing was read and nothing can change. */
@@ -1078,6 +1089,22 @@ async function runUndo(
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Bring the stored daily wellness series in line after an `--apply` run. A
+ * reconcile routes records ADDITIVELY into wellness files, and a pod imported
+ * before the series existed gets its first one here. Returns the outcome for
+ * the report, or undefined when the pod holds neither records nor a series.
+ */
+async function refreshSeries(
+  podDir: string,
+  dek: Buffer | undefined,
+  globalOpts: OutputOptions,
+): Promise<DailySeriesRefresh | undefined> {
+  const r = await refreshWellnessDailySeriesAfterWrite(podDir, dek);
+  if (r.warning) printWarning(r.warning, globalOpts);
+  return r.refresh && r.refresh.status !== 'absent' ? r.refresh : undefined;
+}
+
 export function registerReconcileSubcommand(podProgram: Command, program: Command): void {
   podProgram
     .command('reconcile')
@@ -1241,6 +1268,12 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
             userResolutions: emptyUserResolutionReport(userResolutions.size),
             filesWritten: [],
           };
+          // A wellness-only pod has nothing to reconcile, and is exactly the pod
+          // whose stored daily series `--apply` must still bring up to date.
+          if (apply) {
+            const series = await refreshSeries(podDir, dek, globalOpts);
+            if (series) (emptyReport as { wellnessDailySeries?: DailySeriesRefresh }).wellnessDailySeries = series;
+          }
           // `--report` is honoured here too. A caller that asked for the report
           // file and got none cannot tell "empty pod" from "the run failed".
           if (options.report) {
@@ -1441,6 +1474,9 @@ export function registerReconcileSubcommand(podProgram: Command, program: Comman
 
           report.applied = true;
           if (failed.length > 0) process.exitCode = 1;
+
+          const series = await refreshSeries(podDir, dek, globalOpts);
+          if (series) report.wellnessDailySeries = series;
         }
 
         if (options.report) {

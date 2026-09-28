@@ -30,6 +30,7 @@ import * as path from 'path';
 import { Store, DataFactory } from 'n3';
 import { shortenIRI, getProperties, extractLabel } from '../../lib/turtle-parser.js';
 import { discoverTtlFiles, type PodReader, type PodReadFailure } from '../../lib/pod-read.js';
+import { WELLNESS_DAILY_SERIES_DESCRIPTOR } from '../../lib/pod-data-types.js';
 
 const { namedNode } = DataFactory;
 
@@ -98,15 +99,31 @@ export interface NeighborhoodResult {
   neighbors: Neighbor[];
 }
 
-/** The same file-set `pod query --all` reads (record data, no pod plumbing). */
-function graphExcludePaths(absDir: string): Set<string> {
+/**
+ * The pod plumbing `pod query --all` never reads as records, as absolute paths.
+ * One list for the record sweep and the graph, so the two cannot disagree about
+ * which files hold records.
+ */
+export function podPlumbingPaths(absDir: string): Set<string> {
   return new Set([
     path.join(absDir, 'index.ttl'),
     path.join(absDir, 'manifest.ttl'),
     path.join(absDir, 'profile', 'card.ttl'),
     path.join(absDir, 'settings', 'publicTypeIndex.ttl'),
     path.join(absDir, 'settings', 'privateTypeIndex.ttl'),
+    // A derived view's descriptor: rebuilt from the records, never one of them.
+    path.join(absDir, ...WELLNESS_DAILY_SERIES_DESCRIPTOR.split('/')),
   ]);
+}
+
+/** What {@link loadPodGraph} leaves out beyond the pod plumbing. */
+export interface PodGraphOptions {
+  /**
+   * Absolute paths of files the caller excluded (`pod query
+   * --exclude-data-type`). They are never read, decrypted or parsed: the cost
+   * being avoided is the parse, so filtering its output would save nothing.
+   */
+  exclude?: ReadonlySet<string>;
 }
 
 /**
@@ -119,11 +136,12 @@ function graphExcludePaths(absDir: string): Set<string> {
  * layer exists to prevent. Read failures are collected, never thrown — the
  * caller weighs them with the read layer's ledger.
  */
-export async function loadPodGraph(reader: PodReader): Promise<PodGraph> {
+export async function loadPodGraph(reader: PodReader, opts: PodGraphOptions = {}): Promise<PodGraph> {
   const absDir = reader.podDir;
-  const exclude = graphExcludePaths(absDir);
+  const plumbing = podPlumbingPaths(absDir);
+  const excluded = opts.exclude ?? new Set<string>();
   const discovered = await discoverTtlFiles(absDir); // already sorted
-  const files = discovered.filter((f) => !exclude.has(f));
+  const files = discovered.filter((f) => !plumbing.has(f) && !excluded.has(f));
 
   const store = new Store();
   const readFailures: PodReadFailure[] = [];
