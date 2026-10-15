@@ -53,7 +53,7 @@ export function buildCapabilities(program: Command): CapabilitiesOutput {
     version: CLI_VERSION,
     description:
       'Cascade Protocol CLI - Validate, convert, and manage health data. Local-first: every command ' +
-      'operates on the local filesystem except the two named in securityModel.networkCalls.',
+      'operates on the local filesystem except those named in securityModel.networkCalls.',
     protocol: 'https://cascadeprotocol.org',
     parameterConventions: PARAMETER_CONVENTIONS,
     globalOptions: describeGlobalOptions(program),
@@ -62,12 +62,16 @@ export function buildCapabilities(program: Command): CapabilitiesOutput {
       // false while two verbs made outbound calls. It went unnoticed partly
       // because neither verb was described here. State the exceptions; the
       // field is only useful if it is true. `tests/capabilities-registry.test.ts`
-      // greps src/ for fetch() and fails if a third one appears.
+      // greps src/ for fetch(), and requires every top-level command (including
+      // ones another package registers, like `agent`) to be classified.
       networkCalls:
         'none by default — no command contacts a network to validate, convert, query, import or ' +
-        'write. Two exceptions, both only when you invoke them: `advisory feed pull` fetches the ' +
-        'feed URL you pass it (any host you choose), and `pod extract` posts narrative text to the ' +
-        'cascade-agent server at --agent-url (http://127.0.0.1:8765 by default, i.e. your machine). ' +
+        'write. Three exceptions, each only when you invoke it: `advisory feed pull` fetches the ' +
+        'feed URL you pass it (any host you choose); `pod extract` posts narrative text to the ' +
+        'cascade-agent server at --agent-url (http://127.0.0.1:8765 by default, i.e. your machine); ' +
+        'and `agent` sends your prompts, and the output of the commands it runs (which can include ' +
+        'health data from a pod), to the AI provider you configure (Anthropic, OpenAI or Google; ' +
+        'the ollama provider at its default http://localhost:11434 keeps it on your machine). ' +
         'No telemetry, no analytics, no implicit calls.',
       dataStorage: 'local filesystem only',
       provenance: 'all agent-written data tagged with AIExtracted provenance',

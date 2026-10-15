@@ -27,6 +27,7 @@ import {
 } from '../pod-read.js';
 import { loadShapes, validateTurtle, validateFile, findTurtleFiles } from '../shacl-validator.js';
 import { convert } from '../fhir-converter/index.js';
+import { SCHEMA_VERSION } from '../fhir-converter/types.js';
 import { writeAuditEntry, createAuditEntry } from './audit.js';
 import { appendPodFile, mkdirInPod, podPathExists, writePodFile } from '../pod-path.js';
 import { describeMcpTools } from './describe.js';
@@ -705,7 +706,7 @@ export function buildRecordTurtle(
   // used to emit `cascade:AIGenerated`, a term declared nowhere, so every
   // record written through this path violated its own shape.
   lines.push(`    cascade:dataProvenance cascade:AIExtracted ;`);
-  lines.push(`    cascade:schemaVersion "1.3" ;`);
+  lines.push(`    cascade:schemaVersion "${SCHEMA_VERSION}" ;`);
 
   // Add provenance metadata as blank node
   const agentId = provenance?.agentId ?? 'unknown-agent';
