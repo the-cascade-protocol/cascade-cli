@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-15
+
+The MCP server's SSE transport now answers only this machine, `pod add-record` writes records that pass `cascade validate` and refuses ones missing a required property, `cascade capabilities` names every command that can reach a network, and the README covers every command.
+
 ### Changed
 
 - **README rewritten around what the CLI does today.** The command list now
