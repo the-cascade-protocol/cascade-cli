@@ -247,26 +247,29 @@ index.ttl                  # Root LDP container listing all resources
 
 ## Getting Started
 
-1. Edit \`profile/card.ttl\` to set the Pod owner's display name (public-safe).
-2. Edit \`profile/extended.ttl\` to fill in PHI (DOB, address, phone, email) — keep this private.
-3. Add clinical data files (e.g., \`clinical/medications.ttl\`) and register them in \`settings/publicTypeIndex.ttl\`.
-4. Add wellness data files (e.g., \`wellness/heart-rate.ttl\`) and register them in \`settings/privateTypeIndex.ttl\`.
-5. Update \`index.ttl\` to list all resources.
+Add records with the \`cascade\` CLI rather than by editing files: it files each record in the
+right place, registers it in the type indexes and \`index.ttl\`, and records where it came from.
+
+\`\`\`bash
+cascade pod import . records.json             # FHIR JSON, C-CDA, Turtle, or an Apple Health export
+cascade pod profile set-name . "Alex Doe"     # owner's display name
+\`\`\`
 
 ## Useful Commands
 
 \`\`\`bash
-cascade pod info .           # Show Pod summary
-cascade pod query . --all    # Query all data in the Pod
+cascade pod info .                  # Show Pod summary
+cascade pod query . --all           # Query all data in the Pod
+cascade pod conflicts .             # Records from different sources that disagree
 cascade pod export . --format zip   # Export as ZIP archive
-cascade validate .           # Validate against SHACL shapes
+cascade validate .                  # Validate against SHACL shapes
 \`\`\`
 
 ## Learn More
 
 - Cascade Protocol: https://cascadeprotocol.org
-- Pod Structure Spec: https://cascadeprotocol.org/docs/spec/pod-structure
-- Cascade SDK: https://github.com/nickthorpe71/cascade-sdk-swift
+- Pod Structure Spec: https://cascadeprotocol.org/docs/spec/pod-structure.md
+- CLI command reference: https://cascadeprotocol.org/docs/guides/cli-commands.md
 `;
 
 // ─── Command Registration ────────────────────────────────────────────────────

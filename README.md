@@ -1,6 +1,16 @@
 # @the-cascade-protocol/cli
 
-Cascade Protocol CLI - Validate, convert, and manage health data.
+The reference command-line tool for the [Cascade Protocol](https://cascadeprotocol.org). It
+converts health records from FHIR, C-CDA, Apple Health and genomics formats into RDF/Turtle,
+validates them against the protocol's SHACL shapes, and keeps them in a local Pod (a folder of
+Turtle files, optionally encrypted) that you can query, correct with a full audit trail,
+deduplicate, and open to AI agents over MCP.
+
+Everything runs on your machine. No command contacts a network to convert, validate, import,
+query or write. The only commands that do are the ones you invoke by name for that purpose:
+`advisory feed pull` fetches the URL you give it, `pod extract` posts narrative text to a
+cascade-agent server (on your own machine by default), and `agent` sends your prompts, and the
+output of the commands it runs, to the AI provider you configure.
 
 ## Installation
 
@@ -8,51 +18,121 @@ Cascade Protocol CLI - Validate, convert, and manage health data.
 npm install -g @the-cascade-protocol/cli
 ```
 
-Or use directly with npx:
+Or run it without installing:
 
 ```bash
 npx @the-cascade-protocol/cli validate record.ttl
 ```
 
+Requires Node.js 18 or later (CI runs Node 22).
+
+## Quick start
+
+```bash
+cascade pod init ./my-pod                          # create an empty Pod
+cascade pod import ./my-pod patient-bundle.json    # FHIR, C-CDA, Turtle, or an Apple Health export
+cascade pod info ./my-pod                          # record counts and sources
+cascade pod query ./my-pod --medications --conditions
+cascade validate ./my-pod                          # check every file against the SHACL shapes
+```
+
+`--json` goes before the command and makes any command's output machine-readable:
+`cascade --json pod info ./my-pod`. `--verbose` works the same way.
+
+## Commands
+
+This section is an overview. Every command, flag and MCP tool is listed in the
+[full command reference](https://cascadeprotocol.org/docs/guides/cli-commands.md), which is
+generated for each release from the CLI's own `cascade --json capabilities` output, so it cannot
+fall behind. `cascade <command> --help` shows the same thing locally.
+
+### Top-level commands
+
+| Command | What it does |
+|---|---|
+| `validate <file-or-dir>` | Validate Turtle against the Cascade SHACL shapes (`--shapes` for your own) |
+| `convert [file]` | Convert one file between formats without a Pod (see [Formats](#formats)); reads stdin if no file |
+| `reconcile <files...>` | Merge two or more loose Cascade Turtle files from different sources into one deduplicated record set |
+| `pod <subcommand>` | Create and manage a Pod ([below](#pod-subcommands)) |
+| `sources coverage <pod-dir>` | Report fields that were populated in the original source documents but not carried into the Pod |
+| `serve --mcp` | Run the MCP server so an AI agent can read and write a Pod ([MCP](#connecting-an-ai-agent-mcp)) |
+| `capabilities` | Describe every command and MCP tool (as JSON with `--json`) |
+| `advisory <subcommand>` | Validate, preview, apply, list and revert Cascade Advisory Patches ([experimental](#advisories-experimental)) |
+| `agent [prompt]` | Plain-English front end that runs `cascade` commands for you ([agent](#plain-english-agent)) |
+| `conformance run` | Run the protocol conformance suite |
+
+`reconcile` and `pod reconcile` are different commands. `reconcile` takes loose files and writes
+the merged result to stdout or `--output`, touching no Pod. `pod reconcile` finds duplicates a Pod
+already holds ([details](#reconciling-a-pods-own-duplicates)).
+
+### Pod subcommands
+
+| Subcommand | What it does |
+|---|---|
+| **Create and inspect** | |
+| `pod init <dir>` | Create a new Pod (`--encrypt`, `--owner-name`) |
+| `pod info <pod-dir>` | Show Pod metadata, record counts and sources |
+| `pod profile set-name <dir> <name>` | Set the owner's display name |
+| `pod doctor <pod-dir>` | Diagnose a damaged Pod; `--write` repairs what it safely can |
+| **Data in and out** | |
+| `pod import <pod-dir> <files...>` | Import files or folders, reconciling them against what the Pod already holds |
+| `pod query <pod-dir>` | Read records by type (`--medications`, `--lab-results`, `--all`, ...) or by graph neighborhood |
+| `pod export <pod-dir>` | Export the Pod as a zip or a directory |
+| `pod extract <pod-dir>` | Send C-CDA narrative text to a cascade-agent server for AI extraction (`--dry-run` to preview) |
+| **Correct records** | |
+| `pod add-record <pod-dir>` | Add a new self-reported record |
+| `pod amend <pod-dir>` | Override one property value on a record |
+| `pod annotate <pod-dir>` | Attach a note or an extra attribute to a record |
+| `pod retract <pod-dir>` | Mark a record as withdrawn or superseded by another |
+| `pod erase <pod-dir>` | Permanently delete a record (requires `--confirm`) |
+| **Duplicates and conflicts** | |
+| `pod reconcile <pod-dir>` | Find duplicates already in the Pod; `--apply` merges, `--undo` reverses |
+| `pod conflicts <pod-dir>` | List conflicts awaiting a decision (`--resolved` for the decision log) |
+| `pod resolve <pod-dir>` | Record a decision on a conflict |
+| **Encryption** | |
+| `pod encrypt <dir>` / `pod decrypt <dir>` | Encrypt a plaintext Pod at rest, or decrypt it back |
+| `pod passphrase set <pod-dir>` | Change the passphrase (`--rotate-dek` also replaces the data key) |
+
+`amend`, `annotate` and `retract` never change the original record. Each writes an append-only
+overlay beside it, with provenance, so every correction can be traced and the original is still
+there. `erase` is the only command that removes data; it leaves a tombstone recording that the
+erasure happened.
+
+## Formats
+
+`convert --from <format>` accepts:
+
+| Format | Input |
+|---|---|
+| `fhir` | FHIR R4 JSON, a Bundle or a single resource |
+| `c-cda` | HL7 C-CDA R2.1 XML, a single document or an IHE XDM zip |
+| `cascade` | Cascade Turtle or JSON-LD, converted back to FHIR with `--to fhir` |
+| `fhir-genomics` | HL7 FHIR Genomics Reporting IG bundle |
+| `phenopacket` | GA4GH Phenopacket Schema v1/v2 |
+| `vrs` | GA4GH VRS Allele JSON-LD |
+| `clinvar` | ClinVar VCV XML |
+| `vcf` | VCF 4.0 or later, plain or gzipped |
+
+```bash
+cascade convert --from fhir --to cascade patient.json > patient.ttl
+cascade convert --from c-cda --to cascade summary.xml --source-system clinic-a
+cascade convert --from cascade --to fhir patient.ttl
+```
+
+`--to cascade` and `--to turtle` both produce Turtle; `--format jsonld` produces JSON-LD instead.
+
+`pod import` accepts FHIR JSON, Cascade Turtle, C-CDA XML or zip, folders of those, and an
+unzipped Apple Health export (see
+[docs/2026-09-25-apple-health-wellness-import.md](docs/2026-09-25-apple-health-wellness-import.md)).
+To put genomics data in a Pod, convert it to Turtle first and import the result.
+
 ## Docker
 
-Run the CLI without installing Node.js. See [DOCKER.md](DOCKER.md) for full details.
+Run the CLI without installing Node.js. See [DOCKER.md](DOCKER.md) for details.
 
 ```bash
-# Build the image
 docker build -t cascade-protocol/tools .
-
-# Validate a Turtle file
-docker run --rm -v $(pwd):/data cascade-protocol/tools cascade validate /data/record.ttl
-```
-
-## Usage
-
-```
-cascade <command> [options]
-
-Commands:
-  validate      Validate Cascade data against SHACL shapes
-  convert       Convert between health data formats
-  pod           Manage Cascade Pod structures
-  conformance   Run conformance test suite
-  serve         Start local agent server
-  capabilities  Show machine-readable tool descriptions
-
-Flags:
-  --help        Show help
-  --version     Show version
-  --verbose     Verbose output
-  --json        Output results as JSON (machine-readable)
-```
-
-## Examples
-
-```bash
-cascade validate record.ttl
-cascade convert --from fhir --to cascade patient.json
-cascade pod init ./my-pod
-cascade capabilities
+docker run --rm -v "$(pwd)":/data cascade-protocol/tools validate /data/record.ttl
 ```
 
 ## Reconciling a pod's own duplicates
@@ -213,14 +293,90 @@ you script against this tool: an unreadable pod must never be mistaken for an
 empty one. The codes, the `--json` error envelope, and the MCP equivalents are
 documented in [docs/exit-codes.md](docs/exit-codes.md).
 
+## Encryption at rest
+
+A Pod can be encrypted with AES-256-GCM under a key wrapped by your passphrase:
+
+```bash
+cascade pod init ./my-pod --encrypt     # new encrypted Pod
+cascade pod encrypt ./my-pod            # encrypt an existing plaintext Pod
+```
+
+The passphrase is read from `CASCADE_POD_PASSPHRASE`, or from a hidden prompt; it is never
+accepted as an argument. Every other command opens an encrypted Pod the same way. The design,
+the on-disk format, and passphrase changes and re-keying are documented in
+[docs/pod-encryption.md](docs/pod-encryption.md).
+
+## Connecting an AI agent (MCP)
+
+`cascade serve --mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over
+stdio. To add it to an MCP client such as Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "cascade": {
+      "command": "cascade",
+      "args": ["serve", "--mcp", "--pod", "/path/to/my-pod"]
+    }
+  }
+}
+```
+
+It exposes six tools: `cascade_pod_read`, `cascade_pod_query`, `cascade_validate`,
+`cascade_convert`, `cascade_write` and `cascade_capabilities`. Records an agent writes are tagged
+with AI-extracted provenance, and every MCP operation is logged to `provenance/audit-log.ttl` in
+the Pod. `--transport sse --port <n>` serves the same tools over HTTP instead; the SSE server has
+no authentication of its own, so prefer stdio.
+
+## Advisories (experimental)
+
+A Cascade Advisory Patch (CAP) is a signed update an issuer publishes about records a Pod may
+hold, for example a reclassified genetic variant. The Pod owner decides whether to apply it, can
+preview it first, and can roll it back:
+
+```bash
+cascade advisory validate advisory.ldpatch
+cascade advisory dry-run advisory.ldpatch --pod ./my-pod
+cascade advisory apply advisory.ldpatch --pod ./my-pod --signature advisory.jws --key <hex>
+cascade advisory list --pod ./my-pod --pending
+cascade advisory revert --pod ./my-pod --advisory <advisory-iri>
+cascade advisory feed pull https://issuer.example/feed.jsonld --pod ./my-pod
+```
+
+The advisory vocabulary is still a draft in [`spec`](https://github.com/the-cascade-protocol/spec),
+so the patch format may change between releases.
+
+## Plain-English agent
+
+`cascade agent` (provided by
+[`@the-cascade-protocol/agent`](https://www.npmjs.com/package/@the-cascade-protocol/agent))
+turns a request like "convert every FHIR file in ~/records and validate the output" into
+`cascade` commands, showing each one as it runs. Run it with no prompt for an interactive
+session, or pass a prompt for a single request.
+
+```bash
+cascade agent login                 # add credentials for a provider
+cascade agent provider anthropic    # or openai, google, ollama
+cascade agent "how many conditions are in ./my-pod?"
+```
+
+Unlike the rest of the CLI, the agent sends your prompts and the output of the commands it runs
+to the provider you choose. With a hosted provider that can include health data from your Pod;
+use `ollama` to keep everything on your machine.
+
 ## Development
 
 ```bash
-npm install
+npm ci
 npm run build
 npm run dev -- --help
 npm test
 ```
+
+The test suite needs sibling checkouts of `conformance` and `spec` and Apache Jena `riot` on your
+`PATH`. [CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, what must pass before review, and how
+to add a `--from` importer.
 
 ## License
 

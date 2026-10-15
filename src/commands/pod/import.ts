@@ -1,7 +1,7 @@
 /**
  * cascade pod import <pod-dir> <files...>
  *
- * Import FHIR JSON or Cascade Turtle files into a Cascade Pod.
+ * Import FHIR JSON, C-CDA, Cascade Turtle or an Apple Health export into a Cascade Pod.
  *
  * Converts FHIR to Cascade Turtle if needed, optionally reconciles multiple
  * inputs, routes records by type to the correct pod data files, updates type
@@ -533,7 +533,7 @@ async function appendIndexContains(
 export function registerImportSubcommand(pod: Command, program: Command): void {
   pod
     .command('import')
-    .description('Import FHIR JSON or Cascade Turtle files into a pod')
+    .description('Import FHIR JSON, C-CDA, Cascade Turtle or an Apple Health export into a pod')
     .argument('<pod-dir>', 'Path to the Cascade Pod directory')
     .argument('<files...>', 'Files or folders to import (FHIR JSON, Cascade Turtle, C-CDA XML/zip, or a folder / Apple Health export)')
     .option('--source-system <name>', 'Tag all imported records with this system name')
