@@ -9,6 +9,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **The Docker image files** (`Dockerfile`, `.dockerignore`, `DOCKER.md`) and
+  the README's Docker section. The image was never published to a registry,
+  nothing built or tested it, it ran on Node 18 (no longer supported), and its
+  documented examples failed for months unnoticed. Use
+  `npx @the-cascade-protocol/cli` to run the CLI without a global install.
+
 ## [0.28.0] - 2026-10-15
 
 The MCP server's SSE transport now answers only this machine, `pod add-record` writes records that pass `cascade validate` and refuses ones missing a required property, `cascade capabilities` names every command that can reach a network, and the README covers every command.
