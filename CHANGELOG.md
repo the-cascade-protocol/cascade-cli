@@ -31,6 +31,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`pod import --help`** names every input it accepts (C-CDA and Apple Health
   exports were missing from the one-line description).
 
+### Security
+
+- **`serve --mcp --transport sse` now answers this machine only.** It listened
+  on every network interface, and the server has no authentication, so any
+  host that could reach the port could call the MCP tools, including
+  `cascade_pod_read` and `cascade_write`, against the served pod. It now binds
+  `127.0.0.1`, and it refuses (403) any request whose `Host` header is not
+  `localhost` or `127.0.0.1`, so a web page cannot reach it by DNS rebinding.
+  The existing `Origin` check is unchanged. A port already in use is now
+  reported as an error at startup. The stdio transport was never affected.
+
 ## [0.27.0] - 2026-09-28
 
 Reading a pod with wellness data cheaply: `pod query --exclude-data-type` (with a `wellness` group that keeps supplements) skips excluded files entirely, `--wellness-series` returns the stored daily series (freshness-checked), and the MCP `cascade_pod_query` tool takes the same options.

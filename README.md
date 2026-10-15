@@ -326,8 +326,9 @@ stdio. To add it to an MCP client such as Claude Desktop:
 It exposes six tools: `cascade_pod_read`, `cascade_pod_query`, `cascade_validate`,
 `cascade_convert`, `cascade_write` and `cascade_capabilities`. Records an agent writes are tagged
 with AI-extracted provenance, and every MCP operation is logged to `provenance/audit-log.ttl` in
-the Pod. `--transport sse --port <n>` serves the same tools over HTTP instead; the SSE server has
-no authentication of its own, so prefer stdio.
+the Pod. `--transport sse --port <n>` serves the same tools over HTTP instead. The SSE server has
+no authentication of its own, so it listens on `127.0.0.1` only and refuses requests addressed to
+any other host name; anything running on your machine can still reach it, so prefer stdio.
 
 ## Advisories (experimental)
 

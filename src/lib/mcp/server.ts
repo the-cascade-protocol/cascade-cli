@@ -94,7 +94,22 @@ export async function startServer(options: ServeOptions): Promise<void> {
 /**
  * Start an SSE-based MCP server on the specified port.
  */
-async function startSSEServer(server: McpServer, port: number, podPath?: string): Promise<void> {
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
+
+function isLoopbackHostHeader(host: string | undefined): boolean {
+  if (!host) return false;
+  try {
+    return LOOPBACK_HOSTNAMES.has(new URL(`http://${host}`).hostname);
+  } catch {
+    return false;
+  }
+}
+
+export async function startSSEServer(
+  server: McpServer,
+  port: number,
+  podPath?: string,
+): Promise<import('http').Server> {
   // Dynamic import to avoid loading http module for stdio transport
   const { SSEServerTransport } = await import('@modelcontextprotocol/sdk/server/sse.js');
   const http = await import('http');
@@ -103,7 +118,15 @@ async function startSSEServer(server: McpServer, port: number, podPath?: string)
   const transports = new Map<string, InstanceType<typeof SSEServerTransport>>();
 
   const httpServer = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', `http://localhost:${port}`);
+    // The server has no authentication, so it must only ever answer this machine. Binding to
+    // loopback keeps other hosts out; the Host check stops a web page reaching it via DNS rebinding.
+    if (!isLoopbackHostHeader(req.headers['host'])) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Forbidden: only localhost hosts are allowed' }));
+      return;
+    }
+
+    const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
 
     // CORS headers — restricted to localhost origins only.
     // Requests without an Origin header (same-origin, CLI tools, curl) are allowed.
@@ -180,13 +203,22 @@ async function startSSEServer(server: McpServer, port: number, podPath?: string)
     }
   });
 
-  httpServer.listen(port, () => {
-    console.error(`[cascade] MCP server started (SSE transport)`);
-    console.error(`[cascade] Listening on http://localhost:${port}`);
-    console.error(`[cascade] SSE endpoint: http://localhost:${port}/sse`);
-    console.error(`[cascade] Health check: http://localhost:${port}/health`);
-    if (podPath) {
-      console.error(`[cascade] Default Pod path: ${podPath}`);
-    }
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once('error', reject);
+    httpServer.listen(port, '127.0.0.1', () => {
+      httpServer.off('error', reject);
+      resolve();
+    });
   });
+
+  const address = httpServer.address();
+  const boundPort = typeof address === 'object' && address ? address.port : port;
+  console.error(`[cascade] MCP server started (SSE transport)`);
+  console.error(`[cascade] Listening on http://127.0.0.1:${boundPort} (this machine only)`);
+  console.error(`[cascade] SSE endpoint: http://127.0.0.1:${boundPort}/sse`);
+  console.error(`[cascade] Health check: http://127.0.0.1:${boundPort}/health`);
+  if (podPath) {
+    console.error(`[cascade] Default Pod path: ${podPath}`);
+  }
+  return httpServer;
 }

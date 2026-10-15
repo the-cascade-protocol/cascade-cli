@@ -39,7 +39,7 @@ export function registerServeCommand(program: Command): void {
     .description('Start local agent server')
     .option('--mcp', 'Enable MCP (Model Context Protocol) mode')
     .option('--transport <transport>', 'Transport type (stdio|sse)', 'stdio')
-    .option('--port <port>', 'Port for SSE transport', '3000')
+    .option('--port <port>', 'Port for SSE transport (listens on 127.0.0.1 only)', '3000')
     .option('--pod <path>', 'Default Pod directory path')
     .action(
       async (options: {
