@@ -517,7 +517,7 @@ describe('capabilities: the network claim matches the code', () => {
     // claim the CLI as a whole makes no network calls.
     expect(
       capabilities.securityModel.networkCalls,
-      'securityModel.networkCalls claims zero network calls again. Two verbs make them.',
+      'securityModel.networkCalls claims zero network calls again. Three commands make them.',
     ).not.toMatch(/^zero/);
     expect(
       capabilities.description,
@@ -529,6 +529,38 @@ describe('capabilities: the network claim matches the code', () => {
     for (const entry of NETWORK_ALLOWLIST) {
       expect(fs.existsSync(path.join(SRC_DIR, entry.file)), `${entry.file} no longer exists`).toBe(true);
       expect(entry.why.length, `${entry.file} is allowlisted with no stated reason`).toBeGreaterThan(20);
+    }
+  });
+
+  // The fetch() grep above only sees src/. `agent` is registered from
+  // @the-cascade-protocol/agent and reaches hosted AI providers, so it went
+  // unnamed in networkCalls. Every top-level command must therefore be
+  // classified here by hand; a new one fails until someone decides which it is.
+  const NETWORK_COMMANDS: Readonly<Record<string, string>> = {
+    agent: 'sends prompts and command output to the configured AI provider (registered from @the-cascade-protocol/agent)',
+  };
+  const LOCAL_COMMANDS = new Set([
+    'validate', 'convert', 'reconcile', 'pod', 'sources', 'conformance', 'serve',
+    'capabilities', 'advisory',
+  ]);
+
+  it('classifies every top-level command as local or network, including ones another package registers', () => {
+    const registered = buildProgram().commands.map((c) => c.name()).sort();
+    const unclassified = registered.filter((n) => !LOCAL_COMMANDS.has(n) && !(n in NETWORK_COMMANDS));
+    expect(
+      unclassified,
+      'A top-level command is not classified. If it, or anything it delegates to, can reach a ' +
+        'network, add it to NETWORK_COMMANDS and name it in securityModel.networkCalls; ' +
+        'otherwise add it to LOCAL_COMMANDS.',
+    ).toEqual([]);
+    for (const name of [...LOCAL_COMMANDS, ...Object.keys(NETWORK_COMMANDS)]) {
+      expect(registered, `${name} is classified but no longer registered`).toContain(name);
+    }
+  });
+
+  it('names every network command in the security model', () => {
+    for (const name of Object.keys(NETWORK_COMMANDS)) {
+      expect(capabilities.securityModel.networkCalls).toContain(`\`${name}\``);
     }
   });
 });

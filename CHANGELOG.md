@@ -9,6 +9,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`pod add-record` writes records that pass `cascade validate`.** Every
+  record it added lacked `cascade:schemaVersion`, which the medication,
+  condition, allergy and supplement shapes require, so a complete record
+  failed validation the moment it was written. It now stamps the same schema
+  version the importers do, and the MCP `cascade_write` tool reads that
+  version from the same constant instead of its own copy.
+- **`cascade capabilities` names `agent` as a command that uses the network.**
+  `securityModel.networkCalls` listed only `advisory feed pull` and
+  `pod extract`. `agent` sends prompts, and the output of the commands it
+  runs, to the AI provider you configure. A test now requires every top-level
+  command, including ones registered by another package, to be classified as
+  local or network.
+
 ### Changed
 
 - **README rewritten around what the CLI does today.** The command list now

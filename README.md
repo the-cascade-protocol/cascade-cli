@@ -364,7 +364,7 @@ cascade agent "how many conditions are in ./my-pod?"
 
 Unlike the rest of the CLI, the agent sends your prompts and the output of the commands it runs
 to the provider you choose. With a hosted provider that can include health data from your Pod;
-use `ollama` to keep everything on your machine.
+use `ollama` with a local Ollama server (its default) to keep everything on your machine.
 
 ## Development
 

@@ -37,6 +37,7 @@ import { resolvePodDek, mintUri } from '../../lib/annotations.js';
 import { mergeIntoBucket, KNOWN_PREFIXES, assertWritableIri } from '../../lib/bucket-write.js';
 import { typedLiteralForPredicate } from '../../lib/shape-datatypes.js';
 import { registeredDataTypeKeyForSubject } from '../../lib/pod-data-types.js';
+import { SCHEMA_VERSION } from '../../lib/fhir-converter/types.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -223,6 +224,11 @@ export function registerAddRecordSubcommand(pod: Command, program: Command): voi
         subject,
         namedNode(KNOWN_PREFIXES.prov + 'wasAttributedTo'),
         namedNode(options.by ?? PATIENT_WEBID),
+      ));
+      newQuads.push(makeQuad(
+        subject,
+        namedNode(KNOWN_PREFIXES.cascade + 'schemaVersion'),
+        literal(SCHEMA_VERSION),
       ));
       // Verification axis (orthogonal to source): self-entered data is unverified
       // until corroborated. Mirrors FHIR verificationStatus.
