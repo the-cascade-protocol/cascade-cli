@@ -59,6 +59,18 @@ describe('cascade serve --mcp --transport sse answers this machine only', () => 
     }
   });
 
+  it('reports the package version on /health', async () => {
+    const { CLI_VERSION } = await import('../src/lib/version.js');
+    const body = await new Promise<string>((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port, path: '/health' }, (res) => {
+        let s = '';
+        res.on('data', (d) => (s += d));
+        res.on('end', () => resolve(s));
+      }).on('error', reject);
+    });
+    expect(JSON.parse(body).version).toBe(CLI_VERSION);
+  });
+
   it('answers a request addressed to 127.0.0.1 or localhost, with no Origin header', async () => {
     expect(await get(port, `127.0.0.1:${port}`)).toBe(200);
     expect(await get(port, `localhost:${port}`)).toBe(200);

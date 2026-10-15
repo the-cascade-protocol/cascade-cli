@@ -38,6 +38,7 @@ import { mergeIntoBucket, KNOWN_PREFIXES, assertWritableIri } from '../../lib/bu
 import { typedLiteralForPredicate } from '../../lib/shape-datatypes.js';
 import { registeredDataTypeKeyForSubject } from '../../lib/pod-data-types.js';
 import { SCHEMA_VERSION } from '../../lib/fhir-converter/types.js';
+import { requiredProperties } from '../../lib/shape-requirements.js';
 
 const { namedNode, literal, quad: makeQuad } = DataFactory;
 
@@ -71,6 +72,13 @@ function expandCurie(curie: string): string | undefined {
   const ns = PREFIX_NS[prefix];
   if (!ns) return undefined;
   return ns + local;
+}
+
+function compactIri(iri: string): string {
+  for (const [prefix, ns] of Object.entries(PREFIX_NS)) {
+    if (iri.startsWith(ns)) return `${prefix}:${iri.slice(ns.length)}`;
+  }
+  return iri;
 }
 
 /**
@@ -242,6 +250,23 @@ export function registerAddRecordSubcommand(pod: Command, program: Command): voi
         namedNode(KNOWN_PREFIXES.dct + 'created'),
         literal(createdIso, namedNode(KNOWN_PREFIXES.xsd + 'dateTime')),
       ));
+
+      // Refuse a record the validator would reject for a missing required property: a
+      // hand-entered record is the one place the gap can still be filled.
+      const present = new Set(
+        newQuads
+          .filter((q) => q.object.termType !== 'Literal' || q.object.value.trim() !== '')
+          .map((q) => q.predicate.value),
+      );
+      const missing = requiredProperties(typeIri).filter((p) => !present.has(p));
+      if (missing.length > 0) {
+        printError(
+          `A ${options.type} record needs ${missing.map(compactIri).join(', ')}. Nothing was written.`,
+          globalOpts,
+        );
+        process.exitCode = 1;
+        return;
+      }
 
       const bucket = findBucketForRecord(newQuads);
       if (!bucket) {
