@@ -53,8 +53,7 @@
     "docs/pod-encryption.md",
     "README.md",
     "LICENSE",
-    "THIRD-PARTY-NOTICES.md",
-    "DOCKER.md"
+    "THIRD-PARTY-NOTICES.md"
   ],
   "dependencies": {
     "@gmod/vcf": "^7.0.2",

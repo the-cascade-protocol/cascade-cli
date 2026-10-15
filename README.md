@@ -126,15 +126,6 @@ unzipped Apple Health export (see
 [docs/2026-09-25-apple-health-wellness-import.md](docs/2026-09-25-apple-health-wellness-import.md)).
 To put genomics data in a Pod, convert it to Turtle first and import the result.
 
-## Docker
-
-Run the CLI without installing Node.js. See [DOCKER.md](DOCKER.md) for details.
-
-```bash
-docker build -t cascade-protocol/tools .
-docker run --rm -v "$(pwd)":/data cascade-protocol/tools validate /data/record.ttl
-```
-
 ## Reconciling a pod's own duplicates
 
 `pod import` compares arriving records against stored ones, and never two stored records with each
