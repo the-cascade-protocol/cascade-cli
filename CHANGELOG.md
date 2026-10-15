@@ -9,6 +9,28 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **README rewritten around what the CLI does today.** The command list now
+  covers every registered command, adding `reconcile`, `sources`, `advisory`
+  and `agent`, plus a grouped table of all 19 `pod` subcommands. New sections
+  on input formats, encryption at rest, the MCP server, advisories and the
+  agent, and a link to the generated command reference on cascadeprotocol.org.
+  The network statement now names all three commands that can contact a
+  network (`agent` was missing).
+- **Docker examples fixed.** The image's entrypoint is the CLI, so the
+  documented `docker run ... cascade-protocol/tools cascade validate ...` failed
+  with `unknown command 'cascade'`. README and `DOCKER.md` now drop the leading
+  `cascade`, and `DOCKER.md` no longer claims an image size, platforms, or a
+  "no network calls" rule the `agent` command does not follow.
+- **The README that `pod init` writes into a new pod** now points to
+  `pod import` and `pod profile set-name` instead of telling the owner to edit
+  Turtle and the type indexes by hand, fixes the Pod Structure link (it
+  returned 404), links the CLI command reference, and drops a link to a
+  repository outside the project.
+- **`pod import --help`** names every input it accepts (C-CDA and Apple Health
+  exports were missing from the one-line description).
+
 ## [0.27.0] - 2026-09-28
 
 Reading a pod with wellness data cheaply: `pod query --exclude-data-type` (with a `wellness` group that keeps supplements) skips excluded files entirely, `--wellness-series` returns the stored daily series (freshness-checked), and the MCP `cascade_pod_query` tool takes the same options.
