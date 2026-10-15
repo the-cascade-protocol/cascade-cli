@@ -33,6 +33,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`pod add-record` refuses a record missing a required property.** It wrote
+  a condition with no name, an allergy with no allergen, or a supplement with
+  no regulatory status, and `cascade validate` then failed the pod. It now
+  reads the required properties for the type from the bundled shapes (the same
+  source `validate` uses), names every missing one, exits 1 and writes
+  nothing. A blank value counts as missing. Only Violation-level requirements
+  are enforced, so a record that `validate` would pass with a warning is still
+  accepted.
+- **The MCP server reports the package version** in its `initialize`
+  handshake and on the SSE `/health` endpoint. Both said `0.2.0`.
 - **`pod add-record` writes records that pass `cascade validate`.** Every
   record it added lacked `cascade:schemaVersion`, which the medication,
   condition, allergy and supplement shapes require, so a complete record

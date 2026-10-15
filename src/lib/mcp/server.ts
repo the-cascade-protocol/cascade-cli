@@ -25,6 +25,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerTools, setDefaultPodPath } from './tools.js';
+import { CLI_VERSION } from '../version.js';
 
 export interface ServeOptions {
   transport: 'stdio' | 'sse';
@@ -39,7 +40,7 @@ export function createServer(): McpServer {
   const server = new McpServer(
     {
       name: 'cascade-protocol',
-      version: '0.2.0',
+      version: CLI_VERSION,
     },
     {
       capabilities: {
@@ -185,7 +186,7 @@ export async function startSSEServer(
       res.end(JSON.stringify({
         status: 'ok',
         server: 'cascade-protocol',
-        version: '0.2.0',
+        version: CLI_VERSION,
         transport: 'sse',
         activeSessions: transports.size,
         podPath: podPath ?? 'not set',
