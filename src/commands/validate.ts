@@ -24,7 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
-import { printVerbose, type OutputOptions } from '../lib/output.js';
+import { printVerbose, writeStdout, type OutputOptions } from '../lib/output.js';
 import {
   loadShapes,
   validateFile,
@@ -268,7 +268,7 @@ export function registerValidateCommand(program: Command): void {
       // Check if path exists
       if (!fs.existsSync(targetPath)) {
         if (globalOpts.json) {
-          console.log(toJsonText({ error: `Path not found: ${targetPath}` }));
+          writeStdout(toJsonText({ error: `Path not found: ${targetPath}` }));
         } else {
           console.error(`${colors.red}ERROR${colors.reset}: Path not found: ${targetPath}`);
         }
@@ -289,7 +289,7 @@ export function registerValidateCommand(program: Command): void {
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         if (globalOpts.json) {
-          console.log(toJsonText({ error: msg }));
+          writeStdout(toJsonText({ error: msg }));
         } else {
           console.error(`${colors.red}ERROR${colors.reset}: ${msg}`);
         }
@@ -309,7 +309,7 @@ export function registerValidateCommand(program: Command): void {
           const msg =
             e instanceof PodDecryptError ? e.message : e instanceof Error ? e.message : String(e);
           if (globalOpts.json) {
-            console.log(toJsonText({ error: `Cannot read encrypted pod: ${msg}` }));
+            writeStdout(toJsonText({ error: `Cannot read encrypted pod: ${msg}` }));
           } else {
             console.error(`${colors.red}ERROR${colors.reset}: Cannot read encrypted pod: ${msg}`);
           }
@@ -326,7 +326,7 @@ export function registerValidateCommand(program: Command): void {
         filesToValidate = findTurtleFiles(targetPath);
         if (filesToValidate.length === 0) {
           if (globalOpts.json) {
-            console.log(toJsonText({ error: `No .ttl files found in ${targetPath}` }));
+            writeStdout(toJsonText({ error: `No .ttl files found in ${targetPath}` }));
           } else {
             console.error(`${colors.yellow}WARNING${colors.reset}: No .ttl files found in ${targetPath}`);
           }
@@ -337,7 +337,7 @@ export function registerValidateCommand(program: Command): void {
       } else if (stat.isFile()) {
         if (!targetPath.endsWith('.ttl')) {
           if (globalOpts.json) {
-            console.log(toJsonText({ error: `Not a Turtle file: ${targetPath}` }));
+            writeStdout(toJsonText({ error: `Not a Turtle file: ${targetPath}` }));
           } else {
             console.error(`${colors.red}ERROR${colors.reset}: Not a Turtle file (expected .ttl): ${targetPath}`);
           }
@@ -347,7 +347,7 @@ export function registerValidateCommand(program: Command): void {
         filesToValidate = [targetPath];
       } else {
         if (globalOpts.json) {
-          console.log(toJsonText({ error: `Not a file or directory: ${targetPath}` }));
+          writeStdout(toJsonText({ error: `Not a file or directory: ${targetPath}` }));
         } else {
           console.error(`${colors.red}ERROR${colors.reset}: Not a file or directory: ${targetPath}`);
         }
@@ -373,7 +373,7 @@ export function registerValidateCommand(program: Command): void {
 
           // Print result immediately in human-readable mode
           if (!globalOpts.json) {
-            console.log(formatResultHuman(result, globalOpts.verbose));
+            writeStdout(formatResultHuman(result, globalOpts.verbose));
           }
         } catch (e: unknown) {
           hasErrors = true;
@@ -400,14 +400,14 @@ export function registerValidateCommand(program: Command): void {
           };
           results.push(errorResult);
           if (!globalOpts.json) {
-            console.log(formatResultHuman(errorResult, globalOpts.verbose));
+            writeStdout(formatResultHuman(errorResult, globalOpts.verbose));
           }
         }
       }
 
       // Output JSON
       if (globalOpts.json) {
-        console.log(toJsonText(results));
+        writeStdout(toJsonText(results));
       } else {
         // Print summary for multiple files
         if (results.length > 1) {

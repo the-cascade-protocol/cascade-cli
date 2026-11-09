@@ -53,6 +53,7 @@ import {
 } from '../lib/advisory/feed-client.js';
 import { parseTurtle } from '../lib/turtle-parser.js';
 import { toJsonText } from '../lib/json-output.js';
+import { writeStdout } from '../lib/output.js';
 import { podPathPresentOrRefused, readPodFile, walkPodTree, writePodFile } from '../lib/pod-path.js';
 
 const { namedNode } = DataFactory;
@@ -190,7 +191,7 @@ async function runValidate(program: Command, patchPath: string): Promise<void> {
   const parseResult = parseCap(src);
   if (!parseResult.ast) {
     if (opts.json) {
-      console.log(toJsonText({ valid: false, parseErrors: parseResult.errors }));
+      writeStdout(toJsonText({ valid: false, parseErrors: parseResult.errors }));
     } else {
       console.error(`Parse failed for ${patchPath}:`);
       for (const e of parseResult.errors) {
@@ -202,7 +203,7 @@ async function runValidate(program: Command, patchPath: string): Promise<void> {
   }
   const validation = validateCap(parseResult.ast);
   if (opts.json) {
-    console.log(
+    writeStdout(
       toJsonText(
         {
           valid: validation.valid,
@@ -290,7 +291,7 @@ async function runApply(
   const bindings = evaluateSelector(parseResult.ast, podStore);
   if (bindings.length === 0) {
     if (opts.json) {
-      console.log(toJsonText({ applied: 0, reason: 'inapplicable' }));
+      writeStdout(toJsonText({ applied: 0, reason: 'inapplicable' }));
     } else {
       console.log(`Advisory not applicable to this pod (zero selector matches).`);
     }
@@ -314,7 +315,7 @@ async function runApply(
   });
 
   if (opts.json) {
-    console.log(
+    writeStdout(
       toJsonText(
         {
           applied: applyResult.matchesApplied,
@@ -345,7 +346,7 @@ async function runList(program: Command, options: ListOptions): Promise<void> {
         : undefined;
   const records = listCacheRecords(options.pod, filter as AdvisoryCacheStatus | undefined);
   if (opts.json) {
-    console.log(toJsonText(records));
+    writeStdout(toJsonText(records));
     return;
   }
   if (records.length === 0) {
@@ -420,7 +421,7 @@ async function runRevert(program: Command, options: RevertOptions): Promise<void
   });
 
   if (opts.json) {
-    console.log(
+    writeStdout(
       toJsonText(
         { reverted: options.advisory, activitiesRemoved: activitySubjects.size, triplesRemoved: removedCount },
       ),
@@ -442,7 +443,7 @@ async function runFeedPull(
   const opts = globalOpts(program);
   const result = await pullFeed(url, options.pod);
   if (opts.json) {
-    console.log(toJsonText(result));
+    writeStdout(toJsonText(result));
   } else if (!result.ok) {
     console.error(`Feed pull failed: ${result.reason}`);
   } else {
@@ -497,7 +498,7 @@ async function runDryRun(
   const bindings = evaluateSelector(parseResult.ast, cloneStore);
   if (bindings.length === 0) {
     if (opts.json) {
-      console.log(toJsonText({ matches: 0, wouldInsert: 0 }));
+      writeStdout(toJsonText({ matches: 0, wouldInsert: 0 }));
     } else {
       console.log(`Advisory inapplicable to this pod (zero matches). No triples would be inserted.`);
     }
@@ -512,7 +513,7 @@ async function runDryRun(
   });
 
   if (opts.json) {
-    console.log(
+    writeStdout(
       toJsonText(
         {
           matches: bindings.length,
@@ -528,7 +529,7 @@ async function runDryRun(
       `Dry-run: ${bindings.length} match(es), would insert ${result.insertedQuads.length} triple(s).`,
     );
     console.log('--- would-insert ---');
-    console.log(quadsToTurtle(result.insertedQuads));
+    writeStdout(quadsToTurtle(result.insertedQuads));
     console.log('--- end dry-run ---');
     console.log(`Pod state unchanged.`);
   }

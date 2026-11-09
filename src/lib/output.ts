@@ -60,7 +60,25 @@ function formatSingleItem(item: unknown): string {
  * exit immediately after large writes.
  */
 export function printResult(data: unknown, opts: OutputOptions): void {
-  process.stdout.write(formatOutput(data, opts) + '\n');
+  writeStdout(formatOutput(data, opts));
+}
+
+/**
+ * Write one payload (a document, a Turtle graph, a JSON array) to stdout,
+ * followed by a newline.
+ *
+ * Use this, never `console.log`, for any output whose size the caller does not
+ * bound. In a Bun-compiled binary a single `console.log` call whose payload is
+ * larger than 64 KiB is cut to exactly 65,536 bytes when stdout is a pipe, and
+ * the process still exits 0, so a consumer reading the pipe gets a truncated
+ * document with no error. `process.stdout.write` is not affected. Measured on a
+ * compiled binary: `convert --from fhir --to turtle` on a 617 KB bundle wrote
+ * 65,536 bytes to a pipe and 217,293 to a file.
+ *
+ * `console.log` stays fine for short status lines.
+ */
+export function writeStdout(text: string): void {
+  process.stdout.write(text + '\n');
 }
 
 /**
