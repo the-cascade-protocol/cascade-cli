@@ -9,6 +9,23 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Large outputs are no longer cut off when the CLI runs as a single-file
+  executable and its stdout is a pipe.** In a Bun-compiled binary one
+  `console.log` call larger than 64 KiB was truncated to 65,536 bytes with exit
+  code 0, which broke `--json validate` on directories of roughly 60 or more
+  files, `pod conflicts --format json`, `convert` and `reconcile` to stdout, and
+  several `advisory` outputs. Every unbounded payload now goes through
+  `process.stdout.write`, and `pod conflicts` sets its exit code instead of
+  calling `process.exit()` after printing. A test guards the call shapes.
+- **RxNorm ingredient names are bundled with the code.** The name table was read
+  from disk relative to the module, so a single-file build could not find it,
+  silently used an empty table, and gave a medication named only by its RxNorm
+  code a different name (and so a different record identifier) than an
+  unbundled CLI did. The table is now imported through the module graph, and a
+  test bundles the lookup into a directory with no data beside it.
+
 ### Removed
 
 - **The Docker image files** (`Dockerfile`, `.dockerignore`, `DOCKER.md`) and

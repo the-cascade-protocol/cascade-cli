@@ -30,7 +30,7 @@
 
 import { Command } from 'commander';
 import { readFileSync, realpathSync } from 'node:fs';
-import { printResult, printError, printVerbose, type OutputOptions } from '../lib/output.js';
+import { printResult, printError, printVerbose, writeStdout, type OutputOptions } from '../lib/output.js';
 import type { ImportContext, ImporterCliOption, OutputFormat } from '../lib/import-types.js';
 import { getImporter, listFormats, autoDetect, importers } from '../lib/import-registry.js';
 
@@ -274,7 +274,7 @@ export function registerConvertCommand(program: Command): void {
           globalOpts,
         );
       } else {
-        console.log(result.output);
+        writeStdout(result.output);
         if (result.resourceCount > 0) {
           console.error(
             `Converted ${result.resourceCount} resource${result.resourceCount > 1 ? 's' : ''} ` +

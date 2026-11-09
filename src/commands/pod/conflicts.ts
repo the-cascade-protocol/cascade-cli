@@ -41,7 +41,7 @@ import {
   type UserResolution,
 } from '../../lib/user-resolutions.js';
 import { resolvePodDir, resolvePodDekIfEncrypted } from './helpers.js';
-import { printError, type OutputOptions } from '../../lib/output.js';
+import { printError, writeStdout, type OutputOptions } from '../../lib/output.js';
 import { toJsonText } from '../../lib/json-output.js';
 import { shellCommand } from '../../lib/shell-quote.js';
 
@@ -76,11 +76,11 @@ export function registerConflictsCommand(podProgram: Command, program: Command):
       }
 
       if (options.format === 'json') {
-        console.log(toJsonText(conflicts));
+        writeStdout(toJsonText(conflicts));
       } else {
         if (conflicts.length === 0) {
           console.log(`No unresolved conflicts in pod at ${podDir}`);
-          process.exit(0);
+          return;
         }
 
         console.log(`${conflicts.length} unresolved conflict${conflicts.length > 1 ? 's' : ''} in pod at ${podDir}\n`);
@@ -107,8 +107,9 @@ export function registerConflictsCommand(podProgram: Command, program: Command):
           console.log();
         }
 
-        // Exit code 1 if there are conflicts (useful for CI)
-        process.exit(1);
+        // Exit code 1 if there are conflicts (useful for CI). Set, not called:
+        // process.exit() can drop stdout a pipe has not drained yet.
+        process.exitCode = 1;
       }
     });
 }
@@ -158,7 +159,7 @@ async function listResolutions(
     }));
 
   if (format === 'json') {
-    console.log(toJsonText(rows));
+    writeStdout(toJsonText(rows));
     return;
   }
 

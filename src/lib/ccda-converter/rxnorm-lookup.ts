@@ -11,35 +11,24 @@
  *    Health and Human Services; NLM is not responsible for the product and
  *    does not endorse or recommend this or any other product."
  *
- * If the data file is absent or empty (e.g. a fresh clone before running the
- * build script), all lookups return undefined gracefully — the converter
- * continues to work, just without resolved medication names.
+ * The table is imported through the module graph, the same way
+ * `src/lib/terminology.ts` imports its asset, so a bundler inlines it. It used
+ * to be read from disk relative to this module's own URL, and a single-file
+ * build (where every bundled module reports the same virtual URL) could not
+ * find the file: the read failed, the lookup silently became empty, and a
+ * medication whose only name was its RxNorm code got a different name, and so
+ * a different content-derived record identifier, than the same input imported
+ * by an unbundled CLI.
  */
 
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { join, dirname } from 'path';
+import rxnormNames from '../../data/rxnorm-names.json' with { type: 'json' };
 
-let _cache: Record<string, string> | null = null;
-
-function getCache(): Record<string, string> {
-  if (_cache !== null) return _cache;
-  try {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    // Resolves to dist/data/rxnorm-names.json at runtime (copied during build)
-    const dataPath = join(__dirname, '../../data/rxnorm-names.json');
-    _cache = JSON.parse(readFileSync(dataPath, 'utf-8')) as Record<string, string>;
-  } catch {
-    _cache = {};
-  }
-  return _cache;
-}
+const TABLE: Readonly<Record<string, string>> = rxnormNames as Record<string, string>;
 
 /**
  * Look up a generic ingredient name by RxNorm RXCUI.
  * Returns undefined if the code is not in the lookup table.
  */
 export function lookupRxNormName(rxcui: string): string | undefined {
-  return getCache()[rxcui];
+  return Object.prototype.hasOwnProperty.call(TABLE, rxcui) ? TABLE[rxcui] : undefined;
 }

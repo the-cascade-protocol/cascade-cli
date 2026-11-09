@@ -31,7 +31,7 @@
 import { Command } from 'commander';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { printResult, printError, printVerbose, type OutputOptions } from '../lib/output.js';
+import { printResult, printError, printVerbose, writeStdout, type OutputOptions } from '../lib/output.js';
 import { runReconciliation } from '../lib/reconciler.js';
 import { toJsonText } from '../lib/json-output.js';
 
@@ -96,7 +96,7 @@ export function registerReconcileCommand(program: Command): void {
         writeFileSync(options.output, result.turtle);
         console.error(`Merged Turtle written to: ${options.output}`);
       } else {
-        console.log(result.turtle);
+        writeStdout(result.turtle);
       }
 
       const reportData = {
