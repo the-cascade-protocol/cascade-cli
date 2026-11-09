@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-09
+
+The CLI now works fully as a single-file executable: large outputs survive a pipe, and RxNorm ingredient names are bundled with the code.
+
 ### Fixed
 
 - **Large outputs are no longer cut off when the CLI runs as a single-file
