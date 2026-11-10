@@ -9,6 +9,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`pod import` reports whether the incoming files name the pod's owner.**
+  The import report gains a top-level `patientMatch` object:
+  `{ status: 'match' | 'mismatch' | 'unverified', comparedFields, pod: { hasName, hasDob },
+  incoming: { hasName, hasDob }, detail? }`. It compares the name and date of
+  birth the incoming C-CDA, IHE XDM zip, FHIR or Cascade Turtle files state
+  against the owner profile the pod held before the import (normalized name
+  comparison, exact date of birth), and is `unverified` when nothing is
+  comparable, which includes a first import into a fresh pod. It is computed on
+  `--dry-run`, never changes the exit code, never blocks the import, and holds
+  booleans, an enum and field names only, never a name or a date. A mismatch
+  also prints a warning that names the differing fields.
+- **`cascade inspect patient <paths...>`** prints, as JSON on stdout, the
+  patient name and birth date each file names:
+  `{ files: [{ file, format, incomingPatient: { name?, birthDate? } | null, patientCount }] }`.
+  It reads the same inputs `pod import` reads, folders included; a file that
+  names no patient (an Apple Health `export.xml`, a lone FHIR resource) reports
+  `null`. The output is PHI for an in-process caller: it is written to stdout
+  only, has no report option, and must not be logged.
+
 ## [0.28.1] - 2026-11-09
 
 The CLI now works fully as a single-file executable: large outputs survive a pipe, and RxNorm ingredient names are bundled with the code.

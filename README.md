@@ -55,6 +55,7 @@ fall behind. `cascade <command> --help` shows the same thing locally.
 | `reconcile <files...>` | Merge two or more loose Cascade Turtle files from different sources into one deduplicated record set |
 | `pod <subcommand>` | Create and manage a Pod ([below](#pod-subcommands)) |
 | `sources coverage <pod-dir>` | Report fields that were populated in the original source documents but not carried into the Pod |
+| `inspect patient <paths...>` | Print, as JSON on stdout, the patient name and birth date each record file names, so an app can check whose records they are before importing. The output is PHI: keep it in memory, never log it |
 | `serve --mcp` | Run the MCP server so an AI agent can read and write a Pod ([MCP](#connecting-an-ai-agent-mcp)) |
 | `capabilities` | Describe every command and MCP tool (as JSON with `--json`) |
 | `advisory <subcommand>` | Validate, preview, apply, list and revert Cascade Advisory Patches ([experimental](#advisories-experimental)) |

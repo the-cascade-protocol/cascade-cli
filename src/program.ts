@@ -16,6 +16,7 @@ import { registerConvertCommand } from './commands/convert.js';
 import { registerReconcileCommand } from './commands/reconcile.js';
 import { registerPodCommand } from './commands/pod/index.js';
 import { registerSourcesCommand } from './commands/sources.js';
+import { registerInspectCommand } from './commands/inspect.js';
 import { registerConformanceCommand } from './commands/conformance.js';
 import { registerServeCommand } from './commands/serve.js';
 import { registerCapabilitiesCommand } from './commands/capabilities.js';
@@ -39,6 +40,7 @@ export function buildProgram(): Command {
   registerReconcileCommand(program);
   registerPodCommand(program);
   registerSourcesCommand(program);
+  registerInspectCommand(program);
   registerConformanceCommand(program);
   registerServeCommand(program);
   registerCapabilitiesCommand(program);
