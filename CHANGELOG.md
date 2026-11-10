@@ -9,6 +9,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.28.2] - 2026-11-10
+
+An import now says whether the incoming records name the pod's owner, and a new verb reads whom a record file names before it is imported.
+
 ### Added
 
 - **`pod import` reports whether the incoming files name the pod's owner.**
