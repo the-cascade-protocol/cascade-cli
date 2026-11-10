@@ -32,6 +32,32 @@ function mapBiologicalSex(code: string): string | undefined {
   }
 }
 
+/**
+ * The name and birth time a C-CDA `recordTarget` states, read exactly as
+ * {@link extractPatientQuads} reads them: the first `<name>`, its first
+ * `<given>` and first `<family>`, and `birthTime/@value` as written
+ * (`YYYYMMDD...`). Empty strings where the document states nothing.
+ *
+ * Exported so the incoming-patient reader (`lib/incoming-patient.ts`) and the
+ * converter cannot disagree about who a document names.
+ */
+export function readCcdaPatientIdentity(recordTarget: any): {
+  given: any;
+  family: any;
+  birthTime: any;
+} {
+  const rt = Array.isArray(recordTarget) ? recordTarget[0] : recordTarget;
+  const patient = rt?.patientRole?.patient ?? rt?.patient ?? {};
+  const nameEl = firstOf<any>(patient.name) ?? {};
+  const given = Array.isArray(nameEl.given) ? nameEl.given[0] : nameEl.given ?? '';
+  const family = Array.isArray(nameEl.family) ? nameEl.family[0] : nameEl.family ?? '';
+  const givenStr = typeof given === 'string' ? given : given?.['#text'] ?? '';
+  const familyStr = typeof family === 'string' ? family : family?.['#text'] ?? '';
+  const birthTime = patient?.birthTime?.['@_value'] ?? patient?.birthTime?.value ?? '';
+  // Returned uncoerced, as the converter has always used them.
+  return { given: givenStr, family: familyStr, birthTime };
+}
+
 export function extractPatientQuads(
   recordTarget: any,
   sourceSystem: string,
@@ -50,13 +76,7 @@ export function extractPatientQuads(
   // const patientRole = rt?.patientRole ?? rt ?? {};
 
   // Extract demographics
-  const nameEl = firstOf<any>(patient.name) ?? {};
-  const given = Array.isArray(nameEl.given) ? nameEl.given[0] : nameEl.given ?? '';
-  const family = Array.isArray(nameEl.family) ? nameEl.family[0] : nameEl.family ?? '';
-  const givenStr = typeof given === 'string' ? given : given?.['#text'] ?? '';
-  const familyStr = typeof family === 'string' ? family : family?.['#text'] ?? '';
-
-  const dob = patient?.birthTime?.['@_value'] ?? patient?.birthTime?.value ?? '';
+  const { given: givenStr, family: familyStr, birthTime: dob } = readCcdaPatientIdentity(recordTarget);
   const sex = patient?.administrativeGenderCode?.['@_code'] ?? patient?.administrativeGenderCode?.code ?? '';
 
   // Extract address from patientRole

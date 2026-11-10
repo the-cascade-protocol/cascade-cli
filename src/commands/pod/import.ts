@@ -90,6 +90,13 @@ import { toJsonText } from '../../lib/json-output.js';
 import { appendTier0Journal, TIER0_JOURNAL_RELATIVE_PATH } from '../../lib/tier0-journal.js';
 import { shellCommand } from '../../lib/shell-quote.js';
 import { appendAll } from '../../lib/append-all.js';
+import {
+  computePatientMatch,
+  readIncomingPatients,
+  readPodOwnerIdentity,
+  type IncomingPatient,
+  type PatientMatch,
+} from '../../lib/incoming-patient.js';
 
 // ---------------------------------------------------------------------------
 // Import report type
@@ -211,6 +218,18 @@ interface ImportReport {
    * dry run, which writes nothing.
    */
   wellnessDailySeries?: DailySeriesRefresh;
+  /**
+   * Do the incoming files name the pod's owner? Computed from the
+   * demographics the inputs state and the profile the pod held BEFORE this
+   * import, and computed on `--dry-run` too, because a preflight is where a
+   * mismatch has to be caught.
+   *
+   * Booleans, an enum and field NAMES only, never a name or a date: this
+   * report is written to `--report` files and application logs. It never
+   * changes the exit code and never blocks the import. Additive alongside
+   * `recordsNew` / `recordsAlreadyPresent`.
+   */
+  patientMatch?: PatientMatch;
   warnings: string[];
   dryRun: boolean;
 }
@@ -592,6 +611,13 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         printVerbose('Dry-run mode: no files will be written.', globalOpts);
       }
 
+      // Who the pod belonged to BEFORE this import, for the patient-match
+      // verdict. Read now because Step 9b rewrites the profile from the very
+      // records being judged. PHI: held in memory only, never reported.
+      const podOwner = readPodOwnerIdentity(podDir, dek);
+      // Every patient the incoming files name. PHI: same rule.
+      const incomingPatients: IncomingPatient[] = [];
+
       // Parse trust scores
       const trustScores: Record<string, number> = {};
       if (options.trust) {
@@ -776,6 +802,9 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         // extension-less and an IHE XDM zip that reaches the Turtle parser dies
         // with `Unexpected "PK..."`.
         const inputKind = classifyImportInput(absPath, rawBytes);
+        // Read before conversion, so a file that then fails to convert still
+        // counts towards the verdict: it was offered as this person's record.
+        appendAll(incomingPatients, readIncomingPatients(rawBytes, inputKind));
         if (inputKind === 'ccda') {
           // C-CDA ZIP or XML — convert natively
           printVerbose(`Converting C-CDA: ${filePath}`, globalOpts);
@@ -1346,7 +1375,19 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         }
       }
 
-      // --- Step 9b: Populate card.ttl (name only) and profile/extended.ttl (PHI) ---
+      // --- Step 9b: Patient match, then populate card.ttl (name only) and
+      // profile/extended.ttl (PHI) ---
+      // The verdict compares the demographics the inputs state against the
+      // owner profile read before anything was written. Computed on a dry run.
+      const patientMatch = computePatientMatch(podOwner, incomingPatients);
+      if (patientMatch.status === 'mismatch') {
+        printWarning(
+          `These records may belong to someone other than this pod's owner. ${patientMatch.detail ?? ''} ` +
+            'Nothing was blocked; check before keeping them.',
+          globalOpts,
+        );
+      }
+
       const cardPath = path.join(podDir, 'profile', 'card.ttl');
       const extendedPath = path.join(podDir, 'profile', 'extended.ttl');
       if (!dryRun && await fileExists(cardPath)) {
@@ -1571,6 +1612,7 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
         sectionCensus,
         ...(wellnessReports.length > 0 ? { wellness: wellnessReports } : {}),
         ...(seriesRefresh ? { wellnessDailySeries: seriesRefresh } : {}),
+        patientMatch,
         warnings: allWarnings,
         dryRun,
       };
@@ -1598,6 +1640,10 @@ export function registerImportSubcommand(pod: Command, program: Command): void {
           console.log(`\nImport complete: ${podDir}`);
         }
         console.log(`  Sources:          ${sourceReport.length} file(s)`);
+        console.log(
+          `  Patient match:    ${patientMatch.status}` +
+            (patientMatch.comparedFields.length > 0 ? ` (compared ${patientMatch.comparedFields.join(', ')})` : ''),
+        );
         // "Records imported: 243" on a re-import of 243 records the pod already
         // held read as 243 fresh records. Name the duplicates.
         console.log(
