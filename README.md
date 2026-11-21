@@ -1,5 +1,7 @@
 # @the-cascade-protocol/cli
 
+> **Cascade Protocol v1.** This CLI runs Cascade Protocol v1 today; Cascade Protocol v2 support is planned. The v2 model is in [cascade-vocabulary](https://github.com/the-cascade-protocol/cascade-vocabulary) and [cascade-runtime-js](https://github.com/the-cascade-protocol/cascade-runtime-js).
+
 The reference command-line tool for the [Cascade Protocol](https://cascadeprotocol.org). It
 converts health records from FHIR, C-CDA, Apple Health and genomics formats into RDF/Turtle,
 validates them against the protocol's SHACL shapes, and keeps them in a local Pod (a folder of
